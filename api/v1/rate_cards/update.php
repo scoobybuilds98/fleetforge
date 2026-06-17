@@ -26,7 +26,7 @@ declare(strict_types=1);
  *          404 NOT_FOUND | 409 STALE_DATA | 409 ALREADY_EXISTS
  *
  * Decisions: D5 (soft delete), D16 (bcmath), D19 (optimistic lock), §7 (audit)
- * Session: S019
+ * Session: S019, S-RATE-CARD-TEMPLATE-ITEM
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -163,7 +163,7 @@ $rateLabels = [
 ];
 
 if ($replaceItems && is_array($body['items'])) {
-    $seenTypes = [];
+    $seenKeys = []; // "c:{equipment_type}" or "t:{template_id}"
     foreach ($body['items'] as $idx => $item) {
         $lineNum   = $idx + 1;
         $equipType = clean_string($item['equipment_type'] ?? null, 255);
@@ -171,11 +171,27 @@ if ($replaceItems && is_array($body['items'])) {
             $itemErrors[] = "Item {$lineNum}: equipment type is required.";
             continue;
         }
-        if (in_array($equipType, $seenTypes, true)) {
-            $itemErrors[] = "Item {$lineNum}: equipment type '{$equipType}' is listed more than once.";
+
+        // S-RATE-CARD-TEMPLATE-ITEM: optional equipment_template_id
+        $templateId = null;
+        if (!empty($item['equipment_template_id'])) {
+            $templateId = clean_int($item['equipment_template_id']);
+            if (!$templateId || !db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL AND is_active = 1', [$templateId])) {
+                $itemErrors[] = "Item {$lineNum}: equipment template not found.";
+                continue;
+            }
+            $tmpl = db_row("SELECT category FROM equipment_templates WHERE id = ?", [$templateId]);
+            if ($tmpl && $tmpl['category'] !== $equipType) {
+                $equipType = $tmpl['category'];
+            }
+        }
+
+        $dedupeKey = $templateId !== null ? "t:{$templateId}" : "c:{$equipType}";
+        if (in_array($dedupeKey, $seenKeys, true)) {
+            $itemErrors[] = "Item {$lineNum}: this equipment type / template combination is listed more than once.";
             continue;
         }
-        $seenTypes[] = $equipType;
+        $seenKeys[] = $dedupeKey;
 
         $rates = [
             'daily_rate'   => null,
@@ -215,14 +231,15 @@ if ($replaceItems && is_array($body['items'])) {
         if ($itemHadError) continue;
 
         $itemsToInsert[] = [
-            'equipment_type' => $equipType,
-            'daily_rate'     => $rates['daily_rate'],
-            'weekly_rate'    => $rates['weekly_rate'],
-            'monthly_rate'   => $rates['monthly_rate'],
-            'mileage_rate'   => $rates['mileage_rate'],
-            'mileage_unit'   => $mileageUnit,
-            'currency'       => $currency,
-            'notes'          => clean_string($item['notes'] ?? null, 1000),
+            'equipment_type'        => $equipType,
+            'equipment_template_id' => $templateId,
+            'daily_rate'            => $rates['daily_rate'],
+            'weekly_rate'           => $rates['weekly_rate'],
+            'monthly_rate'          => $rates['monthly_rate'],
+            'mileage_rate'          => $rates['mileage_rate'],
+            'mileage_unit'          => $mileageUnit,
+            'currency'              => $currency,
+            'notes'                 => clean_string($item['notes'] ?? null, 1000),
         ];
     }
 }
@@ -233,23 +250,22 @@ if ($itemErrors) {
 
 // -----------------------------------------------------------------------
 // 4b. Hard guard — a customer may not have two active cards covering the
-//     same equipment type over an overlapping period (S-RATES-CARD-
-//     CONFLICT-GUARD). Re-checked on every update because changing the
-//     card's customer_id OR effective window can create a collision even
-//     when items[] is untouched. Types checked = the post-update item set:
-//     the replacement items when items[] is provided, else the card's
-//     current items. Self is excluded. Global cards are exempt.
+//     same equipment type (or same template) over an overlapping period
+//     (S-RATES-CARD-CONFLICT-GUARD, S-RATE-CARD-TEMPLATE-ITEM).
+//     Re-checked on every update because changing customer_id or the
+//     effective window can create a collision even when items[] is untouched.
+//     Items checked = post-update item set. Self is excluded. Global exempt.
 // -----------------------------------------------------------------------
-$typesToCheck = $replaceItems
-    ? array_column($itemsToInsert, 'equipment_type')
-    : array_column(
-        db_select("SELECT equipment_type FROM rate_card_items WHERE rate_card_id = ?", [$id]),
-        'equipment_type'
+$itemsToCheck = $replaceItems
+    ? $itemsToInsert
+    : db_select(
+        "SELECT equipment_type, equipment_template_id FROM rate_card_items WHERE rate_card_id = ?",
+        [$id]
       );
 
 $conflicts = \FleetForge\RateCards\ConflictGuard::conflicts(
     $customerId,
-    $typesToCheck,
+    $itemsToCheck,
     $effectiveFrom,
     $effectiveTo,
     $id

@@ -5,7 +5,7 @@ declare(strict_types=1);
  * lib/RateCards/ConflictGuard.php
  *
  * Guards against a single customer being linked to more than one
- * rate card that covers the SAME equipment type over an OVERLAPPING
+ * rate card that covers the SAME equipment type/template over an OVERLAPPING
  * effective period.
  *
  * WHY: rate_cards.customer_id (added by S-RATES-REDESIGN) has only a
@@ -23,8 +23,13 @@ declare(strict_types=1);
  * type are resolved by precedence (is_default, effective_from) and are
  * a supported pattern (e.g. a default global plus a promo global).
  *
+ * S-RATE-CARD-TEMPLATE-ITEM: Items now carry an optional equipment_template_id.
+ * The guard checks two kinds of conflict independently:
+ *   - Category conflicts:  two cards with the same equipment_type AND template_id=NULL
+ *   - Template conflicts:  two cards with the same equipment_template_id (non-null)
+ *
  * @decisions D5 (rate_cards soft-deleted — always filtered)
- * @session  S-RATES-CARD-CONFLICT-GUARD
+ * @session  S-RATES-CARD-CONFLICT-GUARD, S-RATE-CARD-TEMPLATE-ITEM
  */
 
 namespace FleetForge\RateCards;
@@ -44,76 +49,132 @@ final class ConflictGuard
      *   AND otherFrom <= thisTo (thisTo NULL = open-ended → +∞).
      *
      * @param  int|null    $customerId     Target card's customer (NULL = global → never conflicts).
-     * @param  string[]    $equipmentTypes Equipment-type slugs the card will carry.
+     * @param  array       $items          Items for the card:
+     *                                     [ ['equipment_type'=>'dry_van','equipment_template_id'=>null], ... ]
      * @param  string      $effectiveFrom  Y-m-d start of the card's effective window.
      * @param  string|null $effectiveTo    Y-m-d end, or NULL for open-ended.
      * @param  int|null    $excludeCardId  Card id to exclude (self, on update).
-     * @return array<int, array{equipment_type:string, card_id:int, card_name:string}>
+     * @return array<int, array{equipment_type:string, equipment_template_id:int|null, card_id:int, card_name:string}>
      */
     public static function conflicts(
         ?int $customerId,
-        array $equipmentTypes,
+        array $items,
         string $effectiveFrom,
         ?string $effectiveTo,
         ?int $excludeCardId = null
     ): array {
         // Global cards and item-less cards can never collide on this rule.
-        if ($customerId === null || $equipmentTypes === []) {
+        if ($customerId === null || $items === []) {
             return [];
         }
 
-        // Build the IN (...) list for the equipment types.
-        $placeholders = implode(',', array_fill(0, count($equipmentTypes), '?'));
-
-        $params = [$customerId];
-        foreach ($equipmentTypes as $type) {
-            $params[] = $type;
+        // Split into category items (template_id IS NULL) and template items (template_id != NULL).
+        $categoryTypes = [];
+        $templateIds   = [];
+        foreach ($items as $item) {
+            if (empty($item['equipment_template_id'])) {
+                $categoryTypes[] = $item['equipment_type'];
+            } else {
+                $templateIds[] = (int)$item['equipment_template_id'];
+            }
         }
 
-        $sql = "SELECT rci.equipment_type, rc.id AS card_id, rc.name AS card_name
-                FROM rate_card_items rci
-                JOIN rate_cards rc ON rc.id = rci.rate_card_id
-                WHERE rc.customer_id = ?
-                  AND rc.deleted_at IS NULL
-                  AND rci.equipment_type IN ($placeholders)";
+        $results = [];
 
-        // Exclude the card itself when validating an update.
-        if ($excludeCardId !== null) {
-            $sql      .= " AND rc.id != ?";
-            $params[]  = $excludeCardId;
+        // --- Category conflict query ---
+        if ($categoryTypes !== []) {
+            $placeholders = implode(',', array_fill(0, count($categoryTypes), '?'));
+
+            $params = [$customerId];
+            foreach ($categoryTypes as $type) {
+                $params[] = $type;
+            }
+
+            $sql = "SELECT rci.equipment_type, rci.equipment_template_id,
+                           rc.id AS card_id, rc.name AS card_name
+                    FROM rate_card_items rci
+                    JOIN rate_cards rc ON rc.id = rci.rate_card_id
+                    WHERE rc.customer_id = ?
+                      AND rc.deleted_at IS NULL
+                      AND rci.equipment_template_id IS NULL
+                      AND rci.equipment_type IN ($placeholders)";
+
+            if ($excludeCardId !== null) {
+                $sql     .= " AND rc.id != ?";
+                $params[] = $excludeCardId;
+            }
+
+            $sql     .= " AND (rc.effective_to IS NULL OR rc.effective_to >= ?)";
+            $params[] = $effectiveFrom;
+
+            if ($effectiveTo !== null) {
+                $sql     .= " AND rc.effective_from <= ?";
+                $params[] = $effectiveTo;
+            }
+
+            $results = array_merge($results, \db_select($sql, $params));
         }
 
-        // Overlap clause 1: thisFrom <= otherTo (open-ended other = always true).
-        $sql      .= " AND (rc.effective_to IS NULL OR rc.effective_to >= ?)";
-        $params[]  = $effectiveFrom;
+        // --- Template conflict query ---
+        if ($templateIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($templateIds), '?'));
 
-        // Overlap clause 2: otherFrom <= thisTo. When this card is open-ended
-        // (thisTo NULL) it extends to +∞, so every later card overlaps and no
-        // upper bound is added.
-        if ($effectiveTo !== null) {
-            $sql      .= " AND rc.effective_from <= ?";
-            $params[]  = $effectiveTo;
+            $params = [$customerId];
+            foreach ($templateIds as $tid) {
+                $params[] = $tid;
+            }
+
+            $sql = "SELECT rci.equipment_type, rci.equipment_template_id,
+                           rc.id AS card_id, rc.name AS card_name
+                    FROM rate_card_items rci
+                    JOIN rate_cards rc ON rc.id = rci.rate_card_id
+                    WHERE rc.customer_id = ?
+                      AND rc.deleted_at IS NULL
+                      AND rci.equipment_template_id IN ($placeholders)";
+
+            if ($excludeCardId !== null) {
+                $sql     .= " AND rc.id != ?";
+                $params[] = $excludeCardId;
+            }
+
+            $sql     .= " AND (rc.effective_to IS NULL OR rc.effective_to >= ?)";
+            $params[] = $effectiveFrom;
+
+            if ($effectiveTo !== null) {
+                $sql     .= " AND rc.effective_from <= ?";
+                $params[] = $effectiveTo;
+            }
+
+            $results = array_merge($results, \db_select($sql, $params));
         }
 
-        return \db_select($sql, $params);
+        return $results;
     }
 
     /**
      * Human-readable, one-line-per-collision message for json_validation_error.
      * Returns '' when there are no conflicts.
      *
-     * @param array<int, array{equipment_type:string, card_id:int, card_name:string}> $conflicts
+     * @param array<int, array{equipment_type:string, equipment_template_id:int|null, card_id:int, card_name:string}> $conflicts
      */
     public static function message(array $conflicts): string
     {
         $parts = [];
         foreach ($conflicts as $c) {
             $type = str_replace('_', ' ', $c['equipment_type']);
-            $parts[] = sprintf(
-                "“%s” is already covered by rate card “%s” for this customer over an overlapping period.",
-                $type,
-                $c['card_name']
-            );
+            if (!empty($c['equipment_template_id'])) {
+                $parts[] = sprintf(
+                    'A template-specific "%s" row is already covered by rate card "%s" for this customer over an overlapping period.',
+                    $type,
+                    $c['card_name']
+                );
+            } else {
+                $parts[] = sprintf(
+                    '"%s" is already covered by rate card "%s" for this customer over an overlapping period.',
+                    $type,
+                    $c['card_name']
+                );
+            }
         }
         return implode(' ', $parts);
     }

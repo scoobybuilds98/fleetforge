@@ -51,16 +51,18 @@ if (!$card) {
 }
 
 // -----------------------------------------------------------------------
-// 2. Load items
+// 2. Load items — S-RATE-CARD-TEMPLATE-ITEM: join template name
 // -----------------------------------------------------------------------
 $items = db_select(
-    "SELECT id, rate_card_id, equipment_type,
-            daily_rate, weekly_rate, monthly_rate,
-            mileage_rate, mileage_unit, currency, notes,
-            created_at, updated_at
-     FROM rate_card_items
-     WHERE rate_card_id = ?
-     ORDER BY equipment_type ASC",
+    "SELECT rci.id, rci.rate_card_id, rci.equipment_type,
+            rci.equipment_template_id, et.name AS equipment_template_name,
+            rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
+            rci.mileage_rate, rci.mileage_unit, rci.currency, rci.notes,
+            rci.created_at, rci.updated_at
+     FROM rate_card_items rci
+     LEFT JOIN equipment_templates et ON et.id = rci.equipment_template_id AND et.deleted_at IS NULL
+     WHERE rci.rate_card_id = ?
+     ORDER BY rci.equipment_type ASC, ISNULL(rci.equipment_template_id) DESC, et.name ASC",
     [$id]
 );
 

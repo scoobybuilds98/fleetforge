@@ -3063,6 +3063,7 @@ _71 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `rate_card_id` | int unsigned | MUL | NO |
 | `equipment_type` | varchar(255) |  | NO |
+| `equipment_template_id` | int unsigned | UNI (w/ rate_card_id) | YES |
 | `daily_rate` | decimal(10,2) |  | YES |
 | `weekly_rate` | decimal(10,2) |  | YES |
 | `monthly_rate` | decimal(10,2) |  | YES |
@@ -3072,6 +3073,8 @@ _71 tables._
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+**S-RATE-CARD-TEMPLATE-ITEM:** `equipment_template_id = NULL` = category-level row (applies to all equipment of that category). `equipment_template_id = X` = template-specific override (applies only to that template, takes priority over the category row). Lookup priority: customer card + template-specific > customer card + category > global card + template-specific > global card + category.
 
 ## `rate_cards`
 

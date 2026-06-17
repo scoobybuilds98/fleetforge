@@ -41,10 +41,14 @@ $card = db_row(
 if (!$card) { http_response_code(404); die('Rate card not found.'); }
 
 $items = db_select(
-    "SELECT id, equipment_type, daily_rate, weekly_rate, monthly_rate,
-            mileage_rate, mileage_unit, currency, notes, updated_at
-     FROM rate_card_items WHERE rate_card_id = ?
-     ORDER BY equipment_type ASC",
+    "SELECT rci.id, rci.equipment_type, rci.equipment_template_id,
+            et.name AS equipment_template_name,
+            rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
+            rci.mileage_rate, rci.mileage_unit, rci.currency, rci.notes, rci.updated_at
+     FROM rate_card_items rci
+     LEFT JOIN equipment_templates et ON et.id = rci.equipment_template_id AND et.deleted_at IS NULL
+     WHERE rci.rate_card_id = ?
+     ORDER BY rci.equipment_type ASC, ISNULL(rci.equipment_template_id) DESC, et.name ASC",
     [$cardId]
 );
 
@@ -244,7 +248,7 @@ require_once FF_ROOT . '/includes/header.php';
                       x-text="items.length + ' item' + (items.length === 1 ? '' : 's')"></span>
             </div>
             <?php if (can('rates', 'edit')): ?>
-            <button class="btn btn-secondary btn-sm" @click="addItem()" x-show="items.length === 0">+ Add Type</button>
+            <button class="btn btn-secondary btn-sm" @click="addItem()">+ Add Rate</button>
             <?php endif; ?>
         </div>
 
@@ -268,11 +272,15 @@ require_once FF_ROOT . '/includes/header.php';
                             <!-- ── VIEW MODE — cream card (shared .rate-item-card) ─ -->
                             <template x-if="!item.editing">
                                 <div class="rate-item-card">
-                                    <!-- Header: type name + currency + edit/delete -->
+                                    <!-- Header: type name + template badge + currency + edit/delete -->
                                     <div class="rate-item-card__head">
-                                        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                                        <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
                                             <span class="rate-item-card__type rate-item-card__type--name"
                                                   x-text="categoryLabel(item.equipment_type)"></span>
+                                            <template x-if="item.equipment_template_id">
+                                                <span class="badge badge-info" style="font-size:0.7rem;"
+                                                      x-text="item._templateName || '—'"></span>
+                                            </template>
                                             <span class="rate-item-card__cur" x-text="item.currency || 'CAD'"></span>
                                         </div>
                                         <?php if (can('rates', 'edit')): ?>
@@ -328,6 +336,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <div style="display:flex;align-items:center;gap:8px;">
                                             <select class="form-select"
                                                     x-model="item.equipment_type"
+                                                    @change="clearTemplate(items.indexOf(item))"
                                                     style="flex:1;min-width:0;">
                                                 <option value="">— Select type —</option>
                                                 <?php foreach ($categories as $cat): ?>
@@ -342,6 +351,47 @@ require_once FF_ROOT . '/includes/header.php';
                                                 <option value="CAD">CAD</option>
                                                 <option value="USD">USD</option>
                                             </select>
+                                        </div>
+                                        <!-- S-RATE-CARD-TEMPLATE-ITEM: optional unit-type override -->
+                                        <div style="margin-top:8px;">
+                                            <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:3px;">
+                                                Specific Unit Type
+                                                <span style="font-weight:400;">(optional — leave blank to apply to all
+                                                    <span x-text="item.equipment_type ? '&quot;' + categoryLabel(item.equipment_type) + '&quot;' : 'this category'"></span>)
+                                                </span>
+                                            </div>
+                                            <template x-if="item.equipment_template_id">
+                                                <div style="display:flex;align-items:center;gap:6px;">
+                                                    <span class="badge badge-info" style="font-size:0.75rem;" x-text="item._templateName"></span>
+                                                    <button type="button"
+                                                            style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:0.75rem;padding:0 4px;"
+                                                            @click="clearTemplate(items.indexOf(item))">× clear</button>
+                                                </div>
+                                            </template>
+                                            <template x-if="!item.equipment_template_id">
+                                                <div style="position:relative;" @click.outside="item._templateOpen = false">
+                                                    <input type="text" class="form-control"
+                                                           style="font-size:0.8125rem;height:34px;"
+                                                           :disabled="!item.equipment_type"
+                                                           :placeholder="item.equipment_type ? 'Search unit types…' : 'Select category first'"
+                                                           x-model="item._templateSearch"
+                                                           @input.debounce.300ms="searchTemplates(items.indexOf(item), $event.target.value)"
+                                                           @focus="if(item._templateResults.length) item._templateOpen = true">
+                                                    <div x-show="item._templateOpen" x-cloak
+                                                         style="position:absolute;top:100%;left:0;right:0;z-index:100;
+                                                                background:var(--bg-primary);border:1px solid var(--border-color);
+                                                                border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);
+                                                                max-height:160px;overflow-y:auto;margin-top:2px;">
+                                                        <template x-for="tmpl in item._templateResults" :key="tmpl.id">
+                                                            <div style="padding:8px 12px;cursor:pointer;font-size:0.8125rem;"
+                                                                 onmouseover="this.style.background='var(--bg-secondary)'"
+                                                                 onmouseout="this.style.background=''"
+                                                                 @mousedown.prevent="pickTemplate(items.indexOf(item), tmpl)"
+                                                                 x-text="tmpl.name"></div>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                            </template>
                                         </div>
                                     </div>
                                     <!-- Body: 2×2 rate input grid -->
@@ -472,7 +522,13 @@ function FF_RateCardShow() {
         'updated_at'    => $card['updated_at'],
     ]) ?>;
 
-    const initialItems = <?= json_encode(array_map(fn($i) => array_merge($i, ['editing' => false]), $items)) ?>;
+    const initialItems = <?= json_encode(array_map(fn($i) => array_merge($i, [
+        'editing'          => false,
+        '_templateName'    => $i['equipment_template_name'] ?? '',
+        '_templateSearch'  => $i['equipment_template_name'] ?? '',
+        '_templateResults' => [],
+        '_templateOpen'    => false,
+    ]), $items)) ?>;
 
     // Category slug → display label
     const CATEGORY_LABELS = {
@@ -552,13 +608,54 @@ function FF_RateCardShow() {
 
         addItem() {
             this.items.push({
-                id: null, equipment_type: '', daily_rate: '', weekly_rate: '',
+                id: null, equipment_type: '', equipment_template_id: null,
+                _templateName: '', _templateSearch: '', _templateResults: [], _templateOpen: false,
+                daily_rate: '', weekly_rate: '',
                 monthly_rate: '', mileage_rate: '', mileage_unit: 'km', currency: 'CAD',
                 notes: '', editing: true,
             });
         },
 
         removeItem(idx) { this.items.splice(idx, 1); },
+
+        // S-RATE-CARD-TEMPLATE-ITEM: template search / pick / clear
+        async searchTemplates(idx, query) {
+            const item = this.items[idx];
+            if (!item) return;
+            if (!query || query.length < 1 || !item.equipment_type) {
+                item._templateResults = [];
+                item._templateOpen    = false;
+                return;
+            }
+            try {
+                const params = new URLSearchParams({ search: query, category: item.equipment_type, per_page: 10, active: 1 });
+                const r = await FF_Api.get(FF_Api.url('/api/v1/equipment/templates/index.php') + '?' + params.toString());
+                if (r.success) {
+                    item._templateResults = r.data.items || [];
+                    item._templateOpen    = item._templateResults.length > 0;
+                }
+            } catch (e) { /* silent */ }
+        },
+
+        pickTemplate(idx, tmpl) {
+            const item               = this.items[idx];
+            if (!item) return;
+            item.equipment_template_id = tmpl.id;
+            item._templateName       = tmpl.name;
+            item._templateSearch     = tmpl.name;
+            item._templateOpen       = false;
+            if (!item.equipment_type && tmpl.category) item.equipment_type = tmpl.category;
+        },
+
+        clearTemplate(idx) {
+            const item               = this.items[idx];
+            if (!item) return;
+            item.equipment_template_id = null;
+            item._templateName       = '';
+            item._templateSearch     = '';
+            item._templateResults    = [];
+            item._templateOpen       = false;
+        },
 
         async deleteItem(idx) {
             this.items.splice(idx, 1);
@@ -583,16 +680,20 @@ function FF_RateCardShow() {
             this.globalError = null;
             this.saveSuccess = false;
 
-            // Validate
-            const seen = new Set();
+            // Validate — S-RATE-CARD-TEMPLATE-ITEM: dedup by "t:{id}" or "c:{type}"
+            const seen     = new Set();
             const problems = [];
             for (let i = 0; i < this.items.length; i++) {
                 const item = this.items[i];
                 const num  = i + 1;
                 if (this.isBlankItem(item)) continue;
                 if (!item.equipment_type) { problems.push(`Item ${num}: select an equipment category.`); continue; }
-                if (seen.has(item.equipment_type)) { problems.push(`Item ${num}: '${this.categoryLabel(item.equipment_type)}' listed more than once.`); continue; }
-                seen.add(item.equipment_type);
+                const key = item.equipment_template_id ? `t:${item.equipment_template_id}` : `c:${item.equipment_type}`;
+                if (seen.has(key)) {
+                    problems.push(`Item ${num}: '${item.equipment_template_id ? item._templateName : this.categoryLabel(item.equipment_type)}' listed more than once.`);
+                    continue;
+                }
+                seen.add(key);
                 const fields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage' };
                 for (const [f, label] of Object.entries(fields)) {
                     const raw = item[f];
@@ -607,14 +708,15 @@ function FF_RateCardShow() {
             this.saving = true;
             try {
                 const itemPayload = this.items.filter(i => !this.isBlankItem(i)).map(item => ({
-                    equipment_type: item.equipment_type,
-                    daily_rate:     item.daily_rate   || null,
-                    weekly_rate:    item.weekly_rate  || null,
-                    monthly_rate:   item.monthly_rate || null,
-                    mileage_rate:   item.mileage_rate || null,
-                    mileage_unit:   item.mileage_unit,
-                    currency:       item.currency,
-                    notes:          item.notes || null,
+                    equipment_type:        item.equipment_type,
+                    equipment_template_id: item.equipment_template_id || null,
+                    daily_rate:            item.daily_rate   || null,
+                    weekly_rate:           item.weekly_rate  || null,
+                    monthly_rate:          item.monthly_rate || null,
+                    mileage_rate:          item.mileage_rate || null,
+                    mileage_unit:          item.mileage_unit,
+                    currency:              item.currency,
+                    notes:                 item.notes || null,
                 }));
 
                 const r = await FF_Api.post('<?= base_url('api/v1/rate_cards/update') ?>', {

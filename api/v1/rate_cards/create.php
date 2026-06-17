@@ -12,7 +12,11 @@ declare(strict_types=1);
  *   - is_default: only one card can be default at a time. Setting is_default=1 clears
  *     is_default on all other cards in the same transaction.
  *   - customer_id optional FK to customers — NULL = global card.
- *   - items[] optional array — each item has equipment_type (category slug, required) + rates.
+ *   - items[] optional array — each item has equipment_type (category slug, required),
+ *     optional equipment_template_id (FK to equipment_templates), + rates.
+ *     S-RATE-CARD-TEMPLATE-ITEM: template_id=NULL = category-level row;
+ *     template_id=X = template-specific row. No two items may share the same
+ *     (equipment_type, template_id) pair on a card.
  *   - D16: rate values via clean_decimal(), stored as strings for bcmath.
  *   - Audit log: action='create', module='rates', entity_type='rate_card'.
  *
@@ -23,7 +27,7 @@ declare(strict_types=1);
  * @returns 201 { id, name, effective_from, customer_id }
  *
  * Decisions: D5 (soft delete), D7, D16 (bcmath), §7 (audit log)
- * Session: S019, S-RATES-REDESIGN
+ * Session: S019, S-RATES-REDESIGN, S-RATE-CARD-TEMPLATE-ITEM
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -117,7 +121,7 @@ $rateLabels = [
 ];
 
 if (!empty($body['items']) && is_array($body['items'])) {
-    $seenTypes = [];
+    $seenKeys = []; // "c:{equipment_type}" or "t:{template_id}"
     foreach ($body['items'] as $idx => $item) {
         $lineNum   = $idx + 1;
         $equipType = clean_string($item['equipment_type'] ?? null, 255);
@@ -125,11 +129,28 @@ if (!empty($body['items']) && is_array($body['items'])) {
             $itemErrors[] = "Item {$lineNum}: equipment type is required.";
             continue;
         }
-        if (in_array($equipType, $seenTypes, true)) {
-            $itemErrors[] = "Item {$lineNum}: equipment type '{$equipType}' is listed more than once.";
+
+        // S-RATE-CARD-TEMPLATE-ITEM: optional equipment_template_id
+        $templateId = null;
+        if (!empty($item['equipment_template_id'])) {
+            $templateId = clean_int($item['equipment_template_id']);
+            if (!$templateId || !db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL AND is_active = 1', [$templateId])) {
+                $itemErrors[] = "Item {$lineNum}: equipment template not found.";
+                continue;
+            }
+            // Derive and validate that the template's category matches the supplied equipment_type
+            $tmpl = db_row("SELECT category FROM equipment_templates WHERE id = ?", [$templateId]);
+            if ($tmpl && $tmpl['category'] !== $equipType) {
+                $equipType = $tmpl['category']; // auto-correct silently — category is derived from template
+            }
+        }
+
+        $dedupeKey = $templateId !== null ? "t:{$templateId}" : "c:{$equipType}";
+        if (in_array($dedupeKey, $seenKeys, true)) {
+            $itemErrors[] = "Item {$lineNum}: this equipment type / template combination is listed more than once.";
             continue;
         }
-        $seenTypes[] = $equipType;
+        $seenKeys[] = $dedupeKey;
 
         // Rates — D16 bcmath strings; each rate must parse + be ≥ 0 when provided
         $rates = [
@@ -170,14 +191,15 @@ if (!empty($body['items']) && is_array($body['items'])) {
         if ($itemHadError) continue;
 
         $itemsToInsert[] = [
-            'equipment_type' => $equipType,
-            'daily_rate'     => $rates['daily_rate'],
-            'weekly_rate'    => $rates['weekly_rate'],
-            'monthly_rate'   => $rates['monthly_rate'],
-            'mileage_rate'   => $rates['mileage_rate'],
-            'mileage_unit'   => $mileageUnit,
-            'currency'       => $currency,
-            'notes'          => clean_string($item['notes'] ?? null, 1000),
+            'equipment_type'        => $equipType,
+            'equipment_template_id' => $templateId,
+            'daily_rate'            => $rates['daily_rate'],
+            'weekly_rate'           => $rates['weekly_rate'],
+            'monthly_rate'          => $rates['monthly_rate'],
+            'mileage_rate'          => $rates['mileage_rate'],
+            'mileage_unit'          => $mileageUnit,
+            'currency'              => $currency,
+            'notes'                 => clean_string($item['notes'] ?? null, 1000),
         ];
     }
 }
@@ -188,12 +210,13 @@ if ($itemErrors) {
 
 // -----------------------------------------------------------------------
 // 5b. Hard guard — a customer may not have two active cards covering the
-//     same equipment type over an overlapping period (S-RATES-CARD-
-//     CONFLICT-GUARD). Global cards are exempt. See lib/RateCards/ConflictGuard.
+//     same equipment type (or same template) over an overlapping period
+//     (S-RATES-CARD-CONFLICT-GUARD, S-RATE-CARD-TEMPLATE-ITEM).
+//     Global cards are exempt. See lib/RateCards/ConflictGuard.
 // -----------------------------------------------------------------------
 $conflicts = \FleetForge\RateCards\ConflictGuard::conflicts(
     $customerId,
-    array_column($itemsToInsert, 'equipment_type'),
+    $itemsToInsert,
     $effectiveFrom,
     $effectiveTo,
     null

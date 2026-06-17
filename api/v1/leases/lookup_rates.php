@@ -104,10 +104,10 @@ $today         = date('Y-m-d');
 
 // -----------------------------------------------------------------------
 // 2. Priority 1 — active rate_cards with a matching item.
-//    Customer-specific card (customer_id = this customer) preferred first,
-//    then global (customer_id IS NULL) as fallback. D5: filter deleted_at.
-//    A customer-specific match reports source='customer' so the UI keeps
-//    showing the "custom rates for this customer" signal (overrides retired).
+//    S-RATE-CARD-TEMPLATE-ITEM: a row can be template-specific
+//    (rci.equipment_template_id = $equipmentTemplateId) or category-level
+//    (rci.equipment_template_id IS NULL). Template-specific beats category.
+//    Customer-specific card beats global. D5: filter deleted_at.
 // -----------------------------------------------------------------------
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
@@ -115,14 +115,22 @@ $rateCardItem = db_row(
             rc.name AS card_name, rc.customer_id, rc.gps_price
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
-     WHERE rci.equipment_type = ?
+     WHERE (
+         (rci.equipment_template_id = ? AND rci.equipment_type = ?)
+         OR
+         (rci.equipment_template_id IS NULL AND rci.equipment_type = ?)
+     )
        AND rc.deleted_at IS NULL
        AND rc.effective_from <= ?
        AND (rc.effective_to IS NULL OR rc.effective_to >= ?)
        AND (rc.customer_id = ? OR rc.customer_id IS NULL)
-     ORDER BY (rc.customer_id IS NOT NULL) DESC, rc.is_default DESC, rc.effective_from DESC
+     ORDER BY
+         (rc.customer_id IS NOT NULL) DESC,
+         (rci.equipment_template_id IS NOT NULL) DESC,
+         rc.is_default DESC,
+         rc.effective_from DESC
      LIMIT 1",
-    [$equipmentType, $today, $today, $customerId]
+    [$equipmentTemplateId, $equipmentType, $equipmentType, $today, $today, $customerId]
 );
 
 if ($rateCardItem) {

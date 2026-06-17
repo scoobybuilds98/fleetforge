@@ -200,12 +200,11 @@ require_once FF_ROOT . '/includes/header.php';
                 <div>
                     <h3 class="card-title" style="margin:0;">Rate Items</h3>
                     <p class="text-secondary" style="font-size:0.8125rem;margin:2px 0 0;">
-                        One card per equipment category. Rates are used when creating leases.
+                        One rate per equipment category — or per specific unit type for custom overrides.
                     </p>
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm"
-                        x-show="items.length === 0"
-                        @click="addItem()">+ Add Equipment Type</button>
+                        @click="addItem()">+ Add Rate</button>
             </div>
 
             <!-- Empty state -->
@@ -257,6 +256,47 @@ require_once FF_ROOT . '/includes/header.php';
                                             <option value="CAD">CAD</option>
                                             <option value="USD">USD</option>
                                         </select>
+                                    </div>
+                                    <!-- S-RATE-CARD-TEMPLATE-ITEM: optional unit-type override -->
+                                    <div style="margin-top:8px;">
+                                        <div style="font-size:0.7rem;color:var(--text-muted);margin-bottom:3px;">
+                                            Specific Unit Type
+                                            <span style="font-weight:400;">(optional — leave blank to apply to all
+                                                <span x-text="item.equipment_type ? '&quot;' + categoryLabel(item.equipment_type) + '&quot;' : 'this category'"></span>)
+                                            </span>
+                                        </div>
+                                        <template x-if="item.equipment_template_id">
+                                            <div style="display:flex;align-items:center;gap:6px;">
+                                                <span class="badge badge-info" style="font-size:0.75rem;" x-text="item._templateName"></span>
+                                                <button type="button"
+                                                        style="background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:0.75rem;padding:0 4px;"
+                                                        @click="clearTemplate(idx)">× clear</button>
+                                            </div>
+                                        </template>
+                                        <template x-if="!item.equipment_template_id">
+                                            <div style="position:relative;" @click.outside="item._templateOpen = false">
+                                                <input type="text" class="form-control"
+                                                       style="font-size:0.8125rem;height:34px;"
+                                                       :disabled="!item.equipment_type"
+                                                       :placeholder="item.equipment_type ? 'Search unit types…' : 'Select category first'"
+                                                       x-model="item._templateSearch"
+                                                       @input.debounce.300ms="searchTemplates(idx, $event.target.value)"
+                                                       @focus="if(item._templateResults.length) item._templateOpen = true">
+                                                <div x-show="item._templateOpen" x-cloak
+                                                     style="position:absolute;top:100%;left:0;right:0;z-index:100;
+                                                            background:var(--bg-primary);border:1px solid var(--border-color);
+                                                            border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.12);
+                                                            max-height:160px;overflow-y:auto;margin-top:2px;">
+                                                    <template x-for="tmpl in item._templateResults" :key="tmpl.id">
+                                                        <div style="padding:8px 12px;cursor:pointer;font-size:0.8125rem;"
+                                                             onmouseover="this.style.background='var(--bg-secondary)'"
+                                                             onmouseout="this.style.background=''"
+                                                             @mousedown.prevent="pickTemplate(idx, tmpl)"
+                                                             x-text="tmpl.name"></div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
                                     </div>
                                     <div x-show="item._error" class="text-danger" style="font-size:0.8rem;margin-top:6px;"
                                          x-text="item._error"></div>
@@ -343,6 +383,13 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
+// Category slug → display label (mirrors PHP $categoryLabels)
+const CATEGORY_LABELS_CREATE = {
+    chassis: 'Chassis', dry_van: 'Dry Van', reefer: 'Reefer',
+    container: 'Container', flatbed: 'Flatbed', step_deck: 'Step Deck',
+    lowboy: 'Lowboy', tanker: 'Tanker', dump: 'Dump', other: 'Other',
+};
+
 function FF_RateCardCreate() {
     return {
         form: {
@@ -374,23 +421,27 @@ function FF_RateCardCreate() {
             } // S-FORM-DRAFT-ROLLOUT
         },
 
+        categoryLabel(slug) {
+            if (!slug) return '';
+            return CATEGORY_LABELS_CREATE[slug] || slug.replace(/_/g, ' ');
+        },
+
         addItem() {
-            if (this.items.length >= 1) return;
             this.items.push({
-                _key:           this._nextKey++,
-                _error:         '',
-                equipment_type: '',
-                daily_rate:     '',
-                weekly_rate:    '',
-                monthly_rate:   '',
-                mileage_rate:   '',
-                mileage_unit:   'km',
-                currency:       'CAD',
-            });
-            // Scroll table into view if it just appeared
-            this.$nextTick(() => {
-                const tbl = this.$el.querySelector('table');
-                if (tbl) tbl.querySelector('tbody tr:last-child')?.scrollIntoView({ block: 'nearest' });
+                _key:                  this._nextKey++,
+                _error:                '',
+                equipment_type:        '',
+                equipment_template_id: null,
+                _templateName:         '',
+                _templateSearch:       '',
+                _templateResults:      [],
+                _templateOpen:         false,
+                daily_rate:            '',
+                weekly_rate:           '',
+                monthly_rate:          '',
+                mileage_rate:          '',
+                mileage_unit:          'km',
+                currency:              'CAD',
             });
         },
 
@@ -399,8 +450,46 @@ function FF_RateCardCreate() {
         },
 
         onTypeChange(idx) {
-            // Clear any duplicate-type error on change
+            // Clear per-item error and any selected template when category changes
             this.items[idx]._error = '';
+            this.clearTemplate(idx);
+        },
+
+        // S-RATE-CARD-TEMPLATE-ITEM: template search / pick / clear
+        async searchTemplates(idx, query) {
+            const item = this.items[idx];
+            if (!query || query.length < 1 || !item.equipment_type) {
+                item._templateResults = [];
+                item._templateOpen    = false;
+                return;
+            }
+            try {
+                const params = new URLSearchParams({ search: query, category: item.equipment_type, per_page: 10, active: 1 });
+                const r = await FF_Api.get(FF_Api.url('/api/v1/equipment/templates/index.php') + '?' + params.toString());
+                if (r.success) {
+                    item._templateResults = r.data.items || [];
+                    item._templateOpen    = item._templateResults.length > 0;
+                }
+            } catch (e) { /* silent — search errors don't block form */ }
+        },
+
+        pickTemplate(idx, tmpl) {
+            const item               = this.items[idx];
+            item.equipment_template_id = tmpl.id;
+            item._templateName       = tmpl.name;
+            item._templateSearch     = tmpl.name;
+            item._templateOpen       = false;
+            // Auto-fill category from template if not already set
+            if (!item.equipment_type && tmpl.category) item.equipment_type = tmpl.category;
+        },
+
+        clearTemplate(idx) {
+            const item               = this.items[idx];
+            item.equipment_template_id = null;
+            item._templateName       = '';
+            item._templateSearch     = '';
+            item._templateResults    = [];
+            item._templateOpen       = false;
         },
 
         validate() {
@@ -433,7 +522,8 @@ function FF_RateCardCreate() {
                 }
             }
 
-            const seen = new Set();
+            // S-RATE-CARD-TEMPLATE-ITEM: dedup key = "t:{templateId}" or "c:{equipmentType}"
+            const seen     = new Set();
             const problems = [];
             for (let i = 0; i < this.items.length; i++) {
                 const item = this.items[i];
@@ -445,13 +535,17 @@ function FF_RateCardCreate() {
                     ok = false;
                     continue;
                 }
-                if (seen.has(item.equipment_type)) {
-                    item._error = 'Duplicate category — each may appear only once.';
-                    problems.push(`Item ${num}: '${item.equipment_type}' listed more than once.`);
+
+                const key = item.equipment_template_id
+                    ? `t:${item.equipment_template_id}`
+                    : `c:${item.equipment_type}`;
+                if (seen.has(key)) {
+                    item._error = 'Duplicate — this category / unit type combination is already listed.';
+                    problems.push(`Item ${num}: duplicate combination.`);
                     ok = false;
                     continue;
                 }
-                seen.add(item.equipment_type);
+                seen.add(key);
 
                 const rateFields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage' };
                 for (const [f, label] of Object.entries(rateFields)) {
@@ -478,9 +572,10 @@ function FF_RateCardCreate() {
 
             const items = this.items.map(item => {
                 const out = {
-                    equipment_type: item.equipment_type,
-                    mileage_unit:   item.mileage_unit,
-                    currency:       item.currency,
+                    equipment_type:        item.equipment_type,
+                    equipment_template_id: item.equipment_template_id || null,
+                    mileage_unit:          item.mileage_unit,
+                    currency:              item.currency,
                 };
                 if (item.daily_rate   !== '') out.daily_rate   = item.daily_rate;
                 if (item.weekly_rate  !== '') out.weekly_rate  = item.weekly_rate;

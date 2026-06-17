@@ -3217,7 +3217,7 @@ CREATE TABLE `leases` (
   `precharge_refund_method` enum('cash','credit') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: refund mechanism picked at lease close when precharge_balance > 0. NULL until close (S-MILEAGE-3 sets).',
   `precharge_refund_settled_at` datetime DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: when the refund (cash or credit) actually posted. Audit trail for S-MILEAGE-3.',
   `gps_opt_in` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'S-LEASE-GPS-COST: per-lease GPS tracking add-on toggle. Default 1 = ON for new leases (differs from insurance/warranty default 0).',
-  `gps_cost` decimal(10,2) NOT NULL DEFAULT '1.00' COMMENT 'S-LEASE-GPS-COST: GPS service rate per billing day. Default $1.00. Engine multiplies by billing-window day count when gps_opt_in=1 AND gps_cost>0.',
+  `gps_cost` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'S-LEASE-GPS-COST: GPS service rate per billing day. Auto-populated from rate_cards.gps_price at lease creation (S-GPS-RATE-CARD). Engine multiplies by billing-window day count when gps_opt_in=1 AND gps_cost>0.',
   `engine_version` enum('period_independent','holistic') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'holistic' COMMENT 'S-BILLING-HOLISTIC-ENGINE: which billing engine bills this lease. Locked at lease creation; never modified mid-lease. period_independent = old ProRateCalculator (per-period THE LAW); holistic = new HolisticLeaseEngine (running reconciliation).',
   PRIMARY KEY (`id`),
   UNIQUE KEY `contract_number` (`contract_number`),
@@ -3634,6 +3634,7 @@ CREATE TABLE `rate_card_items` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `rate_card_id` int unsigned NOT NULL,
   `equipment_type` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `equipment_template_id` int unsigned DEFAULT NULL COMMENT 'S-RATE-CARD-TEMPLATE-ITEM: NULL=category-level; non-NULL=specific template override',
   `daily_rate` decimal(10,2) DEFAULT NULL,
   `weekly_rate` decimal(10,2) DEFAULT NULL,
   `monthly_rate` decimal(10,2) DEFAULT NULL,
@@ -3644,8 +3645,10 @@ CREATE TABLE `rate_card_items` (
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_card_type` (`rate_card_id`,`equipment_type`),
-  CONSTRAINT `rate_card_items_ibfk_1` FOREIGN KEY (`rate_card_id`) REFERENCES `rate_cards` (`id`) ON DELETE CASCADE
+  UNIQUE KEY `uq_card_template` (`rate_card_id`,`equipment_template_id`),
+  KEY `idx_rci_template_id` (`equipment_template_id`),
+  CONSTRAINT `rate_card_items_ibfk_1` FOREIGN KEY (`rate_card_id`) REFERENCES `rate_cards` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `rci_ibfk_2` FOREIGN KEY (`equipment_template_id`) REFERENCES `equipment_templates` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `rate_cards` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
