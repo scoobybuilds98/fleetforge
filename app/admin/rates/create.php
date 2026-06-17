@@ -361,6 +361,18 @@ require_once FF_ROOT . '/includes/header.php';
                                         </div>
                                     </div>
 
+                                    <!-- Hourly (reefer) -->
+                                    <div>
+                                        <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">Hourly (reefer) $/hr</label>
+                                        <div style="position:relative;">
+                                            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-secondary);font-size:0.875rem;pointer-events:none;user-select:none;">$</span>
+                                            <input type="number" class="form-control font-mono"
+                                                   style="padding-left:22px;"
+                                                   x-model="item.hourly_rate"
+                                                   step="0.0001" min="0" placeholder="0.0000">
+                                        </div>
+                                    </div>
+
                                 </div>
                             </div>
                         </template>
@@ -441,6 +453,7 @@ function FF_RateCardCreate() {
                 monthly_rate:          '',
                 mileage_rate:          '',
                 mileage_unit:          'km',
+                hourly_rate:           '',
                 currency:              'CAD',
             });
         },
@@ -547,7 +560,7 @@ function FF_RateCardCreate() {
                 }
                 seen.add(key);
 
-                const rateFields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage' };
+                const rateFields = { daily_rate: 'Daily', weekly_rate: 'Weekly', monthly_rate: 'Monthly', mileage_rate: 'Mileage', hourly_rate: 'Hourly' };
                 for (const [f, label] of Object.entries(rateFields)) {
                     const raw = item[f];
                     if (raw === '' || raw == null) continue;
@@ -581,6 +594,7 @@ function FF_RateCardCreate() {
                 if (item.weekly_rate  !== '') out.weekly_rate  = item.weekly_rate;
                 if (item.monthly_rate !== '') out.monthly_rate = item.monthly_rate;
                 if (item.mileage_rate !== '') out.mileage_rate = item.mileage_rate;
+                if (item.hourly_rate  !== '') out.hourly_rate  = item.hourly_rate;
                 return out;
             });
 

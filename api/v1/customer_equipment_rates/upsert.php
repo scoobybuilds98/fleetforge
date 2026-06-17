@@ -25,7 +25,7 @@ declare(strict_types=1);
  * @body    JSON: customer_id (required), equipment_type (required),
  *               effective_from (required), id?, updated_at (D19 — required for update),
  *               daily_rate?, weekly_rate?, monthly_rate?, mileage_rate?,
- *               mileage_unit?, currency?, minimum_charge?, notes?, effective_to?
+ *               hourly_rate?, mileage_unit?, currency?, minimum_charge?, notes?, effective_to?
  * @auth    Session required; require_permission('rates','edit')
  * @returns 201/200 { id, customer_id, equipment_type, updated_at }
  *
@@ -118,6 +118,7 @@ $dailyRate     = null;
 $weeklyRate    = null;
 $monthlyRate   = null;
 $mileageRate   = null;
+$hourlyRate    = null;
 $minimumCharge = null;
 
 // Friendly labels for rate fields
@@ -126,6 +127,7 @@ $rateFieldMap = [
     'weekly_rate'    => ['var' => 'weeklyRate',    'label' => 'Weekly rate'],
     'monthly_rate'   => ['var' => 'monthlyRate',   'label' => 'Monthly rate'],
     'mileage_rate'   => ['var' => 'mileageRate',   'label' => 'Mileage rate'],
+    'hourly_rate'    => ['var' => 'hourlyRate',    'label' => 'Hourly rate'],
     'minimum_charge' => ['var' => 'minimumCharge', 'label' => 'Minimum charge'],
 ];
 
@@ -195,6 +197,7 @@ $rateData = [
     'monthly_rate'   => $monthlyRate,
     'mileage_rate'   => $mileageRate,
     'mileage_unit'   => $mileageUnit,
+    'hourly_rate'    => $hourlyRate,
     'currency'       => $currency,
     'minimum_charge' => $minimumCharge,
     'notes'          => $notes,
@@ -227,6 +230,7 @@ $savedId = db_transaction(function() use (
         'monthly_rate'   => $rateData['monthly_rate'],
         'mileage_rate'   => $rateData['mileage_rate'],
         'mileage_unit'   => $rateData['mileage_unit'],
+        'hourly_rate'    => $rateData['hourly_rate'],
         'currency'       => $rateData['currency'],
         'change_type'    => $changeType,
         'change_source'  => 'manual',

@@ -118,6 +118,7 @@ $rateLabels = [
     'weekly_rate'  => 'Weekly rate',
     'monthly_rate' => 'Monthly rate',
     'mileage_rate' => 'Mileage rate',
+    'hourly_rate'  => 'Hourly rate',
 ];
 
 if (!empty($body['items']) && is_array($body['items'])) {
@@ -158,6 +159,7 @@ if (!empty($body['items']) && is_array($body['items'])) {
             'weekly_rate'  => null,
             'monthly_rate' => null,
             'mileage_rate' => null,
+            'hourly_rate'  => null,
         ];
         $itemHadError = false;
         foreach ($rateLabels as $field => $label) {
@@ -198,6 +200,7 @@ if (!empty($body['items']) && is_array($body['items'])) {
             'monthly_rate'          => $rates['monthly_rate'],
             'mileage_rate'          => $rates['mileage_rate'],
             'mileage_unit'          => $mileageUnit,
+            'hourly_rate'           => $rates['hourly_rate'],
             'currency'              => $currency,
             'notes'                 => clean_string($item['notes'] ?? null, 1000),
         ];

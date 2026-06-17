@@ -2325,6 +2325,7 @@ _71 tables._
 | `monthly_rate` | decimal(10,2) |  | YES |
 | `mileage_rate` | decimal(8,4) |  | YES |
 | `mileage_unit` | enum('km','miles') |  | YES |
+| `hourly_rate` | decimal(10,4) |  | YES |
 | `currency` | enum('CAD','USD') |  | NO |
 | `minimum_charge` | decimal(10,2) |  | YES |
 | `notes` | text |  | YES |
@@ -2360,6 +2361,7 @@ _71 tables._
 | `monthly_rate` | decimal(10,2) |  | YES |
 | `mileage_rate` | decimal(8,4) |  | YES |
 | `mileage_unit` | enum('km','miles') |  | YES |
+| `hourly_rate` | decimal(10,4) |  | YES |
 | `currency` | enum('CAD','USD') |  | NO |
 | `change_type` | enum('created','updated','deleted','used_in_lease','override') |  | NO |
 | `change_source` | enum('manual','lease_creation','bulk_update','system','import') |  | NO |
@@ -2531,6 +2533,7 @@ _71 tables._
 | `default_weekly_rate` | decimal(10,2) |  | YES |
 | `default_monthly_rate` | decimal(10,2) |  | YES |
 | `default_mileage_rate` | decimal(10,4) |  | NO |
+| `default_hourly_rate` | decimal(10,4) |  | YES |
 | `default_currency` | enum('CAD','USD') |  | NO |
 | `default_mileage_unit` | enum('km','miles') |  | NO |
 | `default_notes` | text |  | YES |
@@ -3069,6 +3072,7 @@ _71 tables._
 | `monthly_rate` | decimal(10,2) |  | YES |
 | `mileage_rate` | decimal(8,4) |  | YES |
 | `mileage_unit` | enum('km','miles') |  | NO |
+| `hourly_rate` | decimal(10,4) |  | YES |
 | `currency` | enum('CAD','USD') |  | NO |
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |

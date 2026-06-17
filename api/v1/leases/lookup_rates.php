@@ -38,7 +38,8 @@ declare(strict_types=1);
  *   mileage_rate: string|null,
  *   mileage_unit: "km"|"miles",
  *   currency: "CAD"|"USD",
- *   gps_price: string|null   (S-GPS-RATE-CARD: card-level GPS daily rate, null if not set)
+ *   gps_price: string|null,   (S-GPS-RATE-CARD: card-level GPS daily rate, null if not set)
+ *   hourly_rate: string|null  (S-RATECARD-HOURLY: per-item hourly rate, null if not set)
  * }
  *
  * Decisions: D5 (soft delete on rate_cards), D16 (bcmath strings), D7 (routing)
@@ -73,7 +74,8 @@ if (!db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
 $template = db_row(
     "SELECT id, name, category,
             default_daily_rate, default_weekly_rate, default_monthly_rate,
-            default_mileage_rate, default_mileage_unit, default_currency
+            default_mileage_rate, default_mileage_unit, default_currency,
+            default_hourly_rate
      FROM equipment_templates
      WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
     [$equipmentTemplateId]
@@ -111,7 +113,7 @@ $today         = date('Y-m-d');
 // -----------------------------------------------------------------------
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-            rci.mileage_rate, rci.mileage_unit, rci.currency,
+            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.currency,
             rc.name AS card_name, rc.customer_id, rc.gps_price
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
@@ -145,6 +147,7 @@ if ($rateCardItem) {
         'monthly_rate' => $rateCardItem['monthly_rate'],
         'mileage_rate' => $rateCardItem['mileage_rate'],
         'mileage_unit' => $rateCardItem['mileage_unit'],
+        'hourly_rate'  => $rateCardItem['hourly_rate'],
         'currency'     => $rateCardItem['currency'],
         'gps_price'    => $rateCardItem['gps_price'],
     ]);
@@ -168,6 +171,7 @@ if ($hasTemplateRates) {
         'monthly_rate' => $template['default_monthly_rate'],
         'mileage_rate' => $template['default_mileage_rate'],
         'mileage_unit' => $template['default_mileage_unit'] ?? 'km',
+        'hourly_rate'  => $template['default_hourly_rate'],
         'currency'     => $template['default_currency'] ?? 'CAD',
         'gps_price'    => null,
     ]);
@@ -184,6 +188,7 @@ json_success([
     'monthly_rate' => null,
     'mileage_rate' => null,
     'mileage_unit' => 'km',
+    'hourly_rate'  => null,
     'currency'     => 'CAD',
     'gps_price'    => null,
 ]);
