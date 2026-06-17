@@ -29,13 +29,13 @@ require_permission('invoices', 'view');
 $arCurrent = db_row(
     "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
        FROM invoices
-      WHERE status = 'sent' AND due_date >= CURDATE() AND deleted_at IS NULL",
+      WHERE status IN ('sent','partially_paid') AND due_date >= CURDATE() AND deleted_at IS NULL",
     []
 );
 $ar30 = db_row(
     "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
        FROM invoices
-      WHERE status IN ('sent','overdue')
+      WHERE status IN ('sent','partially_paid','overdue')
         AND due_date < CURDATE()
         AND due_date >= CURDATE() - INTERVAL 30 DAY
         AND deleted_at IS NULL",
@@ -44,7 +44,7 @@ $ar30 = db_row(
 $ar60 = db_row(
     "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
        FROM invoices
-      WHERE status IN ('sent','overdue')
+      WHERE status IN ('sent','partially_paid','overdue')
         AND due_date < CURDATE() - INTERVAL 30 DAY
         AND due_date >= CURDATE() - INTERVAL 60 DAY
         AND deleted_at IS NULL",
@@ -53,7 +53,7 @@ $ar60 = db_row(
 $ar90 = db_row(
     "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
        FROM invoices
-      WHERE status IN ('sent','overdue')
+      WHERE status IN ('sent','partially_paid','overdue')
         AND due_date < CURDATE() - INTERVAL 60 DAY
         AND deleted_at IS NULL",
     []
