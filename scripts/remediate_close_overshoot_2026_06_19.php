@@ -63,7 +63,8 @@ echo str_repeat('=', 90) . "\n";
 
 // ── Affected leases (same predicate as the diagnostic / live fix) ───────────
 $leases = db_select(
-    "SELECT id, contract_number, customer_id, company_name_snapshot, customer_name_snapshot,
+    "SELECT id, contract_number, customer_id, equipment_unit_id,
+            company_name_snapshot, customer_name_snapshot,
             start_date, start_time, actual_return_date, actual_return_time
        FROM leases
       WHERE status = 'completed' AND actual_return_date IS NOT NULL AND deleted_at IS NULL
