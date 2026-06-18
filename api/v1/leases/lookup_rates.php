@@ -77,7 +77,7 @@ $template = db_row(
             default_mileage_rate, default_mileage_unit, default_currency,
             default_hourly_rate
      FROM equipment_templates
-     WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
+     WHERE id = ? AND deleted_at IS NULL",
     [$equipmentTemplateId]
 );
 if (!$template) {

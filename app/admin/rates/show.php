@@ -55,7 +55,7 @@ $items = db_select(
 // Distinct equipment categories for the items editor
 $categories = db_select(
     "SELECT DISTINCT category FROM equipment_templates
-     WHERE deleted_at IS NULL AND is_active = 1
+     WHERE deleted_at IS NULL
      ORDER BY category ASC"
 );
 
@@ -637,7 +637,7 @@ function FF_RateCardShow() {
                 return;
             }
             try {
-                const params = new URLSearchParams({ search: query, category: item.equipment_type, per_page: 10, active: 1 });
+                const params = new URLSearchParams({ search: query, category: item.equipment_type, per_page: 10 });
                 const r = await FF_Api.get(FF_Api.url('/api/v1/equipment/templates/index.php') + '?' + params.toString());
                 if (r.success) {
                     item._templateResults = r.data.items || [];
