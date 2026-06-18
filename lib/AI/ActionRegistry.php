@@ -195,6 +195,46 @@ class ActionRegistry
                     );
                 },
             ],
+
+            // ── Work-order status change (S-AI-ACTION-5) ───────────────
+            'change_work_order_status' => [
+                'label'          => 'change work order status',
+                'entity'         => 'work_order',
+                'table'          => 'maintenance_work_orders',
+                'permission'     => 'maintenance',
+                'resolve_column' => 'work_order_number',
+                'label_column'   => 'work_order_number',
+                'soft_delete'    => true,
+                'preview' => static function (array $rec, array $params): array {
+                    $new = strtolower(trim((string) ($params['new_status'] ?? '')));
+                    $old = (string) $rec['status'];
+                    if (!in_array($new, ['open', 'in_progress', 'waiting_parts', 'completed', 'cancelled'], true)) {
+                        return ['error' => "\"{$new}\" isn't a valid work-order status (open, in_progress, waiting_parts, completed, cancelled)."];
+                    }
+                    if ($new === $old) {
+                        return ['error' => "Work order {$rec['work_order_number']} is already \"{$old}\"."];
+                    }
+                    $allowed = StatusActions::WO_STATUS_TRANSITIONS[$old] ?? [];
+                    if (!in_array($new, $allowed, true)) {
+                        $ok = $allowed ? implode(', ', $allowed) : 'none (terminal state)';
+                        return ['error' => "Work order {$rec['work_order_number']} can't go from \"{$old}\" to \"{$new}\". Allowed from \"{$old}\": {$ok}."];
+                    }
+                    $reason = trim((string) ($params['reason'] ?? ''));
+                    $extra  = $new === 'completed'
+                        ? " On completion it finalizes the \$" . number_format((float) ($rec['total_cost'] ?? 0), 2) . " cost into the vendor + unit maintenance totals."
+                        : '';
+                    return [
+                        'summary' => "Change work order {$rec['work_order_number']} status: {$old} → {$new}" . ($reason !== '' ? " (reason: {$reason})" : '') . $extra,
+                        'params'  => ['new_status' => $new, 'reason' => $reason ?: null],
+                    ];
+                },
+                'run' => static function (array $rec, array $params, int $userId, string $userName, ?string $ip): array {
+                    return StatusActions::changeWorkOrderStatus(
+                        (int) $rec['id'], (string) $params['new_status'], $params['reason'] ?? null, null,
+                        $userId, $userName, $ip
+                    );
+                },
+            ],
         ];
     }
 

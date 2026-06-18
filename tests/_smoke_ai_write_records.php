@@ -340,6 +340,44 @@ try {
         }
     }
 
+    // ════ 3h. ACTION: work-order status change ════
+    $wEntry = \FleetForge\AI\ActionRegistry::get('change_work_order_status');
+    if ($wEntry) {
+        $wp = ($wEntry['preview'])(['work_order_number'=>'WO-1','status'=>'completed','total_cost'=>100], ['new_status'=>'in_progress']);
+        isset($wp['error']) ? $pass("work order: transition from terminal 'completed' rejected") : $fail("work order: terminal transition not rejected");
+        $wp2 = ($wEntry['preview'])(['work_order_number'=>'WO-2','status'=>'in_progress','total_cost'=>300], ['new_status'=>'completed']);
+        (isset($wp2['summary']) && stripos($wp2['summary'],'finalizes')!==false) ? $pass("work order: completion preview notes cost finalization") : $fail("work order: completion summary wrong");
+    } else { $fail("work order: action not registered"); }
+    try { \FleetForge\AI\Actions\StatusActions::changeWorkOrderStatus(999999,'in_progress',null,null,$userId,'Smoke','127.0.0.1'); $fail("work order: not-found should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='NOT_FOUND' ? $pass("work order: not-found rejected") : $fail("work order: wrong code {$e->errorCode}"); }
+
+    $wu = db_row("SELECT id, total_maintenance_cost FROM equipment_units WHERE deleted_at IS NULL ORDER BY id LIMIT 1");
+    $wv = db_row("SELECT id, total_spent FROM vendors WHERE deleted_at IS NULL ORDER BY id LIMIT 1");
+    if ($wu) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            $woId = db_insert('maintenance_work_orders', [
+                'work_order_number'=>'TEST-WO-SMOKE','equipment_unit_id'=>(int)$wu['id'],
+                'work_type'=>'repair','title'=>'Smoke WO','requested_date'=>date('Y-m-d'),
+                'status'=>'in_progress','total_cost'=>'300.00',
+            ] + ($wv ? ['vendor_id'=>(int)$wv['id']] : []));
+            \FleetForge\AI\Actions\StatusActions::changeWorkOrderStatus($woId,'completed',null,'fixed it',$userId,'Smoke','127.0.0.1');
+            $wo = db_row("SELECT status, completed_date FROM maintenance_work_orders WHERE id=?", [$woId]);
+            ($wo['status']==='completed' && $wo['completed_date']!==null) ? $pass("work order: applied in_progress→completed + completed_date stamped") : $fail("work order: state ".json_encode($wo));
+            $uc = (float) db_row("SELECT total_maintenance_cost FROM equipment_units WHERE id=?", [$wu['id']])['total_maintenance_cost'];
+            abs($uc - ((float)$wu['total_maintenance_cost'] + 300.0))<0.001 ? $pass("work order: unit total_maintenance_cost +\$300 (Trap 6)") : $fail("work order: unit cost now {$uc}");
+            if ($wv) {
+                $vs = (float) db_row("SELECT total_spent FROM vendors WHERE id=?", [$wv['id']])['total_spent'];
+                abs($vs - ((float)$wv['total_spent'] + 300.0))<0.001 ? $pass("work order: vendor total_spent +\$300 (Trap 6)") : $fail("work order: vendor spent now {$vs}");
+            }
+        } catch (\Throwable $e) {
+            $fail("work order: hermetic apply threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

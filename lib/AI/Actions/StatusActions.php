@@ -130,6 +130,112 @@ class StatusActions
         return $result;
     }
 
+    /** Work-order state machine (canonical — mirrors maintenance_work_orders/update_status.php). */
+    public const WO_STATUS_TRANSITIONS = [
+        'open'          => ['in_progress', 'cancelled'],
+        'in_progress'   => ['waiting_parts', 'completed'],
+        'waiting_parts' => ['in_progress'],
+        'completed'     => [], // TERMINAL
+        'cancelled'     => [], // TERMINAL
+    ];
+
+    /**
+     * Transition a maintenance work order. On completion: stamps completed_date/
+     * _by + optional resolution_notes, and bumps vendors.total_spent +
+     * equipment_units.total_maintenance_cost by total_cost (Trap 6, same txn).
+     * Mirrors api/v1/maintenance_work_orders/update_status.php.
+     *
+     * @throws ActionException  NOT_FOUND / INVALID_TRANSITION / VALIDATION_ERROR
+     * @return array{id:int, old_status:string, new_status:string, work_order_number:string}
+     */
+    public static function changeWorkOrderStatus(int $id, string $newStatus, ?string $reason, ?string $resNotes, int $userId, string $userName, ?string $ip): array
+    {
+        if (!in_array($newStatus, ['open', 'in_progress', 'waiting_parts', 'completed', 'cancelled'], true)) {
+            throw new ActionException('VALIDATION_ERROR', 'Please select a valid work-order status.', 422);
+        }
+
+        $result = null;
+
+        db_transaction(function () use ($id, $newStatus, $reason, $resNotes, $userId, $userName, $ip, &$result): void {
+            $wo = db_row(
+                "SELECT id, work_order_number, status, vendor_id, equipment_unit_id, total_cost
+                 FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                [$id]
+            );
+            if (!$wo) {
+                throw new ActionException('NOT_FOUND', 'Work order not found.', 404);
+            }
+
+            $oldStatus   = $wo['status'];
+            $allowedNext = self::WO_STATUS_TRANSITIONS[$oldStatus] ?? [];
+
+            if ($oldStatus === $newStatus) {
+                $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus, 'work_order_number' => $wo['work_order_number']];
+                return;
+            }
+            if (!in_array($newStatus, $allowedNext, true)) {
+                throw new ActionException('INVALID_TRANSITION',
+                    "Cannot transition work order {$wo['work_order_number']} from '{$oldStatus}' to '{$newStatus}'.", 409);
+            }
+
+            $setClause = 'status = ?';
+            $setParams = [$newStatus];
+            if ($newStatus === 'completed') {
+                $setClause .= ', completed_date = CURDATE(), completed_by = ?';
+                $setParams[] = $userId;
+                if ($resNotes !== null) {
+                    $setClause .= ', resolution_notes = ?';
+                    $setParams[] = $resNotes;
+                }
+            }
+            $setParams[] = $id;
+            db_execute("UPDATE maintenance_work_orders SET $setClause WHERE id = ?", $setParams);
+
+            if ($newStatus === 'completed') {
+                $totalCost = $wo['total_cost'] ?? '0.00';
+                if ($wo['vendor_id'] !== null) {
+                    db_execute("UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?", [$totalCost, $wo['vendor_id']]);
+                }
+                if ($wo['equipment_unit_id'] !== null) {
+                    db_execute("UPDATE equipment_units SET total_maintenance_cost = total_maintenance_cost + ?, updated_at = NOW() WHERE id = ?", [$totalCost, $wo['equipment_unit_id']]);
+                }
+            }
+
+            db_insert('audit_log', [
+                'user_id' => $userId, 'user_name' => $userName, 'action' => 'status_change',
+                'module' => 'maintenance', 'entity_type' => 'work_order', 'entity_id' => $id,
+                'entity_label' => $wo['work_order_number'],
+                'old_values' => json_encode(['status' => $oldStatus]),
+                'new_values' => json_encode(['status' => $newStatus, 'reason' => $reason]),
+                'notes' => "Work order {$wo['work_order_number']}: {$oldStatus} → {$newStatus}" . ($reason ? " — {$reason}" : ''),
+                'ip_address' => $ip ?? '127.0.0.1',
+            ]);
+
+            $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus, 'work_order_number' => $wo['work_order_number']];
+
+            try {
+                if ($newStatus === 'completed') {
+                    $cost = '$' . number_format((float) $wo['total_cost'], 2);
+                    \FleetForge\Notifications\NotificationService::notify(
+                        type: 'maintenance.completed', title: "Work order {$wo['work_order_number']} completed",
+                        message: "Work order {$wo['work_order_number']} completed — {$cost}",
+                        entityType: 'work_order', entityId: $id, url: '/fleetforge/maintenance_work_orders/show?id=' . $id
+                    );
+                } elseif ($newStatus === 'waiting_parts') {
+                    \FleetForge\Notifications\NotificationService::notify(
+                        type: 'maintenance.waiting_parts', title: "Work order {$wo['work_order_number']} waiting for parts",
+                        message: "Work order {$wo['work_order_number']} waiting for parts",
+                        entityType: 'work_order', entityId: $id, url: '/fleetforge/maintenance_work_orders/show?id=' . $id, severity: 'warning'
+                    );
+                }
+            } catch (\Throwable $e) {
+                error_log('[NOTIF maintenance.status_change] ' . $e->getMessage());
+            }
+        });
+
+        return $result;
+    }
+
     /** Reservation state machine (canonical — mirrors reservations/update_status.php). */
     public const RESERVATION_TRANSITIONS = [
         'pending'   => ['confirmed', 'cancelled'],

@@ -61,126 +61,19 @@ if ($fields) {
     json_validation_error($fields);
 }
 
-// Valid state machine transitions (spec §11)
-const WO_STATUS_TRANSITIONS = [
-    'open'          => ['in_progress', 'cancelled'],
-    'in_progress'   => ['waiting_parts', 'completed'],
-    'waiting_parts' => ['in_progress'],
-    'completed'     => [],  // TERMINAL
-    'cancelled'     => [],  // TERMINAL
-];
-
-$result = null;
-
-db_transaction(function() use ($id, $newStatus, $reason, $resNotes, &$result) {
-    // Lock the work order row for update
-    $wo = db_row(
-        "SELECT id, work_order_number, status, vendor_id, equipment_unit_id, total_cost
-         FROM maintenance_work_orders
-         WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
-        [$id]
+// ── Delegate to the shared action service (S-AI-ACTION-5) ──────
+// State machine, completion stamping, Trap 6 counter bumps (vendor total_spent
+// + equipment total_maintenance_cost), audit, and notifications all live in
+// StatusActions::changeWorkOrderStatus so the AI confirm→apply path runs the
+// exact same logic. ActionException → json_error keeps the field-map shape.
+try {
+    $result = \FleetForge\AI\Actions\StatusActions::changeWorkOrderStatus(
+        $id, $newStatus, $reason, $resNotes,
+        current_user_id(), current_user()['name'] ?? 'system',
+        $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'
     );
+} catch (\FleetForge\AI\Actions\ActionException $e) {
+    json_error($e->errorCode, $e->getMessage(), $e->status, ['fields' => ['new_status' => $e->getMessage()]]);
+}
 
-    if (!$wo) {
-        json_error('NOT_FOUND', 'Work order not found.', 404);
-    }
-
-    $oldStatus   = $wo['status'];
-    $allowedNext = WO_STATUS_TRANSITIONS[$oldStatus] ?? [];
-
-    // Idempotent: same→same is a no-op
-    if ($oldStatus === $newStatus) {
-        $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus];
-        return;
-    }
-
-    if (!in_array($newStatus, $allowedNext, true)) {
-        json_error('INVALID_TRANSITION',
-            "Cannot transition work order {$wo['work_order_number']} from '{$oldStatus}' to '{$newStatus}'.", 409,
-            ['fields' => ['new_status' => "Cannot move a work order from '{$oldStatus}' to '{$newStatus}'."]]);
-    }
-
-    // Build the UPDATE fields
-    $setClause  = 'status = ?';
-    $setParams  = [$newStatus];
-
-    if ($newStatus === 'completed') {
-        $setClause .= ', completed_date = CURDATE(), completed_by = ?';
-        $setParams[] = current_user_id();
-
-        if ($resNotes !== null) {
-            $setClause .= ', resolution_notes = ?';
-            $setParams[] = $resNotes;
-        }
-    }
-
-    $setParams[] = $id;
-    db_execute("UPDATE maintenance_work_orders SET $setClause WHERE id = ?", $setParams);
-
-    // Trap 6 — update denormalized counters in the SAME transaction on completion
-    if ($newStatus === 'completed') {
-        $totalCost = $wo['total_cost'] ?? '0.00';
-        if ($wo['vendor_id'] !== null) {
-            db_execute(
-                "UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?",
-                [$totalCost, $wo['vendor_id']]
-            );
-        }
-        if ($wo['equipment_unit_id'] !== null) {
-            db_execute(
-                "UPDATE equipment_units SET total_maintenance_cost = total_maintenance_cost + ?, updated_at = NOW() WHERE id = ?",
-                [$totalCost, $wo['equipment_unit_id']]
-            );
-        }
-    }
-
-    // Audit log — status_change action
-    db_insert('audit_log', [
-        'user_id'      => current_user_id(),
-        'user_name'    => current_user()['name'] ?? 'system',
-        'action'       => 'status_change',
-        'module'       => 'maintenance',
-        'entity_type'  => 'work_order',
-        'entity_id'    => $id,
-        'entity_label' => $wo['work_order_number'],
-        'old_values'   => json_encode(['status' => $oldStatus]),
-        'new_values'   => json_encode([
-            'status' => $newStatus,
-            'reason' => $reason,
-        ]),
-        'notes'        => "Work order {$wo['work_order_number']}: {$oldStatus} → {$newStatus}"
-                         . ($reason ? " — {$reason}" : ''),
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-
-    $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus];
-
-    // ── In-app notification (NOTIF-1) ──────────────────────────
-    try {
-        if ($newStatus === 'completed') {
-            $cost = '$' . number_format((float) $wo['total_cost'], 2);
-            \FleetForge\Notifications\NotificationService::notify(
-                type:       'maintenance.completed',
-                title:      "Work order {$wo['work_order_number']} completed",
-                message:    "Work order {$wo['work_order_number']} completed — {$cost}",
-                entityType: 'work_order',
-                entityId:   $id,
-                url:        '/fleetforge/maintenance_work_orders/show?id=' . $id
-            );
-        } elseif ($newStatus === 'waiting_parts') {
-            \FleetForge\Notifications\NotificationService::notify(
-                type:       'maintenance.waiting_parts',
-                title:      "Work order {$wo['work_order_number']} waiting for parts",
-                message:    "Work order {$wo['work_order_number']} waiting for parts",
-                entityType: 'work_order',
-                entityId:   $id,
-                url:        '/fleetforge/maintenance_work_orders/show?id=' . $id,
-                severity:   'warning'
-            );
-        }
-    } catch (\Throwable $e) {
-        error_log('[NOTIF maintenance.status_change] ' . $e->getMessage());
-    }
-});
-
-json_success($result);
+json_success(['id' => $result['id'], 'old_status' => $result['old_status'], 'new_status' => $result['new_status']]);
