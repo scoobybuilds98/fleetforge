@@ -51,6 +51,12 @@ class FleetForgeTools
             'get_customer_leases'      => self::getCustomerLeases($input),
             'get_customer_invoices'    => self::getCustomerInvoices($input, $userId),
 
+            // ── Credit Application + Service Request tools (S-AI-READ-GAPS) ──
+            'get_credit_applications'        => self::getCreditApplications($input, $userId),
+            'get_credit_application_details' => self::getCreditApplicationDetails($input, $userId),
+            'get_service_requests'           => self::getServiceRequests($input, $userId),
+            'get_service_request_details'    => self::getServiceRequestDetails($input, $userId),
+
             // Fleet / Equipment tools
             'get_fleet_summary'        => self::getFleetSummary(),
             'get_equipment_unit'       => self::getEquipmentUnit($input),
@@ -611,6 +617,155 @@ class FleetForgeTools
         }
 
         return $result;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  CREDIT APPLICATION TOOLS (S-AI-READ-GAPS) — gated on customers:view
+    // ════════════════════════════════════════════════════════════
+
+    // List credit applications. Filters: status, outcome, customer_id, query.
+    // Trap 7: never emits token_hash / form_data / signature_path / submitted_ip.
+    private static function getCreditApplications(array $input, ?int $userId): array|string
+    {
+        if ($userId !== null && !\can('customers', 'view')) {
+            return 'You do not have permission to view customer credit applications.';
+        }
+        $where  = ['ca.deleted_at IS NULL'];
+        $params = [];
+        if (($s = trim($input['status'] ?? '')) !== '' && in_array($s, ['sent', 'opened', 'submitted', 'reviewed'], true)) {
+            $where[] = 'ca.status = ?'; $params[] = $s;
+        }
+        if (($o = trim($input['outcome'] ?? '')) !== '' && in_array($o, ['approved', 'declined', 'needs_info'], true)) {
+            $where[] = 'ca.review_outcome = ?'; $params[] = $o;
+        }
+        if (($cid = (int) ($input['customer_id'] ?? 0)) > 0) {
+            $where[] = 'ca.customer_id = ?'; $params[] = $cid;
+        }
+        if (($q = trim($input['query'] ?? '')) !== '') {
+            $where[] = '(c.company_name LIKE ? OR ca.print_name_first LIKE ? OR ca.print_name_last LIKE ?)';
+            $like = "%{$q}%"; array_push($params, $like, $like, $like);
+        }
+        $rows = db_select(
+            "SELECT ca.id, ca.customer_id, c.company_name, ca.status, ca.review_outcome,
+                    ca.sent_at, ca.submitted_at, ca.reviewed_at, ca.created_at,
+                    ca.approved_credit_limit, ca.print_name_first, ca.print_name_last,
+                    rb.name AS reviewed_by_name
+             FROM customer_credit_applications ca
+             JOIN customers c ON c.id = ca.customer_id
+             LEFT JOIN users rb ON rb.id = ca.reviewed_by
+             WHERE " . implode(' AND ', $where) . "
+             ORDER BY ca.created_at DESC LIMIT " . ToolRegistry::MAX_ROWS,
+            $params
+        );
+        return self::stripFinancials($rows, $userId); // hides approved_credit_limit w/o payments:view
+    }
+
+    private static function getCreditApplicationDetails(array $input, ?int $userId): array|string
+    {
+        if ($userId !== null && !\can('customers', 'view')) {
+            return 'You do not have permission to view customer credit applications.';
+        }
+        $id = (int) ($input['application_id'] ?? 0);
+        if ($id <= 0) return 'Error: application_id is required.';
+
+        // Trap 7: explicitly NOT selecting token_hash, form_data, signature_path,
+        // submitted_ip, or rendered_html (PII / secrets / huge blob).
+        $row = db_row(
+            "SELECT ca.id, ca.customer_id, c.company_name, ca.status, ca.review_outcome,
+                    ca.sent_at, ca.opened_at, ca.submitted_at, ca.reviewed_at, ca.created_at,
+                    ca.approved_credit_limit, ca.print_name_first, ca.print_name_last,
+                    ca.signed_date, ca.review_notes, ca.token_expires_at,
+                    (ca.generated_pdf_document_id IS NOT NULL) AS has_pdf,
+                    c.credit_limit AS customer_credit_limit, c.status AS customer_status,
+                    rb.name AS reviewed_by_name
+             FROM customer_credit_applications ca
+             JOIN customers c ON c.id = ca.customer_id
+             LEFT JOIN users rb ON rb.id = ca.reviewed_by
+             WHERE ca.id = ? AND ca.deleted_at IS NULL",
+            [$id]
+        );
+        if (!$row) return "No credit application found with ID {$id}.";
+        if (!self::canViewFinancials($userId)) {
+            unset($row['approved_credit_limit'], $row['customer_credit_limit']);
+        }
+        return $row;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  SERVICE REQUEST TOOLS (S-AI-READ-GAPS) — gated on customers:view
+    // ════════════════════════════════════════════════════════════
+
+    // List portal service requests. Filters: status, request_type, customer_id.
+    private static function getServiceRequests(array $input, ?int $userId): array|string
+    {
+        if ($userId !== null && !\can('customers', 'view')) {
+            return 'You do not have permission to view service requests.';
+        }
+        $where  = [];
+        $params = [];
+        if (($s = trim($input['status'] ?? '')) !== '' && in_array($s, ['open', 'in_review', 'resolved', 'closed'], true)) {
+            $where[] = 'psr.status = ?'; $params[] = $s;
+        }
+        if (($t = trim($input['request_type'] ?? '')) !== '') {
+            $where[] = 'psr.request_type = ?'; $params[] = $t;
+        }
+        if (($cid = (int) ($input['customer_id'] ?? 0)) > 0) {
+            $where[] = 'psr.customer_id = ?'; $params[] = $cid;
+        }
+        $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+        return db_select(
+            "SELECT psr.id, psr.request_type, psr.subject, psr.status, psr.created_at, psr.resolved_at,
+                    c.id AS customer_id, c.company_name AS customer_name,
+                    pu.name AS submitted_by_name, assigned.name AS assigned_to_name,
+                    l.contract_number, eu.unit_number
+             FROM portal_service_requests psr
+             LEFT JOIN customers c ON c.id = psr.customer_id
+             LEFT JOIN portal_users pu ON pu.id = psr.portal_user_id
+             LEFT JOIN users assigned ON assigned.id = psr.assigned_to
+             LEFT JOIN leases l ON l.id = psr.lease_id
+             LEFT JOIN equipment_units eu ON eu.id = psr.equipment_unit_id
+             {$whereSql}
+             ORDER BY psr.created_at DESC, psr.id DESC LIMIT " . ToolRegistry::MAX_ROWS,
+            $params
+        );
+    }
+
+    private static function getServiceRequestDetails(array $input, ?int $userId): array|string
+    {
+        if ($userId !== null && !\can('customers', 'view')) {
+            return 'You do not have permission to view service requests.';
+        }
+        $id = (int) ($input['request_id'] ?? 0);
+        if ($id <= 0) return 'Error: request_id is required.';
+
+        $row = db_row(
+            "SELECT psr.id, psr.request_type, psr.subject, psr.message, psr.status,
+                    psr.response, psr.resolved_at, psr.created_at, psr.updated_at,
+                    c.id AS customer_id, c.company_name AS customer_name,
+                    pu.name AS submitted_by_name, pu.email AS submitted_by_email,
+                    assigned.name AS assigned_to_name,
+                    l.contract_number, l.status AS lease_status,
+                    eu.unit_number, et.category AS equipment_category
+             FROM portal_service_requests psr
+             LEFT JOIN customers c ON c.id = psr.customer_id
+             LEFT JOIN portal_users pu ON pu.id = psr.portal_user_id
+             LEFT JOIN users assigned ON assigned.id = psr.assigned_to
+             LEFT JOIN leases l ON l.id = psr.lease_id
+             LEFT JOIN equipment_units eu ON eu.id = psr.equipment_unit_id
+             LEFT JOIN equipment_templates et ON et.id = eu.template_id
+             WHERE psr.id = ?",
+            [$id]
+        );
+        if (!$row) return "No service request found with ID {$id}.";
+
+        // Attach the recent message thread (most recent first, capped).
+        $row['messages'] = db_select(
+            "SELECT sender_type, body, is_internal, created_at
+             FROM portal_service_request_messages
+             WHERE request_id = ? ORDER BY id DESC LIMIT 15",
+            [$id]
+        );
+        return $row;
     }
 
     // ════════════════════════════════════════════════════════════

@@ -162,6 +162,61 @@ class ToolRegistry
                 '_tags' => ['chat', 'summary', 'report'],
             ],
 
+            // ── Credit Application + Service Request Tools (S-AI-READ-GAPS) ──
+            [
+                'name' => 'get_credit_applications',
+                'description' => 'List customer credit applications. Filter by status (sent/opened/submitted/reviewed), outcome (approved/declined/needs_info), customer_id, or a name/company search. Returns status, review outcome, key dates, and approved credit limit. Use for "which credit apps are pending review", "did Acme submit their credit application", etc.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'status'      => ['type' => 'string', 'enum' => ['sent', 'opened', 'submitted', 'reviewed', ''], 'description' => 'Filter by application status'],
+                        'outcome'     => ['type' => 'string', 'enum' => ['approved', 'declined', 'needs_info', ''], 'description' => 'Filter by review outcome'],
+                        'customer_id' => ['type' => 'integer', 'description' => 'Filter to one customer'],
+                        'query'       => ['type' => 'string', 'description' => 'Search company or signer name'],
+                    ],
+                    'required' => [],
+                ],
+                '_tags' => ['chat', 'report'],
+            ],
+            [
+                'name' => 'get_credit_application_details',
+                'description' => 'Get one credit application: status, review outcome, dates, signer name, approved credit limit, review notes, and whether a signed PDF exists. Does not expose the raw form submission, signature, or token (those are restricted).',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'application_id' => ['type' => 'integer', 'description' => 'Credit application ID'],
+                    ],
+                    'required' => ['application_id'],
+                ],
+                '_tags' => ['chat', 'summary'],
+            ],
+            [
+                'name' => 'get_service_requests',
+                'description' => 'List customer-portal service requests (lease extensions, early returns, damage reports, billing inquiries, document requests, etc.). Filter by status (open/in_review/resolved/closed), request_type, or customer_id. Use for "what service requests are open", "any unresolved damage reports", etc.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'status'       => ['type' => 'string', 'enum' => ['open', 'in_review', 'resolved', 'closed', ''], 'description' => 'Filter by status'],
+                        'request_type' => ['type' => 'string', 'enum' => ['lease_extension', 'early_return', 'damage_report', 'billing_inquiry', 'document_request', 'new_lease_inquiry', 'general', ''], 'description' => 'Filter by request type'],
+                        'customer_id'  => ['type' => 'integer', 'description' => 'Filter to one customer'],
+                    ],
+                    'required' => [],
+                ],
+                '_tags' => ['chat', 'report'],
+            ],
+            [
+                'name' => 'get_service_request_details',
+                'description' => 'Get one service request including the full message, current status, assigned operator, linked lease/unit, and the recent reply thread.',
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'request_id' => ['type' => 'integer', 'description' => 'Service request ID'],
+                    ],
+                    'required' => ['request_id'],
+                ],
+                '_tags' => ['chat', 'summary'],
+            ],
+
             // ── Fleet / Equipment Tools ─────────────────────────
             [
                 'name' => 'get_fleet_summary',

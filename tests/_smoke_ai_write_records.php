@@ -448,6 +448,52 @@ try {
         }
     }
 
+    // ════ 3k. READ TOOLS: credit applications + service requests ════
+    $rg = db_row("SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1");
+    if ($rg) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            // Credit application
+            $caId = db_insert('customer_credit_applications', [
+                'customer_id'=>(int)$rg['id'],'status'=>'submitted','review_outcome'=>'approved',
+                'approved_credit_limit'=>'25000.00','print_name_first'=>'Jane','print_name_last'=>'Doe',
+                'token_hash'=>'smoketokenhash'.substr(md5('x'),0,40),'token_expires_at'=>date('Y-m-d H:i:s', time()+86400),
+            ]);
+            $list = json_decode(ToolRegistry::execute('get_credit_applications', ['status'=>'submitted'], $userId), true);
+            (is_array($list) && count($list)>=1 && isset($list[0]['company_name']) && !isset($list[0]['token_hash'])) ? $pass("credit apps: list returns rows, no token leaked") : $fail("credit apps: list ".json_encode($list));
+            $det = json_decode(ToolRegistry::execute('get_credit_application_details', ['application_id'=>$caId], $userId), true);
+            (is_array($det) && ($det['review_outcome']??null)==='approved' && !isset($det['form_data']) && !isset($det['token_hash']) && !isset($det['signature_path'])) ? $pass("credit apps: details safe (no PII/secret fields)") : $fail("credit apps: details ".json_encode($det));
+
+            // Service request (needs a portal_user)
+            $pu = db_row("SELECT id FROM portal_users LIMIT 1");
+            if (!$pu) { $puId = db_insert('portal_users', ['customer_id'=>(int)$rg['id'],'name'=>'Portal Tester','email'=>'smoke@example.com']); } else { $puId = (int)$pu['id']; }
+            $srId = db_insert('portal_service_requests', [
+                'portal_user_id'=>$puId,'customer_id'=>(int)$rg['id'],'request_type'=>'damage_report',
+                'subject'=>'Smoke damage report','message'=>'Bumper scratch','status'=>'open',
+            ]);
+            $sl = json_decode(ToolRegistry::execute('get_service_requests', ['status'=>'open'], $userId), true);
+            (is_array($sl) && count($sl)>=1 && isset($sl[0]['subject'])) ? $pass("service requests: list returns rows") : $fail("service requests: list ".json_encode($sl));
+            $sd = json_decode(ToolRegistry::execute('get_service_request_details', ['request_id'=>$srId], $userId), true);
+            (is_array($sd) && ($sd['request_type']??null)==='damage_report' && array_key_exists('messages',$sd)) ? $pass("service requests: details incl. message thread") : $fail("service requests: details ".json_encode($sd));
+        } catch (\Throwable $e) {
+            $fail("read gaps: threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+    // not-found / permission
+    stripos(ToolRegistry::execute('get_credit_application_details', ['application_id'=>999999], $userId), 'No credit application') !== false ? $pass("credit apps: not-found handled") : $fail("credit apps: not-found wrong");
+    stripos(ToolRegistry::execute('get_service_request_details', ['request_id'=>999999], $userId), 'No service request') !== false ? $pass("service requests: not-found handled") : $fail("service requests: not-found wrong");
+    // permission gate: non-admin role without customers:view (super_admin bypasses can())
+    $savedPerms = $_SESSION['ff_user']['permissions'] ?? [];
+    $savedRole  = $_SESSION['ff_user']['role_slug'] ?? null;
+    $_SESSION['ff_user']['role_slug']   = 'dispatcher';
+    $_SESSION['ff_user']['permissions'] = ['equipment'=>['edit'=>1]]; // no customers:view
+    stripos(ToolRegistry::execute('get_credit_applications', [], $userId), 'permission') !== false ? $pass("credit apps: customers:view gate enforced") : $fail("credit apps: gate not enforced");
+    $_SESSION['ff_user']['permissions'] = $savedPerms;
+    $_SESSION['ff_user']['role_slug']   = $savedRole;
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");
