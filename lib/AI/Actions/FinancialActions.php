@@ -283,4 +283,162 @@ class FinancialActions
 
         return ['id' => $id, 'invoice_number' => $invoice['invoice_number'], 'status' => 'sent'];
     }
+
+    /**
+     * Void (soft-delete) a payment and reverse all its effects. Mirrors
+     * api/v1/payments/delete.php: reverse each allocation (invoice amount_paid /
+     * balance_due / status), leases.total_paid, customers.outstanding_balance
+     * (Path B status guard), and the payment GL journal entries.
+     *
+     * @throws ActionException  NOT_FOUND / VALIDATION_ERROR / PERIOD_CLOSED
+     * @return array{id:int, payment_number:string, reverted_statuses:array}
+     */
+    public static function voidPayment(int $id, ?string $reason, int $userId, string $userName, ?string $ip): array
+    {
+        $reason = $reason !== null ? trim($reason) : '';
+        if ($reason === '') {
+            throw new ActionException('VALIDATION_ERROR', 'A reason is required to void a payment.', 422);
+        }
+
+        $payment = db_row(
+            "SELECT id, payment_number, customer_id, amount, currency, status
+             FROM payments WHERE id = ? AND deleted_at IS NULL",
+            [$id]
+        );
+        if (!$payment) {
+            throw new ActionException('NOT_FOUND', 'Payment not found.', 404);
+        }
+
+        $allocations = db_select(
+            "SELECT pa.id, pa.invoice_id, pa.amount,
+                    i.lease_id, i.invoice_number, i.total_amount, i.credits_applied,
+                    i.amount_paid, i.balance_due, i.status AS invoice_status,
+                    i.customer_id, i.deleted_at AS invoice_deleted_at
+             FROM payment_allocations pa
+             JOIN invoices i ON i.id = pa.invoice_id
+             WHERE pa.payment_id = ?",
+            [$id]
+        );
+
+        $revertedStatuses = [];
+
+        db_transaction(function () use ($id, $payment, $allocations, $reason, $userId, $userName, $ip, &$revertedStatuses): void {
+            db_update('payments', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
+
+            foreach ($allocations as $alloc) {
+                $allocated  = (string) $alloc['amount'];
+                $amountPaid = (string) $alloc['amount_paid'];
+                $credits    = (string) $alloc['credits_applied'];
+                $total      = (string) $alloc['total_amount'];
+
+                // Path B status guard: void/written_off/deleted invoices already
+                // reversed their counters — skip OB re-INC + invoice update.
+                $invoiceTerminal = in_array($alloc['invoice_status'], ['void', 'written_off'], true)
+                                || $alloc['invoice_deleted_at'] !== null;
+
+                if ($invoiceTerminal) {
+                    $revertedStatuses[] = [
+                        'invoice_id' => $alloc['invoice_id'], 'invoice_number' => $alloc['invoice_number'],
+                        'old_status' => $alloc['invoice_status'], 'new_status' => $alloc['invoice_status'],
+                        'note' => 'skipped — invoice is void/written_off/deleted (Path B status guard)',
+                    ];
+                    if ($alloc['lease_id']) {
+                        db_execute("UPDATE leases SET total_paid = GREATEST(0, total_paid - ?), updated_at = NOW() WHERE id = ?", [$allocated, $alloc['lease_id']]);
+                    }
+                    continue;
+                }
+
+                $newAmountPaid = bcround(bcsub($amountPaid, $allocated, 6), 2);
+                if (bccomp($newAmountPaid, '0', 2) < 0) $newAmountPaid = '0.00';
+                $newBalanceDue = bcround(bcsub(bcsub($total, $credits, 6), $newAmountPaid, 6), 2);
+                if (bccomp($newBalanceDue, '0', 2) < 0) $newBalanceDue = '0.00';
+
+                $revertedStatus = $alloc['invoice_status'];
+                if (in_array($alloc['invoice_status'], ['paid', 'partially_paid'], true)) {
+                    if (bccomp($newBalanceDue, '0', 2) === 0) {
+                        $revertedStatus = 'paid';
+                    } elseif (bccomp($newAmountPaid, '0', 2) > 0 || bccomp($credits, '0', 2) > 0) {
+                        $revertedStatus = 'partially_paid';
+                    } else {
+                        $revertedStatus = 'sent';
+                    }
+                }
+
+                $invoiceUpdates = [
+                    'amount_paid' => $newAmountPaid,
+                    'balance_due' => $newBalanceDue,
+                    'status'      => $revertedStatus,
+                    'updated_at'  => date('Y-m-d H:i:s'),
+                ];
+                if ($revertedStatus !== 'paid') {
+                    $invoiceUpdates['paid_date'] = null;
+                }
+                db_update('invoices', $invoiceUpdates, 'id = ?', [$alloc['invoice_id']]);
+
+                if ($revertedStatus !== $alloc['invoice_status']) {
+                    $revertedStatuses[] = [
+                        'invoice_id' => $alloc['invoice_id'], 'invoice_number' => $alloc['invoice_number'],
+                        'old_status' => $alloc['invoice_status'], 'new_status' => $revertedStatus,
+                    ];
+                }
+
+                if ($alloc['lease_id']) {
+                    db_execute("UPDATE leases SET total_paid = GREATEST(0, total_paid - ?), updated_at = NOW() WHERE id = ?", [$allocated, $alloc['lease_id']]);
+                }
+                if ($alloc['customer_id']) {
+                    db_execute("UPDATE customers SET outstanding_balance = outstanding_balance + ?, updated_at = NOW() WHERE id = ?", [$allocated, $alloc['customer_id']]);
+                }
+            }
+
+            // Reverse the payment GL journal entries. A closed-period failure
+            // aborts the whole void (never a counter reversal without the GL one).
+            $paymentJes = db_select(
+                "SELECT id FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = ? AND status = 'posted'",
+                [$id]
+            );
+            foreach ($paymentJes as $je) {
+                try {
+                    \FleetForge\Accounting\JournalEntryService::reverse((int) $je['id'], null, $userId);
+                } catch (\Throwable $e) {
+                    if (stripos($e->getMessage(), 'already been reversed') !== false) {
+                        continue;
+                    }
+                    // Closed period (or no open period) → clean 409 instead of a 500.
+                    throw new ActionException('PERIOD_CLOSED',
+                        'Cannot void: the payment journal entry cannot be reversed (the accounting period is likely closed). ' . $e->getMessage(), 409);
+                }
+            }
+
+            $invoiceList = implode(', ', array_column($allocations, 'invoice_number'));
+            db_insert('audit_log', [
+                'user_id' => $userId, 'user_name' => $userName, 'action' => 'delete', 'module' => 'payments',
+                'entity_type' => 'payment', 'entity_id' => $id, 'entity_label' => $payment['payment_number'],
+                'notes' => "Payment {$payment['payment_number']} soft-deleted. Reason: {$reason}. Reversed allocations for: {$invoiceList}.",
+                'ip_address' => $ip ?? '127.0.0.1',
+            ]);
+
+            try {
+                $companyName = '';
+                if (!empty($payment['customer_id'])) {
+                    $cust = db_row("SELECT company_name FROM customers WHERE id = ?", [$payment['customer_id']]);
+                    $companyName = $cust['company_name'] ?? '';
+                }
+                \FleetForge\Notifications\NotificationService::notify(
+                    type: 'payment.reversed', title: "Payment {$payment['payment_number']} reversed",
+                    message: "Payment {$payment['payment_number']} reversed" . ($companyName ? " for {$companyName}" : '') . ". Reason: {$reason}",
+                    entityType: 'payment', entityId: $id, url: '/fleetforge/payments', severity: 'warning'
+                );
+            } catch (\Throwable $e) {
+                error_log('[NOTIF payment.reversed] ' . $e->getMessage());
+            }
+        });
+
+        // Best-effort QBO void enqueue AFTER commit (soft-delete IS the void signal).
+        \FleetForge\QboPushers\PaymentEnqueuer::enqueue($id, 'void');
+        if (function_exists('invalidate_dashboard_cache')) {
+            invalidate_dashboard_cache();
+        }
+
+        return ['id' => $id, 'payment_number' => $payment['payment_number'], 'reverted_statuses' => $revertedStatuses];
+    }
 }

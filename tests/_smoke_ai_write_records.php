@@ -252,6 +252,53 @@ try {
         else $fail("send: apply did not reach sent state");
     }
 
+    // ════ 3f. FINANCIAL ACTION: payment void ════
+    $pEntry = \FleetForge\AI\ActionRegistry::get('void_payment');
+    if ($pEntry) {
+        ($pEntry['perm_action'] ?? 'edit') === 'delete' ? $pass("payment void: requires payments:delete (not edit)") : $fail("payment void: wrong perm_action");
+        $pp = ($pEntry['preview'])(['payment_number'=>'PMT-1','amount'=>500,'currency'=>'CAD'], ['reason'=>'']);
+        isset($pp['error']) ? $pass("payment void: missing reason rejected by preview") : $fail("payment void: missing reason not rejected");
+        $pp2 = ($pEntry['preview'])(['payment_number'=>'PMT-1','amount'=>500,'currency'=>'CAD'], ['reason'=>'duplicate entry']);
+        (isset($pp2['summary']) && stripos($pp2['summary'],'Void payment PMT-1')!==false) ? $pass("payment void: valid preview builds summary") : $fail("payment void: summary wrong");
+    } else { $fail("payment void: action not registered"); }
+    try { \FleetForge\AI\Actions\FinancialActions::voidPayment(999999, 'r', $userId, 'Smoke', '127.0.0.1'); $fail("payment void: missing should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='NOT_FOUND' ? $pass("payment void: not-found rejected") : $fail("payment void: wrong code {$e->errorCode}"); }
+
+    if (!empty($vc)) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            $obBefore = (float) db_row("SELECT outstanding_balance FROM customers WHERE id=?", [$vc['id']])['outstanding_balance'];
+            $pinv = db_insert('invoices', [
+                'invoice_number'=>'TEST-PAYVOID-INV','customer_id'=>(int)$vc['id'],'status'=>'paid',
+                'billing_type'=>'single_period','invoice_date'=>date('Y-m-d'),'due_date'=>date('Y-m-d'),
+                'billing_period_start'=>date('Y-m-d'),'billing_period_end'=>date('Y-m-d'),'billing_period_days'=>1,
+                'total_amount'=>'200.00','amount_paid'=>'200.00','balance_due'=>'0.00','credits_applied'=>'0.00',
+            ]);
+            $payId = db_insert('payments', [
+                'payment_number'=>'TEST-PAYVOID-PMT','customer_id'=>(int)$vc['id'],'amount'=>'200.00',
+                'payment_method'=>'cash','payment_date'=>date('Y-m-d'),
+            ]);
+            db_insert('payment_allocations', ['payment_id'=>$payId,'invoice_id'=>$pinv,'amount'=>'200.00']);
+
+            $res = \FleetForge\AI\Actions\FinancialActions::voidPayment($payId, 'smoke reversal', $userId, 'Smoke', '127.0.0.1');
+            $pay = db_row("SELECT deleted_at FROM payments WHERE id=?", [$payId]);
+            $pay['deleted_at'] !== null ? $pass("payment void: payment soft-deleted") : $fail("payment void: not soft-deleted");
+            $iv = db_row("SELECT status, amount_paid, balance_due FROM invoices WHERE id=?", [$pinv]);
+            ($iv['status']==='sent' && (float)$iv['amount_paid']===0.0 && (float)$iv['balance_due']===200.0)
+                ? $pass("payment void: invoice reverted paid→sent (amount_paid 0, balance 200)")
+                : $fail("payment void: invoice state ".json_encode($iv));
+            $obAfter = (float) db_row("SELECT outstanding_balance FROM customers WHERE id=?", [$vc['id']])['outstanding_balance'];
+            abs(($obAfter-$obBefore)-200.0)<0.001 ? $pass("payment void: customer OB re-incremented +\$200 (Path B)") : $fail("payment void: OB delta ".($obAfter-$obBefore));
+            $aud = (int) db_row("SELECT COUNT(*) c FROM audit_log WHERE entity_type='payment' AND entity_id=? AND action='delete'", [$payId])['c'];
+            $aud >= 1 ? $pass("payment void: audit_log row written") : $fail("payment void: no audit row");
+        } catch (\Throwable $e) {
+            $fail("payment void: hermetic apply threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

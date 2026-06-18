@@ -127,6 +127,35 @@ class ActionRegistry
                     return FinancialActions::sendInvoice((int) $rec['id'], null, $userId, $userName, $ip);
                 },
             ],
+
+            // ── Payment void (financial — S-AI-ACTION-3) ───────────────
+            // Needs payments:DELETE (stricter than edit) — accountants can record
+            // payments but not void them.
+            'void_payment' => [
+                'label'          => 'void payments',
+                'entity'         => 'payment',
+                'table'          => 'payments',
+                'permission'     => 'payments',
+                'perm_action'    => 'delete',
+                'resolve_column' => 'payment_number',
+                'label_column'   => 'payment_number',
+                'soft_delete'    => true,
+                'preview' => static function (array $rec, array $params): array {
+                    $reason = trim((string) ($params['reason'] ?? ''));
+                    if ($reason === '') {
+                        return ['error' => "Voiding payment {$rec['payment_number']} requires a reason. Ask the user why they're voiding it, then call this again with the reason."];
+                    }
+                    $amt = number_format((float) $rec['amount'], 2);
+                    $cur = $rec['currency'] ?? '';
+                    return [
+                        'summary' => "Void payment {$rec['payment_number']} (\${$amt} {$cur}) — soft-deletes it and reverses its invoice allocations, balance counters, and journal entry. Reason: {$reason}",
+                        'params'  => ['reason' => $reason],
+                    ];
+                },
+                'run' => static function (array $rec, array $params, int $userId, string $userName, ?string $ip): array {
+                    return FinancialActions::voidPayment((int) $rec['id'], (string) ($params['reason'] ?? ''), $userId, $userName, $ip);
+                },
+            ],
         ];
     }
 
