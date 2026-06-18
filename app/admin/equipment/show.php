@@ -47,7 +47,8 @@ $unit = db_row(
             u.samsara_last_location_address, u.samsara_last_speed_kph,
             u.samsara_last_connected_at, u.samsara_last_synced_at,
             u.samsara_odometer_km,
-            t.name AS template_name, t.category AS template_category
+            t.name AS template_name, t.category AS template_category,
+            t.brand AS template_brand, t.model AS template_model
        FROM equipment_units u
        JOIN equipment_templates t ON t.id = u.template_id
       WHERE u.id = ? AND u.deleted_at IS NULL",
@@ -303,6 +304,19 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">VIN</div>
         <div class="stat-value stat-value--vin"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
+    </div>
+
+    <?php
+    $_brandLabel = trim(($unit['template_brand'] ?? '') . ' ' . ($unit['template_model'] ?? ''));
+    ?>
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-truck"/></svg></span>
+        <div class="stat-label">Brand / Make</div>
+        <?php if ($_brandLabel): ?>
+        <div class="stat-value" style="font-size:0.95rem;"><?= e($_brandLabel) ?></div>
+        <?php else: ?>
+        <div class="stat-value text-secondary">—</div>
+        <?php endif; ?>
     </div>
 
     <?php
