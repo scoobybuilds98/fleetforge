@@ -191,7 +191,6 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="mileage">Mileage</option>
                 </optgroup>
                 <optgroup label="Condition &amp; Compliance">
-                    <option value="health_score">Health score</option>
                     <option value="cvi_expiry">CVI expiry</option>
                 </optgroup>
             </select>
@@ -307,7 +306,6 @@ require_once FF_ROOT . '/includes/header.php';
                             </th>
                             <th>Yard</th>
                             <th>Mileage</th>
-                            <th>Health</th>
                             <th>Compliance</th>
                             <th></th>
                         </tr>
@@ -339,17 +337,6 @@ require_once FF_ROOT . '/includes/header.php';
                                 <td x-text="unit.yard_location || '—'" class="text-secondary"></td>
                                 <td x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : (unit.samsara_odometer_km && Number(unit.samsara_odometer_km) > 0 ? Math.round(Number(unit.samsara_odometer_km)).toLocaleString() + ' km' : '0 mi')"
                                     class="font-mono text-sm"></td>
-                                <td>
-                                    <template x-if="unit.health_score !== null">
-                                        <span class="badge badge-no-dot"
-                                              :class="healthBadgeClass(unit.health_score)"
-                                              x-text="unit.health_score + '/100'">
-                                        </span>
-                                    </template>
-                                    <template x-if="unit.health_score === null">
-                                        <span class="text-secondary">—</span>
-                                    </template>
-                                </td>
                                 <td>
                                     <template x-if="hasComplianceIssue(unit)">
                                         <span class="badge badge-warning badge-no-dot">Expiring</span>
@@ -421,21 +408,6 @@ require_once FF_ROOT . '/includes/header.php';
                                   x-text="unit.mileage ? unit.mileage.toLocaleString() + ' mi' : (unit.samsara_odometer_km && Number(unit.samsara_odometer_km) > 0 ? Math.round(Number(unit.samsara_odometer_km)).toLocaleString() + ' km' : '0 mi')">
                             </span>
                         </div>
-                        <div class="eq-mc-row">
-                            <span class="eq-mc-label">Health</span>
-                            <span class="eq-mc-value">
-                                <template x-if="unit.health_score !== null">
-                                    <span class="badge badge-no-dot"
-                                          :class="healthBadgeClass(unit.health_score)"
-                                          x-text="unit.health_score + '/100'">
-                                    </span>
-                                </template>
-                                <template x-if="unit.health_score === null">
-                                    <span class="text-secondary">—</span>
-                                </template>
-                            </span>
-                        </div>
-
                         <!-- Compliance -->
                         <template x-if="hasComplianceIssue(unit)">
                             <div class="eq-mc-row">
@@ -604,16 +576,6 @@ function FF_Equipment() {
                 decommissioned:  'badge-danger',
             };
             return map[status] || 'badge-neutral';
-        },
-
-        // Health score badge — spec §12 four bands (S-CRON-3 canonical mapping)
-        // Mirrors PHP equipment_health_color() in includes/functions.php.
-        healthBadgeClass(score) {
-            if (score === null || score === undefined) return 'badge-neutral';
-            if (score >= 80) return 'badge-success';   // green
-            if (score >= 50) return 'badge-warning';   // yellow
-            if (score >= 20) return 'badge-warning';   // orange (no separate badge)
-            return 'badge-danger';                     // red
         },
 
         toggleSelect(id) {

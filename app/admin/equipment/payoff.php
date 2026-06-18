@@ -37,7 +37,7 @@ if (!$unitId) {
 
 // ── Unit ──────────────────────────────────────────────────────────────────────
 $unit = db_row(
-    "SELECT u.id, u.unit_number, u.status, u.year, u.health_score,
+    "SELECT u.id, u.unit_number, u.status, u.year,
             u.acquired_date, u.acquisition_cost AS unit_acquisition_cost,
             u.mileage, u.vin, u.ownership_type,
             u.cvi_expiry, u.registration_expiry, u.mvi_expiry, u.insurance_expiry,

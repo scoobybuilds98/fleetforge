@@ -95,19 +95,6 @@ function statusBadgeClass(string $status): string {
     return unit_status_badge_class($status);
 }
 
-// healthBadgeClass — map the canonical 4-band health color (S-CRON-3) to
-// our shared badge palette. equipment_health_color() lives in
-// includes/functions.php and is the single source of truth for the bands.
-function healthBadgeClass(?int $score): string {
-    return match (equipment_health_color($score)) {
-        'green'   => 'badge-success',
-        'yellow'  => 'badge-warning',
-        'orange'  => 'badge-warning',
-        'red'     => 'badge-danger',
-        default   => 'badge-neutral',
-    };
-}
-
 // Compliance days helper. Convention: POSITIVE = days until a FUTURE expiry,
 // NEGATIVE = days a PAST expiry is overdue, 0 = expires today.
 // S-CVI-OVERDUE-SIGN-FIX: the diff direction was reversed — `$date->diff(today)`
@@ -246,18 +233,16 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
      ============================================================ -->
 <div class="stat-grid" style="margin-bottom:1.5rem;">
 
-    <div class="stat-card stat-card--green">
-        <span class="stat-icon stat-icon--green"><svg><use href="#icon-heart"/></svg></span>
-        <div class="stat-label">Health Score</div>
-        <?php if ($unit['health_score'] !== null): ?>
-        <div class="stat-value font-mono">
-            <span class="badge badge-no-dot <?= healthBadgeClass((int)$unit['health_score']) ?>" style="font-size:1.1rem;padding:4px 10px;">
-                <?= e($unit['health_score']) ?>/100
-            </span>
-        </div>
+    <?php
+    $_brandLabel = trim(($unit['template_brand'] ?? '') . ' ' . ($unit['template_model'] ?? ''));
+    ?>
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-truck"/></svg></span>
+        <div class="stat-label">Brand / Make</div>
+        <?php if ($_brandLabel): ?>
+        <div class="stat-value" style="font-size:0.9rem;line-height:1.35;word-break:break-word;overflow-wrap:break-word;white-space:normal;"><?= e($_brandLabel) ?></div>
         <?php else: ?>
         <div class="stat-value text-secondary">—</div>
-        <div class="stat-delta text-secondary">Not calculated yet</div>
         <?php endif; ?>
     </div>
 
@@ -304,19 +289,6 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">VIN</div>
         <div class="stat-value stat-value--vin"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
-    </div>
-
-    <?php
-    $_brandLabel = trim(($unit['template_brand'] ?? '') . ' ' . ($unit['template_model'] ?? ''));
-    ?>
-    <div class="stat-card stat-card--slate">
-        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-truck"/></svg></span>
-        <div class="stat-label">Brand / Make</div>
-        <?php if ($_brandLabel): ?>
-        <div class="stat-value" style="font-size:0.95rem;"><?= e($_brandLabel) ?></div>
-        <?php else: ?>
-        <div class="stat-value text-secondary">—</div>
-        <?php endif; ?>
     </div>
 
     <?php
