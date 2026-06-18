@@ -126,7 +126,7 @@ if (!empty($body['items']) && is_array($body['items'])) {
         $templateId = null;
         if (!empty($item['equipment_template_id'])) {
             $templateId = clean_int($item['equipment_template_id']);
-            if (!$templateId || !db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL AND is_active = 1', [$templateId])) {
+            if (!$templateId || !db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL', [$templateId])) {
                 $itemErrors[] = "Item {$lineNum}: equipment template not found.";
                 continue;
             }
