@@ -220,35 +220,53 @@ function <?= e($_panelId) ?>() {
             const decoder = new TextDecoder();
             let   buf     = '';
 
+            const processEvent = (part) => {
+                if (!part.startsWith('data: ')) return true;
+                let evt;
+                try { evt = JSON.parse(part.slice(6)); } catch { return true; }
+                if (evt.t === 'tok') {
+                    this.streamText += evt.c;
+                } else if (evt.t === 'done') {
+                    this.summary     = this.streamText;
+                    this.streamText  = '';
+                    this.cached      = false;
+                    this.generatedAt = new Date().toLocaleString('en-CA', {
+                        month: 'short', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                    });
+                } else if (evt.t === 'err') {
+                    this.error      = evt.m || 'Failed to generate analysis.';
+                    this.streamText = '';
+                    this.summary    = '';
+                    return false;
+                }
+                return true;
+            };
+
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    // Flush any data buffered before the TCP close
+                    buf += decoder.decode(undefined, { stream: false });
+                    for (const part of buf.split('\n\n')) processEvent(part);
+                    break;
+                }
                 buf += decoder.decode(value, { stream: true });
                 const parts = buf.split('\n\n');
                 buf = parts.pop();
-
                 for (const part of parts) {
-                    if (!part.startsWith('data: ')) continue;
-                    let evt;
-                    try { evt = JSON.parse(part.slice(6)); } catch { continue; }
-
-                    if (evt.t === 'tok') {
-                        this.streamText += evt.c;
-                    } else if (evt.t === 'done') {
-                        this.summary    = this.streamText;
-                        this.streamText = '';
-                        this.cached     = false;
-                        this.generatedAt = new Date().toLocaleString('en-CA', {
-                            month: 'short', day: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
-                        });
-                    } else if (evt.t === 'err') {
-                        this.error      = evt.m || 'Failed to generate analysis.';
-                        this.streamText = '';
-                        this.summary    = '';
-                        return;
-                    }
+                    if (!processEvent(part)) return;
                 }
+            }
+
+            // Fallback: if done event was missed but stream has text, promote it
+            if (!this.summary && this.streamText) {
+                this.summary     = this.streamText;
+                this.streamText  = '';
+                this.generatedAt = new Date().toLocaleString('en-CA', {
+                    month: 'short', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit',
+                });
             }
         },
 
@@ -278,31 +296,58 @@ function <?= e($_panelId) ?>() {
 
         renderMarkdown(text) {
             if (!text) return '';
-            let h = text
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;');
-            h = h.replace(/```[\w]*\n?([\s\S]*?)```/g,
-                '<pre class="ai-code-block"><code>$1</code></pre>');
-            h = h.replace(/`([^`\n]+)`/g,
-                '<code class="ai-inline-code">$1</code>');
-            h = h.replace(/^### (.+)$/gm,
-                '<div class="ai-section-header">$1</div>');
-            h = h.replace(/^## (.+)$/gm,
-                '<div class="ai-section-header ai-section-header--h2">$1</div>');
-            h = h.replace(/^# (.+)$/gm,
-                '<div class="ai-section-header ai-section-header--h1">$1</div>');
-            h = h.replace(/^\*\*([^*\n]{3,})\*\*\s*$/gm,
-                '<div class="ai-section-header">$1</div>');
-            h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-            h = h.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-            h = h.replace(/^[•\-] (.+)$/gm, '<li>$1</li>');
-            h = h.replace(/(<li>[\s\S]*?<\/li>(\n|$))+/g,
-                (m) => '<ul class="ai-list">' + m + '</ul>');
-            h = h.replace(/^---+$/gm, '<hr class="ai-divider">');
-            h = h.replace(/\n\n+/g, '</p><p class="ai-para">');
-            h = h.replace(/\n/g, '<br>');
-            return '<p class="ai-para">' + h + '</p>';
+            const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const inl = s => s
+                .replace(/`([^`\n]+)`/g, '<code class="ai-inline-code">$1</code>')
+                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+            const out = [];
+            const blocks = esc(text).split(/\n\n+/);
+
+            for (const raw of blocks) {
+                const b = raw.trim();
+                if (!b) continue;
+
+                // Fenced code block
+                if (/^```/.test(b)) {
+                    const ls = b.split('\n');
+                    const code = ls.slice(1, ls[ls.length-1]==='```' ? -1 : undefined).join('\n');
+                    out.push('<pre class="ai-code-block"><code>' + code + '</code></pre>');
+                    continue;
+                }
+
+                const lines = b.split('\n');
+
+                // Detect pure list block
+                if (lines.every(l => /^[-•*] /.test(l.trim()))) {
+                    const items = lines.map(l => '<li>' + inl(l.replace(/^[-•*] /,'').trim()) + '</li>').join('');
+                    out.push('<ul class="ai-list">' + items + '</ul>');
+                    continue;
+                }
+
+                // Process each line for block elements
+                const processed = lines.map(l => {
+                    const t = l.trim();
+                    if (/^# /.test(t))    return '<div class="ai-section-header ai-section-header--h1">' + inl(t.slice(2)) + '</div>';
+                    if (/^## /.test(t))   return '<div class="ai-section-header ai-section-header--h2">' + inl(t.slice(3)) + '</div>';
+                    if (/^### /.test(t))  return '<div class="ai-section-header">' + inl(t.slice(4)) + '</div>';
+                    if (/^[-•*] /.test(t)) return '<li>' + inl(t.replace(/^[-•*] /,'')) + '</li>';
+                    if (/^---+$/.test(t)) return '<hr class="ai-divider">';
+                    if (/^\*\*([^*\n]{3,})\*\*$/.test(t)) return '<div class="ai-section-header">' + inl(t.slice(2,-2)) + '</div>';
+                    return inl(t);
+                });
+
+                // Group consecutive <li> into <ul>
+                const joined = processed.join('\n')
+                    .replace(/(<li>.*<\/li>\n?)+/gs, m => '<ul class="ai-list">' + m + '</ul>');
+
+                // If result is a block element, pass through; otherwise wrap in <p>
+                const isBlock = /^<(div class="ai-section|ul class="ai-list|pre class="ai-code|hr class="ai-divider)/.test(joined.trim());
+                out.push(isBlock ? joined : '<p class="ai-para">' + joined.replace(/\n/g,'<br>') + '</p>');
+            }
+
+            return out.join('');
         },
     };
 }
