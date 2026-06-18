@@ -34,6 +34,11 @@
 declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/config/app.php';
+// auth.php defines current_user()/current_user_id() the shared close helpers call.
+// config/app.php (the CLI bootstrap) does NOT load it; the web path gets it via
+// api/bootstrap.php. Loading it here only DEFINES functions (session start is
+// lazy inside _ff_session_start()), so it is CLI-safe.
+require_once dirname(__DIR__) . '/includes/auth.php';
 require_once dirname(__DIR__) . '/api/v1/leases/_close_reconciliation.php';
 
 // ── Args ───────────────────────────────────────────────────────────────────
