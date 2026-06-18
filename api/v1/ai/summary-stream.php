@@ -58,10 +58,11 @@ $summaryType   = trim($body['summary_type'] ?? '');
 $reportContext = is_array($body['context'] ?? null) ? $body['context'] : [];
 $userId        = (int) ($_SESSION['ff_user']['id'] ?? 0);
 
-$validEntityTypes = ['customer', 'lease', 'equipment_unit', 'fleet', 'accounting'];
+$validEntityTypes = ['customer', 'lease', 'equipment_unit', 'fleet', 'accounting', 'invoice'];
 $validSummaryTypes = [
     'customer_insights', 'lease_summary', 'unit_analysis', 'fleet_health',
     'payment_risk', 'forecast', 'anomaly', 'accounting_overview',
+    'invoice_analysis',
     'pl_narrative', 'bs_narrative', 'cashflow_narrative', 'budget_variance',
 ];
 

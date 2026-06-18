@@ -196,6 +196,7 @@ class SummaryEngine
                 'fleet_health'        => self::gatherFleetContext(),
                 'payment_risk'        => self::gatherPaymentRiskContext($entityId, $userId),
                 'accounting_overview' => self::gatherAccountingContext($userId),
+                'invoice_analysis'    => self::gatherInvoiceContext($entityId),
                 // ── S036 Phase B accounting narratives ──────────────
                 'pl_narrative'        => self::gatherPLContext($reportContext, $userId),
                 'bs_narrative'        => self::gatherBSContext($reportContext, $userId),
@@ -272,6 +273,53 @@ class SummaryEngine
         return [
             'unit'        => $unit,
             'maintenance' => $maintenance,
+        ];
+    }
+
+    private static function gatherInvoiceContext(int $invoiceId): ?array
+    {
+        $inv = db_row(
+            "SELECT i.*, c.company_name, c.contact_name, c.email AS customer_email,
+                    c.outstanding_balance AS customer_outstanding,
+                    l.contract_number, l.status AS lease_status,
+                    eu.unit_number, eu.type AS unit_type, eu.year AS unit_year
+             FROM invoices i
+             LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
+             LEFT JOIN leases   l ON l.id = i.lease_id    AND l.deleted_at IS NULL
+             LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
+             WHERE i.id = ? AND i.deleted_at IS NULL",
+            [$invoiceId]
+        );
+        if (!$inv) return null;
+
+        // Line items
+        $lines = db_select(
+            "SELECT description, quantity, unit_price, line_total, line_type
+             FROM invoice_line_items WHERE invoice_id = ? ORDER BY id",
+            [$invoiceId]
+        );
+
+        // Payments against this invoice
+        $payments = db_select(
+            "SELECT amount, payment_date, payment_method, notes
+             FROM payments WHERE invoice_id = ? AND deleted_at IS NULL ORDER BY payment_date DESC LIMIT 10",
+            [$invoiceId]
+        );
+
+        // Other recent invoices for this customer (for payment pattern context)
+        $recentInvoices = db_select(
+            "SELECT invoice_number, status, total_amount, balance_due, invoice_date, due_date
+             FROM invoices
+             WHERE customer_id = ? AND id != ? AND deleted_at IS NULL
+             ORDER BY invoice_date DESC LIMIT 8",
+            [$inv['customer_id'], $invoiceId]
+        );
+
+        return [
+            'invoice'         => $inv,
+            'line_items'      => $lines,
+            'payments'        => $payments,
+            'recent_invoices' => $recentInvoices,
         ];
     }
 
@@ -490,6 +538,30 @@ Specific, prioritized actions for the finance team — include customer names, i
 Format monetary values with \$ and CAD/USD. Reference specific account names where they sharpen the analysis.
 
 Accounting data:
+{$dataJson}
+PROMPT,
+
+            'invoice_analysis' => <<<PROMPT
+You are reviewing a specific invoice for a trailer leasing company. Provide a concise, actionable invoice intelligence brief that an AR or billing manager would find useful.
+
+Structure your response with these sections:
+
+## Invoice Summary
+Invoice number, customer, billing period, total amount, balance due, current status. How many days overdue (if applicable)?
+
+## Line Item Breakdown
+Summarise the key charges — base rental, mileage, add-ons. Any items that look unusual (e.g. very large overage, zero-dollar lines)?
+
+## Payment Status & History
+What has been collected? Is there an outstanding balance? How does payment on this invoice compare to the customer's recent invoice history?
+
+## Customer Context
+Based on the customer's recent invoice history, characterise their payment behaviour — reliable, occasionally late, or consistently delinquent?
+
+## Recommended Action
+One or two specific next steps: send reminder, record payment, escalate, write off, or note if no action needed.
+
+Invoice data:
 {$dataJson}
 PROMPT,
 
