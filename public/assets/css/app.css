@@ -10220,6 +10220,19 @@ tr.ff-row-selected > td {
     transform: translateX(100%);
 }
 
+/* S-LEASE-MILEAGE-MODE: 3-position variant (Manual / Off / Samsara).
+   The pill is one-third wide and slides one or two pill-widths right.
+   Distinct modifiers (--mid/--end) so the 2-position --right rule is untouched. */
+.ff-segment-control--3 .ff-segment-control__pill {
+    width: calc(33.3333% - 2px);
+}
+.ff-segment-control__pill--mid {
+    transform: translateX(100%);
+}
+.ff-segment-control__pill--end {
+    transform: translateX(200%);
+}
+
 .ff-segment-control__option {
     position: relative;
     z-index: 1;

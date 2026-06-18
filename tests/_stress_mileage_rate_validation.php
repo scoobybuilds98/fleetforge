@@ -84,6 +84,7 @@ try {
             'end_date'                => '2026-04-30',
             'status'                  => 'active',
             'billing_cycle'           => 'monthly',
+            'mileage_tracking_mode'   => 'samsara',  // S-LEASE-MILEAGE-MODE: mileage billing active (col default 'off' suppresses it)
             'daily_rate'              => '125.00',
             'weekly_rate'             => '750.00',
             'monthly_rate'            => '2200.00',

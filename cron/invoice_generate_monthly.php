@@ -131,6 +131,7 @@ function ff_run_monthly_billing(string $today): array
     // applied only to the most-recent catch-up period below.
     $leases = db_select(
         "SELECT l.id, l.contract_number, l.odometer_start_km,
+                l.mileage_tracking_mode,
                 u.samsara_odometer_km    AS unit_samsara_odometer_km,
                 u.samsara_last_synced_at AS unit_samsara_last_synced_at
            FROM leases l
@@ -218,7 +219,18 @@ function ff_run_monthly_billing(string $today): array
                 $odoSource      = null;
                 $odoFetchedAt   = null;
 
-                if ($isLastPeriod && $lease['unit_samsara_odometer_km'] !== null) {
+                // S-LEASE-MILEAGE-MODE: only feed the cached Samsara odometer into
+                // the invoice when this lease is in 'samsara' mode. 'manual' and
+                // 'off' leases must NOT have a GPS snapshot applied here — doing so
+                // would bypass InvoiceGenerator's central gate (it only falls back
+                // to Samsara when the caller leaves odometer null). Leaving these
+                // null lets manual leases bill from operator-entered readings and
+                // off leases carry no odometer at all.
+                $leaseMileageMode = $lease['mileage_tracking_mode'] ?? 'samsara';
+                if ($isLastPeriod
+                    && $leaseMileageMode === 'samsara'
+                    && $lease['unit_samsara_odometer_km'] !== null
+                ) {
                     $odoPeriodEnd = (string) $lease['unit_samsara_odometer_km'];
                     $odoSource    = 'gps';
                     $odoFetchedAt = $lease['unit_samsara_last_synced_at'] ?: null;

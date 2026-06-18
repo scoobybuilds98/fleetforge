@@ -691,22 +691,80 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
-        <!-- ── Section 6: Starting Odometer (SAMSARA-3) ────────────
-             Capture the odometer reading when the unit leaves the yard.
-             If the unit is linked to Samsara, the "Fetch from Samsara"
-             button pulls the current live reading; otherwise the user
-             enters it manually. Starting odometer is optional — the
-             lease can be created without one.
+        <!-- ── Section 6: Mileage Tracking (S-LEASE-MILEAGE-MODE) ───
+             The 3-position toggle picks how this lease's mileage/odometer
+             is sourced:
+               Manual  → operator types the reading; Samsara is never queried
+                         and a manual reading is never auto-overwritten.
+               Off     → no mileage tracking or billing at all (default).
+               Samsara → auto-fetch at activation + Samsara distance in
+                         auto-billing; the "Fetch from Samsara" button live-
+                         pulls the current reading.
              ───────────────────────────────────────────────────────── -->
         <div class="card" style="margin-bottom:1.5rem;">
-            <div class="card-header"><div class="card-title">Starting Odometer</div></div>
+            <div class="card-header"><div class="card-title">Mileage Tracking</div></div>
             <div class="card-body">
                 <div class="form-hint" style="margin-bottom:1rem;">
-                    Capture the odometer reading when the unit leaves the yard.
-                    Used to track km driven across the life of the lease.
+                    Choose how this lease tracks mileage. <strong>Manual</strong> = you enter
+                    odometer readings by hand. <strong>Off</strong> = no mileage tracking or
+                    billing. <strong>Samsara</strong> = readings come from the unit's GPS.
                 </div>
 
-                <div class="form-group" style="max-width:540px;">
+                <!-- ── 3-position mileage-source segmented control ── -->
+                <div style="display:flex;justify-content:center;margin-bottom:24px;">
+                    <div class="ff-segment-control ff-segment-control--3"
+                         role="tablist"
+                         aria-label="Mileage tracking mode">
+                        <div class="ff-segment-control__pill"
+                             :class="{
+                                 'ff-segment-control__pill--mid': form.mileage_tracking_mode === 'off',
+                                 'ff-segment-control__pill--end': form.mileage_tracking_mode === 'samsara'
+                             }"></div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': form.mileage_tracking_mode === 'manual' }"
+                             @click="setMileageMode('manual')"
+                             role="tab"
+                             :aria-selected="form.mileage_tracking_mode === 'manual'"
+                             tabindex="0"
+                             @keydown.enter.prevent="setMileageMode('manual')"
+                             @keydown.space.prevent="setMileageMode('manual')">
+                            Manual
+                        </div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': form.mileage_tracking_mode === 'off' }"
+                             @click="setMileageMode('off')"
+                             role="tab"
+                             :aria-selected="form.mileage_tracking_mode === 'off'"
+                             tabindex="0"
+                             @keydown.enter.prevent="setMileageMode('off')"
+                             @keydown.space.prevent="setMileageMode('off')">
+                            Off
+                        </div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': form.mileage_tracking_mode === 'samsara' }"
+                             @click="setMileageMode('samsara')"
+                             role="tab"
+                             :aria-selected="form.mileage_tracking_mode === 'samsara'"
+                             tabindex="0"
+                             @keydown.enter.prevent="setMileageMode('samsara')"
+                             @keydown.space.prevent="setMileageMode('samsara')">
+                            Samsara
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Off-mode notice: no mileage tracking on this lease -->
+                <div x-show="form.mileage_tracking_mode === 'off'"
+                     class="alert alert-warning"
+                     style="margin-bottom:0;padding:0.5rem 0.75rem;font-size:0.875rem;">
+                    Mileage tracking is <strong>Off</strong> — this lease won't capture an
+                    odometer reading or bill any mileage. Pick <strong>Manual</strong> or
+                    <strong>Samsara</strong> if this lease should track mileage.
+                </div>
+
+                <!-- Odometer capture — hidden entirely when tracking is Off -->
+                <div class="form-group" style="max-width:540px;"
+                     x-show="form.mileage_tracking_mode !== 'off'">
                     <label class="form-label" for="odometer_start_km">Starting Odometer (km)</label>
                     <div style="display:flex;gap:0.5rem;align-items:flex-start;flex-wrap:wrap;">
                         <div style="flex:1 1 240px;min-width:0;">
@@ -729,7 +787,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <button type="button"
                                 class="btn btn-secondary"
-                                x-show="odometerCanFetch"
+                                x-show="odometerCanFetch && form.mileage_tracking_mode === 'samsara'"
                                 @click="fetchStartingOdometer()"
                                 :disabled="odometerFetching">
                             <span x-show="!odometerFetching">Fetch from Samsara</span>
@@ -751,17 +809,23 @@ require_once FF_ROOT . '/includes/header.php';
                          x-text="odometerBanner && odometerBanner.message">
                     </div>
 
-                    <!-- Hint when unit is not Samsara-linked -->
-                    <div x-show="selectedUnit && !odometerCanFetch"
+                    <!-- Hint when unit is not Samsara-linked (Samsara mode only) -->
+                    <div x-show="form.mileage_tracking_mode === 'samsara' && selectedUnit && !odometerCanFetch"
                          class="form-hint"
                          style="margin-top:0.5rem;color:var(--text-secondary);">
                         Link this unit to Samsara on the equipment page to enable live GPS odometer fetch.
                     </div>
 
-                    <!-- Default hint -->
-                    <div x-show="!selectedUnit"
+                    <!-- Default hint (Samsara mode only) -->
+                    <div x-show="form.mileage_tracking_mode === 'samsara' && !selectedUnit"
                          class="form-hint" style="margin-top:0.5rem;">
                         Select a unit above to enable the Samsara fetch button.
+                    </div>
+
+                    <!-- Manual-mode hint -->
+                    <div x-show="form.mileage_tracking_mode === 'manual'"
+                         class="form-hint" style="margin-top:0.5rem;">
+                        Enter the starting odometer by hand. This value is authoritative — Samsara will never overwrite it.
                     </div>
 
                     <div class="form-error" x-show="errors.odometer_start_km" x-text="errors.odometer_start_km"></div>
@@ -1017,6 +1081,9 @@ function FF_CreateLease() {
             pst_exempt:         false,
             notes:              '',
             internal_notes:     '',
+            // S-LEASE-MILEAGE-MODE: per-lease mileage data source.
+            // 'manual' | 'off' | 'samsara'. Default 'off' (operator must pick).
+            mileage_tracking_mode: 'off',
             // SAMSARA-3: starting odometer captured at lease start
             odometer_start_km:         '',
             odometer_start_source:     null,  // 'gps' | 'manual' | null
@@ -1095,7 +1162,7 @@ function FF_CreateLease() {
                     el:       this.$root,
                     model:    this.form,
                     exclude:  ['customer_id', 'equipment_unit_id',
-                               'odometer_start_source', 'odometer_start_fetched_at'],
+                               'odometer_start_km', 'odometer_start_source', 'odometer_start_fetched_at'],
                 });
             }
         },
@@ -1213,12 +1280,19 @@ function FF_CreateLease() {
                 samsaraLinked: !!raw.samsara_linked,
             };
             this.odometerCanFetch = this.selectedUnit.samsaraLinked;
-            // Clear stale odometer state from a previous selection
-            this.odometerSource                 = null;
-            this.odometerBanner                 = null;
-            this.form.odometer_start_km         = '';
-            this.form.odometer_start_source     = null;
-            this.form.odometer_start_fetched_at = null;
+            // S-LEASE-MILEAGE-MODE: only drop a STALE GPS reading captured for
+            // the previously-selected unit. A value the operator typed by hand
+            // (source 'manual') is theirs and MUST survive a unit change — the
+            // old code wiped it unconditionally, which is the "manual entry
+            // doesn't register" bug. The banner referenced the old unit, so it
+            // is cleared either way.
+            this.odometerBanner = null;
+            if (this.odometerSource === 'gps') {
+                this.odometerSource                 = null;
+                this.form.odometer_start_km         = '';
+                this.form.odometer_start_source     = null;
+                this.form.odometer_start_fetched_at = null;
+            }
 
             // Reset rate lock before lookup — will be re-set based on new source
             this.ratesLocked = false;
@@ -1231,11 +1305,15 @@ function FF_CreateLease() {
         onUnitPickerCleared() {
             this.selectedUnit     = null;
             this.odometerCanFetch = false;
-            this.odometerSource   = null;
             this.odometerBanner   = null;
-            this.form.odometer_start_km         = '';
-            this.form.odometer_start_source     = null;
-            this.form.odometer_start_fetched_at = null;
+            // S-LEASE-MILEAGE-MODE: preserve an operator-typed manual reading;
+            // only clear a stale GPS fetch tied to the now-deselected unit.
+            if (this.odometerSource === 'gps') {
+                this.odometerSource                 = null;
+                this.form.odometer_start_km         = '';
+                this.form.odometer_start_source     = null;
+                this.form.odometer_start_fetched_at = null;
+            }
             this.rateSource  = null;
             this.ratesLocked = false;
         },
@@ -1309,6 +1387,31 @@ function FF_CreateLease() {
 
         togglePrimaryUnit(newUnit) {
             this.form.mileage_unit = newUnit;
+        },
+
+        // S-LEASE-MILEAGE-MODE: 3-position mileage-source selector.
+        //   manual  → operator enters the odometer by hand; Samsara never queried.
+        //   off     → no mileage tracking/billing; clears any captured reading.
+        //   samsara → auto-fetch at activation + Samsara distance in auto-billing.
+        setMileageMode(mode) {
+            this.form.mileage_tracking_mode = mode;
+            if (mode === 'off') {
+                // No mileage tracking — drop any captured starting reading.
+                this.form.odometer_start_km         = '';
+                this.form.odometer_start_source     = null;
+                this.form.odometer_start_fetched_at = null;
+                this.odometerSource = null;
+                this.odometerBanner = null;
+            } else if (mode === 'manual') {
+                // Manual mode: an existing reading becomes operator-owned and a
+                // prior GPS fetch is downgraded so it can't be treated as live.
+                this.odometerBanner = null;
+                if (this.form.odometer_start_km !== '' && this.form.odometer_start_km !== null) {
+                    this.odometerSource                 = 'manual';
+                    this.form.odometer_start_source     = 'manual';
+                    this.form.odometer_start_fetched_at = null;
+                }
+            }
         },
 
         // S019: rate priority lookup — called when customer or unit changes
@@ -1443,6 +1546,17 @@ function FF_CreateLease() {
 
         async submit() {
             if (!this.validate()) return;
+
+            // S-LEASE-MILEAGE-MODE: operator confirmed default is 'off'. Alert
+            // before creating a lease that won't track or bill any mileage, in
+            // case they forgot to pick Manual or Samsara. They can still proceed
+            // — 'off' is valid for leases with no mileage component.
+            if (this.form.mileage_tracking_mode === 'off') {
+                if (!confirm('Mileage tracking is set to Off — this lease will not capture an odometer reading or bill any mileage.\n\nChoose Manual or Samsara if this lease should track mileage.\n\nCreate the lease with mileage tracking Off?')) {
+                    return;
+                }
+            }
+
             this.submitting  = true;
 
             const form = document.querySelector('form');

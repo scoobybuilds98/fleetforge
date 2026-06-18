@@ -390,6 +390,45 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- ── S-LEASE-MILEAGE-MODE: mileage data source ── -->
+                <div style="border-top:1px solid var(--border-color);margin-top:24px;padding-top:24px;">
+                    <label class="form-label" style="display:block;text-align:center;margin-bottom:12px;">Mileage Tracking</label>
+                    <div style="display:flex;justify-content:center;margin-bottom:12px;">
+                        <div class="ff-segment-control ff-segment-control--3"
+                             role="tablist"
+                             aria-label="Mileage tracking mode">
+                            <div class="ff-segment-control__pill"
+                                 :class="{
+                                     'ff-segment-control__pill--mid': form.mileage_tracking_mode === 'off',
+                                     'ff-segment-control__pill--end': form.mileage_tracking_mode === 'samsara'
+                                 }"></div>
+                            <div class="ff-segment-control__option"
+                                 :class="{ 'ff-segment-control__option--active': form.mileage_tracking_mode === 'manual' }"
+                                 @click="setMileageMode('manual')"
+                                 role="tab" :aria-selected="form.mileage_tracking_mode === 'manual'" tabindex="0"
+                                 @keydown.enter.prevent="setMileageMode('manual')"
+                                 @keydown.space.prevent="setMileageMode('manual')">Manual</div>
+                            <div class="ff-segment-control__option"
+                                 :class="{ 'ff-segment-control__option--active': form.mileage_tracking_mode === 'off' }"
+                                 @click="setMileageMode('off')"
+                                 role="tab" :aria-selected="form.mileage_tracking_mode === 'off'" tabindex="0"
+                                 @keydown.enter.prevent="setMileageMode('off')"
+                                 @keydown.space.prevent="setMileageMode('off')">Off</div>
+                            <div class="ff-segment-control__option"
+                                 :class="{ 'ff-segment-control__option--active': form.mileage_tracking_mode === 'samsara' }"
+                                 @click="setMileageMode('samsara')"
+                                 role="tab" :aria-selected="form.mileage_tracking_mode === 'samsara'" tabindex="0"
+                                 @keydown.enter.prevent="setMileageMode('samsara')"
+                                 @keydown.space.prevent="setMileageMode('samsara')">Samsara</div>
+                        </div>
+                    </div>
+                    <div class="form-hint" style="text-align:center;margin-bottom:24px;">
+                        <span x-show="form.mileage_tracking_mode === 'manual'">Manual — you enter odometer readings; Samsara never overwrites them.</span>
+                        <span x-show="form.mileage_tracking_mode === 'off'">Off — no mileage tracking or billing on this lease.</span>
+                        <span x-show="form.mileage_tracking_mode === 'samsara'">Samsara — readings come from the unit's GPS during auto-billing.</span>
+                    </div>
+                </div>
+
                 <!-- Odometer readings — start is editable for active leases; end is set at close -->
                 <div class="form-row-2">
                     <div class="form-group">
@@ -629,6 +668,8 @@ function FF_EditLease() {
             rate_notes:              <?= json_encode($lease['rate_notes'] ?? '') ?>,
             // S-LEASE-MIN-DAYS: frozen short-lease floor, editable on pending leases.
             minimum_billing_days:    <?= json_encode($lease['minimum_billing_days'] ?? '') ?>,
+            // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
+            mileage_tracking_mode:   <?= json_encode($lease['mileage_tracking_mode'] ?? 'off') ?>,
             mileage_at_end:          <?= json_encode($lease['mileage_at_end'] ?? '') ?>,
             insurance_opt_in:        <?= $lease['insurance_opt_in'] ? 'true' : 'false' ?>,
             insurance_cost:          <?= json_encode($lease['insurance_cost'] ?? '0.00') ?>,
@@ -653,6 +694,11 @@ function FF_EditLease() {
         // S-LEASE-UNITS: primary unit fixed at creation — read-only on edit.
         _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
         factor_section_open: false,
+
+        // S-LEASE-MILEAGE-MODE: 3-position mileage-source selector.
+        setMileageMode(mode) {
+            this.form.mileage_tracking_mode = mode;
+        },
 
         init() {
             // S-FORM-DRAFT-AUTOSAVE: mirror in-progress edits to localStorage so

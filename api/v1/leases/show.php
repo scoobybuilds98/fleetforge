@@ -103,6 +103,9 @@ $lease = db_row(
         -- Surfaced so the edit form can pre-fill the field and the show page can
         -- display the configured minimum-billing-days value.
         l.minimum_billing_days,
+        -- S-LEASE-MILEAGE-MODE: per-lease mileage data source, surfaced so the
+        -- edit form pre-fills the toggle and the show page renders the badge.
+        l.mileage_tracking_mode,
         l.po_number,
         l.last_billed_date,
         l.next_billing_date,

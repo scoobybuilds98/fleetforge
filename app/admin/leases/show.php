@@ -227,6 +227,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
          lease is closed (cannot capture retroactively per D12).
          ──────────────────────────────────────────────────────────── -->
     <template x-if="lease && lease.status === 'active'
+                    && lease.mileage_tracking_mode !== 'off'
                     && (lease.odometer_start_km === null || lease.odometer_start_km === undefined)">
         <div class="alert alert-warning" style="margin-bottom:1rem;display:flex;align-items:center;gap:12px;">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:20px;height:20px;flex-shrink:0;">
@@ -387,6 +388,20 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                              ("no minimum"); a binding value shows "N days". -->
                                         <tr><td class="text-secondary">Minimum Billing</td>
                                             <td x-text="parseInt(lease.minimum_billing_days) >= 2 ? parseInt(lease.minimum_billing_days) + ' days' : '—'"></td>
+                                        </tr>
+                                        <!-- S-LEASE-MILEAGE-MODE: per-lease mileage data source. -->
+                                        <tr>
+                                            <td class="text-secondary">Mileage Tracking</td>
+                                            <td>
+                                                <span class="badge badge-no-dot"
+                                                      :class="{
+                                                          'badge-neutral': lease.mileage_tracking_mode === 'manual',
+                                                          'badge-warning': lease.mileage_tracking_mode === 'off',
+                                                          'badge-info':    lease.mileage_tracking_mode === 'samsara'
+                                                      }"
+                                                      x-text="lease.mileage_tracking_mode === 'manual' ? 'Manual'
+                                                            : (lease.mileage_tracking_mode === 'samsara' ? 'Samsara' : 'Off')"></span>
+                                            </td>
                                         </tr>
                                         <tr x-show="parseInt(lease.gps_opt_in) === 1">
                                             <td class="text-secondary">GPS Tracking</td>

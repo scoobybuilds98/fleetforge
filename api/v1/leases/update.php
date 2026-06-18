@@ -95,6 +95,10 @@ if ($existing['status'] === 'active') {
         'mileage_at_start',
         'estimated_mileage', 'estimated_mileage_km', 'estimated_mileage_miles',
         'km_to_miles_conversion', 'miles_to_km_conversion',
+        // S-LEASE-MILEAGE-MODE: the mileage data source is a distance setting and
+        // may be retuned on an active lease (e.g. a unit that was never linked to
+        // Samsara is switched from samsara→manual). Affects future billing only.
+        'mileage_tracking_mode',
     ];
     $blocked = array_values(array_diff(array_keys($body), $distanceAllowed));
     if ($blocked !== []) {
@@ -291,6 +295,18 @@ if (array_key_exists('minimum_billing_days', $body)) {
         }
     } else {
         $fields['minimum_billing_days'] = 'Minimum billing days must be a whole number between 0 and 90.';
+    }
+}
+
+// S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
+// Editable while pending and (via the distanceAllowed whitelist) on active
+// leases. Out-of-enum is a hard validation error.
+if (array_key_exists('mileage_tracking_mode', $body)) {
+    $raw = $body['mileage_tracking_mode'];
+    if (in_array($raw, ['manual', 'off', 'samsara'], true)) {
+        $data['mileage_tracking_mode'] = $raw;
+    } else {
+        $fields['mileage_tracking_mode'] = 'Invalid mileage tracking mode.';
     }
 }
 

@@ -77,6 +77,7 @@ $makeLease = function (string $suffix, int $enabled, ?string $amount, ?string $b
         'estimated_mileage_km'    => '0',
         'currency'                => 'CAD',
         'billing_cycle'           => 'monthly',
+        'mileage_tracking_mode'   => 'samsara',  // S-LEASE-MILEAGE-MODE: mileage billing active (col default 'off' suppresses it)
         'odometer_start_km'       => '0.00',
         'precharge_enabled'       => $enabled,
         'precharge_amount'        => $amount,

@@ -395,6 +395,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 l.equipment_unit_id, l.unit_number_snapshot, l.mileage_at_start,
                 l.mileage_rate, l.mileage_unit, l.estimated_mileage,
                 l.start_date, l.start_time, l.end_date, l.last_billed_date, l.odometer_start_km,
+                l.mileage_tracking_mode,
                 l.estimated_mileage_km, l.estimated_mileage_miles,
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,
                 l.advance_billing_periods, l.currency,
@@ -418,6 +419,16 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     if ($lease['status'] !== 'active') {
         json_error('INVALID_TRANSITION',
             "Cannot close lease {$lease['contract_number']}: current status is '{$lease['status']}'. Only active leases can be closed.", 409);
+    }
+
+    // S-LEASE-MILEAGE-MODE: an 'off' lease tracks no mileage, so never stamp a
+    // closing odometer onto its final invoice — drop any operator-supplied value.
+    // ('manual' keeps the operator's reading; 'samsara' keeps its GPS/operator
+    // value and the InvoiceGenerator fallback stays gated to samsara mode.)
+    if (($lease['mileage_tracking_mode'] ?? 'samsara') === 'off') {
+        $odoAtClose   = null;
+        $odoSource    = null;
+        $odoFetchedAt = null;
     }
 
     // ── D20: FOR UPDATE lock on unit ───────────────────────────

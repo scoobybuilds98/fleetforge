@@ -546,6 +546,18 @@ class InvoiceGenerator
             $odoEndKm   = isset($params['odometer_at_period_end_km']) && $params['odometer_at_period_end_km'] !== ''
                 ? (string) $params['odometer_at_period_end_km']   : null;
 
+            // S-LEASE-MILEAGE-MODE: resolve this lease's mileage data source.
+            // Default 'samsara' preserves the legacy auto-billing behavior for
+            // any row where the column is somehow absent (real leases always
+            // carry it via SELECT l.*). When the lease is 'off', mileage is not
+            // tracked at all: drop any caller-supplied odometer so no snapshot
+            // is written and no distance/mileage line can be computed below.
+            $mileageMode = $lease['mileage_tracking_mode'] ?? 'samsara';
+            if ($mileageMode === 'off') {
+                $odoStartKm = null;
+                $odoEndKm   = null;
+            }
+
             $periodDistanceKm     = null;
             $cumulativeDistanceKm = null;
             if ($odoStartKm !== null && $odoEndKm !== null) {
@@ -584,7 +596,13 @@ class InvoiceGenerator
             // Either guard short-circuits, so no test-only opt-out param is
             // needed (post-C3 investigation 2026-05-12 — skip_samsara param
             // was introduced + removed in C4 first hunk per operator review).
+            // S-LEASE-MILEAGE-MODE: only fall back to Samsara when this lease is
+            // in 'samsara' mode. 'manual' leases bill from operator-entered
+            // odometer only; 'off' leases never bill mileage. This is the gate
+            // that stops auto-billing from overwriting a manual reading with a
+            // GPS (or 0) value — the core of the reported bug.
             if ($periodDistanceKm === null
+                && $mileageMode === 'samsara'
                 && !empty($lease['samsara_vehicle_id'])
                 && $billingType !== 'mileage_only'
             ) {
@@ -683,6 +701,10 @@ class InvoiceGenerator
             // ════════════════════════════════════════════════════════════════
             $drawdownGate = (
                 $periodDistanceKm !== null
+                // S-LEASE-MILEAGE-MODE: an 'off' lease never emits a mileage line.
+                // (Redundant with the null odometer above, but explicit so a future
+                // caller passing distance under 'off' still can't sneak a line in.)
+                && $mileageMode !== 'off'
                 && bccomp((string) $periodDistanceKm, '0', 2) > 0
                 && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
                 && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)

@@ -256,6 +256,21 @@ if (!array_key_exists('minimum_billing_days', $body)) {
     }
 }
 
+// ── S-LEASE-MILEAGE-MODE: per-lease mileage data source ────────
+// 'manual' | 'off' | 'samsara'. Absent → 'off' (matches the DB column
+// default; the operator must consciously opt into Manual or Samsara on the
+// lease form). An out-of-enum value is a hard validation error (no silent
+// coerce), matching the minimum_billing_days idiom above.
+$mileageTrackingMode = 'off';
+$mtmRaw = $body['mileage_tracking_mode'] ?? null;
+if ($mtmRaw !== null && $mtmRaw !== '') {
+    if (in_array($mtmRaw, ['manual', 'off', 'samsara'], true)) {
+        $mileageTrackingMode = $mtmRaw;
+    } else {
+        $fields['mileage_tracking_mode'] = 'Invalid mileage tracking mode.';
+    }
+}
+
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);
 $internalNotes  = clean_string($body['internal_notes'] ?? null, 5000);
@@ -664,6 +679,8 @@ $createLease = function () use (
         // S-LEASE-MIN-DAYS: frozen short-lease floor (Config Layer 2). NULL = no
         // per-lease minimum; billing then consults rate-card item / global setting.
         'minimum_billing_days'     => $minimumBillingDays,
+        // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
+        'mileage_tracking_mode'    => $mileageTrackingMode,
         'estimated_mileage'        => $estimatedMileage,
         'estimated_mileage_km'     => $allowKmFinal,
         'estimated_mileage_miles'  => $allowMilesFinal,

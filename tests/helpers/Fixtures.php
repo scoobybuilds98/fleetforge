@@ -83,6 +83,11 @@ class Fixtures
         $data['precharge_enabled']       ??= 0;
         $data['gps_opt_in']              ??= 0;
         $data['gps_cost']                ??= '0.00';
+        // S-LEASE-MILEAGE-MODE: default fixtures to 'samsara' so existing
+        // mileage/distance assertions keep their pre-feature behavior (the
+        // production column DEFAULT is 'off', which would silently suppress
+        // mileage billing in these tests). Tests covering manual/off override.
+        $data['mileage_tracking_mode']   ??= 'samsara';
 
         return db_insert('leases', $data);
     }

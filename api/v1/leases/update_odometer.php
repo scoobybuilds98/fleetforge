@@ -79,7 +79,7 @@ if ($source === 'gps') {
 
 // ── Verify the lease exists + is still active ─────────────────
 $lease = db_row(
-    "SELECT id, contract_number, status, odometer_start_km FROM leases
+    "SELECT id, contract_number, status, odometer_start_km, mileage_tracking_mode FROM leases
       WHERE id = ? AND deleted_at IS NULL",
     [$leaseId]
 );
@@ -92,6 +92,16 @@ if (!$lease) {
 if (!in_array($lease['status'], ['active', 'pending'], true)) {
     json_error('LEASE_NOT_ACTIVE',
         "Cannot update starting odometer: lease is '{$lease['status']}'. Only active or pending leases are editable.",
+        409);
+}
+
+// S-LEASE-MILEAGE-MODE: a lease with mileage tracking 'off' captures no odometer.
+// Reject the write so a stale reading can't be stamped onto an off lease; the
+// operator must switch the lease to Manual or Samsara first.
+if (($lease['mileage_tracking_mode'] ?? 'samsara') === 'off') {
+    json_error('MILEAGE_TRACKING_OFF',
+        'Cannot set a starting odometer: this lease has mileage tracking set to Off. '
+        . 'Switch it to Manual or Samsara on the lease edit page first.',
         409);
 }
 

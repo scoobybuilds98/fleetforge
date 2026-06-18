@@ -152,6 +152,7 @@ function s5_make_lease(array $overrides, int $customerId, int $unitId, int $user
         'estimated_mileage_km'    => '0',
         'currency'                => 'CAD',
         'billing_cycle'           => 'monthly',
+        'mileage_tracking_mode'   => 'samsara',  // S-LEASE-MILEAGE-MODE: mileage billing active (col default 'off' suppresses it)
         'odometer_start_km'       => '0.00',
         'precharge_enabled'       => 0,
         'precharge_amount'        => null,

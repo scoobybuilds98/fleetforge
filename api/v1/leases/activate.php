@@ -68,6 +68,7 @@ db_transaction(function () use ($id, &$result) {
                 advance_billing_periods,
                 unit_number_snapshot, last_billed_date,
                 precharge_enabled, precharge_amount, precharge_balance,
+                mileage_tracking_mode, odometer_start_source,
                 updated_at
          FROM leases WHERE id = ? AND deleted_at IS NULL
          FOR UPDATE",
@@ -113,8 +114,25 @@ db_transaction(function () use ($id, &$result) {
     // banner. Stale (>24h) GPS readings still get persisted but flag a
     // manager warning via audit_log so the bookkeeper can recapture
     // before the first invoice generates.
-    $odoCapture = (new \FleetForge\GPS\OdometerService())
-        ->captureCurrentReading((int) $lease['equipment_unit_id']);
+    // S-LEASE-MILEAGE-MODE: only auto-capture from Samsara when this lease is
+    // in 'samsara' mode. In 'manual' mode the operator's reading is authoritative
+    // (capturing would overwrite it — the original bug); in 'off' mode there is
+    // no mileage tracking at all. A non-samsara lease therefore skips the live
+    // Samsara fetch entirely and leaves the odometer fields as the operator set
+    // them (or NULL).
+    $mileageMode = $lease['mileage_tracking_mode'] ?? 'off';
+
+    $odoCapture = [
+        'success' => false,
+        'is_stale' => false,
+        'error'   => $mileageMode === 'manual'
+            ? 'manual mileage mode — operator enters odometer'
+            : 'mileage tracking off for this lease',
+    ];
+    if ($mileageMode === 'samsara') {
+        $odoCapture = (new \FleetForge\GPS\OdometerService())
+            ->captureCurrentReading((int) $lease['equipment_unit_id']);
+    }
 
     $startKm        = null;
     $startSource    = null;
@@ -144,13 +162,25 @@ db_transaction(function () use ($id, &$result) {
     // pre-activation via update_odometer.php) are preserved on capture
     // failure: COALESCE keeps the prior value rather than overwriting
     // with NULL.
+    // S-LEASE-MILEAGE-MODE: belt-and-suspenders — a value the operator entered
+    // by hand (source='manual') is NEVER overwritten by a GPS capture, even if
+    // this lease was later flipped to 'samsara' after a manual reading was
+    // recorded. The CASE keeps the manual value/source/timestamp intact;
+    // otherwise COALESCE applies the GPS reading (or preserves the prior value
+    // when capture returned NULL).
     db_execute(
         "UPDATE leases
             SET status = 'active',
                 next_billing_date = ?,
-                odometer_start_km         = COALESCE(?, odometer_start_km),
-                odometer_start_source     = COALESCE(?, odometer_start_source),
-                odometer_start_fetched_at = COALESCE(?, odometer_start_fetched_at),
+                odometer_start_km         = CASE WHEN odometer_start_source = 'manual'
+                                                 THEN odometer_start_km
+                                                 ELSE COALESCE(?, odometer_start_km) END,
+                odometer_start_source     = CASE WHEN odometer_start_source = 'manual'
+                                                 THEN odometer_start_source
+                                                 ELSE COALESCE(?, odometer_start_source) END,
+                odometer_start_fetched_at = CASE WHEN odometer_start_source = 'manual'
+                                                 THEN odometer_start_fetched_at
+                                                 ELSE COALESCE(?, odometer_start_fetched_at) END,
                 updated_by = ?
           WHERE id = ?",
         [$nextBillingDate, $startKm, $startSource, $startFetchedAt, current_user_id(), $id]
