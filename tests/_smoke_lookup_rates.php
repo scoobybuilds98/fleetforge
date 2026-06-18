@@ -64,6 +64,8 @@ $TAG  = '__SMOKE_LOOKUP_RATES__';
 $custWith = $custWithout = 0;
 $cardCust = $cardGlobal = 0;
 $tmplDryVan = $tmplDefaults = $tmplNull = 0;
+$tmplChassis = 0;                       // S-LEASE-MIN-DAYS
+$custOverride = $cardOverride = 0;      // S-LEASE-MIN-DAYS
 
 $pass = 0; $fail = 0;
 $report = function (string $name, bool $ok, string $detail) use (&$pass, &$fail) {
@@ -125,6 +127,38 @@ try {
         'daily_rate' => '150.00', 'mileage_rate' => '0.1800', 'mileage_unit' => 'km', 'currency' => 'CAD',
     ]);
 
+    // ── S-LEASE-MIN-DAYS: chassis items proving the minimum_days fallback ───
+    //   Operator's question: "do I set Min days under each customer card?"
+    //   These three items prove: a BLANK customer card returns minimum_days=null
+    //   (so the lease form falls back to the global Settings default — you do
+    //   NOT set it per card), a global card CAN carry a value, and a per-card
+    //   value is only needed to OVERRIDE the default.
+    $tmplChassis = db_insert('equipment_templates', [
+        'name' => "SMOKE Chassis {$TAG}", 'slug' => '__smoke_lr_chassis__', 'category' => 'chassis',
+        'is_active' => 1, 'sort_order' => 999,
+    ]);
+    // Global chassis item carries an explicit, distinctive minimum_days=7.
+    db_insert('rate_card_items', [
+        'rate_card_id' => $cardGlobal, 'equipment_type' => 'chassis',
+        'daily_rate' => '90.00', 'currency' => 'CAD', 'minimum_days' => 7,
+    ]);
+    // Customer chassis item is BLANK (minimum_days omitted → NULL): the
+    // "I didn't set Min days on my customer's card" case.
+    db_insert('rate_card_items', [
+        'rate_card_id' => $cardCust, 'equipment_type' => 'chassis',
+        'daily_rate' => '100.00', 'currency' => 'CAD',
+    ]);
+    // A third customer whose own chassis card EXPLICITLY overrides to 5 days.
+    $custOverride = db_insert('customers', ['company_name' => "SMOKE Override {$TAG}"]);
+    $cardOverride = db_insert('rate_cards', [
+        'name' => "SMOKE Override Card {$TAG}", 'customer_id' => $custOverride, 'is_default' => 0,
+        'effective_from' => $from, 'effective_to' => null, 'created_by' => null,
+    ]);
+    db_insert('rate_card_items', [
+        'rate_card_id' => $cardOverride, 'equipment_type' => 'chassis',
+        'daily_rate' => '100.00', 'currency' => 'CAD', 'minimum_days' => 5,
+    ]);
+
     // ── T1 — customer card wins ────────────────────────────────────────────
     $r = $run($custWith, $tmplDryVan);
     $report('T1 customer-specific card',
@@ -160,11 +194,37 @@ try {
         (string)($r['data']['mileage_rate'] ?? '') === '0.1800' && (string)($r['data']['daily_rate'] ?? '') === '150.00',
         sprintf('daily=%s mileage=%s', $r['data']['daily_rate'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
 
+    // ── S-LEASE-MIN-DAYS minimum_days fallback ─────────────────────────────
+    // T6 — BLANK customer chassis card → minimum_days null. The lease form then
+    //      falls back to the global Settings default (lease.minimum_billing_days),
+    //      so the operator does NOT have to set Min days under each customer card.
+    $r = $run($custWith, $tmplChassis);
+    $report('T6 blank customer card → minimum_days null (falls back to global default)',
+        ($r['data']['source'] ?? null) === 'customer'
+            && array_key_exists('minimum_days', $r['data'] ?? [])
+            && $r['data']['minimum_days'] === null,
+        sprintf('source=%s minimum_days=%s', $r['data']['source'] ?? '?',
+            array_key_exists('minimum_days', $r['data'] ?? []) ? ($r['data']['minimum_days'] === null ? 'null' : $r['data']['minimum_days']) : 'unset'));
+
+    // T7 — customer with NO card → global chassis card's minimum_days=7 flows through
+    //      (a global card CAN carry a fleet-wide value).
+    $r = $run($custWithout, $tmplChassis);
+    $report('T7 global card carries minimum_days=7',
+        ($r['data']['source'] ?? null) === 'rate_card' && (string)($r['data']['minimum_days'] ?? '') === '7',
+        sprintf('source=%s minimum_days=%s', $r['data']['source'] ?? '?', $r['data']['minimum_days'] ?? '?'));
+
+    // T8 — per-card EXPLICIT override → minimum_days=5 (the ONLY case you set it
+    //      under a card: when that customer/equipment must differ from the default).
+    $r = $run($custOverride, $tmplChassis);
+    $report('T8 per-card explicit override → minimum_days=5',
+        ($r['data']['source'] ?? null) === 'customer' && (string)($r['data']['minimum_days'] ?? '') === '5',
+        sprintf('source=%s minimum_days=%s', $r['data']['source'] ?? '?', $r['data']['minimum_days'] ?? '?'));
+
 } finally {
     // ── Cleanup (rate_card_items cascade via FK on rate_card delete) ───────
-    foreach ([$cardCust, $cardGlobal] as $id) if ($id) db_execute("DELETE FROM rate_cards WHERE id = ?", [$id]);
-    foreach ([$tmplDryVan, $tmplDefaults, $tmplNull] as $id) if ($id) db_execute("DELETE FROM equipment_templates WHERE id = ?", [$id]);
-    foreach ([$custWith, $custWithout] as $id) if ($id) db_execute("DELETE FROM customers WHERE id = ?", [$id]);
+    foreach ([$cardCust, $cardGlobal, $cardOverride] as $id) if ($id) db_execute("DELETE FROM rate_cards WHERE id = ?", [$id]);
+    foreach ([$tmplDryVan, $tmplDefaults, $tmplNull, $tmplChassis] as $id) if ($id) db_execute("DELETE FROM equipment_templates WHERE id = ?", [$id]);
+    foreach ([$custWith, $custWithout, $custOverride] as $id) if ($id) db_execute("DELETE FROM customers WHERE id = ?", [$id]);
 }
 
 echo str_repeat('=', 70), "\n";
