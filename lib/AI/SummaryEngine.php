@@ -282,11 +282,13 @@ class SummaryEngine
             "SELECT i.*, c.company_name, c.contact_name, c.email AS customer_email,
                     c.outstanding_balance AS customer_outstanding,
                     l.contract_number, l.status AS lease_status,
-                    eu.unit_number, eu.type AS unit_type, eu.year AS unit_year
+                    eu.unit_number AS unit_number_live, eu.year AS unit_year,
+                    t.name AS unit_type_name
              FROM invoices i
              LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
              LEFT JOIN leases   l ON l.id = i.lease_id    AND l.deleted_at IS NULL
              LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
+             LEFT JOIN equipment_templates t ON t.id = eu.template_id AND t.deleted_at IS NULL
              WHERE i.id = ? AND i.deleted_at IS NULL",
             [$invoiceId]
         );
