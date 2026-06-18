@@ -14,7 +14,8 @@ use FleetForge\AI\ToolRegistry;
  *
  * Architecture:
  *   - All methods are read-only (SELECT only — no writes)
- *   - Results capped at ToolRegistry::MAX_ROWS to prevent token explosion
+ *   - List results capped at ToolRegistry::MAX_ROWS (500) as a token backstop;
+ *     for counts use the aggregate tools (e.g. get_fleet_summary) instead
  *   - Financial fields stripped when user lacks payments:view permission
  *   - Tool names map to handler methods via run() dispatcher
  *
@@ -351,9 +352,25 @@ class FleetForgeTools
         $leasable   = $onLease + $available;
         $utilization = $leasable > 0 ? round($onLease / $leasable * 100, 1) : 0;
 
+        // Category breakdown — aggregate counts so "how many of each category"
+        // is answered in ONE call without fetching (or capping) any unit rows.
+        $catRows = db_select(
+            "SELECT COALESCE(et.category, 'unknown') AS category, COUNT(*) AS count
+             FROM equipment_units eu
+             LEFT JOIN equipment_templates et ON et.id = eu.template_id
+             WHERE eu.deleted_at IS NULL
+             GROUP BY et.category
+             ORDER BY count DESC"
+        );
+        $byCategory = [];
+        foreach ($catRows as $r) {
+            $byCategory[$r['category']] = (int) $r['count'];
+        }
+
         return [
             'total_units'      => $total,
             'by_status'        => $byStatus,
+            'by_category'      => $byCategory,
             'utilization_rate' => $utilization,
             'leasable_units'   => $leasable,
         ];

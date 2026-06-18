@@ -494,6 +494,13 @@ try {
     $_SESSION['ff_user']['permissions'] = $savedPerms;
     $_SESSION['ff_user']['role_slug']   = $savedRole;
 
+    // ════ 3l. AGGREGATE COUNTS + raised row cap (S-AI-ROWCAP) ════
+    (\FleetForge\AI\ToolRegistry::MAX_ROWS >= 500) ? $pass("rowcap: MAX_ROWS raised to ".\FleetForge\AI\ToolRegistry::MAX_ROWS) : $fail("rowcap: still ".\FleetForge\AI\ToolRegistry::MAX_ROWS);
+    $fs = json_decode(ToolRegistry::execute('get_fleet_summary', [], $userId), true);
+    (is_array($fs) && isset($fs['by_category']) && is_array($fs['by_category'])) ? $pass("fleet summary: by_category counts present (one-call category breakdown)") : $fail("fleet summary: by_category missing");
+    $catSum = array_sum($fs['by_category'] ?? []);
+    ($catSum === (int)($fs['total_units'] ?? -1)) ? $pass("fleet summary: category counts sum to total ({$catSum})") : $fail("fleet summary: category sum {$catSum} != total ".($fs['total_units']??'?'));
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

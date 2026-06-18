@@ -29,8 +29,13 @@ use FleetForge\AI\Tools\FleetForgeTools;
  */
 class ToolRegistry
 {
-    /** Maximum rows any tool can return (prevents token explosion) */
-    public const MAX_ROWS = 50;
+    /** Maximum rows any list tool can return. Raised 50→500 (S-AI-ROWCAP):
+     *  the old 50 cap forced the AI to paginate just to count a ~190-unit fleet.
+     *  500 covers fleet/customer-scale lists in one call; the backstop remains
+     *  to protect the token budget on pathological tables (e.g. mileage logs).
+     *  For pure counts, prefer the aggregate tools (get_fleet_summary returns
+     *  by_status + by_category) so no rows are fetched at all. */
+    public const MAX_ROWS = 500;
 
     // ────────────────────────────────────────────────────────────
     // getTools()
@@ -112,7 +117,7 @@ class ToolRegistry
             // ── Customer Tools ──────────────────────────────────
             [
                 'name' => 'search_customers',
-                'description' => 'Search customers by name, email, status, or city. Returns up to 50 matches with key details.',
+                'description' => 'Search customers by name, email, status, or city. Returns up to 500 matches with key details.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -220,7 +225,7 @@ class ToolRegistry
             // ── Fleet / Equipment Tools ─────────────────────────
             [
                 'name' => 'get_fleet_summary',
-                'description' => 'Get a summary of the entire fleet: unit counts by status (available, on_lease, maintenance, etc.), total units, utilization rate.',
+                'description' => 'Get a summary of the entire fleet: unit counts BY STATUS (available, on_lease, maintenance, etc.) AND BY CATEGORY (dry_van, chassis, reefer, flatbed, etc.), total units, and utilization rate. Use this for any "how many units / how many of each category/status" question — it returns exact counts in one call (no row listing, no cap).',
                 'input_schema' => [
                     'type' => 'object',
                     // WHY: Empty PHP array [] json_encodes to [] (array); Anthropic needs {} (object) for properties. Cast to stdClass.
@@ -243,7 +248,7 @@ class ToolRegistry
             ],
             [
                 'name' => 'search_equipment',
-                'description' => 'Search equipment units by unit number, template name, status, or category. Returns up to 50 matches.',
+                'description' => 'Search equipment units by unit number, template name, status, or category. Returns up to 500 matches. NOTE: to COUNT units (e.g. "how many of each category" or "by status"), call get_fleet_summary instead — it returns by_status + by_category counts in one shot without listing rows.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
