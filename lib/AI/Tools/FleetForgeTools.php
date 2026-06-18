@@ -59,6 +59,7 @@ class FleetForgeTools
             // Lease tools
             'get_active_leases'        => self::getActiveLeases($input, $userId),
             'get_lease_details'        => self::getLeaseDetails($input, $userId),
+            'get_lease_close_readiness'=> self::getLeaseCloseReadiness($input, $userId),
 
             // Financial tools
             'get_revenue_by_period'    => self::getRevenueByPeriod($input, $userId),
@@ -520,6 +521,96 @@ class FleetForgeTools
         }
 
         return $row;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // getLeaseCloseReadiness
+    //
+    // READ-ONLY assessment of what closing a lease would require. The AI
+    // cannot execute a lease close yet (it's a multi-input flow: odometer,
+    // refund method, advance reconciliation — see api/v1/leases/close.php),
+    // but it CAN tell the user whether a lease is closeable and what inputs
+    // the close would need. Mirrors close.php's read-side detection (status
+    // gate, precharge-refund-owed, advance-batch reconciliation).
+    // ────────────────────────────────────────────────────────────
+    private static function getLeaseCloseReadiness(array $input, ?int $userId): array|string
+    {
+        $leaseId = (int) ($input['lease_id'] ?? 0);
+        if ($leaseId <= 0) return 'Error: lease_id is required.';
+
+        $lease = db_row(
+            "SELECT l.id, l.contract_number, l.status, l.company_name_snapshot AS customer_name,
+                    l.equipment_unit_id, l.unit_number_snapshot AS unit_number,
+                    l.start_date, l.end_date, l.last_billed_date,
+                    l.mileage_at_start, l.odometer_start_km,
+                    l.precharge_enabled, l.precharge_amount, l.precharge_balance,
+                    l.precharge_invoiced_at, l.precharge_refund_method, l.precharge_refund_settled_at
+             FROM leases l
+             WHERE l.id = ? AND l.deleted_at IS NULL",
+            [$leaseId]
+        );
+        if ($lease === null) {
+            return "No lease found with ID {$leaseId}.";
+        }
+
+        $canClose  = ($lease['status'] === 'active');
+        $blockers  = [];
+        if (!$canClose) {
+            $blockers[] = "Lease status is '{$lease['status']}' — only active leases can be closed.";
+        }
+        if ($lease['equipment_unit_id'] && !db_exists('equipment_units', 'id = ? AND deleted_at IS NULL', [$lease['equipment_unit_id']])) {
+            $blockers[] = 'Linked equipment unit not found.';
+        }
+
+        // Precharge refund owed? (precharge_enabled + residual balance > 0)
+        $prechargeBalance = (float) ($lease['precharge_balance'] ?? 0);
+        $refundOwed       = ((int) $lease['precharge_enabled'] === 1) && $prechargeBalance > 0;
+        $refundLocked     = $lease['precharge_refund_method'] !== null; // method already chosen (immutable)
+
+        // Advance-batch close? (activation generated advance invoices)
+        $advanceCount = db_count(
+            "SELECT COUNT(*) FROM invoices
+              WHERE lease_id = ? AND generation_source = 'advance' AND deleted_at IS NULL AND status != 'void'",
+            [$leaseId]
+        );
+        $isAdvanceClose = $advanceCount > 0;
+
+        // What the close request would need the operator to decide:
+        $requiredInputs = [];
+        if ($refundOwed && !$refundLocked) {
+            $requiredInputs[] = "precharge_refund method (cash or credit) — \$" . number_format($prechargeBalance, 2) . ' residual to return';
+        }
+        if ($isAdvanceClose) {
+            $requiredInputs[] = 'reconciliation_mode (refund_unused or no_refund) for the prepaid advance invoices';
+        }
+
+        $result = [
+            'lease_id'                 => (int) $lease['id'],
+            'contract_number'          => $lease['contract_number'],
+            'customer_name'            => $lease['customer_name'],
+            'unit_number'              => $lease['unit_number'],
+            'status'                   => $lease['status'],
+            'can_close'                => $canClose && empty($blockers),
+            'blockers'                 => $blockers,
+            'precharge_refund_owed'    => $refundOwed,
+            'precharge_refund_locked'  => $refundLocked,
+            'is_advance_close'         => $isAdvanceClose,
+            'advance_invoice_count'    => (int) $advanceCount,
+            'has_start_mileage'        => $lease['mileage_at_start'] !== null,
+            'has_start_odometer'       => $lease['odometer_start_km'] !== null,
+            'last_billed_date'         => $lease['last_billed_date'],
+            'end_date'                 => $lease['end_date'],
+            'required_inputs_for_close'=> $requiredInputs,
+            'note'                     => 'Read-only readiness check. Executing the close still happens via the lease Close form (it needs odometer + refund decisions the AI cannot make on its own yet).',
+        ];
+
+        // Gate dollar amounts behind payments:view (mirrors other tools).
+        if (self::canViewFinancials($userId)) {
+            $result['precharge_balance'] = $prechargeBalance;
+            $result['precharge_amount']  = $lease['precharge_amount'] !== null ? (float) $lease['precharge_amount'] : null;
+        }
+
+        return $result;
     }
 
     // ════════════════════════════════════════════════════════════

@@ -226,6 +226,18 @@ class ToolRegistry
                 ],
                 '_tags' => ['chat', 'summary'],
             ],
+            [
+                'name' => 'get_lease_close_readiness',
+                'description' => "Assess whether a lease can be closed and what inputs the close would require. READ-ONLY — does not close anything. Returns can_close + blockers, whether a precharge refund is owed (and how much), whether it's an advance-billed lease needing reconciliation, and the list of decisions the operator must make. Use when asked \"can I close lease X?\" or \"what's needed to close this lease?\". Executing the close itself is still done via the lease Close form, not by you.",
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'lease_id' => ['type' => 'integer', 'description' => 'Lease ID'],
+                    ],
+                    'required' => ['lease_id'],
+                ],
+                '_tags' => ['chat', 'summary'],
+            ],
 
             // ── Financial Tools ─────────────────────────────────
             [

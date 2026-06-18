@@ -418,6 +418,36 @@ try {
         }
     }
 
+    // ════ 3j. READ TOOL: lease close readiness (read-only) ════
+    $rrStr = ToolRegistry::execute('get_lease_close_readiness', ['lease_id'=>999999], $userId);
+    stripos($rrStr, 'No lease found') !== false ? $pass("close-readiness: not-found handled") : $fail("close-readiness: not-found wrong: {$rrStr}");
+
+    $lc = db_row("SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1");
+    if ($lc) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            // (a) simple active lease — closeable, no extra inputs
+            $l1 = db_insert('leases', ['contract_number'=>'TEST-CLOSE-1','start_date'=>date('Y-m-d'),'status'=>'active','customer_id'=>(int)$lc['id']]);
+            $r1 = json_decode(ToolRegistry::execute('get_lease_close_readiness', ['lease_id'=>$l1], $userId), true);
+            ($r1['can_close']===true && empty($r1['required_inputs_for_close'])) ? $pass("close-readiness: simple active lease is closeable with no extra inputs") : $fail("close-readiness: simple lease ".json_encode($r1));
+
+            // (b) precharge lease with residual — refund method required
+            $l2 = db_insert('leases', ['contract_number'=>'TEST-CLOSE-2','start_date'=>date('Y-m-d'),'status'=>'active','customer_id'=>(int)$lc['id'],'precharge_enabled'=>1,'precharge_amount'=>'500.00','precharge_balance'=>'120.00']);
+            $r2 = json_decode(ToolRegistry::execute('get_lease_close_readiness', ['lease_id'=>$l2], $userId), true);
+            ($r2['precharge_refund_owed']===true && !empty($r2['required_inputs_for_close'])) ? $pass("close-readiness: precharge residual flags refund-method requirement") : $fail("close-readiness: precharge ".json_encode($r2));
+
+            // (c) completed lease — not closeable
+            $l3 = db_insert('leases', ['contract_number'=>'TEST-CLOSE-3','start_date'=>date('Y-m-d'),'status'=>'completed','customer_id'=>(int)$lc['id']]);
+            $r3 = json_decode(ToolRegistry::execute('get_lease_close_readiness', ['lease_id'=>$l3], $userId), true);
+            ($r3['can_close']===false && !empty($r3['blockers'])) ? $pass("close-readiness: completed lease blocked") : $fail("close-readiness: completed ".json_encode($r3));
+        } catch (\Throwable $e) {
+            $fail("close-readiness: threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");
