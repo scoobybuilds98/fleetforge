@@ -875,14 +875,14 @@ class ToolRegistry
             ],
             [
                 'name' => 'plan_action',
-                'description' => "Propose a LIFECYCLE action (a status/state transition with side effects), distinct from a plain field edit. Does NOT apply — returns a proposal the user confirms with an Apply button (NOT undoable). Currently supported action: change_equipment_status (move a unit between available/reserved/maintenance/inactive/decommissioned, respecting the state machine). Use when the user asks to e.g. \"put unit T5301 into maintenance\", \"decommission unit X\", \"mark unit Y available\". After calling, state what will happen and that the user must click Apply — do NOT claim it is done.",
+                'description' => "Propose a LIFECYCLE action (a status/state transition with side effects), distinct from a plain field edit. Does NOT apply — returns a proposal the user confirms with an Apply button (NOT undoable). Supported actions: change_equipment_status (move a unit between available/reserved/maintenance/inactive/decommissioned, state-machine enforced — e.g. \"put unit T5301 into maintenance\", \"decommission unit X\"); void_invoice (void a DRAFT or SENT invoice — reverses its journal entry + balance counters; requires a reason; paid invoices cannot be voided, they need a credit note); send_invoice (mark a DRAFT invoice as sent — posts the revenue journal entry and advances balances; e.g. \"send invoice INV-2026-00054\"). After calling, state what will happen and that the user must click Apply — do NOT claim it is done.",
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'action'     => ['type' => 'string', 'enum' => ['change_equipment_status'], 'description' => 'Which lifecycle action.'],
-                        'identifier' => ['type' => 'string', 'description' => "The record's human identifier (e.g. unit_number) or numeric id."],
-                        'new_status' => ['type' => 'string', 'description' => 'For change_equipment_status: the target status (available, reserved, maintenance, inactive, decommissioned). The tool enforces the allowed transitions.'],
-                        'reason'     => ['type' => 'string', 'description' => 'Optional reason/note recorded with the change.'],
+                        'action'     => ['type' => 'string', 'enum' => ['change_equipment_status', 'void_invoice', 'send_invoice'], 'description' => 'Which lifecycle action.'],
+                        'identifier' => ['type' => 'string', 'description' => "The record's human identifier (unit_number for equipment, invoice_number like INV-2026-00054 for invoices) or numeric id."],
+                        'new_status' => ['type' => 'string', 'description' => 'For change_equipment_status: the target status (available, reserved, maintenance, inactive, decommissioned). The tool enforces allowed transitions. Ignored for void_invoice.'],
+                        'reason'     => ['type' => 'string', 'description' => 'Reason/note. REQUIRED for void_invoice; optional for status changes.'],
                     ],
                     'required' => ['action', 'identifier'],
                 ],

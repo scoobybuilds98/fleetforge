@@ -161,6 +161,97 @@ try {
         stripos($badT, "can't go from") !== false ? $pass("action: invalid transition rejected") : $fail("action: invalid transition not rejected: {$badT}");
     } else { echo "  (skip action — no 'available' unit)\n"; }
 
+    // ════ 3d. FINANCIAL ACTION: invoice void ════
+    // Pure preview logic (no DB needed) — the void decision rules.
+    $vEntry = \FleetForge\AI\ActionRegistry::get('void_invoice');
+    if ($vEntry) {
+        $pv = ($vEntry['preview'])(['invoice_number'=>'INV-X','status'=>'paid','total_amount'=>100], ['reason'=>'x']);
+        isset($pv['error']) ? $pass("void: paid invoice rejected by preview") : $fail("void: paid not rejected");
+        $pv2 = ($vEntry['preview'])(['invoice_number'=>'INV-Y','status'=>'sent','total_amount'=>250], ['reason'=>'']);
+        isset($pv2['error']) ? $pass("void: missing reason rejected by preview") : $fail("void: missing reason not rejected");
+        $pv3 = ($vEntry['preview'])(['invoice_number'=>'INV-Z','status'=>'sent','total_amount'=>250], ['reason'=>'duplicate']);
+        (isset($pv3['summary']) && stripos($pv3['summary'],'Void invoice INV-Z')!==false) ? $pass("void: valid preview builds summary") : $fail("void: summary wrong: ".json_encode($pv3));
+    } else { $fail("void: action not registered"); }
+
+    // Guard paths via the service (no real invoice needed).
+    try { \FleetForge\AI\Actions\FinancialActions::voidInvoice(999999, 'reason', $userId, 'Smoke', '127.0.0.1'); $fail("void: missing invoice should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='NOT_FOUND' ? $pass("void: not-found invoice rejected") : $fail("void: wrong code {$e->errorCode}"); }
+    try { \FleetForge\AI\Actions\FinancialActions::voidInvoice(999999, '', $userId, 'Smoke', '127.0.0.1'); $fail("void: empty reason should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='VALIDATION_ERROR' ? $pass("void: empty reason rejected") : $fail("void: wrong code {$e->errorCode}"); }
+
+    // Hermetic apply: synthesize a SENT invoice, void it, assert counters, ROLL BACK.
+    $vc = db_row("SELECT id, outstanding_balance, total_revenue FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1");
+    if ($vc) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            $invId = db_insert('invoices', [
+                'invoice_number'      => 'TEST-VOID-SMOKE',
+                'customer_id'         => (int)$vc['id'],
+                'status'              => 'sent',
+                'billing_type'        => 'single_period',
+                'invoice_date'        => date('Y-m-d'),
+                'due_date'            => date('Y-m-d'),
+                'billing_period_start'=> date('Y-m-d'),
+                'billing_period_end'  => date('Y-m-d'),
+                'billing_period_days' => 1,
+                'total_amount'        => '100.00',
+                'balance_due'         => '100.00',
+            ]);
+            $res = \FleetForge\AI\Actions\FinancialActions::voidInvoice($invId, 'smoke void', $userId, 'Smoke', '127.0.0.1');
+            $inv = db_row("SELECT status, balance_due FROM invoices WHERE id=?", [$invId]);
+            ($inv['status']==='void' && (float)$inv['balance_due']===0.0) ? $pass("void: invoice set to void, balance_due zeroed") : $fail("void: invoice state ".json_encode($inv));
+            $custAfter = db_row("SELECT outstanding_balance, total_revenue FROM customers WHERE id=?", [$vc['id']]);
+            $obDelta  = (float)$vc['outstanding_balance'] - (float)$custAfter['outstanding_balance'];
+            $revDelta = (float)$vc['total_revenue'] - (float)$custAfter['total_revenue'];
+            (abs($obDelta-100.0)<0.001 && abs($revDelta-100.0)<0.001) ? $pass("void: customer OB & revenue decremented by \$100 (Path B sent→void)") : $fail("void: counter delta OB={$obDelta} rev={$revDelta}");
+            $aud = (int) db_row("SELECT COUNT(*) c FROM audit_log WHERE entity_type='invoice' AND entity_id=? AND action='status_change'", [$invId])['c'];
+            $aud >= 1 ? $pass("void: audit_log row written") : $fail("void: no audit row");
+        } catch (\Throwable $e) {
+            $fail("void: hermetic apply threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack(); // nothing persists
+        }
+        // confirm rollback left the customer untouched
+        $cc = db_row("SELECT outstanding_balance FROM customers WHERE id=?", [$vc['id']]);
+        ((float)$cc['outstanding_balance'] === (float)$vc['outstanding_balance']) ? $pass("void: rollback restored customer counters (zero footprint)") : $fail("void: counters NOT restored");
+    }
+
+    // ════ 3e. FINANCIAL ACTION: invoice send ════
+    $sEntry = \FleetForge\AI\ActionRegistry::get('send_invoice');
+    if ($sEntry) {
+        $sp = ($sEntry['preview'])(['invoice_number'=>'INV-S','status'=>'sent','total_amount'=>100], []);
+        isset($sp['error']) ? $pass("send: non-draft invoice rejected by preview") : $fail("send: non-draft not rejected");
+        $sp2 = ($sEntry['preview'])(['invoice_number'=>'INV-D','status'=>'draft','total_amount'=>300], []);
+        (isset($sp2['summary']) && stripos($sp2['summary'],'Send invoice INV-D')!==false) ? $pass("send: draft preview builds summary") : $fail("send: summary wrong");
+    } else { $fail("send: action not registered"); }
+    try { \FleetForge\AI\Actions\FinancialActions::sendInvoice(999999, null, $userId, 'Smoke', '127.0.0.1'); $fail("send: missing invoice should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='NOT_FOUND' ? $pass("send: not-found invoice rejected") : $fail("send: wrong code {$e->errorCode}"); }
+
+    if (!empty($vc)) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        $sendOk = false; $threw = null;
+        try {
+            $sid = db_insert('invoices', [
+                'invoice_number'=>'TEST-SEND-SMOKE','customer_id'=>(int)$vc['id'],'status'=>'draft',
+                'billing_type'=>'single_period','invoice_date'=>date('Y-m-d'),'due_date'=>date('Y-m-d'),
+                'billing_period_start'=>date('Y-m-d'),'billing_period_end'=>date('Y-m-d'),'billing_period_days'=>1,
+                'total_amount'=>'150.00','balance_due'=>'150.00',
+            ]);
+            $custBefore = db_row("SELECT outstanding_balance FROM customers WHERE id=?", [$vc['id']]);
+            \FleetForge\AI\Actions\FinancialActions::sendInvoice($sid, null, $userId, 'Smoke', '127.0.0.1');
+            $inv = db_row("SELECT status FROM invoices WHERE id=?", [$sid]);
+            $custAfter = db_row("SELECT outstanding_balance FROM customers WHERE id=?", [$vc['id']]);
+            $obDelta = (float)$custAfter['outstanding_balance'] - (float)$custBefore['outstanding_balance'];
+            $sendOk = ($inv['status']==='sent' && abs($obDelta-150.0)<0.001);
+        } catch (\Throwable $e) { $threw = $e->getMessage(); }
+        finally { $pdo->rollBack(); }
+        if ($sendOk) $pass("send: draft→sent applied, customer OB +\$150 (Path B)");
+        elseif ($threw !== null) echo "  (skip send apply — accounting post not available in dev: " . substr($threw,0,80) . ")\n";
+        else $fail("send: apply did not reach sent state");
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

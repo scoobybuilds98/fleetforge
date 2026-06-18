@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace FleetForge\AI;
 
 use FleetForge\AI\Actions\StatusActions;
+use FleetForge\AI\Actions\FinancialActions;
 use FleetForge\AI\Actions\ActionException;
 
 /**
@@ -70,6 +71,60 @@ class ActionRegistry
                         (int) $rec['id'], (string) $params['new_status'], $params['reason'] ?? null,
                         $userId, $userName, $ip
                     );
+                },
+            ],
+
+            // ── Invoice void (financial — S-AI-ACTION-2) ───────────────
+            'void_invoice' => [
+                'label'          => 'void invoices',
+                'entity'         => 'invoice',
+                'table'          => 'invoices',
+                'permission'     => 'invoices',
+                'resolve_column' => 'invoice_number',
+                'label_column'   => 'invoice_number',
+                'soft_delete'    => true,
+                'preview' => static function (array $rec, array $params): array {
+                    $reason = trim((string) ($params['reason'] ?? ''));
+                    $status = (string) $rec['status'];
+                    if (!in_array($status, ['draft', 'sent'], true)) {
+                        return ['error' => "Invoice {$rec['invoice_number']} is '{$status}' and can't be voided — only draft or sent invoices can be voided (a paid invoice needs a credit note instead)."];
+                    }
+                    if ($reason === '') {
+                        return ['error' => "Voiding invoice {$rec['invoice_number']} requires a reason. Ask the user why they're voiding it, then call this again with the reason."];
+                    }
+                    $amt = number_format((float) $rec['total_amount'], 2);
+                    return [
+                        'summary' => "Void invoice {$rec['invoice_number']} (status {$status}, \${$amt}) — reason: {$reason}. Reverses its journal entry and balance counters.",
+                        'params'  => ['reason' => $reason],
+                    ];
+                },
+                'run' => static function (array $rec, array $params, int $userId, string $userName, ?string $ip): array {
+                    return FinancialActions::voidInvoice((int) $rec['id'], (string) ($params['reason'] ?? ''), $userId, $userName, $ip);
+                },
+            ],
+
+            // ── Invoice send (financial — S-AI-ACTION-2) ───────────────
+            'send_invoice' => [
+                'label'          => 'send invoices',
+                'entity'         => 'invoice',
+                'table'          => 'invoices',
+                'permission'     => 'invoices',
+                'resolve_column' => 'invoice_number',
+                'label_column'   => 'invoice_number',
+                'soft_delete'    => true,
+                'preview' => static function (array $rec, array $params): array {
+                    $status = (string) $rec['status'];
+                    if ($status !== 'draft') {
+                        return ['error' => "Invoice {$rec['invoice_number']} is '{$status}' — only draft invoices can be sent."];
+                    }
+                    $amt = number_format((float) $rec['total_amount'], 2);
+                    return [
+                        'summary' => "Send invoice {$rec['invoice_number']} (\${$amt}) — marks it sent, posts the revenue journal entry, and advances the balance counters.",
+                        'params'  => [],
+                    ];
+                },
+                'run' => static function (array $rec, array $params, int $userId, string $userName, ?string $ip): array {
+                    return FinancialActions::sendInvoice((int) $rec['id'], null, $userId, $userName, $ip);
                 },
             ],
         ];
