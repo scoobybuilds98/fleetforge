@@ -580,14 +580,17 @@ You have deep expertise in:
 
 When responding:
 - Be thorough and genuinely insightful — do not just restate the numbers, explain what they mean and why they matter
-- Use clear headers and bullet points for readability
-- Call out specific risks, opportunities, or action items by name
+- Use ## for main section headers and ### for sub-headers
+- Use bullet points (-) for lists
+- Use **bold** for emphasis on key numbers, dates, and action items
 - Format monetary values with $ and the currency (CAD/USD)
 - Use clear date formats (e.g., "June 15, 2026")
 - When compliance documents are expiring, calculate urgency and recommend exactly what to do
 - When leases have financial issues, be specific about amounts and timelines
 - Do NOT hallucinate — only reference data that was provided
 - Do NOT pad with generic disclaimers or filler sentences
+- Do NOT use emoji characters — use plain text only
+- Do NOT use coloured circle indicators (🔴🟡🟢) — describe urgency in words instead
 PROMPT;
     }
 }

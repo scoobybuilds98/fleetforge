@@ -42,39 +42,47 @@ $_componentId = 'aiSummary_' . $_entityType . '_' . $_entityId . '_' . $_summary
     <div class="card-header">
         <div class="ai-summary-card__header-left">
             <svg class="ai-summary-card__icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor" opacity="0.9"/>
+                <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
             </svg>
             <span class="ai-summary-card__title"><?= e($_title) ?></span>
-            <span class="badge badge-info ai-summary-card__badge">AI</span>
+            <span class="ai-summary-card__badge">AI</span>
         </div>
         <div class="ai-summary-card__header-right">
             <button
                 @click="generate()"
                 :disabled="loading"
                 class="btn btn-secondary btn-sm ai-summary-card__btn"
-                x-show="!summary"
+                x-show="!summary && !loading"
+            >Generate</button>
+            <button
+                @click="generate()"
+                :disabled="loading"
+                class="btn btn-secondary btn-sm ai-summary-card__btn"
+                x-show="loading && !summary"
+                x-cloak
             >
-                <span x-show="!loading">Generate</span>
-                <span x-show="loading" x-cloak class="ai-summary-card__btn-loading">
+                <span class="ai-summary-card__btn-loading">
                     <span class="ai-summary-card__spinner"></span>
                     Generating…
                 </span>
             </button>
             <template x-if="summary">
-                <div style="display:flex;gap:6px;">
-                    <button
-                        @click="regenerate()"
-                        :disabled="loading"
-                        class="btn btn-secondary btn-sm ai-summary-card__btn"
-                        title="Regenerate"
-                    >
-                        <span x-show="!loading">&#x21bb; Regenerate</span>
-                        <span x-show="loading" x-cloak class="ai-summary-card__btn-loading">
+                <button
+                    @click="regenerate()"
+                    :disabled="loading"
+                    class="btn btn-secondary btn-sm ai-summary-card__btn"
+                    title="Regenerate"
+                >
+                    <template x-if="!loading">
+                        <span>&#x21bb; Regenerate</span>
+                    </template>
+                    <template x-if="loading">
+                        <span class="ai-summary-card__btn-loading">
                             <span class="ai-summary-card__spinner"></span>
                             Generating…
                         </span>
-                    </button>
-                </div>
+                    </template>
+                </button>
             </template>
         </div>
     </div>
@@ -82,11 +90,11 @@ $_componentId = 'aiSummary_' . $_entityType . '_' . $_entityId . '_' . $_summary
     <div class="card-body">
         <!-- Empty state -->
         <div x-show="!summary && !loading && !error" class="ai-summary-card__empty">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:28px;height:28px;opacity:0.35;margin-bottom:10px;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:30px;height:30px;color:var(--color-primary);opacity:0.3;margin-bottom:12px;" aria-hidden="true">
                 <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
             </svg>
-            <div style="font-weight:500;margin-bottom:4px;">Generate AI Insights</div>
-            <div style="font-size:0.75rem;opacity:0.7;">Click "Generate" to get an AI-powered analysis of this <?= e(str_replace('_', ' ', $_entityType)) ?>.</div>
+            <div style="font-weight:600;margin-bottom:5px;color:var(--text-secondary);">Generate AI Insights</div>
+            <div style="font-size:0.75rem;color:var(--text-tertiary);">Click "Generate" to get an AI-powered analysis of this <?= e(str_replace('_', ' ', $_entityType)) ?>.</div>
         </div>
 
         <!-- Error state -->
@@ -95,13 +103,10 @@ $_componentId = 'aiSummary_' . $_entityType . '_' . $_entityId . '_' . $_summary
         <!-- Streaming / result area -->
         <div x-show="summary || (loading && streamText)" x-cloak>
             <div class="ai-response" x-html="renderMarkdown(loading ? streamText : summary)"></div>
-
-            <!-- Streaming cursor -->
-            <span x-show="loading" x-cloak class="ai-summary-card__cursor">▌</span>
-
-            <!-- Footer meta (only when done) -->
+            <span x-show="loading" x-cloak class="ai-summary-card__cursor">&#x2588;</span>
             <div x-show="!loading && summary" x-cloak class="ai-summary-card__meta">
-                <span :class="cached ? 'ai-summary-card__meta-cached' : 'ai-summary-card__meta-fresh'" x-text="cached ? '● Cached' : '● Fresh'"></span>
+                <span :class="cached ? 'ai-summary-card__meta-cached' : 'ai-summary-card__meta-fresh'"
+                      x-text="cached ? 'Cached result' : 'Fresh analysis'"></span>
                 <span x-text="generatedAt ? 'Generated ' + generatedAt : ''"></span>
             </div>
         </div>
@@ -120,16 +125,11 @@ function <?= e($_componentId) ?>() {
 
         async generate() {
             if (this.loading) return;
-            this.loading   = true;
-            this.error     = '';
+            this.loading    = true;
+            this.error      = '';
             this.streamText = '';
-
-            try {
-                await this._stream(false);
-            } catch (e) {
-                this.error = 'Network error — please try again.';
-            }
-
+            try { await this._stream(false); }
+            catch (e) { this.error = 'Network error — please try again.'; }
             this.loading = false;
         },
 
@@ -139,13 +139,8 @@ function <?= e($_componentId) ?>() {
             this.error      = '';
             this.streamText = '';
             this.summary    = '';
-
-            try {
-                await this._stream(true);
-            } catch (e) {
-                this.error = 'Network error — please try again.';
-            }
-
+            try { await this._stream(true); }
+            catch (e) { this.error = 'Network error — please try again.'; }
             this.loading = false;
         },
 
@@ -176,10 +171,8 @@ function <?= e($_componentId) ?>() {
                 if (done) break;
 
                 buf += decoder.decode(value, { stream: true });
-
-                // SSE lines are separated by \n\n
                 const parts = buf.split('\n\n');
-                buf = parts.pop(); // keep incomplete last chunk
+                buf = parts.pop();
 
                 for (const part of parts) {
                     if (!part.startsWith('data: ')) continue;
@@ -189,10 +182,13 @@ function <?= e($_componentId) ?>() {
                     if (evt.t === 'tok') {
                         this.streamText += evt.c;
                     } else if (evt.t === 'done') {
-                        this.summary    = this.streamText;
-                        this.streamText = '';
-                        this.cached     = false;
-                        this.generatedAt = new Date().toLocaleString('en-CA', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                        this.summary     = this.streamText;
+                        this.streamText  = '';
+                        this.cached      = false;
+                        this.generatedAt = new Date().toLocaleString('en-CA', {
+                            month: 'short', day: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
+                        });
                     } else if (evt.t === 'err') {
                         this.error      = evt.m || 'Failed to generate summary.';
                         this.streamText = '';
@@ -203,42 +199,53 @@ function <?= e($_componentId) ?>() {
             }
         },
 
-        // Professional markdown renderer — handles bold headers, bullets, inline code, bold, italic
         renderMarkdown(text) {
             if (!text) return '';
-            let h = text
-                // Escape HTML
-                .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-                // Fenced code blocks (``` ... ```)
-                .replace(/```[\w]*\n?([\s\S]*?)```/g, '<pre class="ai-code-block"><code>$1</code></pre>')
-                // Inline code
-                .replace(/`([^`\n]+)`/g, '<code class="ai-inline-code">$1</code>')
-                // H3 — bold line used as section header
-                .replace(/^### (.+)$/gm, '<h4 class="ai-section-header">$1</h4>')
-                // H2 — larger section header
-                .replace(/^## (.+)$/gm, '<h3 class="ai-section-header ai-section-header--h2">$1</h3>')
-                // H1
-                .replace(/^# (.+)$/gm, '<h2 class="ai-section-header ai-section-header--h1">$1</h2>')
-                // Bold lines that act as headers (entire line is **text**)
-                .replace(/^\*\*([^*\n]+)\*\*\s*$/gm, '<h4 class="ai-section-header">$1</h4>')
-                // Bold inline
-                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-                // Italic inline
-                .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
-                // Bullet lists — convert runs of - or * lines into <ul>
-                .replace(/^[•\-\*] (.+)$/gm, '<li>$1</li>')
-                .replace(/(<li>[\s\S]*?<\/li>)(\n<li>|$)/g, '$1$2')
-                .replace(/(<li>.*?<\/li>\n?)+/g, (match) => '<ul class="ai-list">' + match + '</ul>')
-                // Numbered lists
-                .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-                // Horizontal rules
-                .replace(/^---+$/gm, '<hr class="ai-divider">')
-                // Double newline → paragraph break
-                .replace(/\n\n/g, '</p><p class="ai-para">')
-                // Single newline → <br> inside paragraphs
-                .replace(/\n/g, '<br>');
 
-            // Wrap in a paragraph so single-line content gets spacing too
+            // 1. Escape HTML special chars
+            let h = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+
+            // 2. Fenced code blocks (before any other processing)
+            h = h.replace(/```[\w]*\n?([\s\S]*?)```/g,
+                '<pre class="ai-code-block"><code>$1</code></pre>');
+
+            // 3. Inline code
+            h = h.replace(/`([^`\n]+)`/g,
+                '<code class="ai-inline-code">$1</code>');
+
+            // 4. Headings (## and ###)
+            h = h.replace(/^### (.+)$/gm,
+                '<div class="ai-section-header">$1</div>');
+            h = h.replace(/^## (.+)$/gm,
+                '<div class="ai-section-header ai-section-header--h2">$1</div>');
+            h = h.replace(/^# (.+)$/gm,
+                '<div class="ai-section-header ai-section-header--h1">$1</div>');
+
+            // 5. Standalone bold lines become section headers
+            h = h.replace(/^\*\*([^*\n]{3,})\*\*\s*$/gm,
+                '<div class="ai-section-header">$1</div>');
+
+            // 6. Bold and italic inline
+            h = h.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+            h = h.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+            // 7. Bullet lists — collect consecutive li lines into a single <ul>
+            h = h.replace(/^[•\-] (.+)$/gm, '<li>$1</li>');
+            h = h.replace(/(<li>[\s\S]*?<\/li>(\n|$))+/g,
+                (m) => '<ul class="ai-list">' + m + '</ul>');
+
+            // 8. Horizontal rules
+            h = h.replace(/^---+$/gm, '<hr class="ai-divider">');
+
+            // 9. Paragraphs — double newline becomes a break between paras
+            h = h.replace(/\n\n+/g, '</p><p class="ai-para">');
+
+            // 10. Single newlines within paragraphs
+            h = h.replace(/\n/g, '<br>');
+
             return '<p class="ai-para">' + h + '</p>';
         },
     };
