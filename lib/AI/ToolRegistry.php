@@ -873,6 +873,21 @@ class ToolRegistry
                 ],
                 '_tags' => ['chat'],
             ],
+            [
+                'name' => 'plan_action',
+                'description' => "Propose a LIFECYCLE action (a status/state transition with side effects), distinct from a plain field edit. Does NOT apply — returns a proposal the user confirms with an Apply button (NOT undoable). Currently supported action: change_equipment_status (move a unit between available/reserved/maintenance/inactive/decommissioned, respecting the state machine). Use when the user asks to e.g. \"put unit T5301 into maintenance\", \"decommission unit X\", \"mark unit Y available\". After calling, state what will happen and that the user must click Apply — do NOT claim it is done.",
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'action'     => ['type' => 'string', 'enum' => ['change_equipment_status'], 'description' => 'Which lifecycle action.'],
+                        'identifier' => ['type' => 'string', 'description' => "The record's human identifier (e.g. unit_number) or numeric id."],
+                        'new_status' => ['type' => 'string', 'description' => 'For change_equipment_status: the target status (available, reserved, maintenance, inactive, decommissioned). The tool enforces the allowed transitions.'],
+                        'reason'     => ['type' => 'string', 'description' => 'Optional reason/note recorded with the change.'],
+                    ],
+                    'required' => ['action', 'identifier'],
+                ],
+                '_tags' => ['chat'],
+            ],
         ];
     }
 }

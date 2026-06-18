@@ -167,10 +167,10 @@ if (!$widgetAiEnabled || !$widgetHasApiKey) return;
                             <button class="ff-chat-proposal-cancel" @click="cancelProposal(idx)" :disabled="msg.busy">Cancel</button>
                         </div>
 
-                        <!-- Applied: success + Undo -->
+                        <!-- Applied: success + Undo (Undo hidden for non-undoable actions) -->
                         <div class="ff-chat-proposal-result ff-chat-proposal-ok" x-show="msg.proposalState === 'applied'">
                             <span>✓ Applied</span>
-                            <button class="ff-chat-proposal-undo" @click="undoProposal(idx)" :disabled="msg.busy">
+                            <button class="ff-chat-proposal-undo" x-show="msg.proposal.undoable !== false" @click="undoProposal(idx)" :disabled="msg.busy">
                                 <span x-show="!msg.busy">Undo</span><span x-show="msg.busy">…</span>
                             </button>
                         </div>

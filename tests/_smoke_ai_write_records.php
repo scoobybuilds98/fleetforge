@@ -138,6 +138,29 @@ try {
         stripos($over, 'exceeds the bulk limit') !== false ? $pass("bulk: over-cap selection refused (status={$big['v']}, {$big['c']} rows)") : $fail("bulk: over-cap not refused: {$over}");
     }
 
+    // ════ 3c. ACTION: equipment status change (lifecycle, not a field edit) ════
+    $au = db_row("SELECT id, unit_number, status FROM equipment_units WHERE deleted_at IS NULL AND status='available' ORDER BY id LIMIT 1");
+    if ($au) {
+        $ra = $plan('plan_action', ['action'=>'change_equipment_status','identifier'=>$au['unit_number'],'new_status'=>'maintenance','reason'=>'smoke test']);
+        if (!empty($ra['proposal_id'])) {
+            $pids[] = $ra['proposal_id'];
+            ($ra['undoable'] === false) ? $pass("action: proposal created + flagged not-undoable") : $fail("action: undoable flag should be false");
+            $logBefore = (int) db_row("SELECT COUNT(*) c FROM equipment_status_log WHERE equipment_unit_id=?", [$au['id']])['c'];
+            \FleetForge\AI\ActionRegistry::execute('change_equipment_status', (int)$au['id'], ['new_status'=>'maintenance','reason'=>'smoke test'], $userId, 'Smoke', '127.0.0.1');
+            $now = db_row("SELECT status FROM equipment_units WHERE id=?", [$au['id']])['status'];
+            $now === 'maintenance' ? $pass("action: applied status available→maintenance") : $fail("action: status now '{$now}'");
+            $logAfter = (int) db_row("SELECT COUNT(*) c FROM equipment_status_log WHERE equipment_unit_id=?", [$au['id']])['c'];
+            $logAfter === $logBefore + 1 ? $pass("action: equipment_status_log row written") : $fail("action: status_log not written ({$logBefore}→{$logAfter})");
+            // restore
+            \FleetForge\AI\ActionRegistry::execute('change_equipment_status', (int)$au['id'], ['new_status'=>'available','reason'=>'smoke restore'], $userId, 'Smoke', '127.0.0.1');
+            $rest = db_row("SELECT status FROM equipment_units WHERE id=?", [$au['id']])['status'];
+            $rest === 'available' ? $pass("action: restored to available") : $fail("action: not restored (now '{$rest}')");
+        } else { $fail("action: no proposal — " . json_encode($ra)); }
+        // invalid transition rejected at preview (available→on_lease not allowed)
+        $badT = ToolRegistry::execute('plan_action', ['action'=>'change_equipment_status','identifier'=>$au['unit_number'],'new_status'=>'on_lease'], $userId, null);
+        stripos($badT, "can't go from") !== false ? $pass("action: invalid transition rejected") : $fail("action: invalid transition not rejected: {$badT}");
+    } else { echo "  (skip action — no 'available' unit)\n"; }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

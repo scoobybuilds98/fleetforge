@@ -48,123 +48,18 @@ if (!$newStatus) {
     json_error('MISSING_REQUIRED', 'new_status is required.', 422);
 }
 
-// ── Valid transitions (spec §11) ───────────────────────────────
-// Keyed by current status → array of allowed target statuses.
-// FIX #11: 'decommissioned' was unreachable — add it as a target from
-//          maintenance and inactive (the two states where a unit is out of service).
-// FIX #17: removed 'on_lease' from the 'available' transition — on_lease should only
-//          be set implicitly via lease/activate.php, not via manual status change.
-//          Manual assignment to on_lease without a lease record creates data inconsistency.
-const UNIT_STATUS_TRANSITIONS = [
-    'available'      => ['reserved', 'maintenance', 'inactive'],
-    'reserved'       => ['available'],
-    'on_lease'       => ['available', 'maintenance'],
-    'maintenance'    => ['available', 'inactive', 'decommissioned'],
-    'inactive'       => ['available', 'decommissioned'],
-    'decommissioned' => [], // TERMINAL
-];
-
-$result = null;
-
-db_transaction(function () use ($id, $newStatus, $reason, &$result) {
-    // ── D20: FOR UPDATE — lock unit row ────────────────────────
-    $unit = db_row(
-        "SELECT id, unit_number, status FROM equipment_units
-         WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
-        [$id]
+// ── Delegate to the shared action service (S-AI-ACTION-1) ──────
+// The state-machine guard + status-log + audit + notification all live in
+// StatusActions::changeEquipmentStatus so the AI confirm→apply path runs the
+// exact same logic. ActionException → json_error mirrors the old inline guards.
+try {
+    $result = \FleetForge\AI\Actions\StatusActions::changeEquipmentStatus(
+        $id, $newStatus, $reason,
+        current_user_id(), current_user()['name'] ?? 'system',
+        $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1'
     );
+} catch (\FleetForge\AI\Actions\ActionException $e) {
+    json_error($e->errorCode, $e->getMessage(), $e->status);
+}
 
-    if (!$unit) {
-        json_error('NOT_FOUND', 'Equipment unit not found.', 404);
-    }
-
-    $oldStatus   = $unit['status'];
-    $allowedNext = UNIT_STATUS_TRANSITIONS[$oldStatus] ?? [];
-
-    // No-op check: treat same→same as valid (idempotent)
-    if ($oldStatus === $newStatus) {
-        $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus];
-        return;
-    }
-
-    if (!in_array($newStatus, $allowedNext, true)) {
-        json_error('INVALID_TRANSITION',
-            "Cannot change unit {$unit['unit_number']} status from '{$oldStatus}' to '{$newStatus}'.", 409);
-    }
-
-    $changedBy = current_user()['name'] ?? 'system';
-
-    // ── Update unit status ─────────────────────────────────────
-    if ($newStatus === 'decommissioned') {
-        // Stamp the dedicated decommission columns so reports/filters keyed on
-        // decommissioned_date (e.g. "units decommissioned this year") see the
-        // unit. Business date via PHP date() (app timezone), not UTC CURDATE().
-        db_execute(
-            "UPDATE equipment_units
-                SET status = ?, decommissioned_date = ?, decommission_reason = ?,
-                    updated_by = ?, updated_at = NOW()
-              WHERE id = ?",
-            [$newStatus, date('Y-m-d'), $reason, current_user_id(), $id]
-        );
-    } else {
-        db_execute(
-            "UPDATE equipment_units SET status = ?, updated_by = ?, updated_at = NOW() WHERE id = ?",
-            [$newStatus, current_user_id(), $id]
-        );
-    }
-
-    // ── equipment_status_log ───────────────────────────────────
-    db_insert('equipment_status_log', [
-        'equipment_unit_id'  => $id,
-        'old_status'         => $oldStatus,
-        'new_status'         => $newStatus,
-        'reason'             => $reason ?? "Manual status change: {$oldStatus} → {$newStatus}",
-        'changed_by'         => $changedBy,
-        'changed_by_user_id' => current_user_id(),
-    ]);
-
-    // ── audit_log ──────────────────────────────────────────────
-    db_insert('audit_log', [
-        'user_id'      => current_user_id(),
-        'user_name'    => $changedBy,
-        'action'       => 'status_change',
-        'module'       => 'equipment',
-        'entity_type'  => 'equipment_unit',
-        'entity_id'    => $id,
-        'entity_label' => $unit['unit_number'],
-        'notes'        => "Unit {$unit['unit_number']} status changed: {$oldStatus} → {$newStatus}",
-        'old_values'   => json_encode(['status' => $oldStatus]),
-        'new_values'   => json_encode(['status' => $newStatus, 'reason' => $reason]),
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-
-    $result = ['id' => $id, 'old_status' => $oldStatus, 'new_status' => $newStatus];
-
-    // ── In-app notification (NOTIF-1) ──────────────────────────
-    try {
-        if ($newStatus === 'decommissioned') {
-            \FleetForge\Notifications\NotificationService::notify(
-                type:       'equipment.decommissioned',
-                title:      "Unit {$unit['unit_number']} decommissioned",
-                message:    "Unit {$unit['unit_number']} has been decommissioned",
-                entityType: 'equipment_unit',
-                entityId:   $id,
-                url:        '/fleetforge/equipment/show?id=' . $id,
-                severity:   'warning'
-            );
-        } else {
-            \FleetForge\Notifications\NotificationService::notify(
-                type:       'equipment.status_changed',
-                title:      "Unit {$unit['unit_number']} → {$newStatus}",
-                message:    "Unit {$unit['unit_number']} status changed to {$newStatus}",
-                entityType: 'equipment_unit',
-                entityId:   $id,
-                url:        '/fleetforge/equipment/show?id=' . $id
-            );
-        }
-    } catch (\Throwable $e) {
-        error_log('[NOTIF equipment.status_changed] ' . $e->getMessage());
-    }
-});
-
-json_success($result);
+json_success(['id' => $result['id'], 'old_status' => $result['old_status'], 'new_status' => $result['new_status']]);

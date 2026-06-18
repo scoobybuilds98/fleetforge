@@ -61,6 +61,51 @@ if (!$proposal) {
 $payload = json_decode($proposal['payload'], true) ?: [];
 $targets = $payload['targets'] ?? [];
 
+$userName = current_user()['name'] ?? 'system';
+$ip       = $_SERVER['REMOTE_ADDR'] ?? null;
+
+// ════════════════════════════════════════════════════════════════════════════
+//  LIFECYCLE ACTIONS (S-AI-ACTION-1) — status transitions, not field edits.
+//  Routed to ActionRegistry, which delegates to the same service the canonical
+//  endpoint uses. Actions are NOT undoable.
+// ════════════════════════════════════════════════════════════════════════════
+if (($payload['kind'] ?? '') === 'action') {
+    $actionEntry = \FleetForge\AI\ActionRegistry::get($payload['action'] ?? '');
+    if ($actionEntry === null) {
+        json_error('UNSUPPORTED', 'This action type cannot be applied.', 422);
+    }
+    if (!can($actionEntry['permission'], 'edit')) {
+        json_error('FORBIDDEN', "You do not have permission to {$actionEntry['label']}.", 403);
+    }
+    if ($action === 'undo') {
+        json_error('UNSUPPORTED', 'This action cannot be undone.', 422);
+    }
+    if ($proposal['status'] !== 'pending') {
+        json_error('CONFLICT', 'This action is no longer pending (status: "' . $proposal['status'] . '").', 409);
+    }
+    if (!empty($proposal['expires_at']) && strtotime($proposal['expires_at']) < time()) {
+        db_update('ai_pending_changes', ['status' => 'expired'], 'id = ?', [$proposalId]);
+        json_error('EXPIRED', 'This action proposal has expired. Ask the AI again for a fresh one.', 409);
+    }
+
+    try {
+        $res = \FleetForge\AI\ActionRegistry::execute(
+            (string) $payload['action'], (int) ($payload['entity_id'] ?? 0),
+            $payload['params'] ?? [], $userId, $userName, $ip
+        );
+    } catch (\FleetForge\AI\Actions\ActionException $e) {
+        json_error($e->errorCode, $e->getMessage(), $e->status);
+    }
+
+    db_update('ai_pending_changes', [
+        'status'     => 'applied',
+        'applied_at' => date('Y-m-d H:i:s'),
+        'applied_by' => $userId,
+    ], 'id = ?', [$proposalId]);
+
+    json_success(['id' => $proposalId, 'status' => 'applied', 'summary' => $proposal['summary'], 'result' => $res]);
+}
+
 // ── Route by entity type → real per-resource permission ────────────────────
 // Look the entity up in the write registry; reject unknown types loudly so we
 // never silently no-op a change_type.
@@ -71,9 +116,6 @@ if ($registryEntry === null) {
 if (!can($registryEntry['permission'], 'edit')) {
     json_error('FORBIDDEN', "You do not have permission to edit {$registryEntry['label']}s.", 403);
 }
-
-$userName = current_user()['name'] ?? 'system';
-$ip       = $_SERVER['REMOTE_ADDR'] ?? null;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  UNDO — restore the before-values captured at apply time

@@ -338,13 +338,16 @@ if ($pendingProposalId > 0) {
         [$pendingProposalId, $userId]
     );
     if ($proposal) {
+        $pp = json_decode($proposal['payload'], true) ?: [];
         $responsePayload['proposal'] = [
             'id'             => (int) $proposal['id'],
             'change_type'    => $proposal['change_type'],
             'entity_type'    => $proposal['entity_type'],
             'summary'        => $proposal['summary'],
             'affected_count' => (int) $proposal['affected_count'],
-            'targets'        => json_decode($proposal['payload'], true)['targets'] ?? [],
+            'targets'        => $pp['targets'] ?? [],
+            // Actions (status transitions) are not undoable; field edits are.
+            'undoable'       => ($pp['kind'] ?? '') === 'action' ? false : true,
             'expires_at'     => $proposal['expires_at'],
         ];
     }

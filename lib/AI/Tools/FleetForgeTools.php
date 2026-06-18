@@ -152,6 +152,9 @@ class FleetForgeTools
             'plan_update_record'       => self::planUpdateRecord($input, $userId, $sessionId),
             'plan_bulk_update_records' => self::planBulkUpdateRecords($input, $userId, $sessionId),
 
+            // ── Action planner (S-AI-ACTION-1) — lifecycle transitions ──
+            'plan_action'              => self::planAction($input, $userId, $sessionId),
+
             default => throw new \RuntimeException("Unknown tool: {$toolName}"),
         };
     }
@@ -2739,4 +2742,80 @@ class FleetForgeTools
 
     /** Probe limit = BULK_MAX + 1 so we can detect "exceeds cap" cleanly. */
     private const BULK_PROBE = 101;
+
+    /**
+     * Propose a LIFECYCLE action (state transition) on a record. Validates the
+     * transition via ActionRegistry's preview, then persists a PENDING action
+     * proposal. Applied (not undoable) only when the user clicks Apply.
+     * Input: action, identifier, new_status, reason.
+     */
+    private static function planAction(array $input, ?int $userId, ?int $sessionId): array|string
+    {
+        $action     = trim((string) ($input['action'] ?? ''));
+        $identifier = trim((string) ($input['identifier'] ?? ''));
+
+        $entry = \FleetForge\AI\ActionRegistry::get($action);
+
+        // Gate: feature flag + auth + per-action permission.
+        if (!settings_get('ai.write_enabled', false)) {
+            return 'AI write actions are currently disabled. An administrator can enable them in Settings → AI.';
+        }
+        if ($userId === null) {
+            return 'Write actions require an authenticated user.';
+        }
+        if ($entry === null) {
+            return 'I can only perform these actions: ' . implode(', ', \FleetForge\AI\ActionRegistry::names()) . '.';
+        }
+        if (!\can($entry['permission'], 'edit')) {
+            return "You don't have permission to {$entry['label']}.";
+        }
+        if ($identifier === '') {
+            return 'I need the record identifier to act on.';
+        }
+
+        $res = \FleetForge\AI\ActionRegistry::resolve($entry, $identifier);
+        if (isset($res['error'])) return $res['error'];
+        if (isset($res['ambiguous'])) {
+            $list = implode("\n", array_map(fn($o) => "- {$o['label']} (#{$o['id']})", $res['ambiguous']));
+            return "Multiple records match \"{$identifier}\". Ask the user which one (then pass its id or exact name):\n{$list}";
+        }
+        $record = $res['record'];
+
+        $params = [
+            'new_status' => $input['new_status'] ?? ($input['new_value'] ?? ''),
+            'reason'     => $input['reason'] ?? '',
+        ];
+        $preview = ($entry['preview'])($record, $params);
+        if (isset($preview['error'])) return $preview['error'];
+
+        $payload = [
+            'kind'         => 'action',
+            'action'       => $action,
+            'entity_id'    => (int) $record['id'],
+            'label'        => (string) ($record[$entry['label_column']] ?? ('#' . $record['id'])),
+            'params'       => $preview['params'],
+            'undoable'     => false,
+        ];
+        $proposalId = db_insert('ai_pending_changes', [
+            'user_id'        => $userId,
+            'session_id'     => $sessionId ?: null,
+            'change_type'    => 'action_' . $action,
+            'entity_type'    => $entry['entity'],
+            'summary'        => mb_substr($preview['summary'], 0, 500),
+            'payload'        => json_encode($payload),
+            'affected_count' => 1,
+            'status'         => 'pending',
+            'expires_at'     => date('Y-m-d H:i:s', time() + 1800),
+        ]);
+
+        return [
+            'status'                => 'proposed',
+            'requires_confirmation' => true,
+            'proposal_id'           => $proposalId,
+            'summary'               => $preview['summary'],
+            'affected_count'        => 1,
+            'undoable'              => false,
+            'note'                  => 'A confirmation card has been shown. Tell the user what will happen and that they must click Apply. This action is not undoable. Do NOT say it is done.',
+        ];
+    }
 }
