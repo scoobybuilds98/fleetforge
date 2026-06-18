@@ -80,7 +80,7 @@ INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, desc
 -- ----------------------------------------------------------------
 ('ai.enabled',           '0',                        'boolean', 'ai', 'AI Features Enabled',   'Master toggle for all AI-powered features.',                                0),
 ('ai.daily_token_limit', '500000',                   'integer', 'ai', 'Daily Token Limit',     'Max tokens per day across all users (0 = unlimited).',                      0),
-('ai.model',             'claude-sonnet-4-20250514', 'string',  'ai', 'AI Model',              'Claude model ID used for all AI features.',                                 0),
+('ai.model',             'claude-sonnet-4-6',        'string',  'ai', 'AI Model',              'Claude model ID used for all AI features.',                                 0),
 ('ai.cache_summaries',   '1',                        'boolean', 'ai', 'Cache AI Summaries',    'Cache AI-generated summaries to reduce API calls.',                         0),
 ('ai.summary_ttl_hours', '24',                       'integer', 'ai', 'Summary Cache TTL (h)', 'Hours before cached AI summaries expire and regenerate.',                   0),
 

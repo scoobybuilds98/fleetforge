@@ -1942,7 +1942,7 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
              FROM ai_query_log WHERE DATE(created_at) = CURDATE()"
         );
         $aiDailyLimit = (int) settings_get('ai.daily_token_limit', 500000);
-        $aiModel = settings_get('ai.model', 'claude-sonnet-4-20250514');
+        $aiModel = settings_get('ai.model', 'claude-sonnet-4-6');
         ?>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default);display:flex;gap:20px;flex-wrap:wrap;">
             <div>

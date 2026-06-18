@@ -106,12 +106,12 @@ function <?= e($_componentId) ?>() {
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/ai/summary') ?>?entity_type=<?= e($_entityType) ?>&entity_id=<?= (int) $_entityId ?>&summary_type=<?= e($_summaryType) ?>');
                 // WHY: FF_Api returns raw JSON — no envelope. Fields are top-level
-                if (!r.error) {
+                if (r.summary) {
                     this.summary = r.summary;
                     this.generatedAt = r.generated_at || '';
                     this.cached = r.cached || false;
                 } else {
-                    this.error = r.message || 'Failed to generate summary.';
+                    this.error = r.error?.message || r.message || 'Failed to generate summary.';
                 }
             } catch(e) {
                 this.error = 'Network error. Please try again.';
