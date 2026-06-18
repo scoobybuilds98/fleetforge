@@ -3221,6 +3221,7 @@ CREATE TABLE `leases` (
   `precharge_refund_settled_at` datetime DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: when the refund (cash or credit) actually posted. Audit trail for S-MILEAGE-3.',
   `gps_opt_in` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'S-LEASE-GPS-COST: per-lease GPS tracking add-on toggle. Default 1 = ON for new leases (differs from insurance/warranty default 0).',
   `gps_cost` decimal(10,2) NOT NULL DEFAULT '1.00' COMMENT 'S-LEASE-GPS-COST: GPS service rate per billing day. Default $1.00. Engine multiplies by billing-window day count when gps_opt_in=1 AND gps_cost>0.',
+  `hourly_rate` decimal(10,4) DEFAULT NULL COMMENT 'S-LEASE-HOURLY-RATE: hourly reefer/etc rate captured from rate card at lease creation. NULL = no hourly billing. Amendable via amend_rate.php.',
   `engine_version` enum('period_independent','holistic') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'holistic' COMMENT 'S-BILLING-HOLISTIC-ENGINE: which billing engine bills this lease. Locked at lease creation; never modified mid-lease. period_independent = old ProRateCalculator (per-period THE LAW); holistic = new HolisticLeaseEngine (running reconciliation).',
   PRIMARY KEY (`id`),
   UNIQUE KEY `contract_number` (`contract_number`),

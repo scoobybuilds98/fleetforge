@@ -532,7 +532,15 @@ require_once FF_ROOT . '/includes/header.php';
                             </span>
                         </div>
                     </div>
-                    <div class="form-group"></div>
+                    <div class="form-group" x-show="form.hourly_rate && parseFloat(form.hourly_rate) > 0">
+                        <label class="form-label">Hourly Rate</label>
+                        <div style="margin-top:4px;">
+                            <span class="text-secondary" style="font-size:0.8125rem;">
+                                $<span class="font-mono" x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr
+                                <span style="color:var(--text-muted);">(rate card rate)</span>
+                            </span>
+                        </div>
+                    </div>
                 </div>
                 <?php endif; ?>
             </div>
@@ -611,6 +619,7 @@ function FF_EditLease() {
             warranty_cost:           <?= json_encode($lease['warranty_cost'] ?? '0.00') ?>,
             gps_opt_in:              <?= $lease['gps_opt_in'] ? 'true' : 'false' ?>,
             gps_cost:                <?= json_encode($lease['gps_cost'] ?? '1.00') ?>,
+            hourly_rate:             <?= json_encode($lease['hourly_rate'] ?? null) ?>,
             notes:                   <?= json_encode($lease['notes'] ?? '') ?>,
             internal_notes:          <?= json_encode($lease['internal_notes'] ?? '') ?>,
             precharge_enabled:       <?= !empty($lease['precharge_enabled']) ? 'true' : 'false' ?>,

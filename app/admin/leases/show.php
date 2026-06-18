@@ -350,6 +350,14 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         <tr><td class="text-secondary">Daily Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.daily_rate).toFixed(2)"></td></tr>
                                         <tr><td class="text-secondary">Weekly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.weekly_rate).toFixed(2)"></td></tr>
                                         <tr><td class="text-secondary">Monthly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.monthly_rate).toFixed(2)"></td></tr>
+                                        <tr x-show="parseInt(lease.gps_opt_in) === 1">
+                                            <td class="text-secondary">GPS Tracking</td>
+                                            <td class="font-mono" x-text="parseFloat(lease.gps_cost) > 0 ? '$' + parseFloat(lease.gps_cost).toFixed(2) + ' / day' : 'Included'"></td>
+                                        </tr>
+                                        <tr x-show="lease.hourly_rate !== null && lease.hourly_rate !== undefined && parseFloat(lease.hourly_rate) > 0">
+                                            <td class="text-secondary">Hourly Rate</td>
+                                            <td class="font-mono" x-text="'$' + parseFloat(lease.hourly_rate).toFixed(4) + ' / hr'"></td>
+                                        </tr>
                                         <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
                                              secondary muted with ≈ prefix, custom-conversion badge when factors
                                              differ from international standard. -->
@@ -483,8 +491,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                                 ? parseFloat(lease.discount_value).toFixed(2) + '%'
                                                 : '$' + parseFloat(lease.discount_value).toFixed(2)"></td>
                                         </tr>
-                                        <!-- S-LEASE-GPS-COST: Add-ons row block. Insurance + warranty
-                                             are flat-per-period; GPS is per-day (label spells $/day). -->
+                                        <!-- Add-ons: insurance + warranty (flat-per-period) -->
                                         <tr x-show="parseInt(lease.insurance_opt_in) === 1 && parseFloat(lease.insurance_cost) > 0">
                                             <td class="text-secondary">Insurance</td>
                                             <td class="font-mono" x-text="'$' + parseFloat(lease.insurance_cost).toFixed(2)"></td>
@@ -492,10 +499,6 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         <tr x-show="parseInt(lease.warranty_opt_in) === 1 && parseFloat(lease.warranty_cost) > 0">
                                             <td class="text-secondary">Warranty</td>
                                             <td class="font-mono" x-text="'$' + parseFloat(lease.warranty_cost).toFixed(2)"></td>
-                                        </tr>
-                                        <tr x-show="parseInt(lease.gps_opt_in) === 1 && parseFloat(lease.gps_cost) > 0">
-                                            <td class="text-secondary">GPS Tracking</td>
-                                            <td class="font-mono" x-text="'$' + parseFloat(lease.gps_cost).toFixed(2) + ' / day'"></td>
                                         </tr>
                                         <tr x-show="lease.rate_notes"><td class="text-secondary">Rate Notes</td><td class="text-sm" x-text="lease.rate_notes"></td></tr>
                                     </tbody>
@@ -1013,6 +1016,13 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                    class="form-control font-mono"
                                    step="0.01" min="0"
                                    x-model="rateAmendModal.new_gps_cost">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Hourly Rate ($/hr)</label>
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.0001" min="0"
+                                   x-model="rateAmendModal.new_hourly_rate">
                         </div>
                     </div>
 
@@ -1790,6 +1800,7 @@ function FF_LeaseDetail() {
             new_mileage_rate_km:    '',
             new_mileage_rate_miles: '',
             new_gps_cost:           '',
+            new_hourly_rate:        '',
             reason:                 '',
             success_advisory:       '',
         },
@@ -1975,6 +1986,7 @@ function FF_LeaseDetail() {
                 new_mileage_rate_km:    l.mileage_rate_km !== null && l.mileage_rate_km !== undefined ? String(l.mileage_rate_km) : '',
                 new_mileage_rate_miles: l.mileage_rate_miles !== null && l.mileage_rate_miles !== undefined ? String(l.mileage_rate_miles) : '',
                 new_gps_cost:           l.gps_cost !== null && l.gps_cost !== undefined ? String(l.gps_cost) : '',
+                new_hourly_rate:        l.hourly_rate !== null && l.hourly_rate !== undefined ? String(l.hourly_rate) : '',
                 reason:                 '',
                 success_advisory:       '',
             };
@@ -2015,6 +2027,7 @@ function FF_LeaseDetail() {
                 ['new_mileage_rate_km',    'mileage_rate_km'],
                 ['new_mileage_rate_miles', 'mileage_rate_miles'],
                 ['new_gps_cost',           'gps_cost'],
+                ['new_hourly_rate',        'hourly_rate'],
             ];
             let anyChanged = false;
             for (const [reqKey, leaseKey] of fields) {

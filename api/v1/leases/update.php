@@ -256,6 +256,20 @@ if (array_key_exists('gps_cost', $body)) {
     $data['gps_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '1.00';
 }
 
+// S-LEASE-HOURLY-RATE: hourly rate mutable via edit (like GPS). NULL = clear billing.
+if (array_key_exists('hourly_rate', $body)) {
+    if ($body['hourly_rate'] === null || $body['hourly_rate'] === '') {
+        $data['hourly_rate'] = null;
+    } else {
+        $d = clean_decimal($body['hourly_rate']);
+        if ($d !== null && bccomp($d, '0', 4) < 0) {
+            $fields['hourly_rate'] = 'Hourly rate cannot be negative.';
+        } else {
+            $data['hourly_rate'] = $d;
+        }
+    }
+}
+
 // D22: gst_exempt and pst_exempt can be changed via amendment (allow here for now)
 if (array_key_exists('gst_exempt', $body)) {
     $data['gst_exempt'] = (bool) $body['gst_exempt'] ? 1 : 0;

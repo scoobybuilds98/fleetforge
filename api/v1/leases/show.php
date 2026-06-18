@@ -95,6 +95,7 @@ $lease = db_row(
         l.warranty_cost,
         l.gps_opt_in,
         l.gps_cost,
+        l.hourly_rate,
         l.billing_cycle,
         l.advance_billing_periods,
         l.po_number,

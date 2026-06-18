@@ -210,6 +210,13 @@ if ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) < 0) {
 }
 $gpsCost = ($gpsCostIn !== null && bccomp($gpsCostIn, '0', 4) >= 0) ? $gpsCostIn : '0.00';
 
+// S-LEASE-HOURLY-RATE: hourly rate captured from rate card; NULL = no hourly billing.
+$hourlyCostIn = clean_decimal($body['hourly_rate'] ?? null);
+if ($hourlyCostIn !== null && bccomp($hourlyCostIn, '0', 4) < 0) {
+    $fields['hourly_rate'] = 'Hourly rate cannot be negative.';
+}
+$hourlyCost = ($hourlyCostIn !== null && bccomp($hourlyCostIn, '0', 4) >= 0) ? $hourlyCostIn : null;
+
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);
 $internalNotes  = clean_string($body['internal_notes'] ?? null, 5000);
@@ -610,6 +617,7 @@ $createLease = function () use (
         'warranty_cost'            => $warrantyCost,
         'gps_opt_in'               => $gpsOptIn ? 1 : 0,
         'gps_cost'                 => $gpsCost,
+        'hourly_rate'              => $hourlyCost,
         'po_number'                => $poNumber,
         'notes'                    => $notes,
         'internal_notes'           => $internalNotes,

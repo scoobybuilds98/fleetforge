@@ -588,7 +588,20 @@ require_once FF_ROOT . '/includes/header.php';
                             </template>
                         </div>
                     </div>
-                    <div class="form-group"></div>
+                    <div class="form-group">
+                        <label class="form-label">Hourly Rate</label>
+                        <div style="margin-top:4px;">
+                            <template x-if="form.hourly_rate && parseFloat(form.hourly_rate) > 0">
+                                <span class="text-secondary" style="font-size:0.8125rem;">
+                                    $<span x-text="parseFloat(form.hourly_rate).toFixed(4)"></span>/hr
+                                    <span style="color:var(--text-muted);">(from rate card)</span>
+                                </span>
+                            </template>
+                            <template x-if="!form.hourly_rate || parseFloat(form.hourly_rate) <= 0">
+                                <span class="text-secondary" style="font-size:0.8125rem;">No hourly rate on this rate card</span>
+                            </template>
+                        </div>
+                    </div>
                 </div>
 
             </div>
@@ -940,6 +953,7 @@ function FF_CreateLease() {
             // S-GPS-RATE-CARD: GPS toggle; cost auto-populated from rate card via _lookupRates()
             gps_opt_in:         true,
             gps_cost:           '',
+            hourly_rate:        '',
             gst_exempt:         false,
             pst_exempt:         false,
             notes:              '',
@@ -1257,6 +1271,7 @@ function FF_CreateLease() {
                 this.form.monthly_rate = d.monthly_rate ?? '';
                 // S-GPS-RATE-CARD: GPS cost comes from the rate card, not user input
                 this.form.gps_cost     = d.gps_price    ?? '';
+                this.form.hourly_rate  = d.hourly_rate  ?? '';
 
                 // S-BILLING-RATE-FIX D-D: when the rate source supplied a
                 // monthly rate but no weekly, pre-fill weekly from

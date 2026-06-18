@@ -127,6 +127,7 @@ $rateMap = [
     'new_mileage_rate_km'    => 'mileage_rate_km',
     'new_mileage_rate_miles' => 'mileage_rate_miles',
     'new_gps_cost'           => 'gps_cost',
+    'new_hourly_rate'        => 'hourly_rate',
 ];
 
 // ── Collect + validate provided rates (bcmath per D16) ───────────
@@ -155,9 +156,9 @@ foreach ($rateMap as $reqKey => $col) {
         continue;
     }
     // Round to the column's storage precision. daily/weekly/monthly/
-    // gps_cost are DECIMAL(10,2); mileage_rate_* are DECIMAL(10,4).
+    // gps_cost are DECIMAL(10,2); mileage_rate_* and hourly_rate are DECIMAL(10,4).
     // bcround keeps the trailing zeros that DECIMAL serializes back.
-    $scale = in_array($col, ['mileage_rate_km', 'mileage_rate_miles'], true) ? 4 : 2;
+    $scale = in_array($col, ['mileage_rate_km', 'mileage_rate_miles', 'hourly_rate'], true) ? 4 : 2;
     $provided[$col] = bcround($clean, $scale);
 }
 
@@ -168,7 +169,7 @@ if ($fields !== []) {
 if ($provided === []) {
     json_error('NO_RATE_PROVIDED',
         'At least one of new_daily_rate, new_weekly_rate, new_monthly_rate, '
-        . 'new_mileage_rate_km, new_mileage_rate_miles, or new_gps_cost must '
+        . 'new_mileage_rate_km, new_mileage_rate_miles, new_gps_cost, or new_hourly_rate must '
         . 'be provided.',
         422);
 }
@@ -199,7 +200,7 @@ db_transaction(function () use (
         "SELECT id, status, contract_number, company_name_snapshot,
                 billing_cycle,
                 daily_rate, weekly_rate, monthly_rate,
-                mileage_rate_km, mileage_rate_miles, gps_cost,
+                mileage_rate_km, mileage_rate_miles, gps_cost, hourly_rate,
                 updated_at
          FROM leases
          WHERE id = ? AND deleted_at IS NULL
@@ -239,6 +240,7 @@ db_transaction(function () use (
         'mileage_rate_km'    => $lease['mileage_rate_km']    !== null ? (string) $lease['mileage_rate_km']    : null,
         'mileage_rate_miles' => $lease['mileage_rate_miles'] !== null ? (string) $lease['mileage_rate_miles'] : null,
         'gps_cost'           => (string) $lease['gps_cost'],
+        'hourly_rate'        => $lease['hourly_rate'] !== null ? (string) $lease['hourly_rate'] : null,
     ];
 
     // Merge new rates: only overwrite the columns the request
