@@ -299,6 +299,47 @@ try {
         }
     }
 
+    // ════ 3g. ACTION: reservation status change ════
+    $rEntry = \FleetForge\AI\ActionRegistry::get('change_reservation_status');
+    if ($rEntry) {
+        $rp = ($rEntry['preview'])(['id'=>7,'status'=>'cancelled','company_name'=>'Acme'], ['new_status'=>'confirmed']);
+        isset($rp['error']) ? $pass("reservation: invalid transition (cancelled→confirmed) rejected") : $fail("reservation: bad transition not rejected");
+        $rp2 = ($rEntry['preview'])(['id'=>7,'status'=>'pending','company_name'=>'Acme'], ['new_status'=>'cancelled','reason'=>'']);
+        isset($rp2['error']) ? $pass("reservation: cancel without reason rejected") : $fail("reservation: cancel w/o reason not rejected");
+        $rp3 = ($rEntry['preview'])(['id'=>7,'status'=>'pending','company_name'=>'Acme'], ['new_status'=>'confirmed']);
+        (isset($rp3['summary']) && stripos($rp3['summary'],'pending → confirmed')!==false) ? $pass("reservation: valid preview builds summary") : $fail("reservation: summary wrong");
+    } else { $fail("reservation: action not registered"); }
+    try { \FleetForge\AI\Actions\StatusActions::changeReservationStatus(999999,'confirmed',null,$userId,'Smoke','manager','127.0.0.1'); $fail("reservation: not-found should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='NOT_FOUND' ? $pass("reservation: not-found rejected") : $fail("reservation: wrong code {$e->errorCode}"); }
+
+    $ru = db_row("SELECT id, unit_number, status FROM equipment_units WHERE deleted_at IS NULL AND status='available' ORDER BY id LIMIT 1");
+    if ($ru) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            $resId = db_insert('reservations', [
+                'contact_name'=>'Smoke Tester','company_name'=>'Smoke Reservation Co','pickup_date'=>date('Y-m-d'),'status'=>'pending',
+            ]);
+            db_insert('reservation_units', ['reservation_id'=>$resId,'unit_number_snapshot'=>$ru['unit_number'],'equipment_unit_id'=>(int)$ru['id']]);
+            \FleetForge\AI\Actions\StatusActions::changeReservationStatus($resId,'confirmed',null,$userId,'Smoke','manager','127.0.0.1');
+            $r = db_row("SELECT status FROM reservations WHERE id=?", [$resId]);
+            $r['status']==='confirmed' ? $pass("reservation: applied pending→confirmed") : $fail("reservation: status ".json_encode($r));
+            $unitNow = db_row("SELECT status FROM equipment_units WHERE id=?", [$ru['id']])['status'];
+            $unitNow==='reserved' ? $pass("reservation: linked unit available→reserved") : $fail("reservation: unit status '{$unitNow}'");
+            $log = (int) db_row("SELECT COUNT(*) c FROM equipment_status_log WHERE equipment_unit_id=? AND new_status='reserved'", [$ru['id']])['c'];
+            $log >= 1 ? $pass("reservation: equipment_status_log row written") : $fail("reservation: no status_log");
+            // now cancel (requires reason) → unit back to available
+            \FleetForge\AI\Actions\StatusActions::changeReservationStatus($resId,'cancelled','smoke cancel',$userId,'Smoke','manager','127.0.0.1');
+            $r2 = db_row("SELECT status FROM reservations WHERE id=?", [$resId])['status'];
+            $u2 = db_row("SELECT status FROM equipment_units WHERE id=?", [$ru['id']])['status'];
+            ($r2==='cancelled' && $u2==='available') ? $pass("reservation: cancel freed the unit (reserved→available)") : $fail("reservation: cancel state res={$r2} unit={$u2}");
+        } catch (\Throwable $e) {
+            $fail("reservation: hermetic apply threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

@@ -156,6 +156,45 @@ class ActionRegistry
                     return FinancialActions::voidPayment((int) $rec['id'], (string) ($params['reason'] ?? ''), $userId, $userName, $ip);
                 },
             ],
+
+            // ── Reservation status change (S-AI-ACTION-4) ──────────────
+            'change_reservation_status' => [
+                'label'          => 'change reservation status',
+                'entity'         => 'reservation',
+                'table'          => 'reservations',
+                'permission'     => 'reservations',
+                'resolve_column' => 'company_name',
+                'label_column'   => 'company_name',
+                'soft_delete'    => true,
+                'preview' => static function (array $rec, array $params): array {
+                    $new = strtolower(trim((string) ($params['new_status'] ?? '')));
+                    $old = (string) $rec['status'];
+                    if (!in_array($new, ['pending', 'confirmed', 'cancelled', 'completed'], true)) {
+                        return ['error' => "\"{$new}\" isn't a valid reservation status (pending, confirmed, cancelled, completed)."];
+                    }
+                    $allowed = StatusActions::RESERVATION_TRANSITIONS[$old] ?? [];
+                    if (!in_array($new, $allowed, true)) {
+                        $ok = $allowed ? implode(', ', $allowed) : 'none (terminal state)';
+                        return ['error' => "Reservation #{$rec['id']} can't go from \"{$old}\" to \"{$new}\". Allowed from \"{$old}\": {$ok}."];
+                    }
+                    $reason = trim((string) ($params['reason'] ?? ''));
+                    if ($new === 'cancelled' && $reason === '') {
+                        return ['error' => "Cancelling reservation #{$rec['id']} requires a reason. Ask the user why, then call this again."];
+                    }
+                    $co = $rec['company_name'] ?? '';
+                    return [
+                        'summary' => "Change reservation #{$rec['id']} ({$co}) status: {$old} → {$new}" . ($reason !== '' ? " (reason: {$reason})" : ''),
+                        'params'  => ['new_status' => $new, 'reason' => $reason ?: null],
+                    ];
+                },
+                'run' => static function (array $rec, array $params, int $userId, string $userName, ?string $ip): array {
+                    $role = function_exists('current_user') ? (current_user()['role_slug'] ?? '') : '';
+                    return StatusActions::changeReservationStatus(
+                        (int) $rec['id'], (string) $params['new_status'], $params['reason'] ?? null,
+                        $userId, $userName, $role, $ip
+                    );
+                },
+            ],
         ];
     }
 
