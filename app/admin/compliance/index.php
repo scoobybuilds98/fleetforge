@@ -5,10 +5,10 @@ declare(strict_types=1);
  * app/admin/compliance/index.php
  *
  * Fleet-wide compliance dashboard — grid view of all equipment units with
- * CVI, Registration, and Insurance document status (MVI excluded).
+ * CVI and Registration document status (MVI and Insurance excluded).
  *
  * Each document column shows:
- *   - "Valid From" date (stored in cvi_from_date / registration_from_date / insurance_from_date)
+ *   - "Valid From" date (stored in cvi_from_date / registration_from_date)
  *   - "Expiry (To)" date with colour coding
  *   - Document icon linking to the PDF when one is on file
  *
@@ -72,9 +72,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $where[]  = "(
             (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
             OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
-            OR (eu.insurance_expiry IS NOT NULL AND eu.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
         )";
-        $params[] = $window;
         $params[] = $window;
         $params[] = $window;
     }
@@ -90,9 +88,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
              eu.cvi_from_date        AS cvi_from,
              eu.cvi_expiry,
              eu.registration_from_date AS registration_from,
-             eu.registration_expiry,
-             eu.insurance_from_date  AS insurance_from,
-             eu.insurance_expiry
+             eu.registration_expiry
          FROM equipment_units eu
          JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
          WHERE $whereSQL
@@ -120,7 +116,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Unit Number', 'Equipment Type', 'Yard', 'Status',
         'CVI From', 'CVI Expiry', 'CVI Status',
         'Registration From', 'Registration Expiry', 'Registration Status',
-        'Insurance From', 'Insurance Expiry', 'Insurance Status',
     ], ',', '"', '\\');
     foreach ($rows as $r) {
         fputcsv($out, [
@@ -134,9 +129,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $r['registration_from'] ?? '',
             $r['registration_expiry'] ?? '',
             $expiryStatus($r['registration_expiry']),
-            $r['insurance_from'] ?? '',
-            $r['insurance_expiry'] ?? '',
-            $expiryStatus($r['insurance_expiry']),
         ], ',', '"', '\\');
     }
     fclose($out);
@@ -160,9 +152,8 @@ $initExpiredCount = db_count(
        AND (
            (cvi_expiry IS NOT NULL AND cvi_expiry < ?)
            OR (registration_expiry IS NOT NULL AND registration_expiry < ?)
-           OR (insurance_expiry IS NOT NULL AND insurance_expiry < ?)
        )",
-    [$today, $today, $today]
+    [$today, $today]
 );
 
 $initExpiringSoonCount = db_count(
@@ -171,9 +162,8 @@ $initExpiringSoonCount = db_count(
        AND (
            (cvi_expiry IS NOT NULL AND cvi_expiry >= ? AND cvi_expiry <= ?)
            OR (registration_expiry IS NOT NULL AND registration_expiry >= ? AND registration_expiry <= ?)
-           OR (insurance_expiry IS NOT NULL AND insurance_expiry >= ? AND insurance_expiry <= ?)
        )",
-    [$today, $in30, $today, $in30, $today, $in30]
+    [$today, $in30, $today, $in30]
 );
 
 // Yard list for filter dropdown
@@ -220,14 +210,6 @@ require_once FF_ROOT . '/includes/header.php';
 .compliance-pdf-link--reg:hover {
     background: #dbeafe; border-color: #60a5fa; color: #1d4ed8;
 }
-/* Insurance — teal/green (coverage/protection) */
-.compliance-pdf-link--ins {
-    color: #0d9488; background: #f0fdfa; border: 1px solid #99f6e4;
-}
-.compliance-pdf-link--ins:hover {
-    background: #ccfbf1; border-color: #5eead4; color: #0f766e;
-}
-
 /* Clickable date cells — clear interactive affordance */
 .compliance-cell-edit {
     padding: 3px 6px;
@@ -424,9 +406,6 @@ require_once FF_ROOT . '/includes/header.php';
                             <th @click="setSort('registration_expiry')" style="cursor:pointer;white-space:nowrap;">
                                 Registration <span x-text="sortIcon('registration_expiry')"></span>
                             </th>
-                            <th @click="setSort('insurance_expiry')" style="cursor:pointer;white-space:nowrap;">
-                                Insurance <span x-text="sortIcon('insurance_expiry')"></span>
-                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -518,46 +497,6 @@ require_once FF_ROOT . '/includes/header.php';
                                            title="View Registration document"
                                            @click.stop
                                            class="compliance-pdf-link compliance-pdf-link--reg">
-                                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                                            PDF
-                                        </a>
-                                    </div>
-                                </td>
-
-                                <!-- Insurance cell -->
-                                <td :style="cellStyle(row.insurance_expiry)"
-                                    style="white-space:nowrap;">
-                                    <div style="display:flex;align-items:center;gap:6px;">
-                                        <div style="flex:1;"
-                                             <?php if (can('compliance', 'edit')): ?>
-                                             class="compliance-cell-edit"
-                                             @click="openModal(row, 'insurance')"
-                                             <?php endif; ?>>
-                                            <template x-if="row.insurance_expiry || row.insurance_from">
-                                                <div>
-                                                    <div x-show="row.insurance_from"
-                                                         style="font-size:0.75rem;opacity:0.75;margin-bottom:2px;"
-                                                         x-text="'From: ' + row.insurance_from"></div>
-                                                    <div class="font-mono" style="font-size:0.875rem;"
-                                                         x-text="row.insurance_expiry ? 'To: ' + row.insurance_expiry : '—'"></div>
-                                                </div>
-                                            </template>
-                                            <template x-if="!row.insurance_expiry && !row.insurance_from">
-                                                <span class="text-secondary" style="font-size:0.875rem;">—</span>
-                                            </template>
-                                            <?php if (can('compliance', 'edit')): ?>
-                                            <div class="compliance-edit-hint">
-                                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                                Edit
-                                            </div>
-                                            <?php endif; ?>
-                                        </div>
-                                        <a x-show="row.insurance_doc_url"
-                                           :href="row.insurance_doc_url"
-                                           target="_blank"
-                                           title="View Insurance document"
-                                           @click.stop
-                                           class="compliance-pdf-link compliance-pdf-link--ins">
                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                                             PDF
                                         </a>
@@ -668,7 +607,7 @@ function FF_Compliance() {
             open:       false,
             unitId:     null,
             unitNumber: '',
-            docType:    '',    // cvi | registration | insurance
+            docType:    '',    // cvi | registration
             docLabel:   '',    // CVI | Registration | Insurance
             fromDate:   '',
             expiryDate: '',
@@ -770,7 +709,7 @@ function FF_Compliance() {
 
         // ── Open modal with both from + expiry pre-filled ─────────────────────
         openModal(row, docType) {
-            const labels = { cvi: 'CVI', registration: 'Registration', insurance: 'Insurance' };
+            const labels = { cvi: 'CVI', registration: 'Registration' };
             this.modal = {
                 open:       true,
                 unitId:     row.id,

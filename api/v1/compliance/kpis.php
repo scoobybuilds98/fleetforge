@@ -36,9 +36,8 @@ $expiredCount = db_count(
        AND (
            (cvi_expiry IS NOT NULL AND cvi_expiry < ?)
            OR (registration_expiry IS NOT NULL AND registration_expiry < ?)
-           OR (insurance_expiry IS NOT NULL AND insurance_expiry < ?)
        )",
-    [$today, $today, $today]
+    [$today, $today]
 );
 
 $expiringSoonCount = db_count(
@@ -47,9 +46,8 @@ $expiringSoonCount = db_count(
        AND (
            (cvi_expiry IS NOT NULL AND cvi_expiry >= ? AND cvi_expiry <= ?)
            OR (registration_expiry IS NOT NULL AND registration_expiry >= ? AND registration_expiry <= ?)
-           OR (insurance_expiry IS NOT NULL AND insurance_expiry >= ? AND insurance_expiry <= ?)
        )",
-    [$today, $in30, $today, $in30, $today, $in30]
+    [$today, $in30, $today, $in30]
 );
 
 json_success([

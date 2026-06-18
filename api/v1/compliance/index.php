@@ -4,13 +4,12 @@ declare(strict_types=1);
 /**
  * api/v1/compliance/index.php
  *
- * Paginated list of equipment units with CVI, Registration, and Insurance
- * compliance data. MVI is excluded — only the three customer-facing documents
- * are tracked here.
+ * Paginated list of equipment units with CVI and Registration compliance data.
+ * MVI and Insurance are excluded.
  *
  * Each row includes:
  *   - Expiry date (to) for each doc type
- *   - "From" date (directly stored cvi_from_date / registration_from_date / insurance_from_date)
+ *   - "From" date (directly stored cvi_from_date / registration_from_date)
  *   - Signed download URL for the document when one is on file
  *     (via StorageClient::url() → api/v1/storage/serve.php)
  *
@@ -73,19 +72,16 @@ if (clean_string($_GET['expired_only'] ?? '') === '1') {
     $where[] = "(
         (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry < CURDATE())
         OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry < CURDATE())
-        OR (eu.insurance_expiry IS NOT NULL AND eu.insurance_expiry < CURDATE())
     )";
 }
 
-// Filter: window — units with ANY of the 3 expiry dates <= CURDATE + N days
+// Filter: window — units with CVI or Registration expiry <= CURDATE + N days
 $window = clean_int($_GET['window'] ?? 0) ?? 0;
 if ($window > 0) {
     $where[]  = "(
         (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
         OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
-        OR (eu.insurance_expiry IS NOT NULL AND eu.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
     )";
-    $params[] = $window;
     $params[] = $window;
     $params[] = $window;
 }
@@ -102,7 +98,7 @@ if ($q = clean_string($_GET['q'] ?? null)) {
 // 2. Sort allowlist — mvi_expiry removed
 // -----------------------------------------------------------------------
 $allowedSorts = ['unit_number', 'template_name', 'yard_location', 'status',
-                 'cvi_expiry', 'registration_expiry', 'insurance_expiry'];
+                 'cvi_expiry', 'registration_expiry'];
 $sort    = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'unit_number';
 $dir     = strtoupper($_GET['dir'] ?? '') === 'DESC' ? 'DESC' : 'ASC';
 $orderBy = ($sort === 'template_name') ? "et.name $dir" : "eu.$sort $dir";
@@ -150,11 +146,6 @@ $rows = db_select(
          eu.registration_from_date AS registration_from,
          eu.registration_document,
 
-         -- Insurance
-         eu.insurance_expiry,
-         eu.insurance_from_date  AS insurance_from,
-         eu.insurance_document,
-
          eu.updated_at
      FROM equipment_units eu
      JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
@@ -166,8 +157,8 @@ $rows = db_select(
 
 // -----------------------------------------------------------------------
 // 6. Post-process — convert raw file paths to signed download URLs (Trap 7)
-//    Raw cvi_document / registration_document / insurance_document are server
-//    filesystem keys and must never be returned as-is to the client.
+//    Raw cvi_document / registration_document are server filesystem keys
+//    and must never be returned as-is to the client.
 // -----------------------------------------------------------------------
 foreach ($rows as &$row) {
     // CVI document URL
@@ -189,15 +180,6 @@ foreach ($rows as &$row) {
         } catch (\Throwable) {}
     }
     unset($row['registration_document']);
-
-    // Insurance document URL
-    $row['insurance_doc_url'] = null;
-    if (!empty($row['insurance_document'])) {
-        try {
-            $row['insurance_doc_url'] = StorageClient::url($row['insurance_document'], 3600);
-        } catch (\Throwable) {}
-    }
-    unset($row['insurance_document']);
 }
 unset($row);
 

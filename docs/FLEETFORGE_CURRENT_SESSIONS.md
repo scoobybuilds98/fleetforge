@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-COMPLIANCE-HIDE-INSURANCE** — SHIPPED 2026-06-18 (see PROGRESS.md SESSION LOG row). Removed Insurance column from compliance module (UI, CSV export, KPI queries, API). CVI and Registration remain. No schema changes. php -l 3/3 PASS.
+
 **S-LEASE-HOURLY-RATE** — SHIPPED 2026-06-18 (see PROGRESS.md SESSION LOG row). Added `leases.hourly_rate DECIMAL(10,4) NULL` (migration 202606182400). Wired through create/update/show/edit forms and Amend Rates modal. GPS row moved to main rates block (after Monthly Rate, always shows when gps_opt_in=1). php -l 7/7 PASS; D131 6/6 PASS.
 
 **S-GPS-RATE-PENDING-AMEND** — SHIPPED 2026-06-18 (see PROGRESS.md SESSION LOG row). Follow-on: "Amend Rates" was gated `active` only — pending lease #22 had no UI path to fix gps_cost. Relaxed both `show.php` x-show and `amend_rate.php` status gate to accept `pending`. php -l 2/2 PASS.
