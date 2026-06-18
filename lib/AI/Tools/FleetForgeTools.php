@@ -57,6 +57,7 @@ class FleetForgeTools
             'get_credit_application_details' => self::getCreditApplicationDetails($input, $userId),
             'get_service_requests'           => self::getServiceRequests($input, $userId),
             'get_service_request_details'    => self::getServiceRequestDetails($input, $userId),
+            'get_documents'                  => self::getDocuments($input, $userId),
 
             // Fleet / Equipment tools
             'get_fleet_summary'        => self::getFleetSummary(),
@@ -783,6 +784,85 @@ class FleetForgeTools
             [$id]
         );
         return $row;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  DOCUMENT TOOLS (S-AI-READ-GAPS-2) — per-entity-type permission scoped
+    // ════════════════════════════════════════════════════════════
+
+    // List document METADATA (never file contents or storage paths). Filters:
+    // entity_type, entity_id, document_type, query, expiring_within_days,
+    // current_only. Results scoped to the entity types the caller can view.
+    private static function getDocuments(array $input, ?int $userId): array|string
+    {
+        $allTypes = ['customer', 'equipment_unit', 'lease', 'inspection', 'damage_claim', 'contract', 'service_request'];
+
+        // Permission scope: keep only entity types the caller may view, using the
+        // same module map the document endpoints use (document_entity_module()).
+        $allowed = [];
+        foreach ($allTypes as $t) {
+            if ($userId === null || \can(\document_entity_module($t), 'view')) {
+                $allowed[] = $t;
+            }
+        }
+        if (!$allowed) {
+            return 'You do not have permission to view documents.';
+        }
+
+        $where  = ['d.deleted_at IS NULL'];
+        $params = [];
+
+        $reqType = trim($input['entity_type'] ?? '');
+        if ($reqType !== '') {
+            if (!in_array($reqType, $allTypes, true)) {
+                return 'Invalid entity_type. Valid: ' . implode(', ', $allTypes) . '.';
+            }
+            if (!in_array($reqType, $allowed, true)) {
+                return "You do not have permission to view {$reqType} documents.";
+            }
+            $where[] = 'd.entity_type = ?'; $params[] = $reqType;
+        } else {
+            $ph = implode(',', array_fill(0, count($allowed), '?'));
+            $where[] = "d.entity_type IN ({$ph})";
+            array_push($params, ...$allowed);
+        }
+
+        if (($eid = (int) ($input['entity_id'] ?? 0)) > 0) {
+            $where[] = 'd.entity_id = ?'; $params[] = $eid;
+        }
+        if (($dt = trim($input['document_type'] ?? '')) !== '') {
+            $where[] = 'd.document_type = ?'; $params[] = $dt;
+        }
+        if (($q = trim($input['query'] ?? '')) !== '') {
+            $where[] = '(d.title LIKE ? OR d.file_name LIKE ?)';
+            $like = "%{$q}%"; $params[] = $like; $params[] = $like;
+        }
+        if (($expDays = (int) ($input['expiring_within_days'] ?? 0)) > 0) {
+            $where[] = 'd.expiration_date IS NOT NULL AND d.expiration_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)';
+            $params[] = $expDays;
+        }
+        if (!empty($input['current_only'])) {
+            $where[] = 'd.is_current = 1';
+        }
+
+        // Trap 7: file_path is deliberately NOT selected — storage paths never
+        // reach the AI. No signed URL either (the AI doesn't fetch files).
+        return db_select(
+            "SELECT d.id, d.entity_type, d.entity_id, d.document_type, d.title,
+                    d.file_name, d.file_size_kb, d.mime_type, d.expiration_date,
+                    d.version, d.is_current, d.is_private, d.notes, d.uploaded_at,
+                    u.name AS uploaded_by_name,
+                    COALESCE(c.company_name, eu.unit_number, l.contract_number,
+                             CONCAT(d.entity_type, ' #', d.entity_id)) AS entity_label
+             FROM documents d
+             LEFT JOIN users u ON u.id = d.uploaded_by AND u.deleted_at IS NULL
+             LEFT JOIN customers c ON d.entity_type = 'customer' AND d.entity_id = c.id AND c.deleted_at IS NULL
+             LEFT JOIN equipment_units eu ON d.entity_type = 'equipment_unit' AND d.entity_id = eu.id AND eu.deleted_at IS NULL
+             LEFT JOIN leases l ON d.entity_type = 'lease' AND d.entity_id = l.id AND l.deleted_at IS NULL
+             WHERE " . implode(' AND ', $where) . "
+             ORDER BY d.uploaded_at DESC LIMIT " . ToolRegistry::MAX_ROWS,
+            $params
+        );
     }
 
     // ════════════════════════════════════════════════════════════

@@ -501,6 +501,39 @@ try {
     $catSum = array_sum($fs['by_category'] ?? []);
     ($catSum === (int)($fs['total_units'] ?? -1)) ? $pass("fleet summary: category counts sum to total ({$catSum})") : $fail("fleet summary: category sum {$catSum} != total ".($fs['total_units']??'?'));
 
+    // ════ 3m. READ TOOL: documents (metadata only, never file_path) ════
+    $du = db_row("SELECT id, unit_number FROM equipment_units WHERE deleted_at IS NULL ORDER BY id LIMIT 1");
+    if ($du) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            $docId = db_insert('documents', [
+                'entity_type'=>'equipment_unit','entity_id'=>(int)$du['id'],'title'=>'Smoke CVI Certificate',
+                'document_type'=>'cvi','file_path'=>'documents/equipment_unit/secret_path.pdf','file_name'=>'cvi.pdf',
+                'mime_type'=>'application/pdf','expiration_date'=>date('Y-m-d', time()+30*86400),
+            ]);
+            $list = json_decode(ToolRegistry::execute('get_documents', ['entity_type'=>'equipment_unit','entity_id'=>(int)$du['id']], $userId), true);
+            $hit = is_array($list) ? ($list[0] ?? null) : null;
+            ($hit && ($hit['title']??null)==='Smoke CVI Certificate' && ($hit['file_name']??null)==='cvi.pdf') ? $pass("documents: list returns metadata for the unit") : $fail("documents: list ".json_encode($list));
+            ($hit && !array_key_exists('file_path',$hit)) ? $pass("documents: file_path NEVER emitted (Trap 7)") : $fail("documents: file_path leaked!");
+            ($hit && ($hit['entity_label']??null)===$du['unit_number']) ? $pass("documents: entity_label resolves to unit_number") : $fail("documents: entity_label ".json_encode($hit['entity_label']??null));
+            $exp = json_decode(ToolRegistry::execute('get_documents', ['expiring_within_days'=>60], $userId), true);
+            (is_array($exp) && count(array_filter($exp, fn($d)=>($d['id']??0)==$docId))>=1) ? $pass("documents: expiring_within_days surfaces the doc") : $fail("documents: expiring filter missed it");
+        } catch (\Throwable $e) {
+            $fail("documents: threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+    // permission scope: non-admin without equipment:view can't see equipment_unit docs
+    $savedPerms2 = $_SESSION['ff_user']['permissions'] ?? [];
+    $savedRole2  = $_SESSION['ff_user']['role_slug'] ?? null;
+    $_SESSION['ff_user']['role_slug']   = 'dispatcher';
+    $_SESSION['ff_user']['permissions'] = ['leases'=>['view'=>1]]; // no equipment:view
+    stripos(ToolRegistry::execute('get_documents', ['entity_type'=>'equipment_unit'], $userId), 'permission') !== false ? $pass("documents: per-entity-type permission scope enforced") : $fail("documents: scope not enforced");
+    $_SESSION['ff_user']['permissions'] = $savedPerms2;
+    $_SESSION['ff_user']['role_slug']   = $savedRole2;
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

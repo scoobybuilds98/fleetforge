@@ -221,6 +221,23 @@ class ToolRegistry
                 ],
                 '_tags' => ['chat', 'summary'],
             ],
+            [
+                'name' => 'get_documents',
+                'description' => "List uploaded document METADATA (titles, types, file names, sizes, expiry dates, who uploaded, which record they're attached to). Does NOT return file contents or storage paths. Filter by entity_type (customer/equipment_unit/lease/inspection/damage_claim/contract/service_request), entity_id (the attached record's id), document_type (e.g. cvi, registration, insurance, contract, tax_exemption), a title/filename search, or expiring_within_days (documents with their own expiration_date coming due — distinct from equipment compliance dates, which are get_expiring_documents). Use for \"what documents are on file for unit X / customer Y\", \"which uploaded documents expire soon\".",
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'entity_type'          => ['type' => 'string', 'enum' => ['customer', 'equipment_unit', 'lease', 'inspection', 'damage_claim', 'contract', 'service_request', ''], 'description' => 'Type of record the document is attached to'],
+                        'entity_id'            => ['type' => 'integer', 'description' => 'ID of the attached record (use with entity_type)'],
+                        'document_type'        => ['type' => 'string', 'description' => 'Filter by document type (cvi, registration, insurance, contract, tax_exemption, etc.)'],
+                        'query'                => ['type' => 'string', 'description' => 'Search the document title or file name'],
+                        'expiring_within_days' => ['type' => 'integer', 'description' => 'Only documents whose own expiration_date falls within this many days'],
+                        'current_only'         => ['type' => 'boolean', 'description' => 'Only the current version of each document'],
+                    ],
+                    'required' => [],
+                ],
+                '_tags' => ['chat', 'summary', 'report'],
+            ],
 
             // ── Fleet / Equipment Tools ─────────────────────────
             [

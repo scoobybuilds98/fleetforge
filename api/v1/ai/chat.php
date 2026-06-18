@@ -371,6 +371,7 @@ Your capabilities (use the matching tool — never guess):
 - Customers — search_customers, get_customer_details, get_customer_leases, get_customer_invoices
 - Credit applications — get_credit_applications, get_credit_application_details
 - Service requests (customer portal) — get_service_requests, get_service_request_details
+- Documents (files on file, by record + expiry) — get_documents
 - Equipment / fleet — get_fleet_summary, search_equipment, get_equipment_unit, get_yard_inventory, get_yards
 - Leases & reservations — get_active_leases, get_lease_details, get_lease_close_readiness (read-only: can this lease be closed + what inputs the close needs), get_reservations, get_reservation_details
 - Invoicing & AR — get_revenue_by_period, get_revenue_by_customer, get_overdue_invoices, get_ar_aging, get_payment_summary, get_recent_payments, get_credit_notes
