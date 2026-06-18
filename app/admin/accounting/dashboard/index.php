@@ -108,6 +108,12 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title h4">Accounting Dashboard</h1>
     <div class="page-header-actions">
+        <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_fleet_0_accounting_overview_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:13px;height:13px;color:var(--color-primary);filter:drop-shadow(0 0 3px rgba(249,115,22,0.5));" aria-hidden="true"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
+            AI Analysis
+        </button>
+        <?php endif; ?>
         <?php if (can('journal_entries', 'create')): ?>
         <a href="<?= base_url('accounting/journal-entries') ?>" class="btn btn-primary btn-sm">
             + New Journal Entry
@@ -236,10 +242,10 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
      ============================================================ -->
 <?php
 $aiSummaryEntityType = 'fleet';
-$aiSummaryEntityId   = 0;  // fleet-level summaries don't need an entity_id
+$aiSummaryEntityId   = 0;
 $aiSummaryType       = 'accounting_overview';
 $aiSummaryTitle      = 'AI Accounting Overview';
-include FF_ROOT . '/includes/partials/ai-summary-card.php';
+include FF_ROOT . '/includes/partials/ai-panel.php';
 ?>
 
 <!-- ============================================================
