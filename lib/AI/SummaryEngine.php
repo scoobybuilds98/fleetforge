@@ -294,15 +294,19 @@ class SummaryEngine
 
         // Line items
         $lines = db_select(
-            "SELECT description, quantity, unit_price, line_total, line_type
-             FROM invoice_line_items WHERE invoice_id = ? ORDER BY id",
+            "SELECT description, quantity, unit_price, amount, item_type
+             FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order, id",
             [$invoiceId]
         );
 
-        // Payments against this invoice
+        // Payments applied to this invoice (via allocation table)
         $payments = db_select(
-            "SELECT amount, payment_date, payment_method, notes
-             FROM payments WHERE invoice_id = ? AND deleted_at IS NULL ORDER BY payment_date DESC LIMIT 10",
+            "SELECT p.payment_number, pa.amount AS allocated_amount, p.amount AS payment_total,
+                    p.payment_date, p.payment_method, p.status, p.notes
+             FROM payment_allocations pa
+             JOIN payments p ON p.id = pa.payment_id AND p.deleted_at IS NULL
+             WHERE pa.invoice_id = ?
+             ORDER BY p.payment_date DESC LIMIT 10",
             [$invoiceId]
         );
 
