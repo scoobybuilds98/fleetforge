@@ -246,6 +246,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <?php endif; ?>
     </div>
 
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
+        <div class="stat-label">VIN</div>
+        <div class="stat-value stat-value--vin"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
+    </div>
+
     <div class="stat-card stat-card--blue">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-map-pin"/></svg></span>
         <div class="stat-label">Mileage</div>
@@ -283,12 +289,6 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <?php else: ?>
         <div class="stat-value text-secondary">—</div>
         <?php endif; ?>
-    </div>
-
-    <div class="stat-card stat-card--slate">
-        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
-        <div class="stat-label">VIN</div>
-        <div class="stat-value stat-value--vin"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
     </div>
 
     <?php
