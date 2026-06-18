@@ -112,6 +112,14 @@ class HolisticLeaseEngine
             ? (string)$params['extent_end']
             : $periodEnd;
 
+        // S-LEASE-MIN-DAYS — short-lease floor (N days). Resolved upstream from
+        // the three config layers (rate_card_items.minimum_days · leases
+        // .minimum_billing_days · settings 'lease.minimum_billing_days') and
+        // passed in as 'minimum_days'. 0 (absent / operator-disabled) is a
+        // no-op; cumulativeCorrect() applies the >=2 / total<minDays / daily>0
+        // binding rules.
+        $minDays = (int)($params['minimum_days'] ?? 0);
+
         // ── Step 1: day counts (R2 §7.1, D14 inclusive) ───────────
         // total_days_at_period_end is the forensic "days elapsed at this
         // invoice's period end" — days from start through period_end. The
@@ -143,8 +151,11 @@ class HolisticLeaseEngine
         // single-month-flat rule plus this running reconciliation give the
         // same protection (a 22–30 day single-month lease pays the flat
         // month; a known span prorates immediately).
+        // S-LEASE-MIN-DAYS — $minDays passed as the trailing arg; the engine
+        // floors the cumulative amount to a flat $minDays × daily when the
+        // total billable duration is below the configured minimum.
         $cc = $this->cumulativeCorrect(
-            $startDate, $periodEnd, $extentEnd, $daily, $weekly, $monthly
+            $startDate, $periodEnd, $extentEnd, $daily, $weekly, $monthly, $minDays
         );
         $cumulativeCorrect = $cc['amount'];
         $tier              = $cc['tier'];
@@ -227,6 +238,9 @@ class HolisticLeaseEngine
             'period_end'         => $periodEnd,
             'period_days'        => $periodDays,
             'extent_end'         => $extentEnd,
+            // S-LEASE-MIN-DAYS — record the resolved floor so an auditor can
+            // replay whether the daily_minimum override could have bound.
+            'minimum_days'       => $minDays,
             'total_days_so_far'  => $totalDays,
             'tier'               => $tier,
             'basis'              => $cc['basis'],
@@ -288,6 +302,21 @@ class HolisticLeaseEngine
      * extent even if a caller passes a period_end beyond it (e.g. the
      * monthly cron's Y-m-t end on a lease that returns mid-month).
      *
+     * S-LEASE-MIN-DAYS — $minDays is the short-lease floor: when the lease's
+     * TOTAL billable duration (start through E) is shorter than $minDays, the
+     * normal tier ladder is overridden by a FLAT $minDays × daily_rate charge
+     * (tier='daily_minimum'). Resolved by the caller from the three config
+     * layers (rate card item · lease · global setting); 0/1/NULL disables it.
+     *
+     * @param string $start       Lease start_date (Y-m-d)
+     * @param string $throughDate This invoice's billing_period_end (Y-m-d)
+     * @param string $extentEnd   Known extent E (return / end_date / billing date)
+     * @param string $daily       Daily rate (bcmath)
+     * @param string $weekly      Weekly rate (bcmath)
+     * @param string $monthly     Monthly rate (bcmath)
+     * @param int    $minDays     S-LEASE-MIN-DAYS short-lease floor in days;
+     *                            binds only when >= 2 AND total < minDays AND
+     *                            daily_rate > 0. 0/1 (or default) = no floor.
      * @return array{amount:string, tier:string, basis:string,
      *               explanation:array<string>, segments:array}
      */
@@ -297,7 +326,8 @@ class HolisticLeaseEngine
         string $extentEnd,
         string $daily,
         string $weekly,
-        string $monthly
+        string $monthly,
+        int $minDays = 0
     ): array {
         // Clamp the cumulative window to the known extent (never bill past E).
         $through = (self::ymd($throughDate) > self::ymd($extentEnd))
@@ -312,6 +342,25 @@ class HolisticLeaseEngine
         if ($total <= 0) {
             return ['amount' => '0.00', 'tier' => 'none', 'basis' => 'none',
                     'explanation' => ['0 cumulative days — no charge'], 'segments' => []];
+        }
+
+        // S-LEASE-MIN-DAYS — short-lease floor. When the lease's TOTAL billable
+        // duration through E is shorter than the configured minimum, bill a FLAT
+        // $minDays × daily_rate, overriding the entire tier ladder below. We key
+        // on $total (start..E), NOT $daysThrough (this invoice's period), so the
+        // floor SELF-APPLIES at close/reconciliation (E shrinks to the actual
+        // return) and NEVER binds for an ongoing long lease (total grows past
+        // minDays). Guards: minDays>=2 (0/1/NULL = operator disabled the floor),
+        // total<minDays (long enough → normal ladder), and a positive daily rate
+        // (bccomp scale 6) so a daily-rate of 0 is a no-op and never floors to $0.
+        if ($minDays >= 2 && $total < $minDays && bccomp($daily, '0', 6) > 0) {
+            $amount = bcround(bcmul($daily, (string)$minDays, 6), 2);
+            return ['amount' => $amount, 'tier' => 'daily_minimum', 'basis' => 'daily_minimum',
+                    'explanation' => [
+                        "{$total} billable day(s) is below the {$minDays}-day minimum — "
+                            . "flat {$minDays} × \${$daily}/day = \${$amount} (daily_minimum)",
+                    ],
+                    'segments' => []];
         }
 
         // Monthly applies iff weekly math over the full extent exceeds the

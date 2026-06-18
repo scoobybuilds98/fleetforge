@@ -43,7 +43,11 @@ declare(strict_types=1);
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
  *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, defaults
  *              opt_in=true / cost=$1.00 if absent),
- *              po_number, notes, internal_notes, rate_notes, minimum_end_date
+ *              po_number, notes, internal_notes, rate_notes, minimum_end_date,
+ *              minimum_billing_days (S-LEASE-MIN-DAYS: short-lease floor frozen on
+ *              the lease — absent inherits settings 'lease.minimum_billing_days'
+ *              default 3; ''/null stores NULL = no minimum; numeric clamped 0..90,
+ *              where 0/1 mean "no minimum")
  * @auth        Session required; require_permission('leases','create')
  * @returns     201 { id, contract_number } | 409 UNIT_UNAVAILABLE | 422 validation errors
  *
@@ -216,6 +220,41 @@ if ($hourlyCostIn !== null && bccomp($hourlyCostIn, '0', 4) < 0) {
     $fields['hourly_rate'] = 'Hourly rate cannot be negative.';
 }
 $hourlyCost = ($hourlyCostIn !== null && bccomp($hourlyCostIn, '0', 4) >= 0) ? $hourlyCostIn : null;
+
+// ── S-LEASE-MIN-DAYS: short-lease floor (Config Layer 2 — frozen on lease) ──
+// Resolution rules (mirrors how clean_int rate fields above are ingested, but
+// with a three-way present/absent/empty distinction so an operator can BOTH
+// inherit the global default AND explicitly clear the minimum):
+//   • key ABSENT from body  → inherit the global default
+//       settings 'lease.minimum_billing_days' (Config Layer 3, default '3').
+//   • present but ''/null   → store NULL (operator deliberately cleared it = no
+//                             minimum on this lease; it does NOT re-inherit the
+//                             global default — an explicit clear wins).
+//   • present and numeric   → (int), clamped to 0..90. 0 and 1 are valid and
+//                             mean "no minimum" (floor binds only when N >= 2).
+// Non-numeric / out-of-range input is a hard validation error (no silent coerce),
+// matching the negative-rate rejection idiom used for the rate fields above.
+if (!array_key_exists('minimum_billing_days', $body)) {
+    // Absent → inherit the global default floor.
+    $minimumBillingDays = (int) settings_get('lease.minimum_billing_days', '3');
+} else {
+    $minDaysRaw = $body['minimum_billing_days'];
+    if ($minDaysRaw === null || $minDaysRaw === '') {
+        // Explicit clear → no per-lease minimum (NULL, not the global default).
+        $minimumBillingDays = null;
+    } elseif (is_numeric($minDaysRaw)) {
+        $minDaysInt = (int) $minDaysRaw;
+        if ($minDaysInt < 0 || $minDaysInt > 90) {
+            $fields['minimum_billing_days'] = 'Minimum billing days must be between 0 and 90.';
+            $minimumBillingDays = null;
+        } else {
+            $minimumBillingDays = $minDaysInt;
+        }
+    } else {
+        $fields['minimum_billing_days'] = 'Minimum billing days must be a whole number between 0 and 90.';
+        $minimumBillingDays = null;
+    }
+}
 
 $poNumber       = clean_string($body['po_number'] ?? null, 100);
 $notes          = clean_string($body['notes'] ?? null, 5000);
@@ -518,6 +557,7 @@ $createLease = function () use (
     $rateKmFinal, $rateMilesFinal, $allowKmFinal, $allowMilesFinal,
     $kmToMilesFinal, $milesToKmFinal,
     $prechargeEnabled, $prechargeAmount,
+    $minimumBillingDays,
     &$leaseId
 ) {
     // D20: FOR UPDATE — lock the unit row before status check
@@ -621,6 +661,9 @@ $createLease = function () use (
         'po_number'                => $poNumber,
         'notes'                    => $notes,
         'internal_notes'           => $internalNotes,
+        // S-LEASE-MIN-DAYS: frozen short-lease floor (Config Layer 2). NULL = no
+        // per-lease minimum; billing then consults rate-card item / global setting.
+        'minimum_billing_days'     => $minimumBillingDays,
         'estimated_mileage'        => $estimatedMileage,
         'estimated_mileage_km'     => $allowKmFinal,
         'estimated_mileage_miles'  => $allowMilesFinal,

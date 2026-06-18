@@ -382,6 +382,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                         <tr><td class="text-secondary">Daily Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.daily_rate).toFixed(2)"></td></tr>
                                         <tr><td class="text-secondary">Weekly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.weekly_rate).toFixed(2)"></td></tr>
                                         <tr><td class="text-secondary">Monthly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.monthly_rate).toFixed(2)"></td></tr>
+                                        <!-- S-LEASE-MIN-DAYS: short-lease minimum billing floor. The floor
+                                             only binds when minDays >= 2, so 0/1/null render as an em-dash
+                                             ("no minimum"); a binding value shows "N days". -->
+                                        <tr><td class="text-secondary">Minimum Billing</td>
+                                            <td x-text="parseInt(lease.minimum_billing_days) >= 2 ? parseInt(lease.minimum_billing_days) + ' days' : '—'"></td>
+                                        </tr>
                                         <tr x-show="parseInt(lease.gps_opt_in) === 1">
                                             <td class="text-secondary">GPS Tracking</td>
                                             <td class="font-mono" x-text="parseFloat(lease.gps_cost) > 0 ? 'Included · $' + parseFloat(lease.gps_cost).toFixed(2) + ' / day' : 'Included'"></td>

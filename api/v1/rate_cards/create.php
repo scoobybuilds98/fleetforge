@@ -17,6 +17,8 @@ declare(strict_types=1);
  *     S-RATE-CARD-TEMPLATE-ITEM: template_id=NULL = category-level row;
  *     template_id=X = template-specific row. No two items may share the same
  *     (equipment_type, template_id) pair on a card.
+ *     S-LEASE-MIN-DAYS: optional per-item minimum_days (nullable unsigned int 0..90;
+ *     empty/absent = NULL) — the short-lease daily floor for this equipment.
  *   - D16: rate values via clean_decimal(), stored as strings for bcmath.
  *   - Audit log: action='create', module='rates', entity_type='rate_card'.
  *
@@ -182,6 +184,18 @@ if (!empty($body['items']) && is_array($body['items'])) {
             $itemHadError = true;
         }
 
+        // S-LEASE-MIN-DAYS: per-equipment short-lease floor (rate_card_items.minimum_days
+        // TINYINT UNSIGNED NULL). Nullable unsigned int 0..90; empty/absent → NULL (no floor).
+        // 0/1 persist but disable the floor downstream (NO-OP in the billing engines).
+        $minimumDays = null;
+        if (isset($item['minimum_days']) && $item['minimum_days'] !== '' && $item['minimum_days'] !== null) {
+            $minimumDays = clean_int($item['minimum_days']);
+            if ($minimumDays === null || $minimumDays < 0 || $minimumDays > 90) {
+                $itemErrors[] = "Item {$lineNum}: minimum days must be a whole number between 0 and 90.";
+                $itemHadError = true;
+            }
+        }
+
         if ($itemHadError) continue;
 
         $itemsToInsert[] = [
@@ -194,6 +208,7 @@ if (!empty($body['items']) && is_array($body['items'])) {
             'mileage_unit'          => $mileageUnit,
             'hourly_rate'           => $rates['hourly_rate'],
             'gps_price'             => $rates['gps_price'],
+            'minimum_days'          => $minimumDays, // S-LEASE-MIN-DAYS: NULL = no short-lease floor
             'currency'              => $currency,
             'notes'                 => clean_string($item['notes'] ?? null, 1000),
         ];

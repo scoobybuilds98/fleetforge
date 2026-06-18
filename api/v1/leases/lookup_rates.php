@@ -39,7 +39,11 @@ declare(strict_types=1);
  *   mileage_unit: "km"|"miles",
  *   currency: "CAD"|"USD",
  *   gps_price: string|null,   (S-GPS-RATE-ITEM: per-item GPS daily rate, null if not set or not applicable)
- *   hourly_rate: string|null  (S-RATECARD-HOURLY: per-item hourly rate, null if not set)
+ *   hourly_rate: string|null, (S-RATECARD-HOURLY: per-item hourly rate, null if not set)
+ *   minimum_days: int|null     (S-LEASE-MIN-DAYS: per-item short-lease floor — bill a
+ *                               flat N x daily rate when the lease runs fewer than N
+ *                               days. Only populated from a rate_card_items match;
+ *                               null on the template and "none" branches.)
  * }
  *
  * Decisions: D5 (soft delete on rate_cards), D16 (bcmath strings), D7 (routing)
@@ -114,6 +118,7 @@ $today         = date('Y-m-d');
 $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
             rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price, rci.currency,
+            rci.minimum_days,
             rc.name AS card_name, rc.customer_id
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
@@ -150,6 +155,10 @@ if ($rateCardItem) {
         'hourly_rate'  => $rateCardItem['hourly_rate'],
         'currency'     => $rateCardItem['currency'],
         'gps_price'    => $rateCardItem['gps_price'],
+        // S-LEASE-MIN-DAYS: per-item short-lease floor (Config Layer 1, highest
+        // priority). NULL when this rate-card item sets no minimum. The lease
+        // create form pre-fills minimum_billing_days from this when present.
+        'minimum_days' => $rateCardItem['minimum_days'],
     ]);
 }
 
@@ -174,6 +183,11 @@ if ($hasTemplateRates) {
         'hourly_rate'  => $template['default_hourly_rate'],
         'currency'     => $template['default_currency'] ?? 'CAD',
         'gps_price'    => null,
+        // S-LEASE-MIN-DAYS: templates carry no per-item minimum (Config Layer 1
+        // lives on rate_card_items only). Always null here so the response shape
+        // is consistent across all branches; the lease falls back to its frozen
+        // minimum_billing_days / the global setting default downstream.
+        'minimum_days' => null,
     ]);
 }
 
@@ -191,4 +205,7 @@ json_success([
     'hourly_rate'  => null,
     'currency'     => 'CAD',
     'gps_price'    => null,
+    // S-LEASE-MIN-DAYS: no rate source resolved → no per-item minimum. Keep the
+    // key present (null) so every lookup_rates response has an identical shape.
+    'minimum_days' => null,
 ]);

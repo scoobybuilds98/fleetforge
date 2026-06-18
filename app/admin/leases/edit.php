@@ -214,6 +214,21 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.rate_notes" maxlength="5000">
                         <?php endif; ?>
                     </div>
+                    <!-- S-LEASE-MIN-DAYS — short-lease minimum billing floor (frozen at
+                         creation, operator-overridable). When the lease's total billable
+                         duration is shorter than this, billing flat-charges N × daily
+                         rate instead of the tier ladder. Blank/0/1 = none. Editable on
+                         pending leases only; shown read-only once active. -->
+                    <div class="form-group">
+                        <label class="form-label"<?= $isActive ? '' : ' for="minimum_billing_days"' ?>>Minimum Billing Days</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;"><?= ((int)($lease['minimum_billing_days'] ?? 0) >= 2) ? e((string)(int)$lease['minimum_billing_days']) : '—' ?></div>
+                        <?php else: ?>
+                        <input type="number" id="minimum_billing_days" class="form-control font-mono"
+                               x-model="form.minimum_billing_days" step="1" min="0" placeholder="0">
+                        <div class="form-hint">Short-lease floor. If returned sooner, bills this many days × daily rate. Blank or 0 = none.</div>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
         </div>
@@ -612,6 +627,8 @@ function FF_EditLease() {
             end_date:                <?= json_encode($lease['end_date'] ?? '') ?>,
             minimum_end_date:        <?= json_encode($lease['minimum_end_date'] ?? '') ?>,
             rate_notes:              <?= json_encode($lease['rate_notes'] ?? '') ?>,
+            // S-LEASE-MIN-DAYS: frozen short-lease floor, editable on pending leases.
+            minimum_billing_days:    <?= json_encode($lease['minimum_billing_days'] ?? '') ?>,
             mileage_at_end:          <?= json_encode($lease['mileage_at_end'] ?? '') ?>,
             insurance_opt_in:        <?= $lease['insurance_opt_in'] ? 'true' : 'false' ?>,
             insurance_cost:          <?= json_encode($lease['insurance_cost'] ?? '0.00') ?>,

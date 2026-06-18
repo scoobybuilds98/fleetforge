@@ -40,10 +40,14 @@ class ProRateCalculator
      * @param string $daily   Daily rate as string decimal
      * @param string $weekly  Weekly rate as string decimal
      * @param string $monthly Monthly rate as string decimal
+     * @param int    $minDays Short-lease minimum-billing-days floor (S-LEASE-MIN-DAYS).
+     *                        When >= 2 and $days < $minDays and $daily > 0, the whole
+     *                        tier ladder is bypassed and a FLAT $minDays × daily_rate is
+     *                        billed instead. 0/1 (or NULL upstream → 0) disables the floor.
      * @return array{amount: string, method: string, explanation: string[]}
      * @throws BillingRateException When any branch would produce $0 for days > 0.
      */
-    public function calculate(int $days, string $daily, string $weekly, string $monthly): array
+    public function calculate(int $days, string $daily, string $weekly, string $monthly, int $minDays = 0): array
     {
         // Zero or negative days — no charge (legitimate zero, not a bug)
         if ($days <= 0) {
@@ -51,6 +55,30 @@ class ProRateCalculator
                 'amount'      => '0.00',
                 'method'      => 'none',
                 'explanation' => ['0 billable days — no charge'],
+            ];
+        }
+
+        // S-LEASE-MIN-DAYS: short-lease minimum-billing-days floor.
+        // WHY: chassis (and other) leases returned in fewer than $minDays days must
+        // bill a FLAT $minDays × daily_rate, overriding the normal daily/weekly/monthly
+        // tier selection entirely. This sits ABOVE the tier ladder so a 1-day return on
+        // a 3-day-minimum lease bills 3 × daily instead of 1 × daily.
+        // WHY the exact guards: only binds when minDays >= 2 (0/1/NULL→0 is a no-op,
+        // a 1-day floor is identical to plain daily) AND $days < $minDays (a lease that
+        // already runs the minimum or longer never floors — this is what makes it
+        // self-apply at close and never bind for ongoing long leases) AND daily_rate > 0
+        // (a $0 daily is a no-op — flooring it would just bill $0). bccomp at scale 6 to
+        // match the money-precision idiom used throughout this engine (D16, bcmath only).
+        if ($minDays >= 2 && $days < $minDays && bccomp($daily, '0', 6) > 0) {
+            // FLAT minDays × daily, rounded to cents — replaces the tier ladder.
+            $rounded = bcround(bcmul($daily, (string)$minDays, 6), 2);
+            return [
+                'amount'      => $rounded,
+                'method'      => 'daily_minimum',
+                'explanation' => [
+                    "{$days} billable day(s) is below the {$minDays}-day minimum — "
+                    . "flat {$minDays} days × \${$daily}/day = \${$rounded} (daily_minimum)",
+                ],
             ];
         }
 

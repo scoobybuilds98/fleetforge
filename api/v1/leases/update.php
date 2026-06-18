@@ -32,6 +32,8 @@ declare(strict_types=1);
  *              km_to_miles_conversion, miles_to_km_conversion,
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
  *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, mutable),
+ *              minimum_billing_days (S-LEASE-MIN-DAYS: short-lease floor, mutable;
+ *              ''/null clears to NULL = no minimum, numeric cast to int 0..90),
  *              gst_exempt, pst_exempt
  *              NOTE: status is immutable here (uses dedicated state-machine
  *              endpoints — activate.php, close.php). daily_rate, weekly_rate,
@@ -267,6 +269,28 @@ if (array_key_exists('hourly_rate', $body)) {
         } else {
             $data['hourly_rate'] = $d;
         }
+    }
+}
+
+// ── S-LEASE-MIN-DAYS: short-lease floor (Config Layer 2) is operator-editable ──
+// Mutable here like insurance/warranty/gps (NOT a rate-immutable column — it's a
+// billing-policy floor, not a price). Partial-update guard mirrors the sibling
+// numeric fields: present + ''/null clears it to NULL (no per-lease minimum);
+// present + numeric is cast to int and clamped to 0..90 (0/1 mean "no minimum");
+// non-numeric / out-of-range is a hard validation error rather than a silent coerce.
+if (array_key_exists('minimum_billing_days', $body)) {
+    $raw = $body['minimum_billing_days'];
+    if ($raw === null || $raw === '') {
+        $data['minimum_billing_days'] = null;
+    } elseif (is_numeric($raw)) {
+        $i = (int) $raw;
+        if ($i < 0 || $i > 90) {
+            $fields['minimum_billing_days'] = 'Minimum billing days must be between 0 and 90.';
+        } else {
+            $data['minimum_billing_days'] = $i;
+        }
+    } else {
+        $fields['minimum_billing_days'] = 'Minimum billing days must be a whole number between 0 and 90.';
     }
 }
 

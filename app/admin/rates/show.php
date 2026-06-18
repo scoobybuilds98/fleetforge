@@ -7,6 +7,8 @@ declare(strict_types=1);
  * Rate card detail / edit page.
  * Two-panel layout: card metadata (incl. customer) + rate items table.
  * Equipment type dropdown uses category slugs (S-RATES-UI-CATEGORY-DEDUP fix).
+ * S-LEASE-MIN-DAYS: each rate item shows/edits minimum_days — the per-equipment
+ * short-lease daily floor (em-dash when null); persisted via update.php.
  *
  * D30: asset_url() / base_url().
  * D32: Only confirmed CSS classes.
@@ -44,7 +46,8 @@ $items = db_select(
     "SELECT rci.id, rci.equipment_type, rci.equipment_template_id,
             et.name AS equipment_template_name,
             rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price, rci.currency, rci.notes, rci.updated_at
+            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price,
+            rci.minimum_days, rci.currency, rci.notes, rci.updated_at
      FROM rate_card_items rci
      LEFT JOIN equipment_templates et ON et.id = rci.equipment_template_id AND et.deleted_at IS NULL
      WHERE rci.rate_card_id = ?
@@ -303,6 +306,11 @@ require_once FF_ROOT . '/includes/header.php';
                                         <span class="rate-item-card__v font-mono" x-show="item.gps_price"
                                               x-text="item.gps_price ? '$' + parseFloat(item.gps_price).toFixed(2) + '/day' : ''"></span>
 
+                                        <!-- S-LEASE-MIN-DAYS: short-lease floor; em-dash when null/none -->
+                                        <span class="rate-item-card__k">Min days</span>
+                                        <span class="rate-item-card__v font-mono"
+                                              x-text="(item.minimum_days !== null && item.minimum_days !== '' && item.minimum_days !== undefined) ? item.minimum_days : '—'"></span>
+
                                         <template x-if="!item.daily_rate && !item.weekly_rate && !item.monthly_rate && !item.mileage_rate && !item.hourly_rate && !item.gps_price">
                                             <span class="rate-item-card__empty">No rates set</span>
                                         </template>
@@ -454,6 +462,16 @@ require_once FF_ROOT . '/includes/header.php';
                                                        style="padding-left:22px;"
                                                        x-model="item.gps_price" step="0.01" min="0" placeholder="0.00">
                                             </div>
+                                        </div>
+
+                                        <!-- S-LEASE-MIN-DAYS: per-equipment short-lease floor. Blank = no
+                                             minimum; when a lease's total billable duration is shorter than
+                                             this many days, billing bills a flat N × daily rate. -->
+                                        <div>
+                                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">Min days</label>
+                                            <input type="number" class="form-control font-mono"
+                                                   x-model="item.minimum_days" step="1" min="0" placeholder="—">
+                                            <div class="form-hint" style="font-size:0.7rem;margin-top:3px;">Short-lease floor for this equipment (blank = none)</div>
                                         </div>
 
                                     </div>
@@ -620,7 +638,9 @@ function FF_RateCardShow() {
                 id: null, equipment_type: '', equipment_template_id: null,
                 _templateName: '', _templateSearch: '', _templateResults: [], _templateOpen: false,
                 daily_rate: '', weekly_rate: '',
-                monthly_rate: '', mileage_rate: '', mileage_unit: 'km', hourly_rate: '', gps_price: '', currency: 'CAD',
+                monthly_rate: '', mileage_rate: '', mileage_unit: 'km', hourly_rate: '', gps_price: '',
+                minimum_days: '', // S-LEASE-MIN-DAYS: short-lease floor (blank = none)
+                currency: 'CAD',
                 notes: '', editing: true,
             });
         },
@@ -728,6 +748,8 @@ function FF_RateCardShow() {
                     mileage_unit:          item.mileage_unit,
                     hourly_rate:           item.hourly_rate  || null,
                     gps_price:             item.gps_price    || null,
+                    // S-LEASE-MIN-DAYS: send blank → null, but preserve 0 (don't clobber via ||)
+                    minimum_days:          (item.minimum_days === '' || item.minimum_days === null || item.minimum_days === undefined) ? null : item.minimum_days,
                     currency:              item.currency,
                     notes:                 item.notes || null,
                 }));

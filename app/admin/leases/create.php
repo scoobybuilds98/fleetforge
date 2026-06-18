@@ -410,6 +410,24 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- S-LEASE-MIN-DAYS — short-lease minimum billing floor.
+                     WHY: when a lease's total billable duration is shorter than N
+                     days, billing replaces the daily/weekly/monthly tier ladder with
+                     a flat N × daily_rate charge (mainly chassis). Frozen onto the
+                     lease at creation; defaults to the global setting and is
+                     overwritten by the per-equipment rate-card value when a unit's
+                     rates are looked up (see _lookupRates()). Blank/0/1 = no floor. -->
+                <div class="form-row-3" style="margin-top:1rem;">
+                    <div class="form-group">
+                        <label class="form-label" for="minimum_billing_days">Minimum Billing Days</label>
+                        <input type="number" id="minimum_billing_days" class="form-control font-mono"
+                               x-model="form.minimum_billing_days" step="1" min="0" placeholder="0"
+                               :readonly="ratesLocked"
+                               :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
+                        <div class="form-hint">Short-lease floor. If returned sooner, bills this many days × daily rate. Blank or 0 = none.</div>
+                    </div>
+                </div>
+
                 <!-- S-MILEAGE-UNIT-SIMPLIFY — Single-unit mileage section
                      Operator picks a unit (KM | MILES) then enters one rate
                      and one allowance. The API derives counterpart columns
@@ -977,6 +995,9 @@ function FF_CreateLease() {
             daily_rate:         '',
             weekly_rate:        '',
             monthly_rate:       '',
+            // S-LEASE-MIN-DAYS: frozen short-lease floor — defaults to the global
+            // setting and is overwritten by the rate-card minimum_days in _lookupRates().
+            minimum_billing_days: <?= (int) settings_get('lease.minimum_billing_days', '3') ?>,
             // S-MILEAGE-UNIT-SIMPLIFY: single rate + allowance; API derives counterpart columns
             mileage_rate:             '',
             estimated_mileage:        '',
@@ -1307,6 +1328,10 @@ function FF_CreateLease() {
                 this.form.daily_rate   = d.daily_rate   ?? '';
                 this.form.weekly_rate  = d.weekly_rate  ?? '';
                 this.form.monthly_rate = d.monthly_rate ?? '';
+                // S-LEASE-MIN-DAYS: the per-equipment rate-card minimum_days (config
+                // layer 1) overrides the global default frozen at init; when the rate
+                // source supplies no minimum, fall back to the same global default.
+                this.form.minimum_billing_days = (d.minimum_days != null) ? d.minimum_days : <?= (int) settings_get('lease.minimum_billing_days', '3') ?>;
                 // S-GPS-RATE-CARD: GPS cost comes from the rate card, not user input
                 this.form.gps_cost     = d.gps_price    ?? '';
                 this.form.hourly_rate  = d.hourly_rate  ?? '';
@@ -1442,6 +1467,15 @@ function FF_CreateLease() {
                     payload[k] = v;
                 }
             });
+
+            // S-LEASE-MIN-DAYS: always transmit minimum_billing_days, even when blank,
+            // so a deliberate clear-to-blank reaches the API as '' (→ NULL, "no floor on
+            // this lease") instead of being stripped as an absent key — which the create
+            // API would re-inherit as the global default. The edit form posts the whole
+            // form object, so it already preserves this clear-to-none intent.
+            payload.minimum_billing_days =
+                (this.form.minimum_billing_days === '' || this.form.minimum_billing_days === null || this.form.minimum_billing_days === undefined)
+                    ? '' : this.form.minimum_billing_days;
 
             // Coerce numeric integers
             ['customer_id', 'equipment_unit_id'].forEach(f => {

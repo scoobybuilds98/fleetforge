@@ -169,6 +169,22 @@ class InvoiceGenerator
 
             $engineVersion = (string)($lease['engine_version'] ?? 'period_independent');
 
+            // S-LEASE-MIN-DAYS: establish the per-lease minimum-billing-days floor
+            // once, defensively. The $lease array MAY NOT carry the
+            // minimum_billing_days column depending on the caller's SELECT — the
+            // load above uses l.* so it normally does, but a narrower caller
+            // (cron/fixtures/direct SQL) might not. When the key is absent we
+            // re-read it from the leases row so the floor is honoured regardless
+            // of how the lease was loaded. This frozen-on-lease value is config
+            // layer 2 (operator-overridable); layer 1 (rate_card_items.minimum_days)
+            // and layer 3 (settings 'lease.minimum_billing_days') are resolved
+            // upstream at lease creation into this single column, so by billing
+            // time this is THE effective floor. 0/1/NULL → 0 here, which both
+            // billing engines treat as a NO-OP.
+            $minBillingDays = array_key_exists('minimum_billing_days', $lease)
+                ? (int)($lease['minimum_billing_days'] ?? 0)
+                : (int)(db_row('SELECT minimum_billing_days FROM leases WHERE id = ?', [$leaseId])['minimum_billing_days'] ?? 0);
+
             if ($billingType === 'mileage_only') {
                 // Both engines skip base_rental for mileage_only invoices.
                 $rentalAmount = '0.00';
@@ -223,6 +239,14 @@ class InvoiceGenerator
                     'daily_rate'           => (string)$lease['daily_rate'],
                     'weekly_rate'          => (string)$lease['weekly_rate'],
                     'monthly_rate'         => (string)$lease['monthly_rate'],
+                    // S-LEASE-MIN-DAYS: per-lease short-lease floor. The engine
+                    // measures totalBillableDays against the EXTENT (start..extent_end)
+                    // and, when minDays>=2 AND totalBillableDays<minDays AND
+                    // daily_rate>0, replaces the tier ladder with a flat
+                    // minDays × daily charge. Computing against the extent (not the
+                    // per-invoice period) is what makes the floor self-apply at
+                    // close/reconciliation yet never bind for ongoing long leases.
+                    'minimum_days'         => $minBillingDays,
                 ]);
 
                 // Capture audit-column values for the invoices INSERT and
@@ -334,15 +358,32 @@ class InvoiceGenerator
                 $explanation = ['Full month — flat monthly rate: $' . $rentalAmount];
             } else {
                 // Legacy period_independent path: partial period — use THE LAW
+                // S-LEASE-MIN-DAYS: pass the per-lease floor as the new 5th
+                // positional arg. ProRateCalculator binds the flat minDays × daily
+                // override (label 'daily_minimum') only when minDays>=2 AND
+                // $days<minDays AND daily_rate>0; 0/1/NULL is a NO-OP, preserving
+                // legacy tier selection for every long/normal period.
                 $result = $this->proRate->calculate(
                     $days,
                     (string)$lease['daily_rate'],
                     (string)$lease['weekly_rate'],
-                    (string)$lease['monthly_rate']
+                    (string)$lease['monthly_rate'],
+                    $minBillingDays
                 );
                 $rentalAmount = $result['amount'];
                 $rateMethod = $result['method'];
                 $explanation = $result['explanation'];
+
+                // S-LEASE-MIN-DAYS: ProRateCalculator returns method='daily_minimum'
+                // when the flat short-lease floor binds. That label is NOT a member of
+                // the invoices.rate_method_used / invoice_line_items.rate_method ENUMs,
+                // so writing it verbatim would 1265-truncate under STRICT_TRANS_TABLES
+                // and abort the whole invoice/close transaction. Persist it as its
+                // economic basis 'daily' (the floor IS a flat N × daily_rate charge);
+                // the 'daily_minimum' identity is preserved in $explanation/detail_lines.
+                if ($rateMethod === 'daily_minimum') {
+                    $rateMethod = 'daily';
+                }
             }
 
             // ════════════════════════════════════════════════════════════════
@@ -2238,9 +2279,11 @@ class InvoiceGenerator
      * (daily / weekly / weekly_capped / monthly / none).
      *
      * The engine reports tiers as: 'none', 'daily', 'weekly_flat',
-     * 'weekly_math', 'weekly_capped', 'monthly_math'. The DB column
-     * doesn't distinguish flat-vs-math weeklies (both bill weekly)
-     * and uses 'monthly' for any 30+ day tier. Collapse accordingly.
+     * 'weekly_math', 'weekly_capped', 'monthly_math', and the
+     * S-LEASE-MIN-DAYS short-lease floor 'daily_minimum'. The DB column
+     * doesn't distinguish flat-vs-math weeklies (both bill weekly),
+     * uses 'monthly' for any 30+ day tier, and records the flat
+     * minimum-days floor under its economic basis 'daily'. Collapse accordingly.
      *
      * The same mapping is reused for invoice_line_items.rate_method,
      * which shares the ENUM with one nullable difference (caller wraps).
@@ -2254,6 +2297,7 @@ class InvoiceGenerator
             'weekly_capped' => 'weekly_capped',
             'monthly'       => 'monthly',  // R2: calendar-month flat / per-segment
             'monthly_math'  => 'monthly',  // legacy tier name (applyTierFormula)
+            'daily_minimum' => 'daily',  // S-LEASE-MIN-DAYS: flat short-lease floor → economic basis 'daily'
             default         => 'none',  // 'none' or any unknown
         };
     }

@@ -370,6 +370,18 @@ require_once FF_ROOT . '/includes/header.php';
                                         </div>
                                     </div>
 
+                                    <!-- S-LEASE-MIN-DAYS: per-equipment short-lease floor. When a lease's
+                                         total billable duration is shorter than this many days, billing
+                                         bills a flat N × daily rate instead of the actual short span.
+                                         Blank = no minimum for this equipment. -->
+                                    <div>
+                                        <label class="form-label" style="font-size:0.75rem;margin-bottom:4px;">Min days</label>
+                                        <input type="number" class="form-control font-mono"
+                                               x-model="item.minimum_days"
+                                               step="1" min="0" placeholder="—">
+                                        <div class="form-hint" style="font-size:0.7rem;margin-top:3px;">Short-lease floor for this equipment (blank = none)</div>
+                                    </div>
+
                                 </div>
                             </div>
                         </template>
@@ -451,6 +463,7 @@ function FF_RateCardCreate() {
                 mileage_unit:          'km',
                 hourly_rate:           '',
                 gps_price:             '',
+                minimum_days:          '', // S-LEASE-MIN-DAYS: short-lease floor (blank = none)
                 currency:              'CAD',
             });
         },
@@ -585,6 +598,7 @@ function FF_RateCardCreate() {
                 if (item.mileage_rate !== '') out.mileage_rate = item.mileage_rate;
                 if (item.hourly_rate  !== '') out.hourly_rate  = item.hourly_rate;
                 if (item.gps_price    !== '') out.gps_price    = item.gps_price;
+                if (item.minimum_days !== '') out.minimum_days = item.minimum_days; // S-LEASE-MIN-DAYS
                 return out;
             });
 

@@ -439,6 +439,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             // General tab
             'company'            => 'general',
             'invoices'           => 'general',
+            // S-LEASE-MIN-DAYS: Billing card lives on the General tab.
+            'billing'            => 'general',
             'leases'             => 'general',
             'lease'              => 'general',
             'maintenance'        => 'general',
@@ -478,10 +480,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 // backfilled by migration 19) appear in the Integrations tab. The 13
 // rate_limit.* rows still have NULL labels and stay hidden via the
 // `label IS NOT NULL` filter (D-C — deferred to a future surface).
+// S-LEASE-MIN-DAYS: include 'billing' so the global short-lease floor
+// default (key 'lease.minimum_billing_days', group_name 'billing',
+// value_type integer) loads into $grouped and renders/saves through the
+// same generic mechanism as the sibling billing.max_advance_periods key
+// (which lives in group 'invoices'). Without 'billing' here the row would
+// never reach $grouped and the card below would render empty.
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
-     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio','credit_application','lease')
+     WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio','credit_application','lease','billing')
        AND label IS NOT NULL
      ORDER BY group_name ASC, `key` ASC"
 );
@@ -492,7 +500,12 @@ foreach ($allSettings as $s) {
 }
 
 // credit_application has its own dedicated tab — not in the General loop.
-$primaryGroups   = ['company', 'invoices', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
+// S-LEASE-MIN-DAYS: 'billing' added so the generic General-tab loop renders
+// the short-lease floor card. Placed after 'invoices' so the Billing card
+// sits next to Invoices & Billing. The generic loop fully handles the
+// integer value_type (number input) + save (via _group=billing) exactly
+// like the invoices group's billing.max_advance_periods key.
+$primaryGroups   = ['company', 'invoices', 'billing', 'leases', 'maintenance', 'alerts', 'notifications', 'yards'];
 // S-SETTINGS-CLEANUP: 'security' added so the MFA card renders alongside
 // gps/ai/email/storage/aws in the Integrations tab via the existing render loop.
 // S-INTEL-TAB: 'ai' removed from Integrations — it now renders in the
@@ -524,6 +537,8 @@ $secretKeys = [
 $groupLabels = [
     'company'       => 'Company',
     'invoices'      => 'Invoices & Billing',
+    // S-LEASE-MIN-DAYS: card heading for the short-lease floor group.
+    'billing'       => 'Billing',
     'leases'        => 'Leases & Contracts',
     'maintenance'   => 'Maintenance & Claims',
     'alerts'        => 'Alerts & Compliance',

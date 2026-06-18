@@ -98,6 +98,11 @@ $lease = db_row(
         l.hourly_rate,
         l.billing_cycle,
         l.advance_billing_periods,
+        -- S-LEASE-MIN-DAYS: frozen short-lease floor (Config Layer 2). NULL = no
+        -- per-lease minimum (falls back to the global setting at billing time).
+        -- Surfaced so the edit form can pre-fill the field and the show page can
+        -- display the configured minimum-billing-days value.
+        l.minimum_billing_days,
         l.po_number,
         l.last_billed_date,
         l.next_billing_date,
@@ -170,6 +175,9 @@ $lease['total_distance_km']           = $lease['total_distance_km']           !=
 $lease['estimated_mileage_km']        = $lease['estimated_mileage_km']        !== null ? (float) $lease['estimated_mileage_km']        : null;
 $lease['estimated_mileage_miles']     = $lease['estimated_mileage_miles']     !== null ? (float) $lease['estimated_mileage_miles']     : null;
 $lease['mileage_rate_km']             = $lease['mileage_rate_km']             !== null ? (float) $lease['mileage_rate_km']             : null;
+// S-LEASE-MIN-DAYS: cast the TINYINT short-lease floor so the Alpine UI gets a
+// typed int (not a numeric string); null stays null when no per-lease minimum.
+$lease['minimum_billing_days']        = $lease['minimum_billing_days']        !== null ? (int)   $lease['minimum_billing_days']        : null;
 $lease['mileage_rate_miles']          = $lease['mileage_rate_miles']          !== null ? (float) $lease['mileage_rate_miles']          : null;
 $lease['km_to_miles_conversion']      = $lease['km_to_miles_conversion']      !== null ? (float) $lease['km_to_miles_conversion']      : null;
 

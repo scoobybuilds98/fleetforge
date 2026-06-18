@@ -15,6 +15,8 @@ declare(strict_types=1);
  *   - is_default=1 clears all other defaults in the same transaction.
  *   - Optional: items[] replaces the entire item set for this card
  *     (all existing items deleted, new ones inserted atomically).
+ *     S-LEASE-MIN-DAYS: each item may carry minimum_days (nullable unsigned int
+ *     0..90; empty/absent = NULL) — the short-lease daily floor for this equipment.
  *   - Audit log: action='update', old/new captured.
  *
  * @method  POST
@@ -217,6 +219,18 @@ if ($replaceItems && is_array($body['items'])) {
             $itemHadError = true;
         }
 
+        // S-LEASE-MIN-DAYS: per-equipment short-lease floor (rate_card_items.minimum_days
+        // TINYINT UNSIGNED NULL). Nullable unsigned int 0..90; empty/absent → NULL (no floor).
+        // 0/1 persist but disable the floor downstream (NO-OP in the billing engines).
+        $minimumDays = null;
+        if (isset($item['minimum_days']) && $item['minimum_days'] !== '' && $item['minimum_days'] !== null) {
+            $minimumDays = clean_int($item['minimum_days']);
+            if ($minimumDays === null || $minimumDays < 0 || $minimumDays > 90) {
+                $itemErrors[] = "Item {$lineNum}: minimum days must be a whole number between 0 and 90.";
+                $itemHadError = true;
+            }
+        }
+
         if ($itemHadError) continue;
 
         $itemsToInsert[] = [
@@ -229,6 +243,7 @@ if ($replaceItems && is_array($body['items'])) {
             'mileage_unit'          => $mileageUnit,
             'hourly_rate'           => $rates['hourly_rate'],
             'gps_price'             => $rates['gps_price'],
+            'minimum_days'          => $minimumDays, // S-LEASE-MIN-DAYS: NULL = no short-lease floor
             'currency'              => $currency,
             'notes'                 => clean_string($item['notes'] ?? null, 1000),
         ];
