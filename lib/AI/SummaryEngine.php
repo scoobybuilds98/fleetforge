@@ -143,7 +143,7 @@ class SummaryEngine
     // Stores a generated summary in ai_summaries table.
     // Marks previous summaries for the same entity+type as not current.
     // ────────────────────────────────────────────────────────────
-    private static function cacheSummary(
+    public static function cacheSummary(
         string $entityType,
         int    $entityId,
         string $summaryType,
@@ -186,7 +186,7 @@ class SummaryEngine
     // Collects relevant data for the summary by calling the
     // appropriate tool handlers directly.
     // ────────────────────────────────────────────────────────────
-    private static function gatherContext(string $entityType, int $entityId, string $summaryType, ?int $userId, array $reportContext = []): ?array
+    public static function gatherContext(string $entityType, int $entityId, string $summaryType, ?int $userId, array $reportContext = []): ?array
     {
         try {
             return match ($summaryType) {
@@ -339,7 +339,7 @@ class SummaryEngine
     // Constructs the user prompt for Claude based on summary
     // type and gathered context data.
     // ────────────────────────────────────────────────────────────
-    private static function buildPrompt(string $summaryType, array $context): string
+    public static function buildPrompt(string $summaryType, array $context): string
     {
         $dataJson = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
@@ -566,7 +566,7 @@ PROMPT,
     // ────────────────────────────────────────────────────────────
     // getSystemPrompt()
     // ────────────────────────────────────────────────────────────
-    private static function getSystemPrompt(): string
+    public static function getSystemPrompt(): string
     {
         return <<<'PROMPT'
 You are FleetForge AI — the built-in fleet intelligence assistant for Mainland Truck & Trailer Sales & Leasing, a Canadian commercial trailer and equipment leasing company.
