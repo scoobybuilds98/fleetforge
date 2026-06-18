@@ -23,7 +23,7 @@ declare(strict_types=1);
  *                     auto-regenerated) so the operator can review
  *                     before sending.
  *                D-B  No period-boundary restriction. Amend any time
- *                     while the lease is `active`.
+ *                     while the lease is `active` or `pending`.
  *                D-C  Any admin can amend immediately — no approval
  *                     gate. audit_log + lease_amendments capture the
  *                     who/what/when paper trail.
@@ -83,7 +83,7 @@ declare(strict_types=1);
  *                                          comparisons)
  *               }
  *              409 STALE_DATA       — optimistic-lock mismatch (D19)
- *              422 NOT_ACTIVE       — lease status != 'active' (D-B)
+ *              422 NOT_ACTIVE       — lease status not in (active, pending) (D-B)
  *              422 NO_RATE_PROVIDED — request had no amendable field
  *              422 INVALID_RATE     — a provided rate is negative
  *                                     or non-numeric
@@ -211,11 +211,13 @@ db_transaction(function () use (
         json_error('NOT_FOUND', 'Lease not found.', 404);
     }
 
-    // 2 — status gate (D-B: active only) + optimistic lock (D19)
-    if ($lease['status'] !== 'active') {
+    // 2 — status gate (D-B: active + pending allowed) + optimistic lock (D19)
+    // Pending leases have no invoices, so rate amendments are safe and useful
+    // for fixing rates before activation (e.g. correcting GPS cost before start).
+    if (!in_array($lease['status'], ['active', 'pending'], true)) {
         json_error('NOT_ACTIVE',
             "Lease {$lease['contract_number']} is {$lease['status']}; "
-            . 'rate amendments are only permitted on active leases. '
+            . 'rate amendments are only permitted on active or pending leases. '
             . 'Sent invoices remain immutable per D14.',
             422);
     }

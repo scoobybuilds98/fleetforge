@@ -513,7 +513,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                      so this card doesn't duplicate the history
                                      display; the caption below points operators
                                      there for the full audit trail. -->
-                                <div x-show="lease.status === 'active'" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                                <div x-show="['active','pending'].includes(lease.status)" style="margin-top:16px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
                                     <button type="button"
                                             class="btn btn-secondary btn-sm"
                                             @click="openRateAmendModal()">
