@@ -534,6 +534,17 @@ try {
     $_SESSION['ff_user']['permissions'] = $savedPerms2;
     $_SESSION['ff_user']['role_slug']   = $savedRole2;
 
+    // ════ 3n. AI SUMMARY PANELS (S-AI-SUMMARY-PANELS) ════
+    foreach (['reservation_summary','vendor_summary','payment_summary'] as $st) {
+        $p = \FleetForge\AI\SummaryEngine::buildPrompt($st, ['_demo' => 1]);
+        (is_string($p) && strlen($p) > 100) ? $pass("summary panel: {$st} prompt registered") : $fail("summary panel: {$st} prompt missing/short");
+    }
+    $vrow = db_row("SELECT id FROM vendors WHERE deleted_at IS NULL LIMIT 1");
+    if ($vrow) {
+        $vctx = \FleetForge\AI\SummaryEngine::gatherContext('vendor', (int)$vrow['id'], 'vendor_summary', $userId);
+        (is_array($vctx) && isset($vctx['vendor'], $vctx['work_order_stats'])) ? $pass("summary panel: vendor context gathers (real vendor)") : $fail("summary panel: vendor ctx ".json_encode($vctx));
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

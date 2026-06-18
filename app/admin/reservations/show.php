@@ -116,6 +116,16 @@ require_once FF_ROOT . '/includes/header.php';
         <!-- Quick action buttons (header level) -->
         <div class="page-header-actions" x-show="!loading" style="flex-wrap:wrap;gap:6px;">
             <?= help_button('reservations') ?>
+            <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
+            <button type="button" class="btn btn-secondary btn-sm no-print"
+                    onclick="aiPanel_reservation_<?= (int)$resId ?>_reservation_summary_open()"
+                    title="Open AI Reservation Summary">
+                <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;" aria-hidden="true">
+                    <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
+                </svg>
+                AI Analysis
+            </button>
+            <?php endif; ?>
             <a href="<?= base_url('reservations') ?>" class="btn btn-ghost btn-sm">← Back</a>
             <a href="<?= base_url('reservations/create') ?>" class="btn btn-ghost btn-sm">+ New</a>
             <?php if (can('reservations', 'edit')): ?>
@@ -1201,4 +1211,12 @@ function FF_ReservationShow(resId) {
 .ff-connector-done { background: #22c55e; }
 </style>
 
+<?php
+// ── AI Reservation Summary panel (S-AI-SUMMARY-PANELS) ──
+$aiSummaryEntityType = 'reservation';
+$aiSummaryEntityId   = $resId;
+$aiSummaryType       = 'reservation_summary';
+$aiSummaryTitle      = 'Reservation Summary — #' . (int)$resId;
+require_once FF_ROOT . '/includes/partials/ai-panel.php';
+?>
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

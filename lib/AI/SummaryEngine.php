@@ -197,6 +197,9 @@ class SummaryEngine
                 'payment_risk'        => self::gatherPaymentRiskContext($entityId, $userId),
                 'accounting_overview' => self::gatherAccountingContext($userId),
                 'invoice_analysis'    => self::gatherInvoiceContext($entityId),
+                'reservation_summary' => self::gatherReservationContext($entityId),
+                'vendor_summary'      => self::gatherVendorContext($entityId, $userId),
+                'payment_summary'     => self::gatherPaymentContext($entityId, $userId),
                 // ── S036 Phase B accounting narratives ──────────────
                 'pl_narrative'        => self::gatherPLContext($reportContext, $userId),
                 'bs_narrative'        => self::gatherBSContext($reportContext, $userId),
@@ -327,6 +330,92 @@ class SummaryEngine
             'payments'        => $payments,
             'recent_invoices' => $recentInvoices,
         ];
+    }
+
+    // ── Reservation context (S-AI-SUMMARY-PANELS) ──────────────
+    private static function gatherReservationContext(int $reservationId): ?array
+    {
+        $res = db_row(
+            "SELECT r.*, c.company_name AS customer_company, c.status AS customer_status,
+                    c.outstanding_balance AS customer_outstanding
+             FROM reservations r
+             LEFT JOIN customers c ON c.id = r.customer_id AND c.deleted_at IS NULL
+             WHERE r.id = ? AND r.deleted_at IS NULL",
+            [$reservationId]
+        );
+        if (!$res) return null;
+        unset($res['internal_notes']); // keep the summary customer-safe
+
+        $units = db_select(
+            "SELECT ru.unit_number_snapshot, eu.unit_number AS unit_number_live,
+                    eu.status AS unit_status, t.name AS template_name, t.category
+             FROM reservation_units ru
+             LEFT JOIN equipment_units eu ON eu.id = ru.equipment_unit_id AND eu.deleted_at IS NULL
+             LEFT JOIN equipment_templates t ON t.id = eu.template_id AND t.deleted_at IS NULL
+             WHERE ru.reservation_id = ?",
+            [$reservationId]
+        );
+        return ['reservation' => $res, 'units' => $units];
+    }
+
+    // ── Vendor context (S-AI-SUMMARY-PANELS) ───────────────────
+    private static function gatherVendorContext(int $vendorId, ?int $userId): ?array
+    {
+        $vendor = db_row(
+            "SELECT * FROM vendors WHERE id = ? AND deleted_at IS NULL",
+            [$vendorId]
+        );
+        if (!$vendor) return null;
+
+        $workOrders = db_select(
+            "SELECT wo.work_order_number, wo.status, wo.work_type, wo.title,
+                    wo.total_cost, wo.requested_date, wo.completed_date,
+                    eu.unit_number
+             FROM maintenance_work_orders wo
+             LEFT JOIN equipment_units eu ON eu.id = wo.equipment_unit_id AND eu.deleted_at IS NULL
+             WHERE wo.vendor_id = ? AND wo.deleted_at IS NULL
+             ORDER BY wo.requested_date DESC LIMIT 20",
+            [$vendorId]
+        );
+        $woStats = db_row(
+            "SELECT COUNT(*) AS total_work_orders,
+                    SUM(status = 'completed') AS completed,
+                    SUM(status IN ('open','in_progress','waiting_parts')) AS open
+             FROM maintenance_work_orders WHERE vendor_id = ? AND deleted_at IS NULL",
+            [$vendorId]
+        );
+
+        // Strip money for users without financial visibility (serve-time gate).
+        if (!\can_view_financials()) {
+            unset($vendor['total_spent'], $vendor['hourly_rate']);
+            foreach ($workOrders as &$w) { unset($w['total_cost']); }
+            unset($w);
+        }
+        return ['vendor' => $vendor, 'recent_work_orders' => $workOrders, 'work_order_stats' => $woStats];
+    }
+
+    // ── Payment context (S-AI-SUMMARY-PANELS) ──────────────────
+    private static function gatherPaymentContext(int $paymentId, ?int $userId): ?array
+    {
+        $pay = db_row(
+            "SELECT p.*, c.company_name AS customer_company, c.outstanding_balance AS customer_outstanding
+             FROM payments p
+             LEFT JOIN customers c ON c.id = p.customer_id AND c.deleted_at IS NULL
+             WHERE p.id = ?",
+            [$paymentId]
+        );
+        if (!$pay) return null;
+        unset($pay['internal_notes']);
+
+        $allocations = db_select(
+            "SELECT pa.amount AS allocated_amount, i.invoice_number, i.status AS invoice_status,
+                    i.total_amount, i.balance_due
+             FROM payment_allocations pa
+             JOIN invoices i ON i.id = pa.invoice_id
+             WHERE pa.payment_id = ? ORDER BY i.invoice_number",
+            [$paymentId]
+        );
+        return ['payment' => $pay, 'allocations' => $allocations];
     }
 
     private static function gatherFleetContext(): array
@@ -467,6 +556,69 @@ How long has this unit been in the fleet? What is it generating? Utilization rat
 Prioritized list of what needs to happen for this unit. Be specific and actionable.
 
 Unit data:
+{$dataJson}
+PROMPT,
+
+            'reservation_summary' => <<<PROMPT
+You are reviewing a trailer/equipment reservation for a leasing company. Give a concise, actionable briefing an operations dispatcher would use.
+
+Structure your response with these sections:
+
+**Reservation Overview**
+Who it's for (company/contact), status, pickup date/time, yard location, quantity, purpose, priority. Flag if the pickup date is in the past or imminent.
+
+**Units Reserved**
+The specific units (or unit types) held, their live status, and whether any reserved unit is not currently in a 'reserved' state (a data/availability concern).
+
+**Customer Context**
+The customer's standing and any outstanding balance that's relevant to fulfilling this reservation.
+
+**Risks & Action Items**
+Conflicts, stale/expired reservations, missing info, or anything blocking pickup. Concrete next steps (confirm, cancel, follow up).
+
+Reservation data:
+{$dataJson}
+PROMPT,
+
+            'vendor_summary' => <<<PROMPT
+You are reviewing a maintenance/parts vendor for a trailer leasing company. Give a thorough vendor briefing a maintenance manager would find useful.
+
+Structure your response with these sections:
+
+**Vendor Overview**
+Name, type, contact info, preferred/related-party flags, rating, specializations.
+
+**Work History**
+Volume of work orders (total / completed / open), recent jobs and what they cost, which units they've serviced. Any recurring work types?
+
+**Spend & Value**
+Total spend with this vendor, hourly rate, whether spend looks high/low for the work volume. (Omit dollar figures if not available to you.)
+
+**Risks & Recommendations**
+Open work orders needing follow-up, quality concerns (low rating), over-reliance on one vendor, or opportunities to consolidate. Concrete next steps.
+
+Vendor data:
+{$dataJson}
+PROMPT,
+
+            'payment_summary' => <<<PROMPT
+You are reviewing a recorded customer payment for a leasing company. Give a clear, accurate payment briefing a billing/AR manager would use.
+
+Structure your response with these sections:
+
+**Payment Overview**
+Payment number, customer, amount + currency, method, payment date, and current status (completed, returned, refunded, etc.). Flag any failed/returned/refunded state.
+
+**Allocation**
+Which invoices this payment was applied to and how much went to each. Is the payment fully allocated, partially allocated, or is there an overpayment? Note any overpayment handling.
+
+**Customer Context**
+The customer's outstanding balance and how this payment affects it.
+
+**Notes & Action Items**
+Anything unusual (returned payment, unresolved overpayment, refund pending) and the concrete next step. If everything is clean, say so plainly.
+
+Payment data:
 {$dataJson}
 PROMPT,
 
