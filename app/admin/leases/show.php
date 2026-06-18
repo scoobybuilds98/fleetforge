@@ -352,11 +352,11 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                         <tr><td class="text-secondary">Monthly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.monthly_rate).toFixed(2)"></td></tr>
                                         <tr x-show="parseInt(lease.gps_opt_in) === 1">
                                             <td class="text-secondary">GPS Tracking</td>
-                                            <td class="font-mono" x-text="parseFloat(lease.gps_cost) > 0 ? '$' + parseFloat(lease.gps_cost).toFixed(2) + ' / day' : 'Included'"></td>
+                                            <td class="font-mono" x-text="parseFloat(lease.gps_cost) > 0 ? 'Included · $' + parseFloat(lease.gps_cost).toFixed(2) + ' / day' : 'Included'"></td>
                                         </tr>
-                                        <tr x-show="lease.hourly_rate !== null && lease.hourly_rate !== undefined && parseFloat(lease.hourly_rate) > 0">
+                                        <tr>
                                             <td class="text-secondary">Hourly Rate</td>
-                                            <td class="font-mono" x-text="'$' + parseFloat(lease.hourly_rate).toFixed(4) + ' / hr'"></td>
+                                            <td class="font-mono" x-text="lease.hourly_rate && parseFloat(lease.hourly_rate) > 0 ? '$' + parseFloat(lease.hourly_rate).toFixed(4) + ' / hr' : 'N/A'"></td>
                                         </tr>
                                         <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
                                              secondary muted with ≈ prefix, custom-conversion badge when factors
