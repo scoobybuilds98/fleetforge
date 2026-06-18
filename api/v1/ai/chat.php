@@ -186,6 +186,10 @@ $maxIterations = \FleetForge\AI\ClaudeClient::MAX_TOOL_ITERATIONS;
 $response = null;
 $accumulatedText = '';
 $totalTokensAll  = 0;
+// S-AI-WRITE-1: a plan_* tool may persist a pending change proposal during the
+// loop. We capture its id so the response can carry the proposal to the UI,
+// which renders a confirm card (the change is NOT applied here).
+$pendingProposalId = 0;
 
 while ($iteration < $maxIterations) {
     $response = $ai->sendMessage(
@@ -264,8 +268,16 @@ while ($iteration < $maxIterations) {
         $toolResult = \FleetForge\AI\ToolRegistry::execute(
             $block['name'],
             $block['input'] ?? [],
-            $userId
+            $userId,
+            $sessionId
         );
+
+        // S-AI-WRITE-1: if a planner persisted a proposal, remember its id.
+        // The last proposal in the turn wins (one confirm card per reply).
+        $decoded = json_decode($toolResult, true);
+        if (is_array($decoded) && !empty($decoded['requires_confirmation']) && !empty($decoded['proposal_id'])) {
+            $pendingProposalId = (int) $decoded['proposal_id'];
+        }
 
         $toolResults[] = [
             'type'        => 'tool_result',
@@ -308,12 +320,37 @@ db_update('ai_chat_sessions', [
 ], 'id = ?', [$sessionId]);
 
 // ── Return response ────────────────────────────────────────
-echo json_encode([
+$responsePayload = [
     'session_id'  => $sessionId,
     'message_id'  => $assistantMsgId,
     'content'     => $assistantText,
     'tokens_used' => $totalTokens,
-]);
+];
+
+// S-AI-WRITE-1: attach a pending-change proposal (if any) so the widget
+// renders a confirm card. Loaded fresh from the table (never trust the
+// loop's in-memory copy) and only while still actionable.
+if ($pendingProposalId > 0) {
+    $proposal = db_row(
+        "SELECT id, change_type, entity_type, summary, payload, affected_count, status, expires_at
+           FROM ai_pending_changes
+          WHERE id = ? AND user_id = ? AND status = 'pending'",
+        [$pendingProposalId, $userId]
+    );
+    if ($proposal) {
+        $responsePayload['proposal'] = [
+            'id'             => (int) $proposal['id'],
+            'change_type'    => $proposal['change_type'],
+            'entity_type'    => $proposal['entity_type'],
+            'summary'        => $proposal['summary'],
+            'affected_count' => (int) $proposal['affected_count'],
+            'targets'        => json_decode($proposal['payload'], true)['targets'] ?? [],
+            'expires_at'     => $proposal['expires_at'],
+        ];
+    }
+}
+
+echo json_encode($responsePayload);
 
 // ════════════════════════════════════════════════════════════
 // Helper: Build the system prompt for FleetForge AI chat
@@ -348,6 +385,13 @@ Identifier patterns (very important):
 - Fixed asset numbers look like FA-2026-00007 — use get_fixed_asset_details.
 - Invoice numbers look like INV-2026-... and lease numbers like LSE-2026-...
 - If a user asks how long a unit (e.g. "CHS-001") will take to pay off, call get_payoff_analysis with unit_number — do NOT search customers first.
+
+Making changes (write actions):
+- You can PROPOSE changes to equipment units with plan_update_equipment (fields: category, year, mileage, license_plate, ownership_type, notes, yard_location).
+- This NEVER applies the change directly. It validates the request and shows the user a confirmation card with an Apply button.
+- After calling plan_update_equipment, briefly state what WILL change and that the user needs to click Apply to confirm. NEVER say the change is done, saved, or applied — it is only a proposal until the user confirms.
+- If the tool returns an error (e.g. invalid value, no permission, multiple matching templates), relay it plainly and suggest the fix.
+- For anything you don't have a plan_* tool for, explain that you can't make that change yet (write access is being rolled out incrementally).
 
 Guidelines:
 - Always use the available tools to look up real data before answering questions. Never guess or make up data.

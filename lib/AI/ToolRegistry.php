@@ -71,10 +71,10 @@ class ToolRegistry
     // @param  int|null $userId    Current user (for permission checks)
     // @return string              Result string to send back to Claude
     // ────────────────────────────────────────────────────────────
-    public static function execute(string $toolName, array $input, ?int $userId = null): string
+    public static function execute(string $toolName, array $input, ?int $userId = null, ?int $sessionId = null): string
     {
         try {
-            $result = FleetForgeTools::run($toolName, $input, $userId);
+            $result = FleetForgeTools::run($toolName, $input, $userId, $sessionId);
             return is_string($result) ? $result : json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } catch (\Throwable $e) {
             return json_encode([
@@ -834,6 +834,31 @@ class ToolRegistry
                     'required' => [],
                 ],
                 '_tags' => ['chat', 'report'],
+            ],
+
+            // ── Write / mutation PLANNERS (S-AI-WRITE-1) ────────────
+            // These do NOT mutate data. They validate the request and
+            // compute the exact diff, then persist a PENDING proposal.
+            // The change only happens when the user clicks Apply, which
+            // hits api/v1/ai/apply-change.php. Gated by ai.write_enabled
+            // + the user's equipment:edit permission.
+            [
+                'name' => 'plan_update_equipment',
+                'description' => "Propose a change to ONE equipment unit's editable field. This does NOT apply the change — it validates the request and returns a proposal the user must confirm with an Apply button. Use this when the user asks to change/set/update a unit's field (e.g. \"set unit ABCD category to chassis\", \"change T5301 mileage to 120000\"). After calling this, tell the user what will change and that they need to confirm — do NOT claim the change is done.",
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'unit_number' => ['type' => 'string', 'description' => 'The unit identifier shown in the UI, e.g. "T5301", "ABCD", "CHS-001".'],
+                        'field' => [
+                            'type' => 'string',
+                            'enum' => ['category', 'year', 'mileage', 'license_plate', 'ownership_type', 'notes', 'yard_location'],
+                            'description' => 'Which field to change. "category" reassigns the unit to a template of that category (chassis, dry_van, reefer, container, flatbed, step_deck, lowboy, tanker, dump, combo, other). "ownership_type" is one of owned/leased/brokered.',
+                        ],
+                        'new_value' => ['type' => 'string', 'description' => 'The new value for the field. For category use the category slug (e.g. "chassis"). For year/mileage use a number as a string.'],
+                    ],
+                    'required' => ['unit_number', 'field', 'new_value'],
+                ],
+                '_tags' => ['chat'],
             ],
         ];
     }

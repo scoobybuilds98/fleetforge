@@ -136,13 +136,47 @@ if (!$widgetAiEnabled || !$widgetHasApiKey) return;
         <div x-ref="wMessages" class="ff-chat-messages">
             <!-- Message list -->
             <template x-for="(msg, idx) in widgetMessages" :key="idx">
-                <div :class="msg.role === 'user' ? 'ff-chat-row ff-chat-row-user' : 'ff-chat-row ff-chat-row-ai'">
-                    <!-- AI avatar (only for assistant) -->
-                    <div x-show="msg.role === 'assistant'" class="ff-chat-msg-avatar">AI</div>
-                    <div :class="msg.role === 'user' ? 'ff-chat-bubble ff-chat-bubble-user' : 'ff-chat-bubble ff-chat-bubble-ai'">
-                        <!-- WHY: User text is plain (preserves line breaks); AI text rendered as markdown HTML -->
-                        <span x-show="msg.role === 'user'" x-text="msg.content" style="white-space:pre-wrap;word-break:break-word;"></span>
-                        <div x-show="msg.role === 'assistant'" x-html="renderMd(msg.content)" class="ff-chat-md"></div>
+                <div>
+                    <!-- ── Regular text message ── -->
+                    <div x-show="msg.type !== 'proposal'"
+                         :class="msg.role === 'user' ? 'ff-chat-row ff-chat-row-user' : 'ff-chat-row ff-chat-row-ai'">
+                        <!-- AI avatar (only for assistant) -->
+                        <div x-show="msg.role === 'assistant'" class="ff-chat-msg-avatar">AI</div>
+                        <div :class="msg.role === 'user' ? 'ff-chat-bubble ff-chat-bubble-user' : 'ff-chat-bubble ff-chat-bubble-ai'">
+                            <!-- WHY: User text is plain (preserves line breaks); AI text rendered as markdown HTML -->
+                            <span x-show="msg.role === 'user'" x-text="msg.content" style="white-space:pre-wrap;word-break:break-word;"></span>
+                            <div x-show="msg.role === 'assistant'" x-html="renderMd(msg.content)" class="ff-chat-md"></div>
+                        </div>
+                    </div>
+
+                    <!-- ── Confirm card for a pending AI change proposal (S-AI-WRITE-1) ── -->
+                    <div x-show="msg.type === 'proposal'" class="ff-chat-proposal">
+                        <div class="ff-chat-proposal-head">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+                            <span>Confirm change</span>
+                            <span class="ff-chat-proposal-count" x-show="msg.proposal.affected_count > 1"
+                                  x-text="msg.proposal.affected_count + ' units'"></span>
+                        </div>
+                        <div class="ff-chat-proposal-body" x-text="msg.proposal.summary"></div>
+
+                        <!-- Pending: Apply / Cancel -->
+                        <div class="ff-chat-proposal-actions" x-show="msg.proposalState === 'pending'">
+                            <button class="ff-chat-proposal-apply" @click="applyProposal(idx)" :disabled="msg.busy">
+                                <span x-show="!msg.busy">Apply</span><span x-show="msg.busy">Applying…</span>
+                            </button>
+                            <button class="ff-chat-proposal-cancel" @click="cancelProposal(idx)" :disabled="msg.busy">Cancel</button>
+                        </div>
+
+                        <!-- Applied: success + Undo -->
+                        <div class="ff-chat-proposal-result ff-chat-proposal-ok" x-show="msg.proposalState === 'applied'">
+                            <span>✓ Applied</span>
+                            <button class="ff-chat-proposal-undo" @click="undoProposal(idx)" :disabled="msg.busy">
+                                <span x-show="!msg.busy">Undo</span><span x-show="msg.busy">…</span>
+                            </button>
+                        </div>
+                        <div class="ff-chat-proposal-result" x-show="msg.proposalState === 'undone'">↩ Reverted</div>
+                        <div class="ff-chat-proposal-result" x-show="msg.proposalState === 'cancelled'">Cancelled</div>
+                        <div class="ff-chat-proposal-result ff-chat-proposal-err" x-show="msg.proposalState === 'error'" x-text="msg.proposalError || 'Something went wrong.'"></div>
                     </div>
                 </div>
             </template>
@@ -544,6 +578,83 @@ if (!$widgetAiEnabled || !$widgetHasApiKey) return;
     letter-spacing: 0.01em;
 }
 
+/* ── Write-proposal confirm card (S-AI-WRITE-1) ──────────── */
+.ff-chat-proposal {
+    align-self: flex-start;
+    max-width: 92%;
+    margin: 2px 0 2px 34px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--color-primary);
+    border-radius: 4px 14px 14px 14px;
+    padding: 11px 13px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+.ff-chat-proposal-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-primary);
+    margin-bottom: 6px;
+}
+.ff-chat-proposal-count {
+    margin-left: auto;
+    background: var(--color-primary);
+    color: #fff;
+    border-radius: 8px;
+    padding: 1px 7px;
+    font-size: 0.625rem;
+    letter-spacing: 0;
+}
+.ff-chat-proposal-body {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+    word-break: break-word;
+    margin-bottom: 10px;
+}
+.ff-chat-proposal-actions { display: flex; gap: 8px; }
+.ff-chat-proposal-apply,
+.ff-chat-proposal-cancel,
+.ff-chat-proposal-undo {
+    border: none;
+    border-radius: 8px;
+    padding: 6px 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    transition: filter 0.15s, background 0.15s;
+}
+.ff-chat-proposal-apply { background: var(--color-primary); color: #fff; }
+.ff-chat-proposal-apply:hover:not(:disabled) { background: var(--color-primary-hover); }
+.ff-chat-proposal-cancel { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); }
+.ff-chat-proposal-cancel:hover:not(:disabled) { background: var(--bg-surface-hover); }
+.ff-chat-proposal-apply:disabled,
+.ff-chat-proposal-cancel:disabled,
+.ff-chat-proposal-undo:disabled { opacity: 0.5; cursor: not-allowed; }
+.ff-chat-proposal-result {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.ff-chat-proposal-ok { color: var(--color-success-text, #16a34a); }
+.ff-chat-proposal-err { color: var(--color-danger, #dc2626); font-weight: 500; }
+.ff-chat-proposal-undo {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 3px 10px;
+    font-size: 0.6875rem;
+}
+.ff-chat-proposal-undo:hover:not(:disabled) { background: var(--bg-surface-hover); }
+
 /* ── Tablet / smaller desktop ─────────── */
 @media (max-width: 520px) {
     .ff-chat-panel {
@@ -628,6 +739,18 @@ function FF_AiChatWidget() {
                 if (!r.error) {
                     this.widgetSessionId = r.session_id;
                     this.widgetMessages.push({ role: 'assistant', content: r.content });
+                    // S-AI-WRITE-1: a write proposal rides alongside the reply.
+                    // Render a confirm card; nothing is changed until Apply.
+                    if (r.proposal) {
+                        this.widgetMessages.push({
+                            role: 'assistant',
+                            type: 'proposal',
+                            proposal: r.proposal,
+                            proposalState: 'pending',
+                            proposalError: '',
+                            busy: false,
+                        });
+                    }
                 } else {
                     this.widgetMessages.push({ role: 'assistant', content: 'Error: ' + (r.message || 'Something went wrong.') });
                 }
@@ -640,6 +763,61 @@ function FF_AiChatWidget() {
                 this.scrollDown();
                 this.$refs.wInput?.focus();
             });
+        },
+
+        // ── Write proposals (S-AI-WRITE-1) ──────────────────────
+        // apply-change.php uses the enveloped json_success/json_error shape,
+        // so we gate on r.success (NOT r.error like the raw chat endpoint).
+        async applyProposal(idx) {
+            const msg = this.widgetMessages[idx];
+            if (!msg || msg.busy) return;
+            msg.busy = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/ai/apply-change') ?>', {
+                    proposal_id: msg.proposal.id,
+                    action: 'apply',
+                });
+                if (r.success) {
+                    msg.proposalState = 'applied';
+                } else {
+                    msg.proposalState = 'error';
+                    msg.proposalError = r.error?.message || 'Could not apply the change.';
+                }
+            } catch (e) {
+                msg.proposalState = 'error';
+                msg.proposalError = 'Failed to reach the server.';
+            } finally {
+                msg.busy = false;
+                this.$nextTick(() => this.scrollDown());
+            }
+        },
+
+        async undoProposal(idx) {
+            const msg = this.widgetMessages[idx];
+            if (!msg || msg.busy) return;
+            msg.busy = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/ai/apply-change') ?>', {
+                    proposal_id: msg.proposal.id,
+                    action: 'undo',
+                });
+                if (r.success) {
+                    msg.proposalState = 'undone';
+                } else {
+                    msg.proposalState = 'error';
+                    msg.proposalError = r.error?.message || 'Could not undo the change.';
+                }
+            } catch (e) {
+                msg.proposalState = 'error';
+                msg.proposalError = 'Failed to reach the server.';
+            } finally {
+                msg.busy = false;
+            }
+        },
+
+        cancelProposal(idx) {
+            const msg = this.widgetMessages[idx];
+            if (msg) msg.proposalState = 'cancelled';
         },
 
         scrollDown() {
