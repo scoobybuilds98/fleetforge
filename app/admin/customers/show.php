@@ -264,6 +264,32 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <div class="stat-value currency"><?= e(format_currency($customer['account_credit_balance'])) ?></div>
     </a>
 
+    <?php
+    $_aiCachedCustomer = db_row(
+        "SELECT generated_at FROM ai_summaries
+         WHERE entity_type = 'customer' AND entity_id = ? AND summary_type = 'customer_insights' AND is_current = 1
+         LIMIT 1",
+        [$customer['id']]
+    );
+    if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
+    <div class="stat-card stat-card--orange"
+         style="cursor:pointer;"
+         onclick="aiPanel_customer_<?= (int)$customer['id'] ?>_customer_insights_open()"
+         title="Open AI Customer Insights">
+        <span class="stat-icon stat-icon--orange">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:18px;height:18px;"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
+        </span>
+        <div class="stat-label">AI Analysis</div>
+        <?php if ($_aiCachedCustomer): ?>
+        <div class="stat-value" style="font-size:0.9rem;font-weight:600;">Available</div>
+        <div class="stat-delta text-secondary"><?= e(date('M j, Y', strtotime($_aiCachedCustomer['generated_at']))) ?></div>
+        <?php else: ?>
+        <div class="stat-value text-secondary" style="font-size:0.875rem;">Not run yet</div>
+        <div class="stat-delta" style="color:var(--color-primary);font-weight:500;">Click to generate →</div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
 </div>
 
     <!-- Tab nav -->

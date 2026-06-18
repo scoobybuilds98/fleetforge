@@ -2234,6 +2234,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .stat-card--purple { --stat-accent: #8b5cf6; }
 .stat-card--teal   { --stat-accent: #14b8a6; }
 .stat-card--slate  { --stat-accent: #64748b; }
+.stat-card--orange { --stat-accent: #f97316; }
 
 /* Decorative icon container — positioned top-right (LEGACY structure).
    Modern .stat-card__header / .stat-card__icon are defined separately
@@ -2261,6 +2262,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .stat-icon--purple { background: rgba(139,92,246,0.12); color: #a78bfa; }
 .stat-icon--teal   { background: rgba(20,184,166,0.12); color: #2dd4bf; }
 .stat-icon--slate  { background: rgba(100,116,139,0.12);color: #94a3b8; }
+.stat-icon--orange { background: rgba(249,115,22,0.12); color: #f97316; }
 
 .stat-label {
     font-size: 0.75rem;              /* 12px */
