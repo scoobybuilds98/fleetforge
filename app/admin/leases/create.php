@@ -180,18 +180,56 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-error" x-show="errors.end_date" x-text="errors.end_date"></div>
                         <!-- S-LEASE-RENTAL-DAY-TIME: expected return time -->
                         <div style="margin-top:6px;" x-show="form.end_date" x-cloak>
-                            <label class="form-label" for="end_time" style="font-size:0.8125rem;margin-bottom:3px;">Expected Return Time <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);">(optional)</span></label>
-                            <input type="time" id="end_time" class="form-control"
-                                   x-model="form.end_time" style="max-width:150px;">
+                            <label class="form-label" for="end_time_h" style="font-size:0.8125rem;margin-bottom:3px;">Expected Return Time <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);">(optional)</span></label>
+                            <div class="d-flex align-items-center" style="gap:6px;">
+                                <select id="end_time_h" class="form-control" style="width:72px;"
+                                        @change="form.end_time = $event.target.value ? ($event.target.value + ':' + ((form.end_time||'').slice(3,5)||'00')) : ''">
+                                    <option value="">HH</option>
+                                    <template x-for="h in Array.from({length:24},(_,i)=>i)" :key="h">
+                                        <option :value="String(h).padStart(2,'0')"
+                                                :selected="String(h).padStart(2,'0') === (form.end_time||'').slice(0,2)"
+                                                x-text="String(h).padStart(2,'0')"></option>
+                                    </template>
+                                </select>
+                                <span style="font-weight:600">:</span>
+                                <select id="end_time_m" class="form-control" style="width:72px;"
+                                        @change="form.end_time = ((form.end_time||'').slice(0,2)||'00') + ':' + $event.target.value">
+                                    <option value="">MM</option>
+                                    <template x-for="m in Array.from({length:60},(_,i)=>i)" :key="m">
+                                        <option :value="String(m).padStart(2,'0')"
+                                                :selected="String(m).padStart(2,'0') === (form.end_time||'').slice(3,5)"
+                                                x-text="String(m).padStart(2,'0')"></option>
+                                    </template>
+                                </select>
+                            </div>
                         </div>
                     </div>
                     <!-- S-LEASE-RENTAL-DAY-TIME: lease start time (mandatory) -->
                     <div class="form-group">
-                        <label class="form-label required" for="start_time">Lease Start Time</label>
-                        <input type="time" id="start_time" class="form-control"
-                               x-model="form.start_time"
-                               :class="errors.start_time ? 'is-invalid' : ''"
-                               required style="max-width:150px;">
+                        <label class="form-label required" for="start_time_h">Lease Start Time</label>
+                        <div class="d-flex align-items-center" style="gap:6px;">
+                            <select id="start_time_h" class="form-control" style="width:72px;"
+                                    :class="errors.start_time ? 'is-invalid' : ''"
+                                    @change="form.start_time = $event.target.value ? ($event.target.value + ':' + ((form.start_time||'').slice(3,5)||'00')) : ''">
+                                <option value="">HH</option>
+                                <template x-for="h in Array.from({length:24},(_,i)=>i)" :key="h">
+                                    <option :value="String(h).padStart(2,'0')"
+                                            :selected="String(h).padStart(2,'0') === (form.start_time||'').slice(0,2)"
+                                            x-text="String(h).padStart(2,'0')"></option>
+                                </template>
+                            </select>
+                            <span style="font-weight:600">:</span>
+                            <select id="start_time_m" class="form-control" style="width:72px;"
+                                    :class="errors.start_time ? 'is-invalid' : ''"
+                                    @change="form.start_time = ((form.start_time||'00:00').slice(0,2)||'00') + ':' + $event.target.value">
+                                <option value="">MM</option>
+                                <template x-for="m in Array.from({length:60},(_,i)=>i)" :key="m">
+                                    <option :value="String(m).padStart(2,'0')"
+                                            :selected="String(m).padStart(2,'0') === (form.start_time||'').slice(3,5)"
+                                            x-text="String(m).padStart(2,'0')"></option>
+                                </template>
+                            </select>
+                        </div>
                         <div class="form-error" x-show="errors.start_time" x-text="errors.start_time"></div>
                         <div class="form-hint">Sets the billing cut-off for same-day returns.</div>
                     </div>
@@ -1216,7 +1254,7 @@ function FF_CreateLease() {
 
                 const ts = new Date(d.fetched_at).toLocaleString('en-CA', {
                     month: 'short', day: 'numeric', year: 'numeric',
-                    hour: 'numeric', minute: '2-digit', hour12: true,
+                    hour: '2-digit', minute: '2-digit', hour12: false,
                 });
                 const km = Number(d.odometer_km).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                 this.odometerBanner = {

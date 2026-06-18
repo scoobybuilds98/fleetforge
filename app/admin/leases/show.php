@@ -1330,12 +1330,31 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 
                     <!-- S-LEASE-RENTAL-DAY-TIME: return time -->
                     <div class="form-group" x-show="lease && lease.start_time" x-cloak>
-                        <label class="form-label" for="actual_return_time">
+                        <label class="form-label" for="actual_return_time_h">
                             Return Time
                             <span style="font-weight:normal;color:var(--color-text-muted,#6b7280);font-size:0.8125rem;">(optional)</span>
                         </label>
-                        <input type="time" id="actual_return_time" class="form-control"
-                               x-model="closeForm.actual_return_time" style="max-width:150px;">
+                        <div class="d-flex align-items-center" style="gap:6px;">
+                            <select id="actual_return_time_h" class="form-control" style="width:72px;"
+                                    @change="closeForm.actual_return_time = $event.target.value ? ($event.target.value + ':' + ((closeForm.actual_return_time||'').slice(3,5)||'00')) : ''">
+                                <option value="">HH</option>
+                                <template x-for="h in Array.from({length:24},(_,i)=>i)" :key="h">
+                                    <option :value="String(h).padStart(2,'0')"
+                                            :selected="String(h).padStart(2,'0') === (closeForm.actual_return_time||'').slice(0,2)"
+                                            x-text="String(h).padStart(2,'0')"></option>
+                                </template>
+                            </select>
+                            <span style="font-weight:600">:</span>
+                            <select id="actual_return_time_m" class="form-control" style="width:72px;"
+                                    @change="closeForm.actual_return_time = ((closeForm.actual_return_time||'').slice(0,2)||'00') + ':' + $event.target.value">
+                                <option value="">MM</option>
+                                <template x-for="m in Array.from({length:60},(_,i)=>i)" :key="m">
+                                    <option :value="String(m).padStart(2,'0')"
+                                            :selected="String(m).padStart(2,'0') === (closeForm.actual_return_time||'').slice(3,5)"
+                                            x-text="String(m).padStart(2,'0')"></option>
+                                </template>
+                            </select>
+                        </div>
                         <div class="form-hint" style="font-size:0.75rem;">
                             Lease start time: <span x-text="lease.start_time ? lease.start_time.slice(0,5) : ''"></span>.
                             Returns after the start time are billed for the extra day.
