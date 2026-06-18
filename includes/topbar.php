@@ -479,38 +479,19 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
         </button>
 
         <!--
-          ── Chat icon (unified: Team Chat + Customer Messenger) ─────
-          Single entry point for both the Slack-style internal team
-          chat (CHAT-1) and the customer DM messenger (MSGR-1). Clicking
-          dispatches a window event the combined FF_ChatHub widget
-          listens for. Both sub-inboxes share one topbar icon with a
-          combined unread badge — the per-inbox badges live inside the
-          widget panel itself.
+          ── Team Chat icon — navigates to /chat page ──────────────────
+          The floating bottom-right bubble is now the AI chat widget;
+          team chat remains accessible via this topbar icon → /chat.
+          Unread badge still reflects team chat unreads.
         -->
         <div class="chat-topbar"
              x-data="FF_ChatHubBadge()"
              x-init="init()">
-            <!--
-              @click uses Alpine.$data(el).toggle() directly instead of
-              going through a window.FF_OpenChatHub global. WHY: a
-              previous iteration stashed an arrow function inside
-              x-init like `window.FF_OpenChatHub = () => { open = !open; }`,
-              but Alpine's x-init evaluates inside a `with(scope)` block
-              — bare identifiers like `open` resolve at EVAL time, not
-              call time. When the arrow function was invoked later by
-              the topbar click, `open` no longer referred to the
-              reactive component property, so Alpine's x-show never
-              fired and the panel stayed at display:none even though
-              the open flag appeared to change. Calling toggle()
-              through Alpine.$data() is the documented, scope-safe way
-              to invoke a factory method from outside the component.
-            -->
             <a href="<?= base_url('chat') ?>"
                class="chat-topbar-btn topbar-chat-btn"
                :class="{ 'has-unread': totalUnread > 0 }"
-               @click.prevent.stop="(() => { const el = document.getElementById('ff-chat-widget'); if (el && window.Alpine) Alpine.$data(el).toggle(); })()"
-               :aria-label="totalUnread > 0 ? 'Chat (' + totalUnread + ' unread)' : 'Chat'"
-               title="Chat (team + customers)">
+               :aria-label="totalUnread > 0 ? 'Team chat (' + totalUnread + ' unread)' : 'Team chat'"
+               title="Team chat">
                 <?= heroicon('chat-bubble-left-right', 'nav-icon') ?>
                 <span class="chat-badge"
                       x-show="totalUnread > 0"
@@ -520,24 +501,16 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
         </div>
 
         <!--
-          ── AI Assistant icon (global launcher) ──────────────────────
-          Always visible on every admin page for users with ai:view.
-          This is a PLAIN NAVIGATION LINK to the full /ai page — no
-          floating widget, no Alpine wiring, no @click handler.
-
-          WHY plain link: a previous iteration opened a floating
-          ai-chat-widget panel via a @click global function, but that
-          caused Alpine scope-chain collisions where clicking the
-          theme toggle button would also open the AI panel. Removing
-          the floating widget entirely + making this a normal anchor
-          guarantees the bottom-right of every page is reserved for
-          the team chat widget only, and no topbar button can ever
-          accidentally summon the AI panel.
+          ── AI Assistant icon — opens floating AI chat widget ─────────
+          Calls window.FF_OpenAiChat() registered by ai-chat-widget.php.
+          Falls back to navigating to /ai if the widget isn't mounted
+          (e.g. user lacks ai:view, AI not configured).
         -->
         <?php if (can('ai', 'view')): ?>
         <div class="chat-topbar">
             <a href="<?= base_url('ai') ?>"
                class="chat-topbar-btn topbar-ai-btn"
+               @click.prevent="window.FF_OpenAiChat ? window.FF_OpenAiChat() : (window.location.href = '<?= base_url('ai') ?>')"
                aria-label="AI Assistant"
                title="AI Assistant">
                 <!--

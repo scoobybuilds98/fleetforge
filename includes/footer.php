@@ -151,19 +151,8 @@
     <div class="modal-backdrop" @click="cancel()" aria-hidden="true"></div>
 </div>
 
-<!-- ── Team Chat Widget (CHAT-1 — floating bubble) ──────────── -->
-<?php require_once FF_ROOT . '/includes/partials/chat-widget.php'; ?>
-
-<!--
-  ── AI Chat Widget ─────────────────────────────────────────
-  DELIBERATELY NOT RENDERED as a floating bubble. Per user request
-  (2026-04-09): the bottom-right floating box is reserved for the
-  team chat / DM widget ONLY. AI lives in the topbar icon (includes/
-  topbar.php) which navigates to the full /ai page. This removes
-  all chance of the floating AI widget colliding with the theme
-  toggle button (observed: theme click was opening the AI panel).
--->
-<?php /* require_once FF_ROOT . '/includes/partials/ai-chat-widget.php'; — see note above */ ?>
+<!-- ── AI Chat Widget (floating bubble — replaces team chat popup) ──── -->
+<?php require_once FF_ROOT . '/includes/partials/ai-chat-widget.php'; ?>
 
 <!-- ── Global Email Compose Modal (EMAIL-1) ──────────────────
      Available on every admin page. Open via:
