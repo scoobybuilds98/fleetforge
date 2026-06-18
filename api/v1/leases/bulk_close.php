@@ -45,6 +45,8 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
+// S-CLOSE-OVERSHOOT: shared reconciliation helpers (same definitions close.php uses).
+require_once __DIR__ . '/_close_reconciliation.php';
 
 require_method('POST');
 require_auth_api();
@@ -95,11 +97,14 @@ $errors   = [];
 foreach ($cleanIds as $id) {
     // ── Fetch lease: must exist and not be soft-deleted ────────
     $lease = db_row(
-        "SELECT id, status, contract_number, equipment_unit_id,
-                start_date, last_billed_date,
-                precharge_balance, precharge_enabled
-           FROM leases
-          WHERE id = ? AND deleted_at IS NULL",
+        "SELECT l.id, l.status, l.contract_number, l.customer_id, l.equipment_unit_id,
+                l.company_name_snapshot, l.customer_name_snapshot,
+                l.start_date, l.last_billed_date,
+                l.precharge_balance, l.precharge_enabled,
+                c.province AS province
+           FROM leases l
+           LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
+          WHERE l.id = ? AND l.deleted_at IS NULL",
         [$id]
     );
 
@@ -139,12 +144,17 @@ foreach ($cleanIds as $id) {
     // MAX(billing_period_end) over non-void invoices; if the next period would
     // start on or before today, the lease has a billable tail and MUST be closed
     // individually (where the final invoice + advance/mileage reconciliation run).
+    // S-CLOSE-OVERSHOOT: restrict the anchor to invoices STARTING on/before today
+    // so a future-dated invoice (billing_period_start > today) cannot mask a real
+    // unbilled tail — without this, such a row pushes coverageEnd past today and
+    // the lease is wrongly NOT skipped, leaving the real gap unbilled.
     $coverageEnd = db_row(
         "SELECT MAX(billing_period_end) AS max_end
            FROM invoices
           WHERE lease_id = ? AND deleted_at IS NULL
-            AND status <> 'void' AND billing_period_end IS NOT NULL",
-        [$id]
+            AND status <> 'void' AND billing_period_end IS NOT NULL
+            AND billing_period_start <= ?",
+        [$id, $today]
     )['max_end'] ?? ($lease['last_billed_date'] ?: null);
     $tailStart = $coverageEnd
         ? date('Y-m-d', strtotime($coverageEnd . ' +1 day'))
@@ -187,6 +197,18 @@ foreach ($cleanIds as $id) {
                         updated_by         = ?
                   WHERE id = ?",
                 [$today, $userId, $userId, $id]
+            );
+
+            // ── 2b. S-CLOSE-OVERSHOOT: clamp any non-advance rental invoice
+            // billed past today (the bulk close-out date). bulk_close does not
+            // capture a return time, so the extent is the date-only $today.
+            // Without this, a lease started mid-month (partial_start invoice
+            // billed to month-end) and bulk-closed mid-month would keep the
+            // over-billed month-end period — the same bug close.php now fixes.
+            reconcile_overshoot_invoices(
+                $id, $lease, $today,
+                "Bulk close {$today} — billing period shortened to lease extent {$today}.",
+                true // bulk_close has no legacy_handle + bills no mileage → clamp full_month straddles here too
             );
 
             // ── 3. Update equipment_unit → available ───────────

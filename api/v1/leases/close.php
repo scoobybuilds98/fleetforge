@@ -135,252 +135,8 @@ if (isset($body['odometer_at_close_km']) && $body['odometer_at_close_km'] !== ''
     }
 }
 
-/**
- * ADV-BILL-1 D-H helper: void a draft advance invoice or issue a full credit_note.
- *
- * Returns an action descriptor for the API response (so the UI can show what
- * happened to each prepaid period).
- *
- * @param array  $inv   advance invoice row (id, invoice_number, status, billing_period_*, total_amount, currency)
- * @param array  $lease lease row (customer_id, contract_number)
- * @param string $reason free-text reason captured on void/credit_note
- */
-function adv_void_or_credit_full(array $inv, array $lease, string $reason): array
-{
-    if ($inv['status'] === 'draft') {
-        // Draft → void. Mirror api/v1/invoices/void.php exactly so denormalized
-        // counters and accounting JE reversal stay correct (Trap 6 + A8/§16).
-        adv_void_invoice($inv, $lease, $reason);
-        return [
-            'invoice_id'     => (int) $inv['id'],
-            'invoice_number' => $inv['invoice_number'],
-            'action'         => 'voided',
-        ];
-    }
-
-    // Sent / paid / partial → leave invoice intact, issue a full credit_note.
-    return adv_create_credit_note($inv, $lease, (string) $inv['total_amount'], $reason);
-}
-
-/**
- * ADV-BILL-1 D-H helper: void an advance invoice.
- *
- * Mirrors api/v1/invoices/void.php so the Trap-6 counter reversal and the
- * accounting JE reversal both happen (otherwise lease.total_invoiced stays
- * inflated and accounting drifts from the invoice ledger).
- *
- * S-FIX-2 Path B: status-aware OB decrement. Drafts: OB unchanged. Sent/etc:
- *   OB -= balance_due. Plus Phase 0.5 Bug B fix: zero balance_due on the void row.
- */
-function adv_void_invoice(array $inv, array $lease, string $reason): void
-{
-    $preVoidStatus = $inv['status'];
-    $totalAmount   = (string) $inv['total_amount'];
-    $balanceDue    = (string) $inv['balance_due'];
-    $decOb         = ($preVoidStatus === 'draft') ? '0.00' : $balanceDue;
-
-    db_update('invoices', [
-        'status'      => 'void',
-        'balance_due' => '0.00',
-        'voided_date' => date('Y-m-d'),
-        'void_reason' => $reason,
-        'voided_by'   => current_user_id(),
-        'updated_by'  => current_user_id(),
-    ], 'id = ?', [$inv['id']]);
-
-    // Trap 6: reverse denormalized counters bumped at invoice insert time.
-    db_execute(
-        "UPDATE leases
-            SET total_invoiced     = total_invoiced     - ?,
-                outstanding_balance = outstanding_balance - ?,
-                updated_at = NOW()
-          WHERE id = ?",
-        [$totalAmount, $decOb, (int) $lease['id']]
-    );
-    if (!empty($lease['customer_id'])) {
-        db_execute(
-            "UPDATE customers
-                SET outstanding_balance = outstanding_balance - ?,
-                    updated_at = NOW()
-              WHERE id = ?",
-            [$decOb, (int) $lease['customer_id']]
-        );
-    }
-
-    db_insert('audit_log', [
-        'user_id'      => current_user_id(),
-        'user_name'    => current_user()['name'] ?? 'system',
-        'action'       => 'status_change',
-        'module'       => 'invoices',
-        'entity_type'  => 'invoice',
-        'entity_id'    => $inv['id'],
-        'entity_label' => $inv['invoice_number'],
-        'notes'        => "Advance invoice {$inv['invoice_number']} voided on lease close (was {$preVoidStatus}): {$reason}. Counter delta: total_invoiced -= {$totalAmount}, outstanding_balance -= {$decOb} (Path B).",
-        'old_values'   => json_encode(['status' => $preVoidStatus, 'balance_due' => $balanceDue]),
-        'new_values'   => json_encode(['status' => 'void', 'balance_due' => '0.00']),
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-
-    \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided((int) $inv['id'], current_user_id());
-}
-
-/**
- * ADV-BILL-1 D-H helper: refund the unused portion of the containing-period invoice.
- *
- * Draft → modify the existing invoice in place: shorten period to actual_return_date
- *         and recompute amounts via createFromLease. Implementation: void the draft and
- *         spawn a replacement (functionally identical to in-place edit, gives us tested
- *         math without duplicating ProRateCalculator/TaxCalculator logic).
- * Sent/paid → issue a credit_note for the prorated unused amount.
- */
-function adv_partial_refund_containing(array $inv, array $lease, string $returnDate, string $reason): array
-{
-    $start = $inv['billing_period_start'];
-    $end   = $inv['billing_period_end'];
-
-    // D14 inclusive day counting.
-    $totalDays = (int)(new \DateTimeImmutable($end))->diff(new \DateTimeImmutable($start))->days + 1;
-    $usedDays  = (int)(new \DateTimeImmutable($returnDate))->diff(new \DateTimeImmutable($start))->days + 1;
-    if ($usedDays < 1)         $usedDays = 1;
-    if ($usedDays > $totalDays) $usedDays = $totalDays;
-    $unusedDays = $totalDays - $usedDays;
-
-    if ($unusedDays <= 0) {
-        // Returning on the last day of the period — nothing to refund.
-        return [
-            'invoice_id'     => (int) $inv['id'],
-            'invoice_number' => $inv['invoice_number'],
-            'action'         => 'no_refund_needed',
-        ];
-    }
-
-    if ($inv['status'] === 'draft') {
-        // Void the draft (with counter + JE reversal) then regenerate at the shortened period.
-        adv_void_invoice($inv, $lease, $reason);
-
-        $generator   = new \FleetForge\Billing\InvoiceGenerator();
-        $billingType = ((new \DateTimeImmutable($start))->format('Y-m-01') === $start)
-            ? 'partial_end' : 'partial_start';
-        $replacement = $generator->createFromLease([
-            'lease_id'          => (int) $lease['id'],
-            'period_start'      => $start,
-            'period_end'        => $returnDate,
-            'billing_type'      => $billingType,
-            'invoice_type'      => 'regular',
-            'notes'             => "Replaces voided advance invoice {$inv['invoice_number']} (lease closed {$returnDate}).",
-            'created_by'        => current_user_id(),
-            'auto_generated'    => 1,
-            'generation_source' => 'lease_close',
-        ]);
-
-        // Replacement invoice link recorded as a follow-up audit entry; the
-        // void itself was already audited inside adv_void_invoice().
-        db_insert('audit_log', [
-            'user_id'      => current_user_id(),
-            'user_name'    => current_user()['name'] ?? 'system',
-            'action'       => 'create',
-            'module'       => 'invoices',
-            'entity_type'  => 'invoice',
-            'entity_id'    => $replacement['invoice_id'],
-            'entity_label' => $replacement['invoice_number'],
-            'notes'        => "Replacement invoice {$replacement['invoice_number']} for voided advance invoice {$inv['invoice_number']} (lease closed {$returnDate}).",
-            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-        ]);
-
-        return [
-            'invoice_id'              => (int) $inv['id'],
-            'invoice_number'          => $inv['invoice_number'],
-            'action'                  => 'replaced',
-            'replacement_invoice_id'  => (int) $replacement['invoice_id'],
-            'replacement_invoice_number' => $replacement['invoice_number'],
-        ];
-    }
-
-    // Sent / paid → credit_note for the unused portion (D16 bcmath, 6dp interim).
-    $totalAmt   = (string) $inv['total_amount'];
-    $unusedFrac = bcdiv((string) $unusedDays, (string) $totalDays, 6);
-    $refundAmt  = bcround(bcmul($totalAmt, $unusedFrac, 6), 2);
-    if (bccomp($refundAmt, '0', 2) <= 0) {
-        return [
-            'invoice_id'     => (int) $inv['id'],
-            'invoice_number' => $inv['invoice_number'],
-            'action'         => 'no_refund_needed',
-        ];
-    }
-
-    return adv_create_credit_note(
-        $inv, $lease, $refundAmt,
-        "Unused {$unusedDays} of {$totalDays} days on advance invoice {$inv['invoice_number']} — {$reason}"
-    );
-}
-
-/**
- * ADV-BILL-1 D-H helper: create a credit_note tied to an advance invoice.
- *
- * Replicates the gap-free numbering pattern from api/v1/credit_notes/create.php
- * (FOR UPDATE on settings counter row) and posts the auto-JE so accounting stays
- * in sync. Inside the outer close() transaction.
- */
-function adv_create_credit_note(array $inv, array $lease, string $amount, string $reason): array
-{
-    $year = date('Y');
-    $key  = "credit_note.next_number.{$year}";
-    $row  = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$key]);
-    $next = $row ? (int) $row['value'] : 1;
-    $prefix = settings_get('credit_note.prefix', 'CN-CR');
-    $cnNumber = sprintf('%s-%s-%05d', $prefix, $year, $next);
-    if ($row) {
-        db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$next + 1, $key]);
-    } else {
-        db_execute(
-            "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
-            [$key, $next + 1]
-        );
-    }
-
-    $cnId = db_insert('credit_notes', [
-        'credit_note_number'     => $cnNumber,
-        'company_name_snapshot'  => $inv['company_name_snapshot']  ?? $lease['company_name_snapshot']  ?? null,
-        'customer_name_snapshot' => $inv['customer_name_snapshot'] ?? $lease['customer_name_snapshot'] ?? null,
-        'billing_address_snapshot' => $inv['billing_address_snapshot'] ?? null,
-        'province_snapshot'      => $inv['province_snapshot']      ?? $lease['province']               ?? null,
-        'customer_email_snapshot' => $inv['customer_email_snapshot'] ?? null,
-        'customer_id'            => $lease['customer_id'],
-        'lease_id'               => (int) $lease['id'],
-        'source'                 => 'invoice_adjustment',
-        'source_invoice_id'      => (int) $inv['id'],
-        'amount'                 => $amount,
-        'currency'               => $inv['currency'] ?? 'CAD',
-        'amount_remaining'       => $amount,
-        'status'                 => 'active',
-        'reason'                 => $reason,
-        'created_by'             => current_user_id(),
-    ]);
-
-    db_insert('audit_log', [
-        'user_id'      => current_user_id(),
-        'user_name'    => current_user()['name'] ?? 'system',
-        'action'       => 'create',
-        'module'       => 'invoices',
-        'entity_type'  => 'credit_note',
-        'entity_id'    => $cnId,
-        'entity_label' => $cnNumber,
-        'notes'        => "Credit note {$cnNumber} ({$inv['currency']} {$amount}) issued against advance invoice {$inv['invoice_number']} on lease close.",
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-
-    // Auto-JE — same call site as api/v1/credit_notes/create.php.
-    \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued($cnId, current_user_id());
-
-    return [
-        'invoice_id'         => (int) $inv['id'],
-        'invoice_number'     => $inv['invoice_number'],
-        'action'             => 'credit_note_issued',
-        'credit_note_id'     => $cnId,
-        'credit_note_number' => $cnNumber,
-        'amount'             => $amount,
-    ];
-}
+// S-CLOSE-OVERSHOOT: shared reconciliation helpers (also used by bulk_close.php).
+require_once __DIR__ . "/_close_reconciliation.php";
 
 /**
  * S-FIX-2 Bug 1 helper: locate any cron-generated full_month draft for the
@@ -638,7 +394,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         "SELECT l.id, l.status, l.contract_number, l.company_name_snapshot, l.customer_id,
                 l.equipment_unit_id, l.unit_number_snapshot, l.mileage_at_start,
                 l.mileage_rate, l.mileage_unit, l.estimated_mileage,
-                l.start_date, l.end_date, l.last_billed_date, l.odometer_start_km,
+                l.start_date, l.start_time, l.end_date, l.last_billed_date, l.odometer_start_km,
                 l.estimated_mileage_km, l.estimated_mileage_miles,
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,
                 l.advance_billing_periods, l.currency,
@@ -793,7 +549,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // Otherwise fall through to the legacy partial_end final invoice flow.
     $advanceInvoices = db_select(
         "SELECT id, invoice_number, status, billing_period_start, billing_period_end,
-                subtotal, total_amount, balance_due, currency
+                subtotal, total_amount, balance_due, currency,
+                company_name_snapshot, customer_name_snapshot, billing_address_snapshot,
+                province_snapshot, customer_email_snapshot
          FROM invoices
          WHERE lease_id = ?
            AND generation_source = 'advance'
@@ -875,6 +633,24 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     $generator    = new \FleetForge\Billing\InvoiceGenerator();
     $finalInvoiceId = null;
     $advanceActions = [];
+
+    // ── S-CLOSE-OVERSHOOT: canonical lease billable extent ─────────
+    // ONE definition (lease_billable_extent in _close_reconciliation.php) shared
+    // with bulk_close.php + the remediation scripts, matching the generator's
+    // extent math so a shortened invoice's period_end agrees with its amount.
+    $extentEnd = lease_billable_extent(
+        $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date']
+    );
+
+    // ── S-CLOSE-OVERSHOOT: clamp every non-advance rental invoice billed
+    // past the lease extent (e.g. an activation partial_start invoice billed to
+    // month-end on a lease returned mid-month). Runs BEFORE the advance /
+    // legacy-full_month / partial_end logic below so the coverage anchor those
+    // paths read (MAX billing_period_end) already reflects the clamped periods.
+    $overshootActions = reconcile_overshoot_invoices(
+        $id, $lease, $extentEnd,
+        $closeNotes ?: "Lease closed {$actualReturnDate} — billing period shortened to lease extent {$extentEnd}."
+    );
 
     if ($isAdvanceClose) {
         // ── ADV-BILL-1 D-H: advance reconciliation ─────────────
@@ -972,14 +748,21 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // is authoritative. written_off counts as covered (the period was
             // billed; non-payment is a collections matter, not a re-bill), so we
             // exclude only 'void' — matching HolisticLeaseEngine::sumAlreadyBilled.
+            // S-CLOSE-OVERSHOOT: restrict the coverage anchor to invoices STARTING
+            // on/before the extent. A future-dated invoice (e.g. a sent/paid one
+            // that was full-credited above but keeps its immutable future
+            // period_end, or a stray manual future-month invoice) must not push
+            // coverageEnd past the real usage — that would suppress the legitimate
+            // partial_end final invoice for the actually-rented tail.
             $coverageRow = db_row(
                 "SELECT MAX(billing_period_end) AS max_end
                    FROM invoices
                   WHERE lease_id = ?
                     AND deleted_at IS NULL
                     AND status <> 'void'
-                    AND billing_period_end IS NOT NULL",
-                [$id]
+                    AND billing_period_end IS NOT NULL
+                    AND billing_period_start <= ?",
+                [$id, $extentEnd]
             );
             $coverageEnd = $coverageRow['max_end'] ?? ($lease['last_billed_date'] ?: null);
 
@@ -987,12 +770,15 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 ? date('Y-m-d', strtotime($coverageEnd . ' +1 day'))
                 : $lease['start_date'];
 
-            // S-FIX-2 Bug #6: guard against date inversion. If billing coverage
-            // already reaches (or extends past) the close date, the previous
-            // invoice covers it and there is no new period to bill. Skip
-            // partial_end generation rather than emit an invoice with
-            // period_end < period_start.
-            if ($periodStart > $actualReturnDate) {
+            // S-FIX-2 Bug #6 / S-CLOSE-OVERSHOOT: guard against date inversion.
+            // If billing coverage already reaches (or extends past) the lease
+            // extent, the previous invoice covers it and there is no new period
+            // to bill. Skip partial_end generation rather than emit an invoice
+            // with period_end < period_start. Compared against $extentEnd (the
+            // time-of-day-adjusted billable extent), NOT the raw return date, so
+            // this stays consistent with the overshoot clamp above and with the
+            // period_end the engine uses for the final invoice's amount.
+            if ($periodStart > $extentEnd) {
                 db_insert('audit_log', [
                     'user_id'      => current_user_id(),
                     'user_name'    => current_user()['name'] ?? 'system',
@@ -1001,18 +787,18 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'entity_type'  => 'lease',
                     'entity_id'    => $id,
                     'entity_label' => $lease['contract_number'],
-                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (billing coverage through {$coverageEnd} >= actual_return_date {$actualReturnDate}). No partial_end invoice generated.",
+                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (billing coverage through {$coverageEnd} >= billable extent {$extentEnd}, return {$actualReturnDate}). No partial_end invoice generated.",
                     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);
                 $advanceActions[] = [
                     'action' => 'partial_end_skipped',
-                    'reason' => "billing coverage ({$coverageEnd}) >= actual_return_date ({$actualReturnDate}); previous invoice already covers the closing date.",
+                    'reason' => "billing coverage ({$coverageEnd}) >= billable extent ({$extentEnd}); previous invoice already covers the closing date.",
                 ];
             } else {
                 $invoiceResult = $generator->createFromLease([
                     'lease_id'          => $id,
                     'period_start'      => $periodStart,
-                    'period_end'        => $actualReturnDate,
+                    'period_end'        => $extentEnd,
                     'billing_type'      => 'partial_end',
                     'invoice_type'      => 'final',
                     'notes'             => $closeNotes,
@@ -1257,6 +1043,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         'advance_close'     => $isAdvanceClose,
         'reconciliation'    => $isAdvanceClose ? $reconMode : null,
         'advance_actions'   => $advanceActions,
+        // S-CLOSE-OVERSHOOT: per-invoice clamps applied to non-advance rental
+        // invoices that were billed past the lease's billable extent.
+        'overshoot_actions' => $overshootActions,
         // S-MILEAGE-3 D-K: precharge refund result. NULL when no refund
         // was needed (precharge_enabled=0 OR precharge_balance=0).
         // Populated with method + amount + settled_at + credit_note_*

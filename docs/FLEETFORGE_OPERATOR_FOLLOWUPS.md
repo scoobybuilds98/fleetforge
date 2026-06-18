@@ -128,6 +128,20 @@
 
 ## 🟢 DEFERRED — queued for follow-up sessions
 
+### F32 — S-CLOSE-OVERSHOOT — sent/paid straddle credit is linear-day, not tier-aware
+
+**Surfaced by:** S-CLOSE-OVERSHOOT (2026-06-19) adversarial review (money-correctness, confirmed MEDIUM).
+**What:** When a lease close clamps an over-billed invoice that is already **sent/paid** (immutable, cannot regenerate), `adv_partial_refund_containing()` in `api/v1/leases/_close_reconciliation.php` issues a credit note for `total_amount × (unusedDays / totalDays)` — a **linear** day-fraction. But base-rental pricing is **tiered/capped** (`lib/Billing/ProRateCalculator.php`: 1–5d daily, 6–7d weekly-flat, 8–29d weekly capped at monthly, 30d+ monthly), so the linear credit can over- or under-refund a sent/paid invoice with tiered pricing (review example: ~$128 over-refund on a $2000 monthly-capped invoice returned at 11 of 27 days). **Draft invoices are NOT affected** (they are voided + regenerated with the exact engine amount). This is **pre-existing behavior** inherited from the advance-billing path (`adv_partial_refund_containing` predates this session); S-CLOSE-OVERSHOOT widened where it applies (non-advance sent/paid straddles).
+**Impact / why deferred:** The prod incident (7 invoices) are all **drafts** → engine-correct, unaffected. The linear path only bites sent/paid invoices that straddle the return with tiered pricing — a narrow population. A correct fix (`credit = original_total − engine-recomputed charge for [start..extent]`) must reconstruct tax/discount/FX for an immutable invoice and is non-trivial; deferred to avoid destabilizing the shared advance primitive.
+**Fix when picked up:** replace the linear fraction with `original_total − createFromLease-equivalent total for [start..extentEnd]` (or a dry-run engine calc), and add a tier-boundary smoke. Applies to BOTH the advance and overshoot callers of `adv_partial_refund_containing`.
+
+### F33 — S-CLOSE-OVERSHOOT — voiding a drawdown-carrying draft does not restore precharge_balance
+
+**Surfaced by:** S-CLOSE-OVERSHOOT (2026-06-19) adversarial review (edge-cases, confirmed MEDIUM; narrow trigger).
+**What:** `adv_void_invoice()` reverses Path-B counters + the accounting JE but does **not** add back `leases.precharge_balance` that an invoice consumed via a mileage `drawdown_credit` line (`InvoiceGenerator.php:786` only ever decrements; nothing restores it on void — repo-wide). If the overshoot pass voids a **draft that carried a drawdown**, the close-time precharge refund (`close.php` re-reads `precharge_balance`) **under-refunds** the customer. This is a **pre-existing gap in the void path** (also reachable via the advance close branch); S-CLOSE-OVERSHOOT can now reach it for non-advance drafts.
+**Impact / why deferred:** The canonical overshoot case (activation `partial_start` Invoice 1) has `precharge_invoiced_at = NULL` → carries **no** drawdown, so it is unaffected. The trigger requires a precharge-enabled lease with a manually-created draft that has odometer/drawdown AND overshoots — narrow. Touching precharge accounting is sensitive; deferred to scope properly.
+**Fix when picked up:** in `adv_void_invoice()` (or a close-time pre-pass), sum the voided invoice's `mileage_drawdown_credit` lines and `UPDATE leases SET precharge_balance = precharge_balance + <restored>` inside the close transaction, before `close.php` re-reads the residual; add a precharge+drawdown+overshoot smoke.
+
 ### F5 — S-QBO-14-UPDATE-FOLLOWUP — PaymentPusher::pushUpdate impl ✅ CLOSED 2026-05-31
 
 **Surfaced by:** S-QBO-14 (2026-05-28) — D-QBO-14-5 stub-then-implement pattern
