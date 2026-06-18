@@ -90,11 +90,10 @@ $_componentId = 'aiSummary_' . $_entityType . '_' . $_entityId . '_' . $_summary
     <div class="card-body">
         <!-- Empty state -->
         <div x-show="!summary && !loading && !error" class="ai-summary-card__empty">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:30px;height:30px;color:var(--color-primary);opacity:0.3;margin-bottom:12px;" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:13px;height:13px;color:var(--color-primary);opacity:0.5;flex-shrink:0;" aria-hidden="true">
                 <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
             </svg>
-            <div style="font-weight:600;margin-bottom:5px;color:var(--text-secondary);">Generate AI Insights</div>
-            <div style="font-size:0.75rem;color:var(--text-tertiary);">Click "Generate" to get an AI-powered analysis of this <?= e(str_replace('_', ' ', $_entityType)) ?>.</div>
+            Click "Generate" to get an AI-powered analysis of this <?= e(str_replace('_', ' ', $_entityType)) ?>.
         </div>
 
         <!-- Error state -->
