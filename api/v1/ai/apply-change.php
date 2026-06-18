@@ -62,13 +62,14 @@ $payload = json_decode($proposal['payload'], true) ?: [];
 $targets = $payload['targets'] ?? [];
 
 // ── Route by entity type → real per-resource permission ────────────────────
-// The slice only knows equipment_unit; reject anything else loudly so we never
-// silently no-op a future change_type.
-if ($proposal['entity_type'] !== 'equipment_unit') {
-    json_error('UNSUPPORTED', 'This proposal type cannot be applied yet.', 422);
+// Look the entity up in the write registry; reject unknown types loudly so we
+// never silently no-op a change_type.
+$registryEntry = \FleetForge\AI\WriteRegistry::get($proposal['entity_type']);
+if ($registryEntry === null) {
+    json_error('UNSUPPORTED', 'This proposal type cannot be applied.', 422);
 }
-if (!can('equipment', 'edit')) {
-    json_error('FORBIDDEN', 'You do not have permission to edit equipment.', 403);
+if (!can($registryEntry['permission'], 'edit')) {
+    json_error('FORBIDDEN', "You do not have permission to edit {$registryEntry['label']}s.", 403);
 }
 
 $userName = current_user()['name'] ?? 'system';

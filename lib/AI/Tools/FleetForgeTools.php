@@ -148,8 +148,9 @@ class FleetForgeTools
             'get_promise_to_pay'       => self::getPromiseToPay($input, $userId),
             'get_collection_notes'     => self::getCollectionNotes($input),
 
-            // ── Write planners (S-AI-WRITE-1) ───────────────────
-            'plan_update_equipment'    => self::planUpdateEquipment($input, $userId, $sessionId),
+            // ── Write planners (S-AI-WRITE-1 / generalized S-AI-WRITE-2) ──
+            'plan_update_record'       => self::planUpdateRecord($input, $userId, $sessionId),
+            'plan_bulk_update_records' => self::planBulkUpdateRecords($input, $userId, $sessionId),
 
             default => throw new \RuntimeException("Unknown tool: {$toolName}"),
         };
@@ -2552,227 +2553,190 @@ class FleetForgeTools
     }
 
     // ════════════════════════════════════════════════════════════
-    //  WRITE PLANNERS (S-AI-WRITE-1)
+    //  WRITE PLANNERS (S-AI-WRITE-1 / generalized S-AI-WRITE-2)
     //
-    //  These NEVER mutate data. They validate the request, compute the
-    //  exact old→new diff, and persist a PENDING row in
-    //  ai_pending_changes. The actual write happens only when the user
-    //  clicks Apply, which hits api/v1/ai/apply-change.php and re-runs
-    //  validation + the real write path before committing.
+    //  These NEVER mutate data. They validate the request via
+    //  WriteRegistry, compute the exact old→new diff, and persist a
+    //  PENDING row in ai_pending_changes. The actual write happens only
+    //  when the user clicks Apply, which hits api/v1/ai/apply-change.php
+    //  and re-runs the write through ChangeApplier. Works for EVERY
+    //  registered entity (equipment, customers, vendors, yards,
+    //  reservations, leases, maintenance, damage claims, rate cards).
     // ════════════════════════════════════════════════════════════
 
-    /**
-     * Editable unit fields the AI is allowed to PROPOSE changes to.
-     * Each maps to the equipment_units column it writes (category is
-     * special — it resolves to template_id). Keep this list tight; it is
-     * the security boundary for what the AI can touch on a unit.
-     */
-    private const EQUIP_EDITABLE_FIELDS = [
-        'category'       => 'template_id',
-        'year'           => 'year',
-        'mileage'        => 'mileage',
-        'license_plate'  => 'license_plate',
-        'ownership_type' => 'ownership_type',
-        'notes'          => 'notes',
-        'yard_location'  => 'yard_location',
-    ];
-
-    private static function planUpdateEquipment(array $input, ?int $userId, ?int $sessionId): array|string
+    /** Shared gate: feature flag + authenticated user + entity + edit permission. */
+    private static function writeGate(?int $userId, ?array $entry): ?string
     {
-        // ── Gate 1: feature flag ───────────────────────────────────
         if (!settings_get('ai.write_enabled', false)) {
             return 'AI write actions are currently disabled. An administrator can enable them in Settings → AI.';
         }
-
-        // ── Gate 2: write actions require an authenticated user ─────
-        // Proposals must belong to a user (ai_pending_changes.user_id is NOT
-        // NULL) and need a permission context. System/cron calls have neither.
         if ($userId === null) {
             return 'Write actions require an authenticated user.';
         }
-        if (!\can('equipment', 'edit')) {
-            return "You don't have permission to edit equipment, so I can't propose this change.";
+        if ($entry === null) {
+            return 'I can only edit these record types: ' . implode(', ', \FleetForge\AI\WriteRegistry::types()) . '.';
         }
-
-        $unitNumber = trim((string) ($input['unit_number'] ?? ''));
-        $field      = trim((string) ($input['field'] ?? ''));
-        $newValue   = trim((string) ($input['new_value'] ?? ''));
-
-        if ($unitNumber === '' || $field === '' || $newValue === '') {
-            return 'I need a unit number, a field, and a new value to propose a change.';
+        if (!\can($entry['permission'], 'edit')) {
+            return "You don't have permission to edit {$entry['label']}s, so I can't propose this change.";
         }
-        if (!isset(self::EQUIP_EDITABLE_FIELDS[$field])) {
-            return "I can only change these unit fields: " . implode(', ', array_keys(self::EQUIP_EDITABLE_FIELDS)) . '.';
-        }
+        return null;
+    }
 
-        // ── Resolve the unit (live rows only) ──────────────────────
-        $unit = db_row(
-            "SELECT eu.id, eu.unit_number, eu.year, eu.mileage, eu.license_plate,
-                    eu.ownership_type, eu.notes, eu.yard_location, eu.template_id,
-                    et.name AS template_name, et.category
-               FROM equipment_units eu
-               LEFT JOIN equipment_templates et ON et.id = eu.template_id
-              WHERE eu.unit_number = ? AND eu.deleted_at IS NULL
-              LIMIT 1",
-            [$unitNumber]
-        );
-        if (!$unit) {
-            return "No equipment unit found with unit number \"{$unitNumber}\". Double-check the identifier.";
-        }
-
-        $column      = self::EQUIP_EDITABLE_FIELDS[$field];
-        $newDbValue  = null;   // value written to the column
-        $oldDisplay  = '';     // human-readable current value
-        $newDisplay  = '';     // human-readable proposed value
-        $fieldLabel  = '';
-
-        // ── Per-field validation (mirrors api/v1/equipment/units/update.php) ──
-        switch ($field) {
-            case 'category':
-                $fieldLabel = 'Category';
-                $validCats  = ['chassis','dry_van','reefer','container','flatbed','step_deck','lowboy','tanker','dump','combo','other'];
-                $cat = strtolower($newValue);
-                if (!in_array($cat, $validCats, true)) {
-                    return "\"{$newValue}\" isn't a valid category. Valid categories: " . implode(', ', $validCats) . '.';
-                }
-                if (strtolower((string) $unit['category']) === $cat) {
-                    return "Unit {$unit['unit_number']} is already category \"{$cat}\" — nothing to change.";
-                }
-                // Category lives on the template, so changing it means reassigning
-                // the unit to a live, active template of that category.
-                $templates = db_select(
-                    "SELECT id, name FROM equipment_templates
-                      WHERE category = ? AND deleted_at IS NULL AND is_active = 1
-                      ORDER BY name LIMIT 25",
-                    [$cat]
-                );
-                if (count($templates) === 0) {
-                    return "There are no active equipment templates in the \"{$cat}\" category, so I can't reassign unit {$unit['unit_number']} to it. Create a {$cat} template first.";
-                }
-                if (count($templates) > 1) {
-                    $list = implode("\n", array_map(fn($t) => "- {$t['name']} (template #{$t['id']})", $templates));
-                    return "There are multiple \"{$cat}\" templates. Ask the user which one to assign unit {$unit['unit_number']} to, then call this tool again — but the tool currently takes a category, not a template. For now, tell the user these are the options:\n{$list}";
-                }
-                $tpl        = $templates[0];
-                $newDbValue = (int) $tpl['id'];
-                $oldDisplay = ($unit['category'] ?: 'none') . ' (' . ($unit['template_name'] ?: 'no template') . ')';
-                $newDisplay = $cat . ' (' . $tpl['name'] . ')';
-                break;
-
-            case 'year':
-                $fieldLabel  = 'Year';
-                $yi          = (int) $newValue;
-                $maxYear     = (int) date('Y') + 1;
-                if ($yi < 1900 || $yi > $maxYear) {
-                    return "Year must be between 1900 and {$maxYear}.";
-                }
-                if ((int) $unit['year'] === $yi) {
-                    return "Unit {$unit['unit_number']} is already year {$yi} — nothing to change.";
-                }
-                $newDbValue = $yi;
-                $oldDisplay = (string) ($unit['year'] ?? 'none');
-                $newDisplay = (string) $yi;
-                break;
-
-            case 'mileage':
-                $fieldLabel = 'Mileage';
-                if (!preg_match('/^\d+$/', $newValue)) {
-                    return 'Mileage must be a whole number of 0 or more.';
-                }
-                $mi = (int) $newValue;
-                if ((int) $unit['mileage'] === $mi) {
-                    return "Unit {$unit['unit_number']} mileage is already {$mi} — nothing to change.";
-                }
-                $newDbValue = $mi;
-                $oldDisplay = number_format((int) ($unit['mileage'] ?? 0)) . ' mi';
-                $newDisplay = number_format($mi) . ' mi';
-                break;
-
-            case 'license_plate':
-                $fieldLabel = 'License plate';
-                $lp = clean_string($newValue, 50);
-                if ($lp === null || $lp === '') {
-                    return 'License plate cannot be empty.';
-                }
-                if ((string) $unit['license_plate'] === $lp) {
-                    return "Unit {$unit['unit_number']} license plate is already \"{$lp}\" — nothing to change.";
-                }
-                $newDbValue = $lp;
-                $oldDisplay = (string) ($unit['license_plate'] ?: 'none');
-                $newDisplay = $lp;
-                break;
-
-            case 'ownership_type':
-                $fieldLabel = 'Ownership type';
-                $ot = strtolower($newValue);
-                if (!in_array($ot, ['owned','leased','brokered'], true)) {
-                    return 'Ownership type must be one of: owned, leased, brokered.';
-                }
-                if ((string) $unit['ownership_type'] === $ot) {
-                    return "Unit {$unit['unit_number']} ownership is already \"{$ot}\" — nothing to change.";
-                }
-                $newDbValue = $ot;
-                $oldDisplay = (string) ($unit['ownership_type'] ?: 'none');
-                $newDisplay = $ot;
-                break;
-
-            case 'notes':
-                $fieldLabel = 'Notes';
-                $nt = clean_string($newValue, 5000);
-                $newDbValue = $nt;
-                $oldDisplay = $unit['notes'] ? mb_substr((string) $unit['notes'], 0, 60) . (mb_strlen((string) $unit['notes']) > 60 ? '…' : '') : 'none';
-                $newDisplay = $nt ? mb_substr($nt, 0, 60) . (mb_strlen($nt) > 60 ? '…' : '') : 'none';
-                break;
-
-            case 'yard_location':
-                $fieldLabel = 'Yard location';
-                $yl = clean_string($newValue, 100);
-                if ((string) $unit['yard_location'] === (string) $yl) {
-                    return "Unit {$unit['unit_number']} yard location is already \"{$yl}\" — nothing to change.";
-                }
-                $newDbValue = $yl;
-                $oldDisplay = (string) ($unit['yard_location'] ?: 'none');
-                $newDisplay = (string) ($yl ?: 'none');
-                break;
-        }
-
-        // ── Build + persist the pending proposal ───────────────────
-        $summary = "Change {$fieldLabel} of unit {$unit['unit_number']}: {$oldDisplay} → {$newDisplay}";
-
+    /** Persist a pending proposal and return the tool result for Claude. */
+    private static function persistProposal(array $entry, string $entityType, string $summary, array $targets, ?int $userId, ?int $sessionId): array
+    {
         $payload = [
-            'targets' => [[
-                'unit_id'      => (int) $unit['id'],
-                'unit_number'  => $unit['unit_number'],
-                'field'        => $field,
-                'field_label'  => $fieldLabel,
-                'column'       => $column,
-                'old_display'  => $oldDisplay,
-                'new_display'  => $newDisplay,
-                'new_db_value' => $newDbValue,
-            ]],
+            'table'        => $entry['table'],
+            'entity_type'  => $entityType,
+            'audit_module' => $entry['audit_module'],
+            'targets'      => $targets,
         ];
-
         $proposalId = db_insert('ai_pending_changes', [
             'user_id'        => $userId,
             'session_id'     => $sessionId ?: null,
-            'change_type'    => 'update_equipment',
-            'entity_type'    => 'equipment_unit',
+            'change_type'    => (count($targets) > 1 ? 'bulk_update_' : 'update_') . $entityType,
+            'entity_type'    => $entityType,
             'summary'        => mb_substr($summary, 0, 500),
             'payload'        => json_encode($payload),
-            'affected_count' => 1,
+            'affected_count' => count($targets),
             'status'         => 'pending',
             'expires_at'     => date('Y-m-d H:i:s', time() + 1800), // 30 min
         ]);
 
-        // The chat endpoint detects requires_confirmation + proposal_id and
-        // attaches the proposal to the response so the UI renders a confirm card.
         return [
             'status'                => 'proposed',
             'requires_confirmation' => true,
             'proposal_id'           => $proposalId,
             'summary'               => $summary,
-            'affected_count'        => 1,
+            'affected_count'        => count($targets),
             'note'                  => 'A confirmation card has been shown to the user. Tell them what will change and that they must click Apply to confirm. Do NOT say the change has been made.',
         ];
     }
+
+    /**
+     * Propose a single-record field change on any registered entity.
+     * Input: entity_type, identifier, field, new_value.
+     */
+    private static function planUpdateRecord(array $input, ?int $userId, ?int $sessionId): array|string
+    {
+        $entityType = trim((string) ($input['entity_type'] ?? ''));
+        $identifier = trim((string) ($input['identifier'] ?? ''));
+        $field      = trim((string) ($input['field'] ?? ''));
+        $newValue   = (string) ($input['new_value'] ?? '');
+
+        $entry = \FleetForge\AI\WriteRegistry::get($entityType);
+        if ($err = self::writeGate($userId, $entry)) return $err;
+
+        if ($identifier === '' || $field === '') {
+            return 'I need the record identifier and the field to change.';
+        }
+
+        $res = \FleetForge\AI\WriteRegistry::resolve($entry, $identifier);
+        if (isset($res['error'])) return $res['error'];
+        if (isset($res['ambiguous'])) {
+            $list = implode("\n", array_map(fn($o) => "- {$o['label']} (#{$o['id']})", $res['ambiguous']));
+            return "Multiple {$entry['label']}s match \"{$identifier}\". Ask the user which one (then pass its id or exact name):\n{$list}";
+        }
+        $record = $res['record'];
+
+        $v = \FleetForge\AI\WriteRegistry::validateField($entry, $field, $newValue, $record);
+        if (isset($v['error'])) return $v['error'];
+        if (!empty($v['noop'])) return $v['message'];
+
+        $recLabel = (string) ($record[$entry['label_column']] ?? ('#' . $record['id']));
+        $summary  = "Change {$v['label']} of {$entry['label']} {$recLabel}: {$v['old_display']} → {$v['new_display']}";
+
+        $targets = [[
+            'id'           => (int) $record['id'],
+            'label'        => $recLabel,
+            'field'        => $field,
+            'field_label'  => $v['label'],
+            'column'       => $v['column'],
+            'old_display'  => $v['old_display'],
+            'new_display'  => $v['new_display'],
+            'new_db_value' => $v['db_value'],
+        ]];
+
+        return self::persistProposal($entry, $entityType, $summary, $targets, $userId, $sessionId);
+    }
+
+    /**
+     * Propose the SAME field change across many records selected by a filter.
+     * Input: entity_type, filters (map of column=>value), field, new_value.
+     * Honors a per-entity bulk-filter allow-list and a hard row cap.
+     */
+    private static function planBulkUpdateRecords(array $input, ?int $userId, ?int $sessionId): array|string
+    {
+        $entityType = trim((string) ($input['entity_type'] ?? ''));
+        $field      = trim((string) ($input['field'] ?? ''));
+        $newValue   = (string) ($input['new_value'] ?? '');
+        $filters    = is_array($input['filters'] ?? null) ? $input['filters'] : [];
+
+        $entry = \FleetForge\AI\WriteRegistry::get($entityType);
+        if ($err = self::writeGate($userId, $entry)) return $err;
+
+        $allowed = $entry['bulk_filters'] ?? [];
+        if (!$allowed) {
+            return "Bulk edits aren't supported for {$entry['label']}s yet. Change them one at a time.";
+        }
+        if (!$filters) {
+            return "I need at least one filter to select which {$entry['label']}s to change. Allowed filters: " . implode(', ', $allowed) . '.';
+        }
+        foreach (array_keys($filters) as $col) {
+            if (!in_array($col, $allowed, true)) {
+                return "\"{$col}\" isn't a valid filter for {$entry['label']}s. Allowed: " . implode(', ', $allowed) . '.';
+            }
+        }
+        if ($field === '') return 'I need the field to change.';
+
+        // Build the WHERE from the allow-listed filters.
+        $where  = $entry['soft_delete'] ? ['deleted_at IS NULL'] : [];
+        $params = [];
+        foreach ($filters as $col => $val) {
+            $where[]  = "`{$col}` = ?";
+            $params[] = $val;
+        }
+        $whereSql = implode(' AND ', $where);
+
+        $rows = db_select(
+            "SELECT * FROM `{$entry['table']}` WHERE {$whereSql} ORDER BY id LIMIT " . (self::BULK_PROBE),
+            $params
+        );
+        if (count($rows) === 0) {
+            return "No {$entry['label']}s match those filters, so there's nothing to change.";
+        }
+        if (count($rows) > \FleetForge\AI\WriteRegistry::BULK_MAX) {
+            $n = count($rows);
+            return "That selection matches {$n}+ {$entry['label']}s, which exceeds the bulk limit of " . \FleetForge\AI\WriteRegistry::BULK_MAX . ". Narrow the filter and try again.";
+        }
+
+        // Validate the field/new_value once (against the first row to derive the
+        // normalized db_value); the same value is applied to every match.
+        $v = \FleetForge\AI\WriteRegistry::validateField($entry, $field, $newValue, $rows[0]);
+        if (isset($v['error'])) return $v['error'];
+
+        $column   = $v['column'];
+        $dbValue  = $v['db_value'];
+        $targets  = [];
+        foreach ($rows as $r) {
+            $targets[] = [
+                'id'           => (int) $r['id'],
+                'label'        => (string) ($r[$entry['label_column']] ?? ('#' . $r['id'])),
+                'field'        => $field,
+                'field_label'  => $v['label'],
+                'column'       => $column,
+                'old_display'  => (string) ($r[$column] ?? 'none'),
+                'new_display'  => $v['new_display'],
+                'new_db_value' => $dbValue,
+            ];
+        }
+
+        $filterDesc = implode(', ', array_map(fn($k, $vv) => "{$k}={$vv}", array_keys($filters), array_values($filters)));
+        $summary = "Set {$v['label']} → {$v['new_display']} for " . count($targets) . " {$entry['label']}(s) where {$filterDesc}";
+
+        return self::persistProposal($entry, $entityType, $summary, $targets, $userId, $sessionId);
+    }
+
+    /** Probe limit = BULK_MAX + 1 so we can detect "exceeds cap" cleanly. */
+    private const BULK_PROBE = 101;
 }

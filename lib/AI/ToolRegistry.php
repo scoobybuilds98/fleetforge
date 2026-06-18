@@ -836,27 +836,40 @@ class ToolRegistry
                 '_tags' => ['chat', 'report'],
             ],
 
-            // ── Write / mutation PLANNERS (S-AI-WRITE-1) ────────────
+            // ── Write / mutation PLANNERS (S-AI-WRITE-1 / S-AI-WRITE-2) ──
             // These do NOT mutate data. They validate the request and
             // compute the exact diff, then persist a PENDING proposal.
             // The change only happens when the user clicks Apply, which
             // hits api/v1/ai/apply-change.php. Gated by ai.write_enabled
-            // + the user's equipment:edit permission.
+            // + the matching module's edit permission. Editable entities +
+            // fields are declared in lib/AI/WriteRegistry.php.
             [
-                'name' => 'plan_update_equipment',
-                'description' => "Propose a change to ONE equipment unit's editable field. This does NOT apply the change — it validates the request and returns a proposal the user must confirm with an Apply button. Use this when the user asks to change/set/update a unit's field (e.g. \"set unit ABCD category to chassis\", \"change T5301 mileage to 120000\"). After calling this, tell the user what will change and that they need to confirm — do NOT claim the change is done.",
+                'name' => 'plan_update_record',
+                'description' => "Propose a change to ONE field of ONE record, on any supported entity. This does NOT apply the change — it validates and returns a proposal the user confirms with an Apply button. Use when the user asks to change/set/update a record's field (e.g. \"set unit ABCD category to chassis\", \"change customer Acme's phone to 555-1234\", \"set reservation 45 priority to urgent\", \"update vendor Joe's Repair email\"). Supported entity_type values: equipment_unit, customer, vendor, yard, reservation, lease, maintenance_work_order, damage_claim, rate_card. After calling, tell the user what will change and that they must click Apply — do NOT claim it is done.",
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'unit_number' => ['type' => 'string', 'description' => 'The unit identifier shown in the UI, e.g. "T5301", "ABCD", "CHS-001".'],
-                        'field' => [
-                            'type' => 'string',
-                            'enum' => ['category', 'year', 'mileage', 'license_plate', 'ownership_type', 'notes', 'yard_location'],
-                            'description' => 'Which field to change. "category" reassigns the unit to a template of that category (chassis, dry_van, reefer, container, flatbed, step_deck, lowboy, tanker, dump, combo, other). "ownership_type" is one of owned/leased/brokered.',
-                        ],
-                        'new_value' => ['type' => 'string', 'description' => 'The new value for the field. For category use the category slug (e.g. "chassis"). For year/mileage use a number as a string.'],
+                        'entity_type' => ['type' => 'string', 'enum' => ['equipment_unit', 'customer', 'vendor', 'yard', 'reservation', 'lease', 'maintenance_work_order', 'damage_claim', 'rate_card'], 'description' => 'Which kind of record to edit.'],
+                        'identifier'  => ['type' => 'string', 'description' => 'How to find the record: its human identifier (unit_number, company name, vendor/yard/rate-card name, contract_number, work_order_number, claim_number) OR its numeric id.'],
+                        'field'       => ['type' => 'string', 'description' => 'The field to change. Use a field name valid for the entity (e.g. equipment_unit: category/year/mileage/license_plate/ownership_type/yard_location/notes; customer/vendor: contact_name/email/phone/address/notes; reservation: priority/pickup_date/notes; etc). If unsure, ask the user or try a sensible name — the tool will reject invalid ones and list valid fields.'],
+                        'new_value'   => ['type' => 'string', 'description' => 'The new value (as a string). For category use the slug (e.g. "chassis"); for dates use YYYY-MM-DD; for yes/no flags use "yes"/"no".'],
                     ],
-                    'required' => ['unit_number', 'field', 'new_value'],
+                    'required' => ['entity_type', 'identifier', 'field', 'new_value'],
+                ],
+                '_tags' => ['chat'],
+            ],
+            [
+                'name' => 'plan_bulk_update_records',
+                'description' => "Propose the SAME field change across MANY records selected by a filter (e.g. \"set all reefer units in Surrey yard to inactive\", \"mark all high-priority reservations urgent\"). Does NOT apply — returns one proposal listing every affected record for the user to confirm with Apply. Supported entity_type: equipment_unit (filters: status, ownership_type, yard_location, year), reservation (status, priority, yard_location), maintenance_work_order (status, priority, work_type). Capped at 100 records. After calling, tell the user how many records will change and that they must click Apply.",
+                'input_schema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'entity_type' => ['type' => 'string', 'enum' => ['equipment_unit', 'reservation', 'maintenance_work_order'], 'description' => 'Which kind of record to bulk-edit.'],
+                        'filters'     => ['type' => 'object', 'description' => 'Map of column→value to SELECT the records, e.g. {"status":"available","yard_location":"Surrey Yard"}. Only allow-listed filter columns are accepted.'],
+                        'field'       => ['type' => 'string', 'description' => 'The field to set on every matched record (same field names as plan_update_record).'],
+                        'new_value'   => ['type' => 'string', 'description' => 'The new value applied to all matched records.'],
+                    ],
+                    'required' => ['entity_type', 'filters', 'field', 'new_value'],
                 ],
                 '_tags' => ['chat'],
             ],

@@ -49,57 +49,62 @@ class ChangeApplier
      */
     public static function apply(array $proposal, int $userId, string $userName, ?string $ip): array
     {
-        if (($proposal['entity_type'] ?? '') !== 'equipment_unit') {
-            throw new \RuntimeException('Unsupported proposal entity_type: ' . ($proposal['entity_type'] ?? '(none)'));
+        $payload     = json_decode($proposal['payload'] ?? '[]', true) ?: [];
+        $entityType  = (string) ($proposal['entity_type'] ?? '');
+        $entry       = \FleetForge\AI\WriteRegistry::get($entityType);
+        if ($entry === null) {
+            throw new \RuntimeException("Unsupported proposal entity_type: {$entityType}");
         }
-
-        $payload = json_decode($proposal['payload'] ?? '[]', true) ?: [];
-        $targets = $payload['targets'] ?? [];
+        $table       = $entry['table'];
+        $auditModule = $entry['audit_module'];
+        $softSql     = $entry['soft_delete'] ? ' AND deleted_at IS NULL' : '';
+        $targets     = $payload['targets'] ?? [];
 
         $appliedDiff = [];
 
-        db_transaction(function () use ($targets, $userId, $userName, $ip, &$appliedDiff): void {
+        db_transaction(function () use ($targets, $userId, $userName, $ip, $table, $auditModule, $entityType, $softSql, &$appliedDiff): void {
             foreach ($targets as $t) {
-                $unitId = (int) ($t['unit_id'] ?? 0);
+                $rowId  = (int) ($t['id'] ?? $t['unit_id'] ?? 0); // unit_id for back-compat with S-AI-WRITE-1 rows
                 $column = (string) ($t['column'] ?? '');
                 $newVal = $t['new_db_value'] ?? null;
+                $label  = (string) ($t['label'] ?? $rowId);
 
                 // Re-read current value NOW: it is both the audit old_values and
-                // the undo before-snapshot. Skip rows that were deleted between
-                // proposal and apply.
+                // the undo before-snapshot. Skip rows deleted between proposal
+                // and apply.
                 $current = db_row(
-                    "SELECT id, unit_number, `{$column}` AS current_value
-                       FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
-                    [$unitId]
+                    "SELECT id, `{$column}` AS current_value FROM `{$table}` WHERE id = ?{$softSql}",
+                    [$rowId]
                 );
                 if (!$current) {
                     continue;
                 }
 
-                db_update('equipment_units', [
+                db_update($table, [
                     $column      => $newVal,
                     'updated_by' => $userId,
-                ], 'id = ?', [$unitId]);
+                ], 'id = ?', [$rowId]);
 
                 db_insert('audit_log', [
                     'user_id'      => $userId,
                     'user_name'    => $userName,
                     'action'       => 'update',
-                    'module'       => 'equipment',
-                    'entity_type'  => 'equipment_unit',
-                    'entity_id'    => $unitId,
-                    'entity_label' => $current['unit_number'],
+                    'module'       => $auditModule,
+                    'entity_type'  => $entityType,
+                    'entity_id'    => $rowId,
+                    'entity_label' => $label,
                     'old_values'   => json_encode([$column => $current['current_value']]),
                     'new_values'   => json_encode([$column => $newVal]),
                     'ip_address'   => $ip,
                 ]);
 
                 $appliedDiff[] = [
-                    'unit_id'     => $unitId,
-                    'unit_number' => $current['unit_number'],
-                    'column'      => $column,
-                    'before'      => $current['current_value'],
-                    'after'       => $newVal,
+                    'id'     => $rowId,
+                    'label'  => $label,
+                    'table'  => $table,
+                    'column' => $column,
+                    'before' => $current['current_value'],
+                    'after'  => $newVal,
                 ];
             }
         });
@@ -124,21 +129,31 @@ class ChangeApplier
             throw new \RuntimeException('No before-snapshot recorded; cannot undo.');
         }
 
-        db_transaction(function () use ($diff, $userId, $userName, $ip): void {
+        $entityType  = (string) ($proposal['entity_type'] ?? '');
+        $entry       = \FleetForge\AI\WriteRegistry::get($entityType);
+        // Fall back to the table recorded in the diff (older S-AI-WRITE-1 rows
+        // used equipment_units and an id/unit_id key).
+        $auditModule = $entry['audit_module'] ?? 'equipment';
+
+        db_transaction(function () use ($diff, $userId, $userName, $ip, $entityType, $auditModule): void {
             foreach ($diff as $d) {
-                db_update('equipment_units', [
+                $table = $d['table'] ?? 'equipment_units';
+                $rowId = (int) ($d['id'] ?? $d['unit_id'] ?? 0);
+                $label = (string) ($d['label'] ?? $d['unit_number'] ?? $rowId);
+
+                db_update($table, [
                     $d['column'] => $d['before'],
                     'updated_by' => $userId,
-                ], 'id = ?', [$d['unit_id']]);
+                ], 'id = ?', [$rowId]);
 
                 db_insert('audit_log', [
                     'user_id'      => $userId,
                     'user_name'    => $userName,
                     'action'       => 'update',
-                    'module'       => 'equipment',
-                    'entity_type'  => 'equipment_unit',
-                    'entity_id'    => $d['unit_id'],
-                    'entity_label' => $d['unit_number'] ?? (string) $d['unit_id'],
+                    'module'       => $auditModule,
+                    'entity_type'  => $entityType ?: 'equipment_unit',
+                    'entity_id'    => $rowId,
+                    'entity_label' => $label,
                     'old_values'   => json_encode([$d['column'] => $d['after']]),
                     'new_values'   => json_encode([$d['column'] => $d['before']]),
                     'ip_address'   => $ip,
