@@ -236,6 +236,62 @@ class StatusActions
         return $result;
     }
 
+    /**
+     * Activate / deactivate a yard. Mirrors api/v1/yards/bulk_{activate,deactivate}.php:
+     * role-gated (super_admin/manager); deactivation is blocked while the yard has
+     * upcoming pending/confirmed reservations (matched by name snapshot). Yards have
+     * no deleted_at — is_active IS the lifecycle flag.
+     *
+     * @throws ActionException  FORBIDDEN / NOT_FOUND / INVALID_TRANSITION / CONFLICT
+     * @return array{id:int, name:string, is_active:bool}
+     */
+    public static function setYardActive(int $id, bool $active, int $userId, string $userName, string $userRoleSlug, ?string $ip): array
+    {
+        if (!in_array($userRoleSlug, ['super_admin', 'manager'], true)) {
+            throw new ActionException('FORBIDDEN', 'Activating or deactivating yards requires Manager role.', 403);
+        }
+
+        $result = null;
+
+        db_transaction(function () use ($id, $active, $userId, $userName, $ip, &$result): void {
+            $yard = db_row("SELECT id, name, is_active FROM yards WHERE id = ? FOR UPDATE", [$id]);
+            if (!$yard) {
+                throw new ActionException('NOT_FOUND', 'Yard not found.', 404);
+            }
+            if ((bool) (int) $yard['is_active'] === $active) {
+                throw new ActionException('INVALID_TRANSITION', "Yard '{$yard['name']}' is already " . ($active ? 'active' : 'inactive') . '.', 409);
+            }
+
+            if (!$active) {
+                $upcoming = db_count(
+                    "SELECT COUNT(*) FROM reservations
+                      WHERE yard_location = ? AND pickup_date >= ? AND status IN ('pending','confirmed') AND deleted_at IS NULL",
+                    [$yard['name'], date('Y-m-d')]
+                );
+                if ($upcoming > 0) {
+                    throw new ActionException('CONFLICT',
+                        "Cannot deactivate '{$yard['name']}' — it has {$upcoming} upcoming reservation(s). Cancel or move those first.", 409);
+                }
+            }
+
+            db_execute("UPDATE yards SET is_active = ? WHERE id = ?", [$active ? 1 : 0, $id]);
+
+            db_insert('audit_log', [
+                'user_id' => $userId, 'user_name' => $userName,
+                'action' => $active ? 'update' : 'delete', 'module' => 'settings',
+                'entity_type' => 'yard', 'entity_id' => $id, 'entity_label' => $yard['name'],
+                'notes' => "Yard '{$yard['name']}' " . ($active ? 'activated' : 'deactivated') . ' (AI action)',
+                'old_values' => json_encode(['is_active' => (int) $yard['is_active']]),
+                'new_values' => json_encode(['is_active' => $active ? 1 : 0]),
+                'ip_address' => $ip ?? '127.0.0.1',
+            ]);
+
+            $result = ['id' => $id, 'name' => $yard['name'], 'is_active' => $active];
+        });
+
+        return $result;
+    }
+
     /** Reservation state machine (canonical — mirrors reservations/update_status.php). */
     public const RESERVATION_TRANSITIONS = [
         'pending'   => ['confirmed', 'cancelled'],

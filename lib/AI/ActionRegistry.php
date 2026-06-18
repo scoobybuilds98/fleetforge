@@ -235,12 +235,61 @@ class ActionRegistry
                     );
                 },
             ],
+
+            // ── Yard activate / deactivate (S-AI-ACTION-6) ─────────────
+            // Role-gated (no per-module permission); yards have no deleted_at.
+            'set_yard_active' => [
+                'label'          => 'activate or deactivate yards',
+                'entity'         => 'yard',
+                'table'          => 'yards',
+                'role_gate'      => ['super_admin', 'manager'],
+                'resolve_column' => 'name',
+                'label_column'   => 'name',
+                'soft_delete'    => false,
+                'preview' => static function (array $rec, array $params): array {
+                    $raw = strtolower(trim((string) ($params['new_status'] ?? '')));
+                    $active = match (true) {
+                        in_array($raw, ['active', 'activate', 'enable', 'enabled', 'on', 'true', '1'], true)  => true,
+                        in_array($raw, ['inactive', 'deactivate', 'disable', 'disabled', 'off', 'false', '0'], true) => false,
+                        default => null,
+                    };
+                    if ($active === null) {
+                        return ['error' => "Say whether to 'activate' or 'deactivate' yard {$rec['name']}."];
+                    }
+                    if ((bool) (int) $rec['is_active'] === $active) {
+                        return ['error' => "Yard {$rec['name']} is already " . ($active ? 'active' : 'inactive') . '.'];
+                    }
+                    return [
+                        'summary' => ($active ? 'Activate' : 'Deactivate') . " yard {$rec['name']}." . (!$active ? ' (Blocked if it has upcoming reservations.)' : ''),
+                        'params'  => ['active' => $active],
+                    ];
+                },
+                'run' => static function (array $rec, array $params, int $userId, string $userName, ?string $ip): array {
+                    $role = function_exists('current_user') ? (current_user()['role_slug'] ?? '') : '';
+                    return StatusActions::setYardActive((int) $rec['id'], (bool) $params['active'], $userId, $userName, $role, $ip);
+                },
+            ],
         ];
     }
 
     public static function get(string $action): ?array
     {
         return self::actions()[$action] ?? null;
+    }
+
+    /**
+     * Authorize the current user for an action. Uses a role gate when the entry
+     * declares one (e.g. yards — no per-module permission, manager/super_admin
+     * only), else the standard can(permission, perm_action) check. Both
+     * planAction (proposal time) and apply-change.php (apply time) call this.
+     */
+    public static function canPerform(array $entry): bool
+    {
+        if (!empty($entry['role_gate'])) {
+            $role = function_exists('current_user') ? (current_user()['role_slug'] ?? '') : '';
+            return in_array($role, $entry['role_gate'], true);
+        }
+        return \can($entry['permission'], $entry['perm_action'] ?? 'edit');
     }
 
     public static function names(): array

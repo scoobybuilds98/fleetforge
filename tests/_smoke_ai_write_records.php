@@ -378,6 +378,46 @@ try {
         }
     }
 
+    // ════ 3i. ACTION: yard activate/deactivate (role-gated) ════
+    $yEntry = \FleetForge\AI\ActionRegistry::get('set_yard_active');
+    if ($yEntry) {
+        $yp = ($yEntry['preview'])(['name'=>'Surrey','is_active'=>1], ['new_status'=>'activate']);
+        isset($yp['error']) ? $pass("yard: activate already-active rejected") : $fail("yard: already-active not rejected");
+        $yp2 = ($yEntry['preview'])(['name'=>'Surrey','is_active'=>1], ['new_status'=>'deactivate']);
+        (isset($yp2['summary']) && stripos($yp2['summary'],'Deactivate yard Surrey')!==false) ? $pass("yard: deactivate preview builds summary") : $fail("yard: summary wrong");
+        $yp3 = ($yEntry['preview'])(['name'=>'Surrey','is_active'=>1], ['new_status'=>'frobnicate']);
+        isset($yp3['error']) ? $pass("yard: unknown intent rejected") : $fail("yard: unknown intent not rejected");
+
+        // Role gate via canPerform (reads session role)
+        $savedRole = $_SESSION['ff_user']['role_slug'] ?? null;
+        $_SESSION['ff_user']['role_slug'] = 'dispatcher';
+        !\FleetForge\AI\ActionRegistry::canPerform($yEntry) ? $pass("yard: dispatcher blocked by role_gate") : $fail("yard: dispatcher NOT blocked");
+        $_SESSION['ff_user']['role_slug'] = 'manager';
+        \FleetForge\AI\ActionRegistry::canPerform($yEntry) ? $pass("yard: manager allowed by role_gate") : $fail("yard: manager NOT allowed");
+        $_SESSION['ff_user']['role_slug'] = $savedRole;
+    } else { $fail("yard: action not registered"); }
+    try { \FleetForge\AI\Actions\StatusActions::setYardActive(999999, false, $userId, 'Smoke', 'manager', '127.0.0.1'); $fail("yard: not-found should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='NOT_FOUND' ? $pass("yard: not-found rejected") : $fail("yard: wrong code {$e->errorCode}"); }
+    try { \FleetForge\AI\Actions\StatusActions::setYardActive(1, false, $userId, 'Smoke', 'dispatcher', '127.0.0.1'); $fail("yard: non-manager should throw"); }
+    catch (\FleetForge\AI\Actions\ActionException $e) { $e->errorCode==='FORBIDDEN' ? $pass("yard: service role gate enforced") : $fail("yard: wrong code {$e->errorCode}"); }
+
+    $yard = db_row("SELECT id, name, is_active FROM yards WHERE is_active=1 LIMIT 1");
+    if ($yard) {
+        $pdo = db_pdo();
+        $pdo->beginTransaction();
+        try {
+            \FleetForge\AI\Actions\StatusActions::setYardActive((int)$yard['id'], false, $userId, 'Smoke', 'manager', '127.0.0.1');
+            $now = (int) db_row("SELECT is_active FROM yards WHERE id=?", [$yard['id']])['is_active'];
+            $now === 0 ? $pass("yard: deactivate applied (is_active→0)") : $fail("yard: is_active now {$now}");
+            $aud = (int) db_row("SELECT COUNT(*) c FROM audit_log WHERE entity_type='yard' AND entity_id=? AND action='delete'", [$yard['id']])['c'];
+            $aud >= 1 ? $pass("yard: audit_log row written") : $fail("yard: no audit row");
+        } catch (\Throwable $e) {
+            $fail("yard: hermetic apply threw — " . $e->getMessage());
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+
     // ════ 4. NEGATIVES ════
     $bad = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'secret_column','new_value'=>'x'], $userId, null);
     stripos($bad, 'can only change') !== false ? $pass("negative: invalid field rejected by allow-list") : $fail("negative: invalid field not rejected: {$bad}");

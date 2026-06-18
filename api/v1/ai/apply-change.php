@@ -74,7 +74,7 @@ if (($payload['kind'] ?? '') === 'action') {
     if ($actionEntry === null) {
         json_error('UNSUPPORTED', 'This action type cannot be applied.', 422);
     }
-    if (!can($actionEntry['permission'], $actionEntry['perm_action'] ?? 'edit')) {
+    if (!\FleetForge\AI\ActionRegistry::canPerform($actionEntry)) {
         json_error('FORBIDDEN', "You do not have permission to {$actionEntry['label']}.", 403);
     }
     if ($action === 'undo') {

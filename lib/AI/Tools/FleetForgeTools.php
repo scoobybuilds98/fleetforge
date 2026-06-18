@@ -2766,7 +2766,7 @@ class FleetForgeTools
         if ($entry === null) {
             return 'I can only perform these actions: ' . implode(', ', \FleetForge\AI\ActionRegistry::names()) . '.';
         }
-        if (!\can($entry['permission'], $entry['perm_action'] ?? 'edit')) {
+        if (!\FleetForge\AI\ActionRegistry::canPerform($entry)) {
             return "You don't have permission to {$entry['label']}.";
         }
         if ($identifier === '') {
