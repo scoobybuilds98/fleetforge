@@ -1884,6 +1884,25 @@ CREATE TABLE `ai_chat_sessions` (
   KEY `idx_user` (`user_id`),
   CONSTRAINT `ai_chat_sessions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `ai_pending_changes` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int unsigned NOT NULL COMMENT 'User who requested the change (proposer).',
+  `session_id` int unsigned DEFAULT NULL COMMENT 'ai_chat_sessions.id the proposal came from.',
+  `change_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'e.g. update_equipment, bulk_update_equipment.',
+  `entity_type` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'e.g. equipment_unit.',
+  `summary` varchar(500) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Human-readable one-line description of the change.',
+  `payload` json NOT NULL COMMENT 'Validated change spec: targets, columns, old/new values.',
+  `affected_count` int unsigned NOT NULL DEFAULT '1' COMMENT 'Number of rows this change will touch.',
+  `status` enum('pending','applied','undone','cancelled','expired') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `applied_diff` json DEFAULT NULL COMMENT 'before/after per row, captured at apply time for undo.',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `expires_at` datetime DEFAULT NULL COMMENT 'After this, the proposal cannot be applied.',
+  `applied_at` datetime DEFAULT NULL,
+  `applied_by` int unsigned DEFAULT NULL COMMENT 'User who clicked Apply (re-checked for edit permission).',
+  PRIMARY KEY (`id`),
+  KEY `idx_user_status` (`user_id`,`status`),
+  KEY `idx_session` (`session_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `ai_query_log` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int unsigned DEFAULT NULL,
