@@ -284,7 +284,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
         if ($unit['cvi_expiry']):
             $cls = $cviDays === null ? 'text-secondary' : ($cviDays < 0 ? 'text-danger' : ($cviDays <= 30 ? 'text-warning' : 'text-success'));
         ?>
-        <div class="stat-value font-mono <?= $cls ?>"><?= e(date('M j, Y', strtotime($unit['cvi_expiry']))) ?></div>
+        <div class="stat-value stat-value--date font-mono <?= $cls ?>"><?= e(date('M j, Y', strtotime($unit['cvi_expiry']))) ?></div>
         <div class="stat-delta text-secondary">
             <?= e(complianceDelta($cviDays)) ?>
         </div>

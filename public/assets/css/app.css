@@ -2289,6 +2289,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     text-overflow: ellipsis;
 }
 
+/* WHY: Dates like "Aug 31, 2026" clip at 1.5rem bold mono — drop to 1.125rem to fit */
+.stat-value--date {
+    font-size: 1.125rem;
+    overflow: visible;
+    text-overflow: unset;
+}
+
 /* WHY: VINs are 17 chars and overflow the tile at 1.5rem bold mono — shrink and allow wrap */
 .stat-value--vin {
     font-size: 0.875rem;

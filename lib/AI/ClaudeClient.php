@@ -93,7 +93,7 @@ class ClaudeClient
 
         $this->model = (string) (
             settings_get('ai.model')
-            ?: env('AI_MODEL', 'claude-sonnet-4-20250514')
+            ?: env('AI_MODEL', 'claude-sonnet-4-6')
         );
         $this->projectRoot = dirname(__DIR__, 2); // lib/AI/ → project root
     }

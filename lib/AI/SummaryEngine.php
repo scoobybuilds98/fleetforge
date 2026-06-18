@@ -91,7 +91,7 @@ class SummaryEngine
             messages:     [['role' => 'user', 'content' => $prompt]],
             systemPrompt: self::getSystemPrompt(),
             tools:        [],
-            maxTokens:    1024,
+            maxTokens:    4096,
             userId:       $userId,
             queryType:    'summary'
         );
@@ -345,74 +345,149 @@ class SummaryEngine
 
         return match ($summaryType) {
             'customer_insights' => <<<PROMPT
-Analyze this customer data and provide a brief insights summary (3-5 bullet points). Cover:
-- Overall account health and status
-- Lease activity patterns
-- Payment behavior and any overdue concerns
-- Risk assessment based on the data
-- Recommendations for account management
+You are reviewing a customer account for a trailer leasing company. Give a thorough account intelligence briefing that a sales manager or account executive would find genuinely actionable.
+
+Structure your response with these sections:
+
+**Account Overview**
+Who this customer is, their current relationship status, credit standing, and how long they've been a customer.
+
+**Lease Portfolio**
+Active leases: unit types, rates, billing cycles, any unusual terms. Are rates competitive or stale? Any leases expiring soon that should be renewed proactively?
+
+**Financial Health**
+Outstanding balance, payment patterns (on time? consistently late?), largest overdue invoices. Be specific about dollar amounts and days overdue. Flag any collections risk.
+
+**Risk & Opportunity Assessment**
+What risks exist (payment risk, fleet reduction, under-billing)? What opportunities are there (expand the fleet, rate renegotiation, cross-sell)?
+
+**Recommended Actions**
+Concrete next steps, prioritized. E.g. "Call re: INV-xxx ($2,400 overdue 45 days)", "Propose renewal for lease ending June 2026", etc.
 
 Customer data:
 {$dataJson}
 PROMPT,
 
             'lease_summary' => <<<PROMPT
-Provide a concise summary of this lease (3-4 bullet points). Cover:
-- Key terms (dates, rates, billing cycle)
-- Current status and any notable conditions
-- Financial standing (invoiced vs paid)
-- Any flags or concerns
+You are reviewing a specific trailer lease. Provide a thorough lease intelligence summary that an operations or billing manager would find useful.
+
+Structure your response with these sections:
+
+**Lease Overview**
+Unit, customer, contract number, status, lease period (start → end or open-ended), billing cycle. Flag if the lease is overdue for renewal or extension.
+
+**Rate Analysis**
+Daily/weekly/monthly rates, mileage rates, GPS add-on, hourly rate. Are rates in line with what you'd expect? Any free/discounted rates that look unusual?
+
+**Financial Position**
+Total invoiced vs paid, outstanding balance, last billing date, next billing date. Any overdue invoices? Estimate remaining contract value if applicable.
+
+**Compliance & Operational Notes**
+GPS tracking status, mileage tracking (from/to), any close notes or inspection issues.
+
+**Action Items**
+What needs to happen next? Be specific (e.g. "Invoice overdue $X since [date]", "Lease ending in 30 days — initiate renewal", "Mileage allowance nearly exhausted").
 
 Lease data:
 {$dataJson}
 PROMPT,
 
             'unit_analysis' => <<<PROMPT
-Analyze this equipment unit and provide a brief assessment (3-5 bullet points). Cover:
-- Current status and utilization
-- Compliance document status (any upcoming expirations)
-- Maintenance history and costs
-- Revenue performance
-- Recommended actions
+You are reviewing a specific piece of equipment in a trailer fleet. Give a thorough unit intelligence report that a fleet manager would find genuinely useful.
+
+Structure your response with these sections:
+
+**Unit Overview**
+Unit number, type/category, year, current status (available/on lease/maintenance), yard location. Current lease customer if on lease.
+
+**Compliance Status**
+CVI, Registration, and MVI expiry dates. For each: how many days until expiry? Flag anything expiring within 60 days as urgent. Recommend specific action (e.g. "Schedule CVI inspection — expires in 22 days").
+
+**Maintenance & Condition**
+Recent maintenance work orders, costs, recurring issues. Is maintenance spend high for the unit age? Any open work orders?
+
+**Revenue Performance**
+How long has this unit been in the fleet? What is it generating? Utilization rate (time on lease vs sitting). If it's been sitting available for a long time, flag it.
+
+**Recommended Actions**
+Prioritized list of what needs to happen for this unit. Be specific and actionable.
 
 Unit data:
 {$dataJson}
 PROMPT,
 
             'fleet_health' => <<<PROMPT
-Provide a fleet health overview (4-6 bullet points). Cover:
-- Overall fleet utilization and capacity
-- Status distribution and availability
-- Upcoming compliance concerns
-- Key performance indicators
-- Maintenance workload
-- Recommendations
+You are generating a fleet-wide health report for management at a Canadian trailer leasing company. Give a thorough executive-level fleet briefing.
+
+Structure your response with these sections:
+
+**Fleet Utilization**
+Total units, how many on lease, available, in maintenance, reserved. Calculate utilization rate. Is it healthy (>70%? >80%)? What's sitting idle that shouldn't be?
+
+**Compliance Alert Summary**
+Units with documents expiring within 30 days. Name the specific units and what needs renewing. Flag anything already expired.
+
+**Revenue Snapshot**
+Active lease revenue, open invoices vs collected, any overdue AR concerns.
+
+**Maintenance & Downtime**
+Units in maintenance — how many, how long, any patterns suggesting systemic issues?
+
+**Top Opportunities & Risks**
+What are the 2-3 biggest opportunities to improve fleet performance right now? What are the 2-3 biggest operational risks?
+
+**Recommended Actions This Week**
+Specific, prioritized action items for the fleet manager.
 
 Fleet data:
 {$dataJson}
 PROMPT,
 
             'payment_risk' => <<<PROMPT
-Assess the payment risk for this customer (3-4 bullet points). Cover:
-- Payment history patterns
-- Current overdue status
-- Risk score and credit standing
-- Recommended collection actions if needed
+You are conducting a payment risk assessment for a customer at a trailer leasing company. Give a thorough risk analysis that a credit manager would use to decide on collections or credit actions.
+
+Structure your response with these sections:
+
+**Payment Pattern Analysis**
+How does this customer pay? On time, slightly late, or chronically delinquent? Be specific about patterns in the invoice data.
+
+**Current Exposure**
+Total outstanding, how much is current vs 30/60/90+ days overdue. Name specific invoices that are the biggest concerns.
+
+**Risk Rating**
+Low / Medium / High / Critical — with specific justification based on the actual data.
+
+**Recommended Actions**
+Concrete collections or credit actions: send reminder, escalate to phone call, hold new leases, engage collections agency, etc. Be specific about which invoices and amounts to reference.
 
 Customer payment data:
 {$dataJson}
 PROMPT,
 
             'accounting_overview' => <<<PROMPT
-Provide a concise accounting health snapshot for the CFO/controller (5-7 bullet points). Cover:
-- Cash position across bank accounts (flag any low balances)
-- AR aging — total outstanding, current vs overdue buckets, any concentration risk
-- AP aging — overdue vendor bills and their impact on cash
-- Revenue vs expenses (from the trial balance) and net position
-- Unusual or notable items in recent journal entries (large adjustments, manual entries, etc.)
-- Top 1-2 actions the finance team should take this week
+You are generating a financial health briefing for the CFO/controller of a Canadian trailer leasing company. Give a thorough accounting snapshot that surfaces what actually matters.
 
-Format monetary values with \$ and currency (CAD/USD). Include specific customer/vendor names where relevant. Do NOT just repeat the numbers — summarize what they mean.
+Structure your response with these sections:
+
+**Cash Position**
+Bank account balances, total cash. Any accounts running low? Cover runway if there are concerning burn signals.
+
+**Accounts Receivable**
+Total AR outstanding, aging breakdown (current / 30 / 60 / 90+ days overdue). Name specific customers with large or severely overdue balances. Concentration risk?
+
+**Accounts Payable**
+Overdue vendor bills — amounts, vendors, days overdue. Cash flow impact.
+
+**Revenue vs Expenses**
+From the trial balance: revenue drivers, major expense categories, net position YTD. What's the margin story?
+
+**Notable Journal Entry Activity**
+Any large manual adjustments, unusual entries, or items that warrant a second look?
+
+**Top Actions This Week**
+Specific, prioritized actions for the finance team — include customer names, invoice numbers, and dollar amounts where relevant.
+
+Format monetary values with \$ and CAD/USD. Reference specific account names where they sharpen the analysis.
 
 Accounting data:
 {$dataJson}
@@ -494,15 +569,25 @@ PROMPT,
     private static function getSystemPrompt(): string
     {
         return <<<'PROMPT'
-You are FleetForge AI, generating concise data summaries for a trailer and equipment leasing company.
+You are FleetForge AI — the built-in fleet intelligence assistant for Mainland Truck & Trailer Sales & Leasing, a Canadian commercial trailer and equipment leasing company.
 
-Rules:
-- Be concise and factual. Use bullet points.
-- Format monetary values with $ and two decimal places, include currency (CAD/USD).
-- Use clear date formats (e.g., "January 15, 2026").
-- Highlight any concerns or anomalies.
-- Do not hallucinate — only reference data provided.
-- Keep summaries under 200 words.
+You have deep expertise in:
+- Commercial trailer and equipment leasing (dry vans, reefers, flatbeds, chassis, combos, etc.)
+- Fleet operations, utilization, and maintenance cost analysis
+- Canadian trucking industry norms and compliance requirements (CVI, MVI, annual registrations)
+- Invoice billing cycles, overdue AR, and customer payment patterns
+- Revenue optimization and risk identification for leasing portfolios
+
+When responding:
+- Be thorough and genuinely insightful — do not just restate the numbers, explain what they mean and why they matter
+- Use clear headers and bullet points for readability
+- Call out specific risks, opportunities, or action items by name
+- Format monetary values with $ and the currency (CAD/USD)
+- Use clear date formats (e.g., "June 15, 2026")
+- When compliance documents are expiring, calculate urgency and recommend exactly what to do
+- When leases have financial issues, be specific about amounts and timelines
+- Do NOT hallucinate — only reference data that was provided
+- Do NOT pad with generic disclaimers or filler sentences
 PROMPT;
     }
 }
