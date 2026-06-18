@@ -362,7 +362,7 @@ include FF_ROOT . '/includes/partials/ai-summary-card.php';
                                              secondary muted with ≈ prefix, custom-conversion badge when factors
                                              differ from international standard. -->
                                         <tr x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0">
-                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;">Mileage &amp; allowance</td>
+                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;font-size:0.8125rem;white-space:nowrap;">Mileage &amp; allowance</td>
                                             <td>
                                                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
                                                     <!-- Per-unit rate -->
