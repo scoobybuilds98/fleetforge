@@ -174,11 +174,21 @@ DbState::inTransaction(function () use ($gen) {
     $inv = $batch['invoices'][0]['invoice_id'];
     eq('300.00', base_net($inv), 'T1 base rental FLAT 3 × $100 (floor binds, not 1 × $100)');
     // The engine's daily_minimum tier is recorded in the invoice's holistic
-    // audit_meta; assert that forensic trail names the floor (the
-    // rate_method_used ENUM has no daily_minimum member, so we read audit_meta,
-    // not that column).
+    // audit_meta; assert that forensic trail names the floor. The rate_method
+    // ENUMs have no 'daily_minimum' member, so the fine-grained floor identity
+    // lives ONLY here (detail_lines), not in the coarse ENUM columns.
     ok(audit_tier($inv) === 'daily_minimum',
         "T1 audit_meta tier = 'daily_minimum' (got '" . audit_tier($inv) . "')");
+    // ENUM-level: mapTierToRateMethod('daily_minimum') => 'daily', so the
+    // coarser invoices.rate_method_used + invoice_line_items.rate_method record
+    // the floor's economic (daily) basis — minimum_days × daily_rate — rather
+    // than falling through to 'none'/null (the pre-fix behaviour).
+    $rmu = db_row("SELECT rate_method_used FROM invoices WHERE id=?", [$inv]);
+    ok(($rmu['rate_method_used'] ?? '') === 'daily',
+        "T1 invoices.rate_method_used = 'daily' (floor's daily basis; got '" . ($rmu['rate_method_used'] ?? '') . "')");
+    $rml = db_row("SELECT rate_method FROM invoice_line_items WHERE invoice_id=? AND item_type='base_rental' ORDER BY id LIMIT 1", [$inv]);
+    ok(($rml['rate_method'] ?? '') === 'daily',
+        "T1 base_rental line item rate_method = 'daily' (got '" . ($rml['rate_method'] ?? '') . "')");
 });
 
 // ════════════════════════════════════════════════════════════════════
