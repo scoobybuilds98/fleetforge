@@ -11872,7 +11872,7 @@ tr.ff-row-selected > td {
     top: var(--topbar-height);
     right: 0;
     bottom: 0;
-    z-index: calc(var(--z-topbar) - 2); /* 28 — same as help drawer */
+    z-index: calc(var(--z-topbar) + 1); /* above topbar so its shadow doesn't bleed over panel top */
     width: 560px;
     max-width: 100vw;
     background: var(--bg-surface);
