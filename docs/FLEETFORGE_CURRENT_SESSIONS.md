@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-AI-STREAM-SUMMARY** — SHIPPED 2026-06-18 (see PROGRESS.md SESSION LOG row). Streaming AI summaries (SSE, token-by-token) + professional response styling. New endpoint `api/v1/ai/summary-stream.php`; rewrote `ai-summary-card.php` with ReadableStream client + blinking cursor; 4 SummaryEngine methods made public static; ~170-line `.ai-response` + `.ai-summary-card` CSS added. php -l 2/2 PASS. No schema changes.
+
 **S-COMPLIANCE-HIDE-INSURANCE** — SHIPPED 2026-06-18 (see PROGRESS.md SESSION LOG row). Removed Insurance column from compliance module (UI, CSV export, KPI queries, API). CVI and Registration remain. No schema changes. php -l 3/3 PASS.
 
 **S-LEASE-HOURLY-RATE** — SHIPPED 2026-06-18 (see PROGRESS.md SESSION LOG row). Added `leases.hourly_rate DECIMAL(10,4) NULL` (migration 202606182400). Wired through create/update/show/edit forms and Amend Rates modal. GPS row moved to main rates block (after Monthly Rate, always shows when gps_opt_in=1). php -l 7/7 PASS; D131 6/6 PASS.
