@@ -92,6 +92,19 @@ if (!in_array($summaryType, $fleetLevelTypes, true)
     json_error('VALIDATION_ERROR', 'entity_id is required', 400);
 }
 
+// Module-view gate (defense-in-depth): ai:view reaches this endpoint, but the
+// underlying entity data still requires that module's view permission, so a
+// custom role with ai:view but not e.g. customers:view can't read a customer
+// summary. 'fleet' aggregates need no extra module gate. S-AI-AUDIT-HIGH-FIX.
+$entityViewPerm = [
+    'customer' => 'customers', 'lease' => 'leases',
+    'equipment_unit' => 'equipment', 'accounting' => 'journal_entries',
+];
+$needPerm = $entityViewPerm[$entityType] ?? null;
+if ($needPerm !== null && !can($needPerm, 'view')) {
+    json_error('FORBIDDEN', 'You do not have permission to view this ' . $entityType . '.', 403);
+}
+
 // ── Check AI is enabled ────────────────────────────────────
 $ai = new \FleetForge\AI\ClaudeClient();
 if (!$ai->isEnabled()) {

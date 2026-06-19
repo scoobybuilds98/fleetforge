@@ -275,6 +275,13 @@ while ($iteration < $maxIterations) {
     $iteration++;
 }
 
+// If we hit the tool-iteration cap while Claude still wanted another tool, the
+// chain was cut short — stream a notice and persist it with the message instead
+// of returning a half-synthesized answer with no explanation. S-AI-AUDIT-HIGH-FIX.
+if ($iteration >= $maxIterations && \FleetForge\AI\ClaudeClient::hasToolUse($response)) {
+    $onChunk("\n\n_(Stopped after {$maxIterations} data-lookup steps — please ask a narrower question for a complete answer.)_");
+}
+
 if ($finalText === '') {
     $finalText = "I'm sorry, I wasn't able to generate a response. Please try rephrasing your question.";
 }

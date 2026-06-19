@@ -29,6 +29,9 @@ declare(strict_types=1);
  * @audit   #3 (missing crons — AI fleet brief)
  */
 
+// Defense-in-depth: refuse a non-CLI (web) invocation (cron/ is above docroot).
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 

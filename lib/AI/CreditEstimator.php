@@ -157,7 +157,7 @@ final class CreditEstimator
     {
         $baseline = self::baselineValue();
         $asOf     = self::baselineAsOf();
-        $model    = (string) (settings_get('ai.model') ?: 'claude-sonnet-4-20250514');
+        $model    = (string) (settings_get('ai.model') ?: 'claude-sonnet-4-6');
 
         if ($baseline === null) {
             return [

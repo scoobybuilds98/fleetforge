@@ -300,6 +300,14 @@ $assistantText = $accumulatedText !== ''
     ? $accumulatedText
     : \FleetForge\AI\ClaudeClient::extractTextContent($response);
 
+// If we hit the tool-iteration cap while Claude still wanted another tool, the
+// chain was cut short — say so instead of returning a half-synthesized or
+// generic answer with no explanation. S-AI-AUDIT-HIGH-FIX.
+if ($iteration >= $maxIterations && \FleetForge\AI\ClaudeClient::hasToolUse($response)) {
+    $notice = "_(Stopped after {$maxIterations} data-lookup steps — please ask a narrower question for a complete answer.)_";
+    $assistantText = $assistantText !== '' ? $assistantText . "\n\n" . $notice : $notice;
+}
+
 if ($assistantText === '') {
     $assistantText = "I'm sorry, I wasn't able to generate a response. Please try rephrasing your question.";
 }

@@ -67,15 +67,22 @@ try {
     echo "\nC1 — Pricing table\n";
     smoke_assert('default model is priced', Pricing::isPriced($PRICED_MODEL));
     smoke_assert('bogus model is unpriced', !Pricing::isPriced('claude-totally-made-up'));
+    // The exact regression the audit caught: the LIVE ai.model must be priced, or
+    // every real call's spend silently counts as $0 in the credit tile.
+    smoke_assert('LIVE ai.model is priced', Pricing::isPriced((string) ($orig['ai.model'] ?? '')),
+        'live model=' . ($orig['ai.model'] ?? 'NULL'));
     smoke_assert('priced model exposes input+output strings',
         is_string($INPUT_PRICE) && is_string($OUTPUT_PRICE) && is_numeric($INPUT_PRICE) && is_numeric($OUTPUT_PRICE),
         "in={$INPUT_PRICE} out={$OUTPUT_PRICE}");
 
     // ── Seed: configured model = priced; two known-token rows ─────────────────
     _smoke_set_setting('ai.model', $PRICED_MODEL);
-    // Use a fixed UTC anchor for the rows; query/baseline as-of just before it.
-    $rowUtc   = '2026-06-07 04:30:00';      // 04:30 UTC
-    $sinceUtc = '2026-06-07 00:00:00';      // before the rows
+    // Use a FAR-FUTURE UTC anchor so no real ai_query_log rows fall in the window
+    // (spentSince sums ALL rows since $since, priced by the current ai.model — a
+    // 2026 anchor let ~14 real dev rows bleed into the hand-computed assertions).
+    // S-AI-AUDIT-HIGH-FIX.
+    $rowUtc   = '2031-06-07 04:30:00';      // 04:30 UTC, far future
+    $sinceUtc = '2031-06-07 00:00:00';      // before the rows, no real data here
     // Row A: 1,000,000 input tokens, 0 output  → 1e6 * INPUT /1e6 = INPUT
     $idA = db_insert('ai_query_log', [
         'user_id' => null, 'query_type' => 'smoke', 'prompt_tokens' => 1000000,
@@ -100,7 +107,7 @@ try {
     $spent = CreditEstimator::spentSince($sinceUtc);
     smoke_assert('spentSince == hand-computed bcmath', bccomp($spent, $expSpend, 6) === 0, "got={$spent} exp={$expSpend}");
     // Sanity: a $since AFTER the rows yields 0
-    $spentAfter = CreditEstimator::spentSince('2026-06-07 05:00:00');
+    $spentAfter = CreditEstimator::spentSince('2031-06-07 05:00:00');
     smoke_assert('spentSince after rows == 0', bccomp($spentAfter, '0', 6) === 0, "got={$spentAfter}");
 
     // ── C3 — remaining (positive) ──────────────────────────────────────────────

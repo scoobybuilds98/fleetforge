@@ -12,6 +12,12 @@ namespace FleetForge\AI;
  * Data is stored in the ai_query_log table (already in schema).
  * Daily limit comes from settings table: ai.daily_token_limit
  *
+ * NOTE on cost_usd: the dollar figures from getTodayUsage/getMonthUsage/
+ * getUsageByUser are NON-AUTHORITATIVE display estimates summed from the stored
+ * per-row cost_usd (itself now derived via the bcmath Pricing path in
+ * ClaudeClient). The authoritative credit/spend figure is CreditEstimator, which
+ * recomputes from token counts with bcmath and does NOT read this column.
+ *
  * @depends includes/db.php (db_row, db_insert), includes/functions.php (settings_get)
  * @session S026
  */
@@ -20,10 +26,15 @@ class TokenTracker
     // ────────────────────────────────────────────────────────────
     // canSpend()
     //
-    // Returns true if the user (or global total) has not exceeded
-    // the daily token limit. If limit is 0, spending is unlimited.
+    // Enforces a GLOBAL daily token budget (ai.daily_token_limit) summed across
+    // ALL users — not a per-user cap. $userId is not a quota dimension here; the
+    // caller (ClaudeClient) only consults this gate for user-attributed calls and
+    // passes null for system/cron to bypass it. Kept in the signature for a
+    // possible future per-user cap and to keep all call sites uniform. If limit
+    // is 0, spending is unlimited. (S-AI-AUDIT-HIGH-FIX: doc corrected — the code
+    // was always global; ClaudeClient's "per-user" wording was the inaccuracy.)
     //
-    // @param  int|null $userId  User ID (null = system/cron)
+    // @param  int|null $userId  Unused for the quota; see note above.
     // @return bool
     // ────────────────────────────────────────────────────────────
     public static function canSpend(?int $userId): bool
@@ -31,7 +42,7 @@ class TokenTracker
         $limit = (int) settings_get('ai.daily_token_limit', 500000);
         if ($limit <= 0) return true; // 0 = unlimited
 
-        // Check global daily usage (all users combined)
+        // Global daily usage (all users combined) vs the shared daily budget.
         $row = db_row(
             "SELECT COALESCE(SUM(total_tokens), 0) AS used
              FROM ai_query_log
@@ -50,20 +61,21 @@ class TokenTracker
     // @param  string   $queryType        Feature label (chat, summary, report, etc.)
     // @param  int      $promptTokens     Input tokens from API response
     // @param  int      $completionTokens Output tokens from API response
-    // @param  int      $totalTokens      Total tokens (input + output)
-    // @param  float    $costUsd          Estimated cost in USD
-    // @param  int      $latencyMs        Request round-trip time
-    // @param  bool     $wasCached        Whether result came from cache
+    // @param  int          $totalTokens   Total tokens (input + output)
+    // @param  float|string $costUsd       Estimated cost in USD (ClaudeClient now
+    //                                      passes a bcmath 6dp decimal string)
+    // @param  int          $latencyMs     Request round-trip time
+    // @param  bool         $wasCached     Whether result came from cache
     // ────────────────────────────────────────────────────────────
     public static function record(
-        ?int   $userId,
-        string $queryType,
-        int    $promptTokens,
-        int    $completionTokens,
-        int    $totalTokens,
-        float  $costUsd,
-        int    $latencyMs,
-        bool   $wasCached
+        ?int         $userId,
+        string       $queryType,
+        int          $promptTokens,
+        int          $completionTokens,
+        int          $totalTokens,
+        float|string $costUsd,
+        int          $latencyMs,
+        bool         $wasCached
     ): void {
         try {
             db_insert('ai_query_log', [
@@ -72,7 +84,9 @@ class TokenTracker
                 'prompt_tokens'      => $promptTokens,
                 'completion_tokens'  => $completionTokens,
                 'total_tokens'       => $totalTokens,
-                'cost_usd'           => round($costUsd, 6),
+                // Already a 6dp bcmath string from ClaudeClient; normalize a float
+                // caller to the same shape for the DECIMAL(8,6) column w/o drift.
+                'cost_usd'           => is_string($costUsd) ? $costUsd : number_format($costUsd, 6, '.', ''),
                 'latency_ms'         => $latencyMs,
                 'was_cached'         => $wasCached ? 1 : 0,
             ]);

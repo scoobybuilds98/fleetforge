@@ -82,6 +82,15 @@ if ($action === 'cancel') {
     json_success(['id' => $proposalId, 'status' => 'cancelled', 'summary' => $proposal['summary']]);
 }
 
+// ── Kill-switch re-check — no AI-driven WRITE proceeds once ai.write_enabled is
+// off. Cancel (above) is exempt: dismissing a pending proposal is always safe.
+// The propose-time gate (FleetForgeTools::writeGate) blocks NEW proposals; this
+// stops an in-flight proposal from being applied/undone after an admin flips the
+// master switch off (closes the 30-min in-flight window). S-AI-AUDIT-HIGH-FIX.
+if (!settings_get('ai.write_enabled', false)) {
+    json_error('AI_WRITE_DISABLED', 'AI write actions are currently disabled. Ask an administrator to re-enable them.', 403);
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 //  LIFECYCLE ACTIONS (S-AI-ACTION-1) — status transitions, not field edits.
 //  Routed to ActionRegistry, which delegates to the same service the canonical
@@ -206,6 +215,11 @@ if ($claimed !== 1) {
 // apply time for the audit old_values and the undo before-snapshot.
 try {
     $result = \FleetForge\AI\ChangeApplier::apply($proposal, $userId, $userName, $ip);
+} catch (\RuntimeException $e) {
+    // Apply-time allowlist rejection (non-registry column) — nothing landed
+    // (transaction rolled back). Release the claim and refuse loudly.
+    db_update('ai_pending_changes', ['status' => 'pending', 'applied_at' => null, 'applied_by' => null], 'id = ?', [$proposalId]);
+    json_error('UNSUPPORTED', $e->getMessage(), 422);
 } catch (\PDOException $e) {
     // Release the claim — ChangeApplier is transactional so nothing landed; the
     // proposal returns to pending and can be retried after the cause is fixed.

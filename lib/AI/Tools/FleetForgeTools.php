@@ -905,12 +905,16 @@ class FleetForgeTools
         $dateTo   = $input['date_to'] ?? '';
         if ($dateFrom === '' || $dateTo === '') return 'Error: date_from and date_to are required.';
 
+        // Money aggregates report in CAD (operator policy, locked 2026-06-13): USD
+        // rows × exchange_rate_to_cad via the canonical ReportBuilder::cad() so the
+        // AI numbers match the Reports module. Latent until a USD invoice exists.
+        $cad = static fn(string $c): string => \FleetForge\Reports\ReportBuilder::cad($c, 'i');
         return db_select(
             "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS month,
                     COUNT(*) AS invoice_count,
-                    SUM(i.total_amount) AS total_invoiced,
-                    SUM(i.amount_paid) AS total_collected,
-                    SUM(i.balance_due) AS total_outstanding
+                    SUM(" . $cad('i.total_amount') . ") AS total_invoiced,
+                    SUM(" . $cad('i.amount_paid') . ") AS total_collected,
+                    SUM(" . $cad('i.balance_due') . ") AS total_outstanding
              FROM invoices i
              WHERE i.invoice_date BETWEEN ? AND ?
                AND i.status NOT IN ('void', 'written_off')
@@ -939,13 +943,15 @@ class FleetForgeTools
 
         $limit = ToolRegistry::MAX_ROWS;
 
+        // CAD-normalize money sums (see getRevenueByPeriod).
+        $cad = static fn(string $c): string => \FleetForge\Reports\ReportBuilder::cad($c, 'i');
         return db_select(
             "SELECT i.customer_id,
                     i.company_name_snapshot AS customer_name,
                     COUNT(*) AS invoice_count,
-                    SUM(i.total_amount) AS total_billed,
-                    SUM(i.amount_paid) AS total_paid,
-                    SUM(i.balance_due) AS outstanding
+                    SUM(" . $cad('i.total_amount') . ") AS total_billed,
+                    SUM(" . $cad('i.amount_paid') . ") AS total_paid,
+                    SUM(" . $cad('i.balance_due') . ") AS outstanding
              FROM invoices i
              WHERE i.invoice_date BETWEEN ? AND ?
                AND i.status NOT IN ('void', 'written_off')
@@ -998,15 +1004,17 @@ class FleetForgeTools
             return 'Access denied: you do not have permission to view financial data.';
         }
 
-        // WHY: CASE-based aging buckets in a single query for efficiency
+        // WHY: CASE-based aging buckets in a single query for efficiency.
+        // Balances are CAD-normalized (see getRevenueByPeriod) so AR matches Reports.
+        $b = \FleetForge\Reports\ReportBuilder::cad('i.balance_due', 'i');
         $row = db_row(
             "SELECT
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) <= 0 THEN i.balance_due ELSE 0 END) AS current_amount,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 1 AND 30 THEN i.balance_due ELSE 0 END) AS days_1_30,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 31 AND 60 THEN i.balance_due ELSE 0 END) AS days_31_60,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 61 AND 90 THEN i.balance_due ELSE 0 END) AS days_61_90,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) > 90 THEN i.balance_due ELSE 0 END) AS days_90_plus,
-                SUM(i.balance_due) AS total_outstanding,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) <= 0 THEN {$b} ELSE 0 END) AS current_amount,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 1 AND 30 THEN {$b} ELSE 0 END) AS days_1_30,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 31 AND 60 THEN {$b} ELSE 0 END) AS days_31_60,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 61 AND 90 THEN {$b} ELSE 0 END) AS days_61_90,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) > 90 THEN {$b} ELSE 0 END) AS days_90_plus,
+                SUM({$b}) AS total_outstanding,
                 COUNT(*) AS invoice_count
              FROM invoices i
              WHERE i.balance_due > 0
@@ -1033,10 +1041,16 @@ class FleetForgeTools
         $dateTo   = $input['date_to'] ?? '';
         if ($dateFrom === '' || $dateTo === '') return 'Error: date_from and date_to are required.';
 
+        // CAD-normalize so collected/invoiced totals match the Reports module
+        // (operator policy; see getRevenueByPeriod). payments + invoices both
+        // carry currency + exchange_rate_to_cad.
+        $payCad = \FleetForge\Reports\ReportBuilder::cad('p.amount', 'p');
+        $invCad = \FleetForge\Reports\ReportBuilder::cad('i.total_amount', 'i');
+
         // Total payments in period
         $totals = db_row(
             "SELECT COUNT(*) AS payment_count,
-                    COALESCE(SUM(p.amount), 0) AS total_collected
+                    COALESCE(SUM({$payCad}), 0) AS total_collected
              FROM payments p
              WHERE p.payment_date BETWEEN ? AND ?
                AND p.status = 'cleared'
@@ -1047,7 +1061,7 @@ class FleetForgeTools
         // Payment method breakdown
         $methods = db_select(
             "SELECT p.payment_method, COUNT(*) AS count,
-                    SUM(p.amount) AS total
+                    SUM({$payCad}) AS total
              FROM payments p
              WHERE p.payment_date BETWEEN ? AND ?
                AND p.status = 'cleared'
@@ -1059,7 +1073,7 @@ class FleetForgeTools
 
         // WHY: Collection rate = payments received / invoices due in same period
         $invoiced = db_row(
-            "SELECT COALESCE(SUM(i.total_amount), 0) AS total_invoiced
+            "SELECT COALESCE(SUM({$invCad}), 0) AS total_invoiced
              FROM invoices i
              WHERE i.invoice_date BETWEEN ? AND ?
                AND i.status NOT IN ('void', 'written_off', 'draft')
@@ -1246,9 +1260,10 @@ class FleetForgeTools
         // Fleet utilization
         $fleet = self::getFleetSummary();
 
-        // Overdue invoice count + total
+        // CAD-normalize money sums (operator policy; see getRevenueByPeriod). The
+        // invoices table is unaliased here, so cad() uses the bare column names.
         $overdue = db_row(
-            "SELECT COUNT(*) AS count, COALESCE(SUM(balance_due), 0) AS total
+            "SELECT COUNT(*) AS count, COALESCE(SUM(" . \FleetForge\Reports\ReportBuilder::cad('balance_due') . "), 0) AS total
              FROM invoices
              WHERE status = 'overdue' AND deleted_at IS NULL"
         );
@@ -1257,8 +1272,8 @@ class FleetForgeTools
         $monthRevenue = null;
         if (self::canViewFinancials($userId)) {
             $rev = db_row(
-                "SELECT COALESCE(SUM(total_amount), 0) AS invoiced,
-                        COALESCE(SUM(amount_paid), 0) AS collected
+                "SELECT COALESCE(SUM(" . \FleetForge\Reports\ReportBuilder::cad('total_amount') . "), 0) AS invoiced,
+                        COALESCE(SUM(" . \FleetForge\Reports\ReportBuilder::cad('amount_paid') . "), 0) AS collected
                  FROM invoices
                  WHERE invoice_date >= ? AND invoice_date <= ?
                    AND status NOT IN ('void', 'written_off')
@@ -1439,8 +1454,14 @@ class FleetForgeTools
         $reservationId = (int) ($input['reservation_id'] ?? 0);
         if ($reservationId <= 0) return 'Error: reservation_id is required.';
 
+        // Explicit projection (not SELECT *) so internal_notes never reaches the
+        // AI and a future sensitive column doesn't auto-leak. S-AI-AUDIT-HIGH-FIX.
         $row = db_row(
-            "SELECT * FROM reservations WHERE id = ? AND deleted_at IS NULL",
+            "SELECT id, status, customer_id, contact_name, company_name,
+                    contact_phone, contact_email, quantity,
+                    pickup_date, pickup_time, yard_location, purpose, priority,
+                    notes, marked_out_at, created_at
+             FROM reservations WHERE id = ? AND deleted_at IS NULL",
             [$reservationId]
         );
 
@@ -1559,8 +1580,13 @@ class FleetForgeTools
         $vendorId = (int) ($input['vendor_id'] ?? 0);
         if ($vendorId <= 0) return 'Error: vendor_id is required.';
 
+        // Explicit projection (not SELECT *) so a future sensitive column on
+        // vendors doesn't auto-leak into AI context. S-AI-AUDIT-HIGH-FIX.
         $row = db_row(
-            "SELECT * FROM vendors WHERE id = ? AND deleted_at IS NULL",
+            "SELECT id, name, is_related_party, vendor_type, contact_name, email, phone,
+                    address, city, state, specializations, hourly_rate, rating, notes,
+                    currency, is_preferred, total_spent, created_at
+             FROM vendors WHERE id = ? AND deleted_at IS NULL",
             [$vendorId]
         );
 
@@ -1619,8 +1645,17 @@ class FleetForgeTools
         $inspectionId = (int) ($input['inspection_id'] ?? 0);
         if ($inspectionId <= 0) return 'Error: inspection_id is required.';
 
+        // Explicit projection (not SELECT i.*) so customer_signature and pdf_path
+        // never reach the AI, and future sensitive columns don't auto-leak.
+        // S-AI-AUDIT-HIGH-FIX.
         $row = db_row(
-            "SELECT i.*, eu.unit_number, l.contract_number
+            "SELECT i.id, i.inspection_number, i.inspection_type,
+                    i.equipment_unit_id, i.lease_id,
+                    i.overall_condition, i.condition_score, i.status,
+                    i.inspected_by, i.inspection_date, i.mileage_at_inspection,
+                    i.reefer_hours, i.fuel_level, i.cvi_expiry, i.is_clean,
+                    i.signed_at, i.notes, i.created_at,
+                    eu.unit_number, l.contract_number
              FROM inspections i
              LEFT JOIN equipment_units eu ON eu.id = i.equipment_unit_id
              LEFT JOIN leases l           ON l.id = i.lease_id
@@ -1978,14 +2013,17 @@ class FleetForgeTools
             return 'Access denied: you do not have permission to view financial data.';
         }
 
+        // CAD-normalize AP balances (operator policy; see getRevenueByPeriod).
+        // acc_bills carries currency + exchange_rate_to_cad.
+        $b = \FleetForge\Reports\ReportBuilder::cad('b.balance_due', 'b');
         $row = db_row(
             "SELECT
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) <= 0 THEN b.balance_due ELSE 0 END) AS current_amount,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 1 AND 30 THEN b.balance_due ELSE 0 END) AS days_1_30,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 31 AND 60 THEN b.balance_due ELSE 0 END) AS days_31_60,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 61 AND 90 THEN b.balance_due ELSE 0 END) AS days_61_90,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) > 90 THEN b.balance_due ELSE 0 END) AS days_90_plus,
-                SUM(b.balance_due) AS total_outstanding,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) <= 0 THEN {$b} ELSE 0 END) AS current_amount,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 1 AND 30 THEN {$b} ELSE 0 END) AS days_1_30,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 31 AND 60 THEN {$b} ELSE 0 END) AS days_31_60,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 61 AND 90 THEN {$b} ELSE 0 END) AS days_61_90,
+                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) > 90 THEN {$b} ELSE 0 END) AS days_90_plus,
+                SUM({$b}) AS total_outstanding,
                 COUNT(*) AS bill_count
              FROM acc_bills b
              WHERE b.balance_due > 0

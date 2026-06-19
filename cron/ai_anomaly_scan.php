@@ -18,6 +18,10 @@ declare(strict_types=1);
  * @session S027
  */
 
+// Defense-in-depth: refuse a non-CLI (web) invocation. cron/ sits above the
+// public docroot and is unrouted today, so this only matters if that regresses.
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+
 // WHY: Cron scripts must bootstrap the app themselves
 require_once __DIR__ . '/../config/app.php';
 \FleetForge\Observability\Sentry::init();

@@ -94,6 +94,20 @@ if (!in_array($summaryType, $fleetLevelTypes, true) && $summaryType !== 'budget_
     $emitErr('entity_id is required.');
 }
 
+// Module-view gate (defense-in-depth): ai:view reaches this endpoint, but the
+// underlying entity data still requires that module's view permission — so a
+// custom role with ai:view but not e.g. customers:view can't read a customer
+// summary. 'fleet' aggregates need no extra module gate. S-AI-AUDIT-HIGH-FIX.
+$entityViewPerm = [
+    'customer' => 'customers', 'lease' => 'leases', 'equipment_unit' => 'equipment',
+    'invoice' => 'invoices', 'reservation' => 'reservations', 'vendor' => 'maintenance',
+    'payment' => 'payments', 'accounting' => 'journal_entries',
+];
+$needPerm = $entityViewPerm[$entityType] ?? null;
+if ($needPerm !== null && !can($needPerm, 'view')) {
+    $emitErr('You do not have permission to view this ' . $entityType . '.');
+}
+
 // ── Serve from cache when allowed — skip the paid AI call ─────────────────────
 // The Generate button sends force=0 (use cache), Regenerate sends force=1. Without
 // this read the endpoint re-billed Claude on every open and the partial's "Cached

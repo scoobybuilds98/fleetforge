@@ -14,6 +14,9 @@ declare(strict_types=1);
  * @session  S-INTEL-V2 Phase A
  */
 
+// Defense-in-depth: refuse a non-CLI (web) invocation (cron/ is above docroot).
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+
 require_once __DIR__ . '/../config/app.php';
 \FleetForge\Observability\Sentry::init();
 

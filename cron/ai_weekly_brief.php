@@ -20,6 +20,9 @@ declare(strict_types=1);
  * Local force: FF_CRON_FORCE=1 php cron/ai_weekly_brief.php
  */
 
+// Defense-in-depth: refuse a non-CLI (web) invocation (cron/ is above docroot).
+if (PHP_SAPI !== 'cli') { http_response_code(404); exit; }
+
 require_once __DIR__ . '/../config/app.php';
 \FleetForge\Observability\Sentry::init();
 
@@ -32,6 +35,11 @@ use FleetForge\Email\EmailService;
 $forced = (string)(getenv('FF_CRON_FORCE') ?: '') === '1';
 
 if (!$forced) {
+    // Master AI kill switch — parity with the morning brief / anomaly scan, which
+    // the weekly digest previously lacked. S-AI-AUDIT-HIGH-FIX.
+    if ((string) settings_get('ai.enabled', '1') !== '1') {
+        exit(0);
+    }
     if ((string) settings_get('ai.weekly_brief_enabled', '1') !== '1') {
         exit(0);
     }
@@ -54,11 +62,29 @@ if (!$lock || (int) $lock['ok'] !== 1) { exit(0); }
 $sent = $skipped = $errors = 0;
 
 try {
+    // Recipient-role allow-list (parity with the morning brief). The weekly
+    // digest previously fanned out on opt-in alone, so an opted-in non-privileged
+    // user would receive it. Filter to ai.briefing_recipient_roles slugs.
+    // S-AI-AUDIT-HIGH-FIX.
+    $rolesJson = (string) settings_get('ai.briefing_recipient_roles', '["super_admin","manager","accountant"]');
+    $roles = json_decode($rolesJson, true);
+    $roles = is_array($roles)
+        ? array_values(array_filter(array_map('strval', $roles), static fn(string $r): bool => $r !== ''))
+        : [];
+    if (empty($roles)) {
+        error_log('[CRON ai_weekly_brief] No recipient roles configured — nothing to send.');
+        exit(0);
+    }
+    $rolePlaceholders = implode(',', array_fill(0, count($roles), '?'));
+
     $recipients = db_select(
-        "SELECT id, name, email, briefing_channels, slack_user_id, phone_e164
-           FROM users
-          WHERE deleted_at IS NULL AND status = 'active'
-            AND weekly_brief_opt_in = 1"
+        "SELECT u.id, u.name, u.email, u.briefing_channels, u.slack_user_id, u.phone_e164
+           FROM users u
+           JOIN user_roles ur ON ur.id = u.role_id
+          WHERE u.deleted_at IS NULL AND u.status = 'active'
+            AND u.weekly_brief_opt_in = 1
+            AND ur.slug IN ({$rolePlaceholders})",
+        $roles
     );
 
     if (empty($recipients)) {

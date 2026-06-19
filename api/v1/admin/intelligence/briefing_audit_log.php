@@ -11,6 +11,9 @@ declare(strict_types=1);
  *   - Per-user opt-in toggles (entity_type='user_briefing_opt_in')
  *   - Test briefing sends (entity_type='morning_briefing_test')
  *   - Manual brief generation (entity_type='ai_brief_generated_manual')
+ *   - Manual "send to all" brief dispatch (entity_type='ai_brief_sent_manual')
+ *   - Per-user channel changes (entity_type='user_briefing_channels')
+ *   - AI connection tests (entity_type='ai_connection')
  *   - Token budget alerts dispatched (entity_type='cron' AND
  *     entity_label='ai_budget_check')
  *
@@ -37,8 +40,11 @@ try {
                 'user_briefing_opt_in',
                 'morning_briefing_test',
                 'ai_brief_generated_manual',
+                'ai_brief_sent_manual',
                 'user_briefing_preferences',
-                'user_briefing_snooze'
+                'user_briefing_snooze',
+                'user_briefing_channels',
+                'ai_connection'
             )
             OR (entity_type = 'cron' AND entity_label IN ('ai_budget_check', 'ai_fleet_brief', 'notification_digest'))
           ORDER BY id DESC

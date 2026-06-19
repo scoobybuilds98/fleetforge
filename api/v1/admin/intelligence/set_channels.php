@@ -53,6 +53,13 @@ if ($phoneE164 !== null && $phoneE164 !== '' && !preg_match('/^\+[1-9]\d{6,14}$/
     json_error('VALIDATION_ERROR', 'phone_e164 must be E.164 (e.g. +14155551212) or empty/null.', 422);
 }
 
+// slack_user_id is users.slack_user_id varchar(50) — validate length so an
+// over-long value returns a clean 422 instead of STRICT 1406 → generic 500.
+// S-AI-AUDIT-HIGH-FIX.
+if ($slackId !== null && strlen($slackId) > 50) {
+    json_error('VALIDATION_ERROR', 'slack_user_id must be 50 characters or fewer.', 422);
+}
+
 try {
     $target = db_row("SELECT id, name, email FROM users WHERE id = ? AND deleted_at IS NULL", [$userId]);
     if (!$target) {

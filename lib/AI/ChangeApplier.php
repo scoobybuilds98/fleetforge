@@ -62,16 +62,27 @@ class ChangeApplier
         // it to the others (vendors/yards/work orders/damage claims/rate cards)
         // throws 1054 — apply-change.php only catches 23000, so it 500s.
         $hasUpdatedBy = !empty($entry['has_updated_by']);
+        // Apply-time allowlist: only columns registered for THIS entity may reach
+        // the raw-identifier SELECT/UPDATE below. The validated planners only ever
+        // write registry columns, so this is defense-in-depth against a tampered
+        // or future-buggy payload reaching the `{$column}` identifier sink.
+        $allowedColumns = array_keys($entry['fields'] ?? []);
         $targets     = $payload['targets'] ?? [];
 
         $appliedDiff = [];
 
-        db_transaction(function () use ($targets, $userId, $userName, $ip, $table, $auditModule, $entityType, $softSql, $hasUpdatedBy, &$appliedDiff): void {
+        db_transaction(function () use ($targets, $userId, $userName, $ip, $table, $auditModule, $entityType, $softSql, $hasUpdatedBy, $allowedColumns, &$appliedDiff): void {
             foreach ($targets as $t) {
                 $rowId  = (int) ($t['id'] ?? $t['unit_id'] ?? 0); // unit_id for back-compat with S-AI-WRITE-1 rows
                 $column = (string) ($t['column'] ?? '');
                 $newVal = $t['new_db_value'] ?? null;
                 $label  = (string) ($t['label'] ?? $rowId);
+
+                if (!in_array($column, $allowedColumns, true)) {
+                    // Fail the whole apply (transaction rolls back) — a non-registry
+                    // column signals tampering or a planner bug, never normal input.
+                    throw new \RuntimeException("Refusing to apply unregistered column '{$column}' for {$entityType}.");
+                }
 
                 // Re-read current value NOW: it is both the audit old_values and
                 // the undo before-snapshot. Skip rows deleted between proposal
@@ -142,12 +153,22 @@ class ChangeApplier
         // Honor the per-entity updated_by flag (see apply()). Legacy rows with no
         // registered entity targeted equipment_units, which has the column.
         $hasUpdatedBy = $entry !== null ? !empty($entry['has_updated_by']) : true;
+        // Apply-time allowlist on undo too: prefer the registry's table/columns
+        // over the values stored in the diff (which is the tamperable surface).
+        $regTable    = $entry['table'] ?? null;
+        $allowedCols = $entry !== null ? array_keys($entry['fields'] ?? []) : null;
 
-        db_transaction(function () use ($diff, $userId, $userName, $ip, $entityType, $auditModule, $hasUpdatedBy): void {
+        db_transaction(function () use ($diff, $userId, $userName, $ip, $entityType, $auditModule, $hasUpdatedBy, $regTable, $allowedCols): void {
             foreach ($diff as $d) {
-                $table = $d['table'] ?? 'equipment_units';
+                // Re-resolve the table from the registry when known; only fall back
+                // to the diff's table for legacy rows whose entity isn't registered.
+                $table = $regTable ?? ($d['table'] ?? 'equipment_units');
                 $rowId = (int) ($d['id'] ?? $d['unit_id'] ?? 0);
                 $label = (string) ($d['label'] ?? $d['unit_number'] ?? $rowId);
+
+                if ($allowedCols !== null && !in_array((string) ($d['column'] ?? ''), $allowedCols, true)) {
+                    throw new \RuntimeException("Refusing to undo unregistered column '" . ($d['column'] ?? '') . "' for {$entityType}.");
+                }
 
                 $updateData = [$d['column'] => $d['before']];
                 if ($hasUpdatedBy) {

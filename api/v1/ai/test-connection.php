@@ -34,14 +34,19 @@ header('Content-Type: application/json');
 $client = new \FleetForge\AI\ClaudeClient();
 $result = $client->testConnection();
 
-// WHY: Log test attempt to audit trail
+// WHY: Log test attempt to audit trail. Canonical columns — the old insert used
+// a nonexistent `details` column, a non-enum action ('ai_test_connection'), and
+// omitted NOT NULL `module`, so EVERY audit row silently 1054'd and was never
+// written. S-AI-AUDIT-HIGH-FIX. (Mirrors update_balance.php.)
 try {
     db_insert('audit_log', [
         'user_id'     => $_SESSION['ff_user']['id'] ?? null,
-        'action'      => 'ai_test_connection',
-        'entity_type' => 'settings',
-        'entity_id'   => 0,
-        'details'     => json_encode(['success' => $result['success'], 'model' => $result['details']['model'] ?? '']),
+        'user_name'   => current_user()['name'] ?? 'system',
+        'action'      => 'manual_trigger',
+        'module'      => 'settings',
+        'entity_type' => 'ai_connection',
+        'entity_id'   => null,
+        'notes'       => json_encode(['success' => $result['success'], 'model' => $result['details']['model'] ?? '']),
         'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '',
     ]);
 } catch (\Throwable) {

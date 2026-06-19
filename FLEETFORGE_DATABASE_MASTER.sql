@@ -1910,7 +1910,7 @@ CREATE TABLE `ai_query_log` (
   `prompt_tokens` int unsigned DEFAULT NULL,
   `completion_tokens` int unsigned DEFAULT NULL,
   `total_tokens` int unsigned DEFAULT NULL,
-  `cost_usd` decimal(8,6) DEFAULT NULL,
+  `cost_usd` decimal(12,6) DEFAULT NULL,
   `latency_ms` int unsigned DEFAULT NULL,
   `was_cached` tinyint(1) NOT NULL DEFAULT '0',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -427,7 +427,12 @@ else { echo "FAIL C28 " . implode('; ', $err) . "\n"; $failures[] = 'C28'; }
 $err = [];
 $migs = ['202605222000_S-INTEL-V2-A.sql', '202605222100_S-INTEL-V2-B.sql', '202605222200_S-INTEL-V2-C.sql', '202605222300_S-INTEL-V2-D.sql', '202605222400_S-INTEL-V2-E.sql'];
 foreach ($migs as $m) {
-    if (!is_file(FF_ROOT . '/db_migrations/' . $m)) $err[] = "migration $m missing";
+    // These migrations were applied then archived to the deprecated `.sql.txt`
+    // form (folded into master; bin/migrate.php only scans `*.sql`, so archiving
+    // prevents re-application drift). Accept either form. S-AI-AUDIT-HIGH-FIX.
+    $present = is_file(FF_ROOT . '/db_migrations/' . $m)
+            || is_file(FF_ROOT . '/db_migrations/' . $m . '.txt');
+    if (!$present) $err[] = "migration $m missing";
 }
 if (empty($err)) { echo "PASS C29 All 5 S-INTEL-V2 migrations present\n"; $pass++; }
 else { echo "FAIL C29 " . implode('; ', $err) . "\n"; $failures[] = 'C29'; }

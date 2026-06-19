@@ -123,7 +123,7 @@ class ClaudeClient
     // Codes:
     //   NO_KEY       — API key is empty in both settings and .env
     //   DISABLED     — ai.enabled toggle is off
-    //   TOKEN_LIMIT  — per-user daily token budget exhausted
+    //   TOKEN_LIMIT  — global daily token budget exhausted (all users combined)
     //   RATE_LIMIT   — Anthropic API returned HTTP 429
     //   NETWORK      — curl error / timeout / DNS failure
     //   API_ERROR    — Anthropic API returned non-200 (not 429)
@@ -148,6 +148,24 @@ class ClaudeClient
     private function clearError(): void
     {
         $this->lastError = null;
+    }
+
+    /**
+     * Per-call cost in USD as a bcmath decimal string (6dp), derived from the
+     * live Pricing table for $this->model — not a hardcoded float rate. Returns
+     * '0.000000' when the model is unpriced (CreditEstimator flags that gap
+     * separately). Keeps ai_query_log.cost_usd consistent with the price table
+     * and the bcmath money policy. S-AI-AUDIT-HIGH-FIX.
+     */
+    private function costForTokens(int $inputTokens, int $outputTokens): string
+    {
+        $price = Pricing::forModel($this->model);
+        if ($price === null) {
+            return '0.000000';
+        }
+        $inCost  = bcdiv(bcmul((string) $inputTokens, $price['input'], 6), '1000000', 6);
+        $outCost = bcdiv(bcmul((string) $outputTokens, $price['output'], 6), '1000000', 6);
+        return bcadd($inCost, $outCost, 6);
     }
 
     // ────────────────────────────────────────────────────────────
@@ -292,8 +310,9 @@ class ClaudeClient
         $completionTokens = (int) ($usage['output_tokens'] ?? 0);
         $totalTokens      = $promptTokens + $completionTokens;
 
-        // WHY: Cost estimate based on Claude Sonnet pricing (~$3/M input, ~$15/M output)
-        $costUsd = ($promptTokens * 3.0 / 1_000_000) + ($completionTokens * 15.0 / 1_000_000);
+        // Cost via the Pricing table + bcmath (no hardcoded float rate; matches
+        // CreditEstimator and stays $0 for an unpriced model). S-AI-AUDIT-HIGH-FIX.
+        $costUsd = $this->costForTokens($promptTokens, $completionTokens);
 
         TokenTracker::record(
             userId:           $userId,
@@ -307,7 +326,7 @@ class ClaudeClient
         );
 
         $this->log('AI_SUCCESS', sprintf(
-            'type=%s user=%s tokens=%d (in=%d out=%d) cost=$%.4f latency=%dms model=%s',
+            'type=%s user=%s tokens=%d (in=%d out=%d) cost=$%s latency=%dms model=%s',
             $queryType, $userId ?? 'system', $totalTokens,
             $promptTokens, $completionTokens, $costUsd, $latencyMs, $this->model
         ));
@@ -396,6 +415,10 @@ class ClaudeClient
         $stopReason     = '';
         $currentBlock   = null;
         $responseHeaders = [];
+        // Cross-chunk SSE line buffer: an event line split across two TCP chunks
+        // must not be parsed as two unparseable halves (would drop a text_delta or
+        // the final message_delta that carries output_tokens). S-AI-AUDIT-HIGH-FIX.
+        $sseBuffer      = '';
 
         // WHY: For streaming we use a custom curl callback to process SSE events
         $ch = curl_init(self::API_URL);
@@ -420,10 +443,21 @@ class ClaudeClient
             },
             CURLOPT_WRITEFUNCTION  => function ($ch, $data) use (
                 &$fullText, &$toolUseBlocks, &$inputTokens, &$outputTokens,
-                &$stopReason, &$currentBlock, $onChunk
+                &$stopReason, &$currentBlock, &$sseBuffer, $onChunk
             ): int {
-                // Parse SSE events from the chunk
-                $lines = explode("\n", $data);
+                // Buffer across chunks: only parse up to the last complete line and
+                // carry the trailing partial line into the next call. (curl wants
+                // the FULL byte count returned regardless of how much we consumed.)
+                $sseBuffer .= $data;
+                $nl = strrpos($sseBuffer, "\n");
+                if ($nl === false) {
+                    return strlen($data); // no complete line yet — keep buffering
+                }
+                $ready     = substr($sseBuffer, 0, $nl + 1);
+                $sseBuffer = substr($sseBuffer, $nl + 1);
+
+                // Parse SSE events from the complete lines
+                $lines = explode("\n", $ready);
                 foreach ($lines as $line) {
                     $line = trim($line);
                     if ($line === '' || str_starts_with($line, ':')) continue;
@@ -522,7 +556,8 @@ class ClaudeClient
         }
 
         $totalTokens = $inputTokens + $outputTokens;
-        $costUsd = ($inputTokens * 3.0 / 1_000_000) + ($outputTokens * 15.0 / 1_000_000);
+        // bcmath cost via Pricing (see non-streaming path). S-AI-AUDIT-HIGH-FIX.
+        $costUsd = $this->costForTokens($inputTokens, $outputTokens);
 
         TokenTracker::record(
             userId:           $userId,

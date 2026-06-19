@@ -63,7 +63,11 @@ class TokenBudgetMonitor
         $lastSent = json_decode($lastSentJson, true);
         if (!is_array($lastSent)) { $lastSent = []; }
 
-        $today = date('Y-m-d');
+        // gmdate (UTC) so the per-threshold dedup key rolls over on the SAME
+        // boundary as the usage counter (MySQL CURDATE() is UTC). date() in
+        // APP_TIMEZONE lagged UTC in the evening window → duplicate/one-cycle-late
+        // budget alerts. S-AI-AUDIT-HIGH-FIX.
+        $today = gmdate('Y-m-d');
         $alertsSent = [];
         $skipped = [];
 
