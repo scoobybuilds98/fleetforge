@@ -457,6 +457,68 @@ require_once FF_ROOT . '/includes/header.php';
 
     </div>
 
+    <!-- ── DRAFT INVOICES (moved below Reservations) ───────────────── -->
+    <div class="dashboard-section">
+        <div class="dashboard-section-header">
+            <h3 class="dashboard-section-title">Draft Invoices</h3>
+            <a href="<?= base_url('invoices') ?>?status=draft"
+               class="dashboard-section-viewall">View all →</a>
+        </div>
+
+        <template x-if="!tablesLoaded && !tablesError">
+            <div class="carousel-empty">Loading…</div>
+        </template>
+
+        <template x-if="tablesError">
+            <div class="carousel-empty">
+                Could not load data.
+                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
+            </div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.draft_invoices.length === 0">
+            <div class="carousel-empty">No draft invoices</div>
+        </template>
+
+        <template x-if="tablesLoaded && tables.draft_invoices.length > 0">
+            <div class="dashboard-carousel">
+                <template x-for="row in tables.draft_invoices" :key="row.id">
+                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
+                       class="carousel-card carousel-card--link">
+
+                        <div class="cc-top">
+                            <span class="cc-id" x-text="row.invoice_number"></span>
+                            <span class="cc-pill cc-pill--warning">Draft</span>
+                        </div>
+
+                        <div class="cc-customer" x-text="row.customer_name"></div>
+
+                        <div class="cc-divider"></div>
+
+                        <div class="cc-rate">
+                            <span class="cc-rate-amount"
+                                  x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:0, maximumFractionDigits:0})"></span>
+                            <span class="cc-rate-period"> total</span>
+                        </div>
+
+                        <div class="cc-footer">
+                            <span class="cc-footer-item">
+                                <span class="cc-footer-label">Created</span>
+                                <span class="cc-footer-value" x-text="fmtDate(row.invoice_date)"></span>
+                            </span>
+                            <span class="cc-footer-item cc-footer-item--right">
+                                <span class="cc-footer-label">In draft</span>
+                                <span class="cc-footer-value"
+                                      x-text="row.days_in_draft + ' days'"></span>
+                            </span>
+                        </div>
+
+                    </a>
+                </template>
+            </div>
+        </template>
+    </div>
+
     <!-- ── HIGH-VALUE LEASES ─────────────────────────────────────── -->
     <div class="dashboard-section">
         <div class="dashboard-section-header">
@@ -739,68 +801,6 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
-    </div>
-
-    <!-- ── DRAFT INVOICES ───────────────────────────────────────── -->
-    <div class="dashboard-section">
-        <div class="dashboard-section-header">
-            <h3 class="dashboard-section-title">Draft Invoices</h3>
-            <a href="<?= base_url('invoices') ?>?status=draft"
-               class="dashboard-section-viewall">View all →</a>
-        </div>
-
-        <template x-if="!tablesLoaded && !tablesError">
-            <div class="carousel-empty">Loading…</div>
-        </template>
-
-        <template x-if="tablesError">
-            <div class="carousel-empty">
-                Could not load data.
-                <button class="btn btn-ghost btn-sm" @click="fetchTables()">Retry</button>
-            </div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.draft_invoices.length === 0">
-            <div class="carousel-empty">No draft invoices</div>
-        </template>
-
-        <template x-if="tablesLoaded && tables.draft_invoices.length > 0">
-            <div class="dashboard-carousel">
-                <template x-for="row in tables.draft_invoices" :key="row.id">
-                    <a :href="'<?= base_url('invoices/show') ?>?id=' + row.id"
-                       class="carousel-card carousel-card--link">
-
-                        <div class="cc-top">
-                            <span class="cc-id" x-text="row.invoice_number"></span>
-                            <span class="cc-pill cc-pill--warning">Draft</span>
-                        </div>
-
-                        <div class="cc-customer" x-text="row.customer_name"></div>
-
-                        <div class="cc-divider"></div>
-
-                        <div class="cc-rate">
-                            <span class="cc-rate-amount"
-                                  x-text="'$' + parseFloat(row.total_amount).toLocaleString('en-CA',{minimumFractionDigits:0, maximumFractionDigits:0})"></span>
-                            <span class="cc-rate-period"> total</span>
-                        </div>
-
-                        <div class="cc-footer">
-                            <span class="cc-footer-item">
-                                <span class="cc-footer-label">Created</span>
-                                <span class="cc-footer-value" x-text="fmtDate(row.invoice_date)"></span>
-                            </span>
-                            <span class="cc-footer-item cc-footer-item--right">
-                                <span class="cc-footer-label">In draft</span>
-                                <span class="cc-footer-value"
-                                      x-text="row.days_in_draft + ' days'"></span>
-                            </span>
-                        </div>
-
-                    </a>
-                </template>
-            </div>
-        </template>
     </div>
 
     <!-- ── ROW 3: Top Customers (1/2) + Leases Trend (1/2) ───── -->
