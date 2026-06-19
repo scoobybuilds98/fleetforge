@@ -111,6 +111,29 @@ if (!in_array($reconMode, ['refund_unused', 'no_refund'], true)) {
         "reconciliation_mode must be 'refund_unused' or 'no_refund'.", 422);
 }
 
+// ── S-LEASE-CLOSE-REMOVE-DAYS: "Remove N billable days" at close ──────
+// Operator input: subtract N days off the END of the lease's BILLABLE
+// period so those days are not in the billing math. The lease's
+// actual_return_date and all displayed dates are UNCHANGED; the removal is
+// internal-only. NULL/unset = 0 (no removal). Must be >= 0 (the column is
+// TINYINT UNSIGNED). The existing 3-day S-LEASE-MIN-DAYS floor still wins:
+// it is evaluated on the REDUCED total inside HolisticLeaseEngine, so a
+// removal can never shave below the floor. The N-day subtraction is applied
+// in lockstep at three sites keyed on leases.billing_days_removed —
+// InvoiceGenerator (holistic extent), lease_billable_extent() (overshoot
+// clamp), and this endpoint's extentEnd below.
+$billingDaysRemoved = clean_int($body['billing_days_removed'] ?? null);
+if ($billingDaysRemoved !== null && ($billingDaysRemoved < 0 || $billingDaysRemoved > 255)) {
+    // S-LEASE-CLOSE-REMOVE-DAYS: the column is TINYINT UNSIGNED (0..255). Reject
+    // out-of-range up front so a typo'd value 422s here rather than 500-ing the
+    // leases UPDATE under STRICT_TRANS_TABLES (1264 out-of-range). The downstream
+    // extent clamp already floors any large value to start_date for the billing
+    // math, but the persisted value still has to fit the column.
+    json_error('VALIDATION_ERROR',
+        'billing_days_removed must be between 0 and 255.', 422);
+}
+$billingDaysRemoved = (int) ($billingDaysRemoved ?? 0);
+
 // SAMSARA-3: optional closing odometer (decimal km) — stored on the final
 // invoice as odometer_at_period_end_km so the invoice can show per-period
 // and cumulative distance.
@@ -426,7 +449,7 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $closeoutLines, $reconMode, $prechargeRefund, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $closeoutLines, $reconMode, $prechargeRefund, $billingDaysRemoved, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
@@ -531,6 +554,11 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         'closed_at'            => date('Y-m-d H:i:s'),
         'closed_by_user_id'    => current_user_id(),
         'updated_by'           => current_user_id(),
+        // S-LEASE-CLOSE-REMOVE-DAYS: persist the operator's "Remove N days" input
+        // so InvoiceGenerator (which re-loads the lease row inside its own
+        // transaction) reads the same value the overshoot clamp below uses. 0 when
+        // unset — a no-op everywhere downstream.
+        'billing_days_removed' => $billingDaysRemoved,
     ];
     if ($mileageAtEnd !== null) {
         $leaseUpdate['mileage_at_end'] = $mileageAtEnd;
@@ -601,6 +629,22 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     ]);
 
     // ── audit_log ──────────────────────────────────────────────
+    // S-LEASE-CLOSE-REMOVE-DAYS: when the operator removed N billable days, fold
+    // the removal into the close audit entry (notes + new_values) so the
+    // internal-only adjustment is traceable. actual_return_date is unchanged —
+    // the removal shaves the billable extent, not the displayed return date.
+    $closeAuditNotes = "Lease {$lease['contract_number']} closed — unit {$unit['unit_number']} → available";
+    $closeAuditNew   = ['status' => 'completed', 'actual_return_date' => $actualReturnDate];
+    if ($billingDaysRemoved > 0) {
+        // Reuse the canonical helper (already required) so the audit note quotes
+        // the EXACT reduced extent the overshoot clamp + final invoice will use.
+        $extentEndForAudit = lease_billable_extent(
+            $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date'],
+            $billingDaysRemoved
+        );
+        $closeAuditNotes .= " — {$billingDaysRemoved} billable day(s) removed at close (billable extent shortened to {$extentEndForAudit})";
+        $closeAuditNew['billing_days_removed'] = $billingDaysRemoved;
+    }
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
         'user_name'    => $changedBy,
@@ -609,9 +653,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         'entity_type'  => 'lease',
         'entity_id'    => $id,
         'entity_label' => $lease['contract_number'],
-        'notes'        => "Lease {$lease['contract_number']} closed — unit {$unit['unit_number']} → available",
+        'notes'        => $closeAuditNotes,
         'old_values'   => json_encode(['status' => 'active']),
-        'new_values'   => json_encode(['status' => 'completed', 'actual_return_date' => $actualReturnDate]),
+        'new_values'   => json_encode($closeAuditNew),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 
@@ -747,8 +791,14 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // ONE definition (lease_billable_extent in _close_reconciliation.php) shared
     // with bulk_close.php + the remediation scripts, matching the generator's
     // extent math so a shortened invoice's period_end agrees with its amount.
+    // S-LEASE-CLOSE-REMOVE-DAYS: pass billing_days_removed so this local
+    // extentEnd (used as the partial_end final invoice's period_end — handles the
+    // legacy period_independent path + the description dates — and as the
+    // overshoot clamp's extent) is reduced in lockstep with InvoiceGenerator's
+    // holistic extent. All three sites apply the SAME clamp on the SAME N.
     $extentEnd = lease_billable_extent(
-        $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date']
+        $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date'],
+        $billingDaysRemoved
     );
 
     // ── S-CLOSE-OVERSHOOT: clamp every non-advance rental invoice billed

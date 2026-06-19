@@ -234,6 +234,27 @@ class InvoiceGenerator
                     $extentEnd = (string)$lease['end_date'];
                 }
 
+                // S-LEASE-CLOSE-REMOVE-DAYS: subtract N billable days off the END
+                // of the lease's billable extent at close. The holistic engine
+                // RE-DERIVES its extent from actual_return_date (above), so a
+                // reduced period_end alone would NOT shrink the holistic bill —
+                // the subtraction MUST happen here, on the same extentEnd the
+                // engine measures totalBillableDays against. Gated on
+                // actual_return_date (a close, not an in-progress invoice) so a
+                // mid-lease invoice is never short-billed. Clamped so the extent
+                // never goes before start_date (min 1 billed day); the existing
+                // S-LEASE-MIN-DAYS floor in HolisticLeaseEngine::cumulativeCorrect
+                // then evaluates on this REDUCED total and still wins — removal
+                // first, floor clamps the bottom (no engine change needed). This
+                // clamp is byte-identical in logic to lease_billable_extent() in
+                // api/v1/leases/_close_reconciliation.php so the overshoot clamp
+                // and the final invoice cannot diverge (S-CLOSE-OVERSHOOT).
+                $daysRemoved = (int)($lease['billing_days_removed'] ?? 0);
+                if ($daysRemoved > 0 && !empty($lease['actual_return_date'])) {
+                    $reduced   = (new \DateTimeImmutable($extentEnd))->modify("-{$daysRemoved} day")->format('Y-m-d');
+                    $extentEnd = ($reduced < (string)$lease['start_date']) ? (string)$lease['start_date'] : $reduced;
+                }
+
                 $engineResult = $this->holistic->calculateForInvoice([
                     'lease_id'             => $leaseId,
                     'start_date'           => (string)$lease['start_date'],
@@ -261,6 +282,19 @@ class InvoiceGenerator
                 $holisticCumulativeCorrect = $engineResult['cumulative_correct'];
                 $holisticAlreadyBilled     = $engineResult['already_billed'];
                 $holisticAuditMeta         = $engineResult['audit_meta'];
+
+                // S-LEASE-CLOSE-REMOVE-DAYS: stamp the day-removal as an
+                // INTERNAL-ONLY note into the holistic audit_meta (detail_lines).
+                // The admin invoice page renders detail_lines as a staff-only
+                // "how this charge was calculated" panel; the customer portal
+                // renders ONLY the line-item description (which already shows the
+                // naturally reduced period — no removal note). So the customer
+                // sees a normal reduced-period line; the operator sees why.
+                if ($daysRemoved > 0 && !empty($lease['actual_return_date'])) {
+                    $holisticAuditMeta['billing_days_removed'] = $daysRemoved;
+                    $holisticAuditMeta['billing_days_removed_note'] =
+                        "{$daysRemoved} billable day(s) removed at close — actual return {$lease['actual_return_date']}, billed through {$extentEnd}.";
+                }
 
                 // rate_method_used is constrained by the invoices.rate_method_used
                 // ENUM ('daily','weekly','weekly_capped','monthly','none').
@@ -1693,7 +1727,7 @@ class InvoiceGenerator
             $lease = db_row(
                 "SELECT id, status, start_date, start_time, end_date, end_time,
                         actual_return_date, actual_return_time, engine_version,
-                        daily_rate, weekly_rate, monthly_rate
+                        daily_rate, weekly_rate, monthly_rate, billing_days_removed
                    FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
                 [$leaseId]
             );
@@ -1790,6 +1824,20 @@ class InvoiceGenerator
             } elseif (!empty($lease['end_date'])) {
                 $target = (string)$lease['end_date'];
                 $extentDefinitive = true;
+            }
+
+            // S-LEASE-CLOSE-REMOVE-DAYS: subtract operator-removed days off the END
+            // of the fan-out extent too. generateForLease is a SECOND holistic extent
+            // authority (operator "create invoice" on a completed lease). Without this,
+            // $target stays the un-reduced actual_return_date and becomes the invoice's
+            // billing_period_end while createFromLease internally reduces only the
+            // AMOUNT — the exact period_end-vs-amount divergence S-CLOSE-OVERSHOOT
+            // exists to prevent. Same verbatim clamp as createFromLease / lease_billable_extent;
+            // gated on actual_return_date (closed lease) and clamped to start_date.
+            $daysRemoved = (int)($lease['billing_days_removed'] ?? 0);
+            if ($daysRemoved > 0 && !empty($lease['actual_return_date'])) {
+                $reduced = (new \DateTimeImmutable($target))->modify("-{$daysRemoved} day")->format('Y-m-d');
+                $target  = ($reduced < (string)$lease['start_date']) ? (string)$lease['start_date'] : $reduced;
             }
 
             // Fully-billed / inverted: the requested start is past the extent.

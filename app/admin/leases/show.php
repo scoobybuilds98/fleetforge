@@ -1619,6 +1619,24 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         </div>
                     </template>
 
+                    <!-- S-LEASE-CLOSE-REMOVE-DAYS: shave N billable days off the END of the
+                         billable period (the day drops out of the billing math). The lease's
+                         actual_return_date and every displayed date stay unchanged; the existing
+                         3-day minimum-billing floor is still evaluated on the REDUCED total, so
+                         this can never shave below the floor. Internal-only — not shown to the
+                         customer (no removal note on the invoice line). -->
+                    <div class="form-group">
+                        <label class="form-label" for="billing_days_removed">Remove days</label>
+                        <input type="number" id="billing_days_removed" class="form-control font-mono"
+                               x-model="closeForm.billing_days_removed" min="0" step="1" placeholder="0"
+                               style="max-width:220px;">
+                        <div class="form-hint">
+                            Subtract this many days off the END of the billable period (e.g. the last
+                            day on a 24h clock). Dates are unchanged; the 3-day minimum still applies;
+                            not shown to the customer.
+                        </div>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label" for="close_notes">Close Notes</label>
                         <textarea id="close_notes" class="form-control"
@@ -1983,6 +2001,10 @@ function FF_LeaseDetail() {
             actual_return_time: '',  // S-LEASE-RENTAL-DAY-TIME; empty = not captured
             mileage_at_end:     '',
             close_notes:        '',
+            // S-LEASE-CLOSE-REMOVE-DAYS: operator input — N days to shave off the
+            // END of the billable period. Empty = none. Sent to close.php only
+            // when set (parsed to int); persisted to leases.billing_days_removed.
+            billing_days_removed: '',
             // SAMSARA-3: closing odometer (decimal km, live from Samsara or manual)
             odometer_at_close_km:  '',
             odometer_source:       null,   // 'gps' | 'manual'
@@ -2782,6 +2804,13 @@ function FF_LeaseDetail() {
             }
             if (this.closeForm.mileage_at_end !== '') {
                 payload.mileage_at_end = parseInt(this.closeForm.mileage_at_end);
+            }
+            // S-LEASE-CLOSE-REMOVE-DAYS: only send when the operator entered a value.
+            // close.php persists it to leases.billing_days_removed and the three
+            // lockstep extent sites subtract it (clamped at >= 1 billed day); the
+            // 3-day minimum-billing floor still wins on the reduced total.
+            if (this.closeForm.billing_days_removed !== '' && this.closeForm.billing_days_removed !== null) {
+                payload.billing_days_removed = parseInt(this.closeForm.billing_days_removed);
             }
             // SAMSARA-3: closing odometer goes to the final invoice
             if (this.closeForm.odometer_at_close_km !== '' && this.closeForm.odometer_at_close_km !== null) {

@@ -70,7 +70,8 @@ echo str_repeat('=', 90) . "\n";
 $leases = db_select(
     "SELECT id, contract_number, customer_id, equipment_unit_id,
             company_name_snapshot, customer_name_snapshot,
-            start_date, start_time, actual_return_date, actual_return_time
+            start_date, start_time, actual_return_date, actual_return_time,
+            billing_days_removed
        FROM leases
       WHERE status = 'completed' AND actual_return_date IS NOT NULL AND deleted_at IS NULL
       ORDER BY id",
@@ -87,7 +88,8 @@ foreach ($leases as $lease) {
 
     $extent = lease_billable_extent(
         (string) $lease['actual_return_date'], $lease['actual_return_time'] ?? null,
-        $lease['start_time'] ?? null, (string) $lease['start_date']
+        $lease['start_time'] ?? null, (string) $lease['start_date'],
+        (int) ($lease['billing_days_removed'] ?? 0)   // S-LEASE-CLOSE-REMOVE-DAYS: stay in lockstep with the live close path
     );
 
     $overshoot = db_select(

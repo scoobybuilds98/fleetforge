@@ -240,6 +240,15 @@ function ff_calc_breakdown_html($detail): string
                 <span>= This invoice (<?= $isCredit ? 'reconciliation credit' : 'base rental' ?>)</span>
                 <span><?= ($isCredit ? '−' : '') . e($money($detail['amount'] ?? $detail['delta'] ?? 0)) ?></span>
             </div>
+            <?php // S-LEASE-CLOSE-REMOVE-DAYS: staff-only removal note. Rendered from
+                  // the holistic audit_meta (detail_lines), which only this admin panel
+                  // reads — the customer invoice (portal view.php) shows the description
+                  // line alone and never sees this.
+            if (!empty($detail['billing_days_removed_note'])): ?>
+            <div class="calc-row" style="font-style:italic;opacity:.85;margin-top:6px;">
+                <span><?= e($detail['billing_days_removed_note']) ?></span>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
     <?php

@@ -27,21 +27,39 @@
  * day is not billed). Defining it once here keeps close.php, bulk_close.php and
  * the remediation scripts from drifting from the generator's amount math.
  *
- * @param string      $returnDate actual_return_date, 'Y-m-d'
- * @param string|null $returnTime actual_return_time, 'H:i:s' or null
- * @param string|null $startTime  lease.start_time (pickup), 'H:i:s' or null
- * @param string      $startDate  lease.start_date, 'Y-m-d' (extent floors here)
+ * S-LEASE-CLOSE-REMOVE-DAYS: $daysRemoved subtracts N billable days off the END
+ * of the extent (operator "Remove N days" at close). Applied AFTER the
+ * time-of-day rule and clamped so the extent never goes before start_date
+ * (min 1 billed day). This clamp is byte-identical in logic to the one in
+ * InvoiceGenerator::createFromLease (lib/Billing/InvoiceGenerator.php) so the
+ * overshoot clamp here and the holistic final-invoice amount cannot diverge
+ * (S-CLOSE-OVERSHOOT invariant).
+ *
+ * @param string      $returnDate  actual_return_date, 'Y-m-d'
+ * @param string|null $returnTime  actual_return_time, 'H:i:s' or null
+ * @param string|null $startTime   lease.start_time (pickup), 'H:i:s' or null
+ * @param string      $startDate   lease.start_date, 'Y-m-d' (extent floors here)
+ * @param int         $daysRemoved leases.billing_days_removed — N billable days to
+ *                                 shave off the end of the extent (0 = no-op)
  * @return string  billable extent, 'Y-m-d'
  */
-function lease_billable_extent(string $returnDate, ?string $returnTime, ?string $startTime, string $startDate): string
+function lease_billable_extent(string $returnDate, ?string $returnTime, ?string $startTime, string $startDate, int $daysRemoved = 0): string
 {
     if (!empty($returnTime) && !empty($startTime)) {
-        $grace = (int) (settings_get('lease.return_grace_minutes', '0') ?? '0');
-        return \FleetForge\Billing\HolisticLeaseEngine::effectiveBillableEndDate(
+        $grace  = (int) (settings_get('lease.return_grace_minutes', '0') ?? '0');
+        $extent = \FleetForge\Billing\HolisticLeaseEngine::effectiveBillableEndDate(
             $returnDate, (string) $returnTime, (string) $startTime, $grace, $startDate
         );
+    } else {
+        $extent = $returnDate;
     }
-    return $returnDate;
+    // S-LEASE-CLOSE-REMOVE-DAYS: shave N billable days off the end, clamped to
+    // start_date (min 1 billed day). Must stay in lockstep with InvoiceGenerator.
+    if ($daysRemoved > 0) {
+        $reduced = (new \DateTimeImmutable($extent))->modify("-{$daysRemoved} day")->format('Y-m-d');
+        $extent  = ($reduced < $startDate) ? $startDate : $reduced;
+    }
+    return $extent;
 }
 
 /**
