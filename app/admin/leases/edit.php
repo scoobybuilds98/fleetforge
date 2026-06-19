@@ -449,6 +449,27 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (only when billed hourly).
+                     Start editable; end is set at close (read-only on active leases). -->
+                <div class="form-row-2" x-show="parseFloat(_hourlyRate) > 0">
+                    <div class="form-group">
+                        <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
+                        <input type="number" id="engine_hours_at_start" class="form-control font-mono"
+                               x-model="form.engine_hours_at_start" step="0.01" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Ending Engine Hours</label>
+                        <?php if ($isActive): ?>
+                        <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;"
+                             title="Set at lease close"><?= e($lease['engine_hours_at_end'] ?? '—') ?></div>
+                        <div class="form-hint">Set at lease close.</div>
+                        <?php else: ?>
+                        <input type="number" id="engine_hours_at_end" class="form-control font-mono"
+                               x-model="form.engine_hours_at_end" step="0.01" min="0">
+                        <?php endif; ?>
+                    </div>
+                </div>
+
                 <!-- S-MILEAGE-1 Model B — Mileage precharge subsection
                      Active leases: rendered read-only (precharge is locked after
                      Invoice 1 billing; cannot change on an active lease at all). -->
@@ -656,6 +677,9 @@ function FF_EditLease() {
             updated_at:              <?= json_encode($lease['updated_at']) ?>,
             // Distance fields — editable regardless of lease status
             mileage_at_start:        <?= json_encode($lease['mileage_at_start'] ?? '') ?>,
+            // S-LEASE-HOURLY-BILLING: starting hours is a usage reading, correctable
+            // on active leases (whitelisted in update.php); always in the model.
+            engine_hours_at_start:   <?= json_encode($lease['engine_hours_at_start'] ?? '') ?>,
             estimated_mileage_km:    <?= json_encode($lease['estimated_mileage_km'] ?? $lease['estimated_mileage'] ?? '') ?>,
             estimated_mileage_miles: <?= json_encode($lease['estimated_mileage_miles'] ?? '') ?>,
             km_to_miles_conversion:  <?= (float)($lease['km_to_miles_conversion'] ?? 0.621371) ?>,
@@ -678,6 +702,8 @@ function FF_EditLease() {
             gps_opt_in:              <?= $lease['gps_opt_in'] ? 'true' : 'false' ?>,
             gps_cost:                <?= json_encode($lease['gps_cost'] ?? '1.00') ?>,
             hourly_rate:             <?= json_encode($lease['hourly_rate'] ?? null) ?>,
+            // S-LEASE-HOURLY-BILLING: ending hours is pending-only (set at close on active).
+            engine_hours_at_end:     <?= json_encode($lease['engine_hours_at_end'] ?? '') ?>,
             notes:                   <?= json_encode($lease['notes'] ?? '') ?>,
             internal_notes:          <?= json_encode($lease['internal_notes'] ?? '') ?>,
             precharge_enabled:       <?= !empty($lease['precharge_enabled']) ? 'true' : 'false' ?>,
@@ -693,6 +719,9 @@ function FF_EditLease() {
 
         // S-LEASE-UNITS: primary unit fixed at creation — read-only on edit.
         _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
+        // S-LEASE-HOURLY-BILLING: read-only gate for the engine-hours section so
+        // it shows on active leases too (form.hourly_rate is pending-only / not posted).
+        _hourlyRate:         <?= json_encode($lease['hourly_rate'] ?? 0) ?>,
         factor_section_open: false,
 
         // S-LEASE-MILEAGE-MODE: 3-position mileage-source selector.

@@ -660,6 +660,21 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours.
+                     Only shown when this lease has an hourly rate (the billing
+                     gate); the engine bills (end − start) × hourly_rate. -->
+                <div class="form-group" style="max-width:320px;margin-top:1rem;"
+                     x-show="parseFloat(form.hourly_rate) > 0">
+                    <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
+                    <input type="number" id="engine_hours_at_start" class="form-control font-mono"
+                           x-model="form.engine_hours_at_start" step="0.01" min="0"
+                           placeholder="e.g. 1240.50">
+                    <div class="form-hint" style="margin-top:0.5rem;">
+                        Manual reading at lease start. Engine hours are billed at $<span x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr on the closing invoice (or a manually-created invoice).
+                    </div>
+                    <div class="form-error" x-show="errors.engine_hours_at_start" x-text="errors.engine_hours_at_start"></div>
+                </div>
+
             </div>
         </div>
 
@@ -1077,6 +1092,8 @@ function FF_CreateLease() {
             gps_opt_in:         true,
             gps_cost:           '',
             hourly_rate:        '',
+            // S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours.
+            engine_hours_at_start: '',
             gst_exempt:         false,
             pst_exempt:         false,
             notes:              '',

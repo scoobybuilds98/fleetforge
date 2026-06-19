@@ -135,6 +135,17 @@ if (isset($body['odometer_at_close_km']) && $body['odometer_at_close_km'] !== ''
     }
 }
 
+// S-LEASE-HOURLY-BILLING: optional closing engine/reefer hours (manual). Stored
+// on the final invoice as engine_hours_at_period_end and on the lease as
+// engine_hours_at_end so the final invoice bills the remaining period's hours.
+$hoursAtClose = null;
+if (isset($body['engine_hours_at_close']) && $body['engine_hours_at_close'] !== '' && $body['engine_hours_at_close'] !== null) {
+    $dec = clean_decimal($body['engine_hours_at_close']);
+    if ($dec !== null && bccomp($dec, '0', 2) >= 0) {
+        $hoursAtClose = $dec;
+    }
+}
+
 // S-CLOSE-OVERSHOOT: shared reconciliation helpers (also used by bulk_close.php).
 require_once __DIR__ . "/_close_reconciliation.php";
 
@@ -382,7 +393,7 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $reconMode, $prechargeRefund, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $reconMode, $prechargeRefund, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
@@ -396,6 +407,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 l.mileage_rate, l.mileage_unit, l.estimated_mileage,
                 l.start_date, l.start_time, l.end_date, l.last_billed_date, l.odometer_start_km,
                 l.mileage_tracking_mode,
+                l.hourly_rate, l.engine_hours_at_start,
                 l.estimated_mileage_km, l.estimated_mileage_miles,
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,
                 l.advance_billing_periods, l.currency,
@@ -491,6 +503,10 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // means a bad starting odometer; the audit log will flag it.
             $leaseUpdate['total_distance_km'] = bccomp($totalDist, '0', 2) >= 0 ? $totalDist : '0.00';
         }
+    }
+    // S-LEASE-HOURLY-BILLING: persist closing engine hours on the lease row.
+    if ($hoursAtClose !== null) {
+        $leaseUpdate['engine_hours_at_end'] = $hoursAtClose;
     }
     if ($closeNotes) {
         // FIX #37: append close_notes to internal_notes instead of replacing
@@ -638,6 +654,26 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             $odoPeriodStart = $prev['odometer_at_period_end_km'];
         } elseif ($lease['odometer_start_km'] !== null) {
             $odoPeriodStart = $lease['odometer_start_km'];
+        }
+    }
+
+    // S-LEASE-HOURLY-BILLING: derive the period-start engine hours for the final
+    // invoice. Same priority as odometer: latest prior invoice's period-end
+    // hours → lease start hours.
+    $hoursPeriodStart = null;
+    if ($hoursAtClose !== null) {
+        $prevH = db_row(
+            "SELECT engine_hours_at_period_end
+               FROM invoices
+              WHERE lease_id = ? AND deleted_at IS NULL
+                AND engine_hours_at_period_end IS NOT NULL
+              ORDER BY billing_period_end DESC, id DESC LIMIT 1",
+            [$id]
+        );
+        if ($prevH && $prevH['engine_hours_at_period_end'] !== null) {
+            $hoursPeriodStart = $prevH['engine_hours_at_period_end'];
+        } elseif ($lease['engine_hours_at_start'] !== null) {
+            $hoursPeriodStart = $lease['engine_hours_at_start'];
         }
     }
 
@@ -821,6 +857,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'odometer_at_period_end_km'   => $odoAtClose,
                     'odometer_source'             => $odoSource,
                     'odometer_fetched_at'         => $odoFetchedAt,
+                    // S-LEASE-HOURLY-BILLING: bill the closing period's engine hours.
+                    'engine_hours_at_period_start' => $hoursPeriodStart,
+                    'engine_hours_at_period_end'   => $hoursAtClose,
                 ]);
                 $finalInvoiceId = $invoiceResult['invoice_id'];
             }

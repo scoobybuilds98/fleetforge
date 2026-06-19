@@ -96,6 +96,9 @@ $lease = db_row(
         l.gps_opt_in,
         l.gps_cost,
         l.hourly_rate,
+        -- S-LEASE-HOURLY-BILLING: manual engine-hours readings for display/edit.
+        l.engine_hours_at_start,
+        l.engine_hours_at_end,
         l.billing_cycle,
         l.advance_billing_periods,
         -- S-LEASE-MIN-DAYS: frozen short-lease floor (Config Layer 2). NULL = no

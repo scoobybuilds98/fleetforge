@@ -138,6 +138,30 @@ if (!empty($body['odometer_fetched_at'])) {
     }
 }
 
+// S-LEASE-HOURLY-BILLING: optional per-period engine/reefer hours (manual).
+// When the lease has an hourly_rate, the engine bills (end - start) × rate.
+$hoursStart = null;
+if (isset($body['engine_hours_at_period_start']) && $body['engine_hours_at_period_start'] !== '' && $body['engine_hours_at_period_start'] !== null) {
+    $dec = clean_decimal($body['engine_hours_at_period_start']);
+    if ($dec === null || bccomp($dec, '0', 2) < 0) {
+        $fields['engine_hours_at_period_start'] = 'Starting engine hours cannot be negative.';
+    } else {
+        $hoursStart = $dec;
+    }
+}
+$hoursEnd = null;
+if (isset($body['engine_hours_at_period_end']) && $body['engine_hours_at_period_end'] !== '' && $body['engine_hours_at_period_end'] !== null) {
+    $dec = clean_decimal($body['engine_hours_at_period_end']);
+    if ($dec === null || bccomp($dec, '0', 2) < 0) {
+        $fields['engine_hours_at_period_end'] = 'Ending engine hours cannot be negative.';
+    } else {
+        $hoursEnd = $dec;
+    }
+}
+if ($hoursStart !== null && $hoursEnd !== null && bccomp($hoursEnd, $hoursStart, 2) < 0) {
+    $fields['engine_hours_at_period_end'] = 'Ending engine hours cannot be less than starting engine hours.';
+}
+
 if ($fields) {
     json_validation_error($fields);
 }
@@ -152,7 +176,7 @@ $batch     = null;
 
 db_transaction(function () use (
     $generator, $leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $body,
-    $odoStart, $odoEnd, $odoSource, $odoFetchedAt, $allowOverlap, $lease,
+    $odoStart, $odoEnd, $odoSource, $odoFetchedAt, $hoursStart, $hoursEnd, $allowOverlap, $lease,
     &$batch
 ) {
     $batch = $generator->generateForLease([
@@ -175,6 +199,9 @@ db_transaction(function () use (
         'odometer_at_period_end_km'   => $odoEnd,
         'odometer_source'             => $odoSource,
         'odometer_fetched_at'         => $odoFetchedAt,
+        // S-LEASE-HOURLY-BILLING — manual engine hours (final segment only).
+        'engine_hours_at_period_start' => $hoursStart,
+        'engine_hours_at_period_end'   => $hoursEnd,
     ]);
 
     $companyName = $lease['company_name_snapshot'] ?? 'customer';

@@ -574,6 +574,26 @@ class InvoiceGenerator
                 $cumulativeDistanceKm = bccomp($cumDiff, '0', 2) >= 0 ? $cumDiff : '0.00';
             }
 
+            // ════════════════════════════════════════════════════════════════
+            // S-LEASE-HOURLY-BILLING — engine/reefer-hours setup (manual only)
+            // Parallel to the odometer block above but simpler: no source/mode,
+            // no precharge. Caller supplies the period's start/end hours
+            // readings; we snapshot them on the invoice and (if hourly_rate>0)
+            // emit one hourly_usage line = period hours × hourly_rate below.
+            // ════════════════════════════════════════════════════════════════
+            $hoursStart = isset($params['engine_hours_at_period_start']) && $params['engine_hours_at_period_start'] !== ''
+                ? (string) $params['engine_hours_at_period_start'] : null;
+            $hoursEnd   = isset($params['engine_hours_at_period_end']) && $params['engine_hours_at_period_end'] !== ''
+                ? (string) $params['engine_hours_at_period_end']   : null;
+
+            $periodEngineHours = null;
+            if ($hoursStart !== null && $hoursEnd !== null) {
+                // Clamp a negative delta to 0 (bad manual edit) — same defensive
+                // posture as period_distance_km above.
+                $hDiff = bcsub($hoursEnd, $hoursStart, 2);
+                $periodEngineHours = bccomp($hDiff, '0', 2) >= 0 ? $hDiff : '0.00';
+            }
+
             $odometerSource = $params['odometer_source'] ?? null;
             if ($odometerSource !== null && !in_array($odometerSource, ['gps', 'manual', 'estimated'], true)) {
                 $odometerSource = 'manual';
@@ -862,6 +882,34 @@ class InvoiceGenerator
                 }
                 // Branch B — precharge_balance == 0 or NULL: no credit line,
                 // no balance update. mileage_usage line above stands alone.
+            }
+
+            // --- Step 2b: Engine/reefer-hours usage (S-LEASE-HOURLY-BILLING) ---
+            // Gate: lease has an hourly rate AND positive period hours AND this
+            // is a normal billing run. Independent of mileage — a lease may bill
+            // both. Plain usage line (no precharge/drawdown); rate_method omitted
+            // like mileage_usage to avoid the rate_method ENUM clamp trap.
+            if (bccomp((string) ($lease['hourly_rate'] ?? '0'), '0', 4) > 0
+                && $periodEngineHours !== null
+                && bccomp((string) $periodEngineHours, '0', 2) > 0
+                && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
+            ) {
+                $rateHr      = (string) $lease['hourly_rate'];
+                $hoursCharge = bcround(bcmul((string) $periodEngineHours, $rateHr, 6), 2);
+                $lineItems[] = [
+                    'sort_order'   => $sortOrder++,
+                    'item_type'    => 'hourly_usage',
+                    'description'  => 'Engine hours: ' . number_format((float) $periodEngineHours, 2)
+                                      . ' hrs × $' . $rateHr . '/hr',
+                    'quantity'     => sprintf('%s', $periodEngineHours),
+                    'unit'         => 'hours',
+                    'unit_price'   => $rateHr,
+                    'amount'       => $hoursCharge,
+                    'is_credit'    => 0,
+                    'taxable'      => 1,
+                    'period_start' => $periodStart,
+                    'period_end'   => $periodEnd,
+                ];
             }
 
             // --- Step 3: Insurance add-on ---
@@ -1210,6 +1258,10 @@ class InvoiceGenerator
                 'cumulative_distance_km'      => $cumulativeDistanceKm,
                 'odometer_source'             => $odometerSource,
                 'odometer_fetched_at'         => $odometerFetchedAt,
+                // S-LEASE-HOURLY-BILLING: per-period engine-hours snapshot.
+                'engine_hours_at_period_start' => $hoursStart,
+                'engine_hours_at_period_end'   => $hoursEnd,
+                'period_engine_hours'          => $periodEngineHours,
                 // S-BILLING-HOLISTIC-ENGINE: forensic audit columns. NULL
                 // for period_independent leases; populated for every holistic
                 // invoice so a future auditor can replay the math without
@@ -1615,13 +1667,16 @@ class InvoiceGenerator
                 'created_by'        => $params['created_by'] ?? null,
                 'generation_source' => $params['generation_source'] ?? 'manual',
             ];
-            // Odometer is period-specific; attach only to the final segment
-            // (the most recent period), mirroring the monthly cron.
+            // Odometer + engine-hours are period-specific; attach only to the
+            // final segment (the most recent period), mirroring the monthly cron.
             $odo = [
                 'odometer_at_period_start_km' => $params['odometer_at_period_start_km'] ?? null,
                 'odometer_at_period_end_km'   => $params['odometer_at_period_end_km']   ?? null,
                 'odometer_source'             => $params['odometer_source']             ?? null,
                 'odometer_fetched_at'         => $params['odometer_fetched_at']         ?? null,
+                // S-LEASE-HOURLY-BILLING: manual engine-hours for this period.
+                'engine_hours_at_period_start' => $params['engine_hours_at_period_start'] ?? null,
+                'engine_hours_at_period_end'   => $params['engine_hours_at_period_end']   ?? null,
             ];
 
             // ── Single-segment mode (R2 §3.6 month picker) ──────────

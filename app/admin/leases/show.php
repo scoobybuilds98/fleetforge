@@ -411,6 +411,14 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                             <td class="text-secondary">Hourly Rate</td>
                                             <td class="font-mono" x-text="lease.hourly_rate && parseFloat(lease.hourly_rate) > 0 ? '$' + parseFloat(lease.hourly_rate).toFixed(4) + ' / hr' : 'N/A'"></td>
                                         </tr>
+                                        <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (only when billed hourly) -->
+                                        <tr x-show="parseFloat(lease.hourly_rate) > 0">
+                                            <td class="text-secondary">Engine Hours</td>
+                                            <td class="font-mono"
+                                                x-text="(lease.engine_hours_at_start != null ? parseFloat(lease.engine_hours_at_start).toFixed(2) : '—')
+                                                        + ' → '
+                                                        + (lease.engine_hours_at_end != null ? parseFloat(lease.engine_hours_at_end).toFixed(2) : '—') + ' hrs'"></td>
+                                        </tr>
                                         <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
                                              secondary muted with ≈ prefix, custom-conversion badge when factors
                                              differ from international standard. -->
@@ -1439,6 +1447,19 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                   x-text="closingTotalKmDisplay"></span>
                         </div>
 
+                        <!-- S-LEASE-HOURLY-BILLING: closing engine hours (only for hourly leases) -->
+                        <div class="form-group" style="margin-top:1rem;margin-bottom:0.5rem;"
+                             x-show="lease && parseFloat(lease.hourly_rate) > 0">
+                            <label class="form-label" for="engine_hours_at_close">Current Engine Hours</label>
+                            <input type="number" id="engine_hours_at_close" class="form-control font-mono"
+                                   x-model="closeForm.engine_hours_at_close"
+                                   step="0.01" min="0" placeholder="e.g. 1380.00"
+                                   style="max-width:220px;">
+                            <div class="form-hint" style="margin-top:0.5rem;">
+                                Billed at $<span x-text="lease ? parseFloat(lease.hourly_rate || 0).toFixed(4) : '0'"></span>/hr for the hours since the last reading.
+                            </div>
+                        </div>
+
                         <div x-show="closeOdoBanner"
                              :class="closeOdoBanner && closeOdoBanner.type === 'success' ? 'alert alert-success' : 'alert alert-warning'"
                              style="margin-top:0.5rem;padding:0.4rem 0.6rem;font-size:0.8rem;"
@@ -1899,6 +1920,8 @@ function FF_LeaseDetail() {
             odometer_at_close_km:  '',
             odometer_source:       null,   // 'gps' | 'manual'
             odometer_fetched_at:   null,   // ISO datetime if GPS
+            // S-LEASE-HOURLY-BILLING: closing engine/reefer hours (manual)
+            engine_hours_at_close: '',
             // ADV-BILL-1 D-H: only sent for advance leases; ignored otherwise.
             reconciliation_mode:   'refund_unused',
             // S-MILEAGE-3 D-G: close-adjustment decision state retired
@@ -2696,6 +2719,10 @@ function FF_LeaseDetail() {
                 if (this.closeForm.odometer_fetched_at) {
                     payload.odometer_fetched_at = this.closeForm.odometer_fetched_at;
                 }
+            }
+            // S-LEASE-HOURLY-BILLING: closing engine hours → final invoice hours line
+            if (this.closeForm.engine_hours_at_close !== '' && this.closeForm.engine_hours_at_close !== null) {
+                payload.engine_hours_at_close = parseFloat(this.closeForm.engine_hours_at_close);
             }
             // ADV-BILL-1 D-H: only meaningful when this lease has prepaid advance periods.
             if ((this.lease?.advance_billing_periods || 0) > 0) {

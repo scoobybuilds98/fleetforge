@@ -99,6 +99,9 @@ if ($existing['status'] === 'active') {
         // may be retuned on an active lease (e.g. a unit that was never linked to
         // Samsara is switched from samsara→manual). Affects future billing only.
         'mileage_tracking_mode',
+        // S-LEASE-HOURLY-BILLING: the manual starting engine-hours baseline is a
+        // usage reading and may be corrected on an active lease (end is set at close).
+        'engine_hours_at_start',
     ];
     $blocked = array_values(array_diff(array_keys($body), $distanceAllowed));
     if ($blocked !== []) {
@@ -214,6 +217,34 @@ if (array_key_exists('mileage_at_end', $body)) {
             $fields['mileage_at_end'] = 'End mileage cannot be negative.';
         } else {
             $data['mileage_at_end'] = $i;
+        }
+    }
+}
+
+// S-LEASE-HOURLY-BILLING: manual engine-hours readings (decimal, >= 0; clearable).
+if (array_key_exists('engine_hours_at_start', $body)) {
+    $raw = $body['engine_hours_at_start'];
+    if ($raw === null || $raw === '') {
+        $data['engine_hours_at_start'] = null;
+    } else {
+        $d = clean_decimal($raw);
+        if ($d === null || bccomp($d, '0', 2) < 0) {
+            $fields['engine_hours_at_start'] = 'Starting engine hours cannot be negative.';
+        } else {
+            $data['engine_hours_at_start'] = $d;
+        }
+    }
+}
+if (array_key_exists('engine_hours_at_end', $body)) {
+    $raw = $body['engine_hours_at_end'];
+    if ($raw === null || $raw === '') {
+        $data['engine_hours_at_end'] = null;
+    } else {
+        $d = clean_decimal($raw);
+        if ($d === null || bccomp($d, '0', 2) < 0) {
+            $fields['engine_hours_at_end'] = 'Ending engine hours cannot be negative.';
+        } else {
+            $data['engine_hours_at_end'] = $d;
         }
     }
 }
