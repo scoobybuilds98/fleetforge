@@ -55,15 +55,10 @@ class SummaryEngine
         bool   $forceRefresh = false,
         array  $reportContext = []
     ): ?array {
-        // WHY: Check cache first unless explicitly refreshing.
-        // Date-range reports (P&L / BS / CF / budget_variance) skip cache
-        // because the same (entity_type, entity_id, summary_type) tuple can
-        // legitimately produce different narratives for different ranges.
-        $skipCacheForDateRange = in_array($summaryType, [
-            'pl_narrative', 'bs_narrative', 'cashflow_narrative', 'budget_variance',
-        ], true);
-        if (!$forceRefresh && !$skipCacheForDateRange && (bool) settings_get('ai.cache_summaries', true)) {
-            $cached = self::getCached($entityType, $entityId, $summaryType);
+        // WHY: Check cache first unless explicitly refreshing. cachedSummary()
+        // is shared with the streaming endpoint so the two read-paths can't drift.
+        if (!$forceRefresh) {
+            $cached = self::cachedSummary($entityType, $entityId, $summaryType);
             if ($cached !== null) {
                 return [
                     'summary'      => $cached['content'],
@@ -135,6 +130,29 @@ class SummaryEngine
              LIMIT 1",
             [$entityType, $entityId, $summaryType]
         );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // cachedSummary()
+    //
+    // Public cache-read shared by BOTH the non-stream generate() path and the
+    // streaming endpoint (api/v1/ai/summary-stream.php) so they cannot drift.
+    // Honors ai.cache_summaries and the date-range skip rule (P&L / BS / CF /
+    // budget_variance produce a different narrative per range → never cached).
+    // Returns the cached row (content + generated_at + expires_at) or null.
+    // ────────────────────────────────────────────────────────────
+    public static function cachedSummary(string $entityType, int $entityId, string $summaryType): ?array
+    {
+        if (!(bool) settings_get('ai.cache_summaries', true)) {
+            return null;
+        }
+        $skipCacheForDateRange = in_array($summaryType, [
+            'pl_narrative', 'bs_narrative', 'cashflow_narrative', 'budget_variance',
+        ], true);
+        if ($skipCacheForDateRange) {
+            return null;
+        }
+        return self::getCached($entityType, $entityId, $summaryType);
     }
 
     // ────────────────────────────────────────────────────────────

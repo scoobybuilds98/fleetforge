@@ -183,11 +183,15 @@ function <?= e($_componentId) ?>() {
                     } else if (evt.t === 'done') {
                         this.summary     = this.streamText;
                         this.streamText  = '';
-                        this.cached      = false;
-                        this.generatedAt = new Date().toLocaleString('en-CA', {
-                            month: 'short', day: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
-                        });
+                        // evt.cached is true when the server served a cached summary
+                        // (skipping a paid AI call) — drives the "Cached result" badge.
+                        this.cached      = !!evt.cached;
+                        this.generatedAt = evt.generated_at
+                            ? evt.generated_at
+                            : new Date().toLocaleString('en-CA', {
+                                month: 'short', day: 'numeric',
+                                hour: '2-digit', minute: '2-digit',
+                            });
                     } else if (evt.t === 'err') {
                         this.error      = evt.m || 'Failed to generate summary.';
                         this.streamText = '';

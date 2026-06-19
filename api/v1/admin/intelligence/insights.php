@@ -47,17 +47,25 @@ try {
           LIMIT 10"
     );
 
-    // Recent anomaly alerts (if anomaly_alerts table exists; degrade if not).
+    // Recent anomaly alerts. ai_anomaly_alerts uses alert_type/title/description —
+    // the previous query selected nonexistent `category`/`summary` columns, so it
+    // threw 42S22 and the broad catch left this permanently empty (the Insights
+    // panel always showed zero anomalies). S-AI-AUDIT-HIGH-FIX.
     $anomalies = [];
     try {
         $anomalies = db_select(
-            "SELECT id, severity, category, summary, created_at
+            "SELECT id, alert_type, severity, title, description, created_at, acknowledged_at
                FROM ai_anomaly_alerts
               WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
               ORDER BY id DESC LIMIT 20"
         );
-    } catch (\Throwable) {
-        // table missing — leave empty
+    } catch (\PDOException $e) {
+        // 42S02 = table genuinely absent (fresh/partial DB) → degrade quietly.
+        // Any other error (e.g. a future column rename) must surface, not be
+        // silently swallowed into a zero-anomaly result.
+        if ($e->getCode() !== '42S02') {
+            throw $e;
+        }
     }
 
     $weeklyPayload = MorningBriefingRenderer::buildWeeklyPayload();

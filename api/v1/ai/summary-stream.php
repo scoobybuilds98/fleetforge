@@ -56,6 +56,7 @@ $entityType    = trim($body['entity_type'] ?? '');
 $entityId      = (int) ($body['entity_id'] ?? 0);
 $summaryType   = trim($body['summary_type'] ?? '');
 $reportContext = is_array($body['context'] ?? null) ? $body['context'] : [];
+$force         = (int) ($body['force'] ?? 0) === 1;
 $userId        = (int) ($_SESSION['ff_user']['id'] ?? 0);
 
 $validEntityTypes = ['customer', 'lease', 'equipment_unit', 'fleet', 'accounting', 'invoice', 'reservation', 'vendor', 'payment'];
@@ -91,6 +92,21 @@ if (!in_array($summaryType, $validSummaryTypes, true)) {
 $fleetLevelTypes = ['fleet_health', 'accounting_overview', 'pl_narrative', 'bs_narrative', 'cashflow_narrative'];
 if (!in_array($summaryType, $fleetLevelTypes, true) && $summaryType !== 'budget_variance' && $entityId <= 0) {
     $emitErr('entity_id is required.');
+}
+
+// ── Serve from cache when allowed — skip the paid AI call ─────────────────────
+// The Generate button sends force=0 (use cache), Regenerate sends force=1. Without
+// this read the endpoint re-billed Claude on every open and the partial's "Cached
+// result" badge was dead. Gated on ai.cache_summaries via cachedSummary().
+// S-AI-AUDIT-HIGH-FIX.
+if (!$force) {
+    $cachedRow = \FleetForge\AI\SummaryEngine::cachedSummary($entityType, $entityId, $summaryType);
+    if ($cachedRow !== null) {
+        echo 'data: ' . json_encode(['t' => 'tok', 'c' => (string) $cachedRow['content']]) . "\n\n";
+        echo 'data: ' . json_encode(['t' => 'done', 'cached' => true, 'generated_at' => $cachedRow['generated_at']]) . "\n\n";
+        flush();
+        exit;
+    }
 }
 
 // ── AI enabled check ──────────────────────────────────────────────────────────

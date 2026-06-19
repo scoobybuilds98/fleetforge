@@ -159,7 +159,7 @@ class WriteRegistry
                     'contact_name'  => ['type' => 'string', 'max' => 255, 'label' => 'Contact name'],
                     'contact_phone' => ['type' => 'string', 'max' => 50,  'label' => 'Contact phone'],
                     'contact_email' => ['type' => 'string', 'max' => 255, 'label' => 'Contact email'],
-                    'pickup_date'   => ['type' => 'date', 'label' => 'Pickup date'],
+                    'pickup_date'   => ['type' => 'date', 'required' => true, 'label' => 'Pickup date'],
                     'yard_location' => ['type' => 'string', 'max' => 100, 'label' => 'Yard location'],
                     'purpose'       => ['type' => 'string', 'max' => 500, 'label' => 'Purpose'],
                     'priority'      => ['type' => 'enum', 'values' => ['low', 'medium', 'high', 'urgent'], 'label' => 'Priority'],
@@ -195,7 +195,7 @@ class WriteRegistry
                     'description'        => ['type' => 'string', 'max' => 5000, 'label' => 'Description'],
                     'work_type'          => ['type' => 'enum', 'values' => ['scheduled_service', 'repair', 'inspection', 'tire', 'electrical', 'body_damage', 'breakdown', 'other'], 'label' => 'Work type'],
                     'priority'           => ['type' => 'enum', 'values' => ['low', 'medium', 'high', 'emergency'], 'label' => 'Priority'],
-                    'requested_date'     => ['type' => 'date', 'label' => 'Requested date'],
+                    'requested_date'     => ['type' => 'date', 'required' => true, 'label' => 'Requested date'],
                     'scheduled_date'     => ['type' => 'date', 'label' => 'Scheduled date'],
                     'mileage_at_service' => ['type' => 'int', 'min' => 0, 'label' => 'Mileage at service'],
                     'notes'              => ['type' => 'string', 'max' => 5000, 'label' => 'Notes'],
@@ -229,7 +229,7 @@ class WriteRegistry
                 'fields' => [
                     'name'           => ['type' => 'string', 'max' => 255, 'unique' => true, 'label' => 'Name'],
                     'description'    => ['type' => 'string', 'max' => 5000, 'label' => 'Description'],
-                    'effective_from' => ['type' => 'date', 'label' => 'Effective from'],
+                    'effective_from' => ['type' => 'date', 'required' => true, 'label' => 'Effective from'],
                     'effective_to'   => ['type' => 'date', 'label' => 'Effective to'],
                 ],
                 'bulk_filters' => [],
@@ -348,6 +348,14 @@ class WriteRegistry
             }
 
             case 'date': {
+                // WHY: clearing a NOT NULL date (required=true: reservations.pickup_date,
+                // maintenance_work_orders.requested_date, rate_cards.effective_from) would
+                // write NULL → 1048, which apply-change maps to a misleading "unique
+                // constraint" 409 and leaves the proposal permanently stuck. Reject the
+                // empty value up front with an accurate message. S-AI-AUDIT-HIGH-FIX.
+                if ($newValue === '' && !empty($def['required'])) {
+                    return ['error' => "{$label} is required and cannot be cleared."];
+                }
                 $d = clean_date($newValue);
                 if ($d === null && $newValue !== '') return ['error' => "{$label} is not a valid date (use YYYY-MM-DD)."];
                 return self::diff($record, $column, $d, (string) ($record[$column] ?: 'none'), (string) ($d ?: 'none'), $label);
