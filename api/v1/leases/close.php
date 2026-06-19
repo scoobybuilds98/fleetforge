@@ -476,6 +476,28 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         $odoFetchedAt = null;
     }
 
+    // ── S-ODO-VALIDATION: closing odometer must be >= starting odometer ──
+    // A real odometer only increases. A closing reading below the start is
+    // impossible and previously slipped through — the engine clamped the negative
+    // distance to 0.00 ("0 km driven"), silently saving a contradictory record
+    // (cf. MTTS82: start 17,112.59 > close 12,198.00). Reject the close so the
+    // operator fixes the bad reading: either the closing value, or the starting
+    // odometer (which may be a stale GPS reading from a back-dated activation —
+    // editable on the lease before re-closing).
+    if ($odoAtClose !== null && $lease['odometer_start_km'] !== null
+        && bccomp((string) $odoAtClose, (string) $lease['odometer_start_km'], 2) < 0) {
+        json_error(
+            'ODOMETER_BELOW_START',
+            sprintf(
+                'Closing odometer (%s km) is below the starting odometer (%s km). An odometer can only increase — verify the closing reading, or correct the starting odometer (it may have been captured at a late/back-dated activation) before closing.',
+                number_format((float) $odoAtClose, 2),
+                number_format((float) $lease['odometer_start_km'], 2)
+            ),
+            422,
+            ['fields' => ['odometer_at_close_km' => 'Closing odometer cannot be below the starting odometer.']]
+        );
+    }
+
     // ── D20: FOR UPDATE lock on unit ───────────────────────────
     // Prevents race with monthly billing cron that also reads/writes the lease
     $unit = db_row(

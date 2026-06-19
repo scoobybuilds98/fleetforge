@@ -1475,6 +1475,16 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                   x-text="closingTotalKmDisplay"></span>
                         </div>
 
+                        <!-- S-ODO-VALIDATION: warn when closing < starting (the server also rejects) -->
+                        <div x-show="closeForm.odometer_at_close_km !== '' && closeForm.odometer_at_close_km !== null
+                                     && lease && lease.odometer_start_km !== null && lease.odometer_start_km !== undefined
+                                     && parseFloat(closeForm.odometer_at_close_km) < parseFloat(lease.odometer_start_km)"
+                             class="alert alert-warning" style="margin-top:0.5rem;padding:0.4rem 0.6rem;font-size:0.8rem;">
+                            Closing odometer is below the starting odometer
+                            (<span class="font-mono" x-text="lease ? Number(lease.odometer_start_km).toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}) : ''"></span> km).
+                            An odometer can only increase — verify this reading, or correct the starting odometer (it may be a stale GPS reading from a back-dated activation). Closing is blocked until this is fixed.
+                        </div>
+
                         <!-- S-LEASE-HOURLY-BILLING: closing engine hours (only for hourly leases) -->
                         <div class="form-group" style="margin-top:1rem;margin-bottom:0.5rem;"
                              x-show="lease && parseFloat(lease.hourly_rate) > 0">
