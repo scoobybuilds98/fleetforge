@@ -133,7 +133,7 @@ require_once FF_ROOT . '/includes/header.php';
         <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit</a>
         <?php endif; ?>
         <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>
-        <button class="btn btn-danger btn-sm" onclick="if((await FF_Confirm.ask('Delete this pending lease? This cannot be undone.'))){FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(r=>{if(r.success)window.location.href='<?= base_url('leases') ?>';else FF_Toast.error(r.error?.message||'Failed to delete');})}">Delete</button>
+        <button class="btn btn-danger btn-sm" onclick="FF_Confirm.ask('Delete this pending lease? This cannot be undone.').then(function(ok){if(!ok)return;FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(function(r){if(r.success){window.location.href='<?= base_url('leases') ?>';}else{FF_Toast.error(r.error?.message||'Failed to delete');}});})">Delete</button>
         <?php endif; ?>
     </div>
 </div>

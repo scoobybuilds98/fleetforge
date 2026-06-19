@@ -1515,69 +1515,74 @@ function FF_CreateLease() {
         },
 
         validate() {
-            // VALID-2: use FF_Validate for consistent, per-field error display.
+            // VALID-2 + S-LEASE-VALIDATION-UX: per-field errors PLUS an explicit
+            // top-of-form summary banner naming exactly which required fields are
+            // missing/invalid — a rejected submit must never look like a silent
+            // "bouncing" button. IMPORTANT: the field id passed to FF_Validate.field
+            // must match a real input, or the error never renders. The start/return
+            // time is a split hour/minute picker (start_time_h / end_time_h), NOT a
+            // `start_time` input — target the hour <select> so the message shows.
             const form = document.querySelector('form');
             FF_Validate.clear(form);
-            let ok = true;
+            const missing = [];
+            const fail = (fieldId, label, msg) => {
+                FF_Validate.field(form, fieldId, msg);
+                missing.push(label);
+            };
 
-            if (!this.form.customer_id) {
-                FF_Validate.field(form, 'customer_id', 'Please select a customer.');
-                ok = false;
-            }
-            if (!this.form.equipment_unit_id) {
-                FF_Validate.field(form, 'equipment_unit_id', 'Please select an equipment unit.');
-                ok = false;
-            }
-            if (!this.form.start_date) {
-                FF_Validate.field(form, 'start_date', 'Start date is required.');
-                ok = false;
-            }
-            if (!this.form.start_time) {
-                FF_Validate.field(form, 'start_time', 'Lease start time is required.');
-                ok = false;
-            }
+            if (!this.form.customer_id)
+                fail('customer_id', 'Customer', 'Please select a customer.');
+            if (!this.form.equipment_unit_id)
+                fail('equipment_unit_id', 'Equipment unit', 'Please select an equipment unit.');
+            if (!this.form.start_date)
+                fail('start_date', 'Start date', 'Start date is required.');
+            if (!this.form.start_time)
+                fail('start_time_h', 'Lease start time', 'Lease start time is required — pick an hour and minute.');
             if (this.form.end_date && this.form.start_date &&
-                this.form.end_date < this.form.start_date) {
-                FF_Validate.field(form, 'end_date', 'End date must be after start date.');
-                ok = false;
-            }
+                this.form.end_date < this.form.start_date)
+                fail('end_date', 'End date', 'End date must be on or after the start date.');
 
-            // Numeric rate fields: reject negatives up-front so the user gets an
-            // immediate message instead of a server round-trip.
+            // Numeric fields: reject negatives up-front with a clear field message.
             const numChecks = [
-                ['daily_rate',             'Daily rate cannot be negative.'],
-                ['weekly_rate',            'Weekly rate cannot be negative.'],
-                ['monthly_rate',           'Monthly rate cannot be negative.'],
-                ['mileage_rate',           'Mileage rate cannot be negative.'],
-                ['estimated_mileage',      'Estimated mileage cannot be negative.'],
-                ['discount_value',         'Discount value cannot be negative.'],
-                ['insurance_cost',         'Insurance cost cannot be negative.'],
-                ['warranty_cost',          'Warranty cost cannot be negative.'],
+                ['daily_rate',        'Daily rate',        'Daily rate cannot be negative.'],
+                ['weekly_rate',       'Weekly rate',       'Weekly rate cannot be negative.'],
+                ['monthly_rate',      'Monthly rate',      'Monthly rate cannot be negative.'],
+                ['mileage_rate',      'Mileage rate',      'Mileage rate cannot be negative.'],
+                ['estimated_mileage', 'Estimated mileage', 'Estimated mileage cannot be negative.'],
+                ['discount_value',    'Discount',          'Discount value cannot be negative.'],
+                ['insurance_cost',    'Insurance cost',    'Insurance cost cannot be negative.'],
+                ['warranty_cost',     'Warranty cost',     'Warranty cost cannot be negative.'],
             ];
-            numChecks.forEach(([k, msg]) => {
+            numChecks.forEach(([k, label, msg]) => {
                 const v = this.form[k];
                 if (v !== '' && v !== null && v !== undefined && Number(v) < 0) {
-                    FF_Validate.field(form, k, msg);
-                    ok = false;
+                    fail(k, label, msg);
                 }
             });
             if (this.form.discount_type === 'percentage' &&
                 Number(this.form.discount_value || 0) > 100) {
-                FF_Validate.field(form, 'discount_value', 'Discount cannot exceed 100%.');
-                ok = false;
+                fail('discount_value', 'Discount', 'Discount cannot exceed 100%.');
             }
 
-            // At least one rate must be > 0
+            // At least one rate must be > 0.
             const anyRate = ['daily_rate','weekly_rate','monthly_rate','mileage_rate']
                 .some(k => Number(this.form[k] || 0) > 0);
             if (!anyRate) {
-                FF_Validate.field(form, 'daily_rate',
-                    'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.');
-                ok = false;
+                fail('daily_rate', 'A rate (daily, weekly, monthly, or mileage)',
+                    'Enter at least one rate greater than zero.');
             }
 
-            if (!ok) FF_Validate.scrollToFirst(form);
-            return ok;
+            if (missing.length) {
+                // Explicit summary so the operator sees WHAT is mandatory + missing.
+                FF_Validate.banner(form, missing.join(', ') + '.', {
+                    title: (missing.length === 1
+                        ? 'Please fix this field before saving:'
+                        : 'Please fix these ' + missing.length + ' fields before saving:'),
+                });
+                FF_Validate.scrollToFirst(form);
+                return false;
+            }
+            return true;
         },
 
         async submit() {
