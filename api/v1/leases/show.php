@@ -99,6 +99,9 @@ $lease = db_row(
         -- S-LEASE-HOURLY-BILLING: manual engine-hours readings for display/edit.
         l.engine_hours_at_start,
         l.engine_hours_at_end,
+        -- S-LEASE-SERVICE-CHARGES: one-time cartage charge + billed marker.
+        l.cartage_amount,
+        l.cartage_billed_at,
         l.billing_cycle,
         l.advance_billing_periods,
         -- S-LEASE-MIN-DAYS: frozen short-lease floor (Config Layer 2). NULL = no

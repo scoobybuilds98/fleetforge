@@ -419,6 +419,17 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                                         + ' → '
                                                         + (lease.engine_hours_at_end != null ? parseFloat(lease.engine_hours_at_end).toFixed(2) : '—') + ' hrs'"></td>
                                         </tr>
+                                        <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge -->
+                                        <tr x-show="parseFloat(lease.cartage_amount) > 0">
+                                            <td class="text-secondary">Cartage</td>
+                                            <td class="font-mono">
+                                                $<span x-text="parseFloat(lease.cartage_amount || 0).toFixed(2)"></span>
+                                                <span class="badge badge-no-dot"
+                                                      :class="lease.cartage_billed_at ? 'badge-success' : 'badge-neutral'"
+                                                      x-text="lease.cartage_billed_at ? 'billed' : 'pending first invoice'"
+                                                      style="margin-left:6px;"></span>
+                                            </td>
+                                        </tr>
                                         <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
                                              secondary muted with ≈ prefix, custom-conversion badge when factors
                                              differ from international standard. -->
@@ -1464,6 +1475,35 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                              :class="closeOdoBanner && closeOdoBanner.type === 'success' ? 'alert alert-success' : 'alert alert-warning'"
                              style="margin-top:0.5rem;padding:0.4rem 0.6rem;font-size:0.8rem;"
                              x-text="closeOdoBanner && closeOdoBanner.message"></div>
+
+                        <!-- S-LEASE-SERVICE-CHARGES: closeout charges (sweep / wash / fuel).
+                             Each pre-filled with the global default; clear to $0 to skip. -->
+                        <div style="margin-top:1.25rem;border-top:1px solid var(--border-color);padding-top:1rem;">
+                            <div class="form-label" style="margin-bottom:0.5rem;">Closeout charges</div>
+                            <div class="form-hint" style="margin-bottom:0.75rem;">Pre-filled with defaults — clear any field to skip that charge.</div>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                                <div class="form-group" style="flex:1 1 120px;min-width:0;margin-bottom:0.5rem;">
+                                    <label class="form-label" for="sweep_amount">Sweep ($)</label>
+                                    <input type="number" id="sweep_amount" class="form-control font-mono"
+                                           x-model="closeForm.sweep_amount" step="0.01" min="0" placeholder="0.00">
+                                </div>
+                                <div class="form-group" style="flex:1 1 120px;min-width:0;margin-bottom:0.5rem;">
+                                    <label class="form-label" for="wash_amount">Wash ($)</label>
+                                    <input type="number" id="wash_amount" class="form-control font-mono"
+                                           x-model="closeForm.wash_amount" step="0.01" min="0" placeholder="0.00">
+                                </div>
+                                <div class="form-group" style="flex:1 1 120px;min-width:0;margin-bottom:0.5rem;">
+                                    <label class="form-label" for="fuel_gallons">Fuel (gallons)</label>
+                                    <input type="number" id="fuel_gallons" class="form-control font-mono"
+                                           x-model="closeForm.fuel_gallons" step="0.01" min="0" placeholder="0">
+                                </div>
+                            </div>
+                            <div class="form-hint" x-show="parseFloat(closeForm.fuel_gallons) > 0">
+                                Fuel: <span x-text="parseFloat(closeForm.fuel_gallons || 0).toFixed(2)"></span> gal ×
+                                $<?= e(number_format((float) settings_get('lease.fuel_rate_per_gallon', '13.00'), 2)) ?>/gal =
+                                <strong>$<span x-text="(parseFloat(closeForm.fuel_gallons || 0) * <?= (float) settings_get('lease.fuel_rate_per_gallon', '13.00') ?>).toFixed(2)"></span></strong>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -1922,6 +1962,10 @@ function FF_LeaseDetail() {
             odometer_fetched_at:   null,   // ISO datetime if GPS
             // S-LEASE-HOURLY-BILLING: closing engine/reefer hours (manual)
             engine_hours_at_close: '',
+            // S-LEASE-SERVICE-CHARGES: closeout charges, pre-filled with global defaults.
+            sweep_amount:  '<?= e(number_format((float) settings_get('lease.sweep_charge_default', '30.00'), 2, '.', '')) ?>',
+            wash_amount:   '<?= e(number_format((float) settings_get('lease.wash_charge_default', '120.00'), 2, '.', '')) ?>',
+            fuel_gallons:  '',
             // ADV-BILL-1 D-H: only sent for advance leases; ignored otherwise.
             reconciliation_mode:   'refund_unused',
             // S-MILEAGE-3 D-G: close-adjustment decision state retired
@@ -2723,6 +2767,16 @@ function FF_LeaseDetail() {
             // S-LEASE-HOURLY-BILLING: closing engine hours → final invoice hours line
             if (this.closeForm.engine_hours_at_close !== '' && this.closeForm.engine_hours_at_close !== null) {
                 payload.engine_hours_at_close = parseFloat(this.closeForm.engine_hours_at_close);
+            }
+            // S-LEASE-SERVICE-CHARGES: closeout charges (server skips any that are 0/blank)
+            if (this.closeForm.sweep_amount !== '' && this.closeForm.sweep_amount !== null) {
+                payload.sweep_amount = parseFloat(this.closeForm.sweep_amount);
+            }
+            if (this.closeForm.wash_amount !== '' && this.closeForm.wash_amount !== null) {
+                payload.wash_amount = parseFloat(this.closeForm.wash_amount);
+            }
+            if (this.closeForm.fuel_gallons !== '' && this.closeForm.fuel_gallons !== null) {
+                payload.fuel_gallons = parseFloat(this.closeForm.fuel_gallons);
             }
             // ADV-BILL-1 D-H: only meaningful when this lease has prepaid advance periods.
             if ((this.lease?.advance_billing_periods || 0) > 0) {

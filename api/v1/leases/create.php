@@ -387,6 +387,20 @@ if ($ehsRaw !== null && $ehsRaw !== '') {
     }
 }
 
+// ── S-LEASE-SERVICE-CHARGES: cartage (one-time delivery charge) ──────
+// Manual amount entered when delivering a unit; no global default. Bills once
+// on the first invoice. NULL when not supplied.
+$cartageAmount = null;
+$cartRaw = $body['cartage_amount'] ?? null;
+if ($cartRaw !== null && $cartRaw !== '') {
+    $cartDec = clean_decimal($cartRaw);
+    if ($cartDec === null || bccomp($cartDec, '0', 2) < 0) {
+        $fields['cartage_amount'] = 'Cartage charge cannot be negative.';
+    } else {
+        $cartageAmount = $cartDec;
+    }
+}
+
 // ── S-MILEAGE-1 Model B: precharge fields ──────────────────────
 // precharge_enabled: 0/1 toggle, defaults off when not supplied.
 // precharge_amount: required (>0) when enabled, NULL when disabled.
@@ -708,6 +722,8 @@ $createLease = function () use (
         'odometer_start_fetched_at'=> $odometerStartFetchedAt,
         // S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours baseline.
         'engine_hours_at_start'    => $engineHoursAtStart,
+        // S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
+        'cartage_amount'           => $cartageAmount,
         // S-MILEAGE-1 Model B: precharge toggle + amount captured at create.
         // precharge_balance defaults to NULL here; activation in S-MILEAGE-2
         // will initialize it = precharge_amount when the lease activates.

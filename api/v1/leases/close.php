@@ -146,6 +146,39 @@ if (isset($body['engine_hours_at_close']) && $body['engine_hours_at_close'] !== 
     }
 }
 
+// ── S-LEASE-SERVICE-CHARGES: closeout service charges (sweep / wash / fuel) ──
+// Each optional: omit or 0 to skip. sweep/wash are flat $ amounts; fuel is
+// gallons × the server-authoritative per-gallon rate (settings, never trusts a
+// client-sent rate). Built into line items here and billed on the final invoice.
+$closeoutLines = [];
+$svcDec = function ($v): ?string {
+    if ($v === null || $v === '') return null;
+    $d = clean_decimal($v);
+    return ($d !== null && bccomp($d, '0', 2) > 0) ? $d : null;
+};
+$sweepAmt = $svcDec($body['sweep_amount'] ?? null);
+if ($sweepAmt !== null) {
+    $closeoutLines[] = ['item_type' => 'sweep', 'description' => 'Sweep out',
+        'quantity' => '1.0000', 'unit_price' => $sweepAmt, 'amount' => $sweepAmt, 'taxable' => 1];
+}
+$washAmt = $svcDec($body['wash_amount'] ?? null);
+if ($washAmt !== null) {
+    $closeoutLines[] = ['item_type' => 'wash', 'description' => 'Wash out',
+        'quantity' => '1.0000', 'unit_price' => $washAmt, 'amount' => $washAmt, 'taxable' => 1];
+}
+$fuelGallons = $svcDec($body['fuel_gallons'] ?? null);
+if ($fuelGallons !== null) {
+    // Per-gallon rate is server-side authoritative (global setting default $13.00).
+    $fuelRate   = (string) settings_get('lease.fuel_rate_per_gallon', '13.00');
+    $fuelAmount = bcround(bcmul($fuelGallons, $fuelRate, 6), 2);
+    if (bccomp($fuelAmount, '0', 2) > 0) {
+        $closeoutLines[] = ['item_type' => 'fuel',
+            'description' => 'Fuel charge: ' . rtrim(rtrim($fuelGallons, '0'), '.') . ' gal × $' . $fuelRate . '/gal',
+            'quantity' => $fuelGallons, 'unit' => 'gallons', 'unit_price' => $fuelRate,
+            'amount' => $fuelAmount, 'taxable' => 1];
+    }
+}
+
 // S-CLOSE-OVERSHOOT: shared reconciliation helpers (also used by bulk_close.php).
 require_once __DIR__ . "/_close_reconciliation.php";
 
@@ -393,7 +426,7 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $reconMode, $prechargeRefund, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $closeoutLines, $reconMode, $prechargeRefund, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
@@ -638,6 +671,13 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         }
     }
 
+    // S-LEASE-SERVICE-CHARGES: closeout charges (sweep/wash/fuel) ride on the
+    // final invoice alongside any mileage overage. The post-pass below guarantees
+    // they still bill when no rental final invoice is generated.
+    if (!empty($closeoutLines)) {
+        $extraLines = array_merge($extraLines, $closeoutLines);
+    }
+
     // SAMSARA-3: derive the period-start odometer for the final invoice.
     // Priority: latest prior invoice's period-end odometer → lease start.
     $odoPeriodStart = null;
@@ -864,6 +904,34 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 $finalInvoiceId = $invoiceResult['invoice_id'];
             }
         }
+    }
+
+    // S-LEASE-SERVICE-CHARGES: guarantee closeout charges always bill. The
+    // branches above attach $extraLines to the rental final invoice, but some
+    // close paths create none (close within an already-billed period; or an
+    // advance close with no mileage overage). When that happens, emit a
+    // standalone 'adjustment' invoice (base-rental-free, extra_lines only) so
+    // operator-entered sweep/wash/fuel — and any mileage overage — are never
+    // silently dropped. 'adjustment' invoices skip drawdown, so this runs
+    // safely before the precharge-refund block below.
+    if ($finalInvoiceId === null && !empty($extraLines)) {
+        $adjInv = $generator->createFromLease([
+            'lease_id'          => $id,
+            'period_start'      => $actualReturnDate,
+            'period_end'        => $actualReturnDate,
+            'billing_type'      => 'adjustment',
+            'invoice_type'      => 'final',
+            'notes'             => $closeNotes,
+            'created_by'        => current_user_id(),
+            'auto_generated'    => 1,
+            'generation_source' => 'lease_close',
+            'extra_lines'       => $extraLines,
+        ]);
+        $finalInvoiceId = $adjInv['invoice_id'] ?? null;
+        $advanceActions[] = [
+            'action' => 'closeout_adjustment_invoice',
+            'reason' => 'closeout/service charges billed on a standalone adjustment invoice (no rental final invoice was generated).',
+        ];
     }
 
     // S-MILEAGE-3 D-G: close_adjustment processing block + D-F

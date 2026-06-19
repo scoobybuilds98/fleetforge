@@ -185,11 +185,15 @@ class InvoiceGenerator
                 ? (int)($lease['minimum_billing_days'] ?? 0)
                 : (int)(db_row('SELECT minimum_billing_days FROM leases WHERE id = ?', [$leaseId])['minimum_billing_days'] ?? 0);
 
-            if ($billingType === 'mileage_only') {
-                // Both engines skip base_rental for mileage_only invoices.
+            if ($billingType === 'mileage_only' || $billingType === 'adjustment') {
+                // Both engines skip base_rental for mileage_only / adjustment
+                // invoices — they carry only extra_lines (e.g. S-LEASE-SERVICE-
+                // CHARGES closeout sweep/wash/fuel when no rental final invoice
+                // is generated). 'adjustment' has no createFromLease callers
+                // other than that closeout post-pass.
                 $rentalAmount = '0.00';
                 $rateMethod   = 'none';
-                $explanation  = ['Mileage-only adjustment — no base rental.'];
+                $explanation  = ['Adjustment / mileage-only — no base rental.'];
             } elseif ($engineVersion === 'holistic') {
                 // ── Holistic engine path ────────────────────────────
                 // D20: lock the lease row for the duration of the
@@ -982,6 +986,43 @@ class InvoiceGenerator
                         'is_credit'   => (int)($line['is_credit'] ?? 0),
                         'taxable'     => (int)($line['taxable'] ?? 1),
                     ];
+                }
+            }
+
+            // --- Step 4b: Cartage — one-time delivery charge (S-LEASE-SERVICE-CHARGES) ---
+            // Entered at lease creation; bills exactly ONCE, on the first invoice.
+            // FOR UPDATE re-read of cartage_billed_at (D20 serialization point) so
+            // an advance batch / concurrent first invoice can't double-bill it.
+            // Excluded from mileage_only/adjustment/credit_note invoices.
+            if (bccomp((string) ($lease['cartage_amount'] ?? '0'), '0', 2) > 0
+                && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
+            ) {
+                $cartLocked = db_row(
+                    "SELECT cartage_amount, cartage_billed_at FROM leases
+                       WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                    [$leaseId]
+                );
+                if ($cartLocked
+                    && $cartLocked['cartage_billed_at'] === null
+                    && bccomp((string) ($cartLocked['cartage_amount'] ?? '0'), '0', 2) > 0
+                ) {
+                    $cartAmt = (string) $cartLocked['cartage_amount'];
+                    $lineItems[] = [
+                        'sort_order'  => $sortOrder++,
+                        'item_type'   => 'cartage',
+                        'description' => 'Cartage (delivery)',
+                        'quantity'    => '1.0000',
+                        'unit'        => null,
+                        'unit_price'  => $cartAmt,
+                        'amount'      => $cartAmt,
+                        'is_credit'   => 0,
+                        'taxable'     => 1,
+                    ];
+                    db_execute(
+                        "UPDATE leases SET cartage_billed_at = NOW(), updated_at = NOW(), updated_by = ?
+                           WHERE id = ?",
+                        [$params['created_by'] ?? null, $leaseId]
+                    );
                 }
             }
 

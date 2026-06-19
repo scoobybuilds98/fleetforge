@@ -675,6 +675,23 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-error" x-show="errors.engine_hours_at_start" x-text="errors.engine_hours_at_start"></div>
                 </div>
 
+                <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
+                     Manual amount — entered only when we deliver the unit; bills
+                     once on the first invoice. No default. -->
+                <div class="form-group" style="max-width:320px;margin-top:1rem;">
+                    <label class="form-label" for="cartage_amount">Cartage (delivery charge)</label>
+                    <div class="input-group">
+                        <span class="input-group-prefix">$</span>
+                        <input type="number" id="cartage_amount" class="form-control font-mono"
+                               x-model="form.cartage_amount" step="0.01" min="0"
+                               placeholder="0.00">
+                    </div>
+                    <div class="form-hint" style="margin-top:0.5rem;">
+                        One-time delivery charge — leave blank if the customer picks the unit up. Bills on the first invoice.
+                    </div>
+                    <div class="form-error" x-show="errors.cartage_amount" x-text="errors.cartage_amount"></div>
+                </div>
+
             </div>
         </div>
 
@@ -1094,6 +1111,8 @@ function FF_CreateLease() {
             hourly_rate:        '',
             // S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours.
             engine_hours_at_start: '',
+            // S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
+            cartage_amount:     '',
             gst_exempt:         false,
             pst_exempt:         false,
             notes:              '',
