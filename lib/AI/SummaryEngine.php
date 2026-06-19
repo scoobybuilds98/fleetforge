@@ -415,6 +415,23 @@ class SummaryEngine
              WHERE pa.payment_id = ? ORDER BY i.invoice_number",
             [$paymentId]
         );
+
+        // WHY: serve-time money gate — parity with gatherVendorContext(). Without
+        // it, an ai:view-only user (no payments:view) gets raw payment amount,
+        // method, customer AR, and per-invoice balances embedded in the AI context.
+        if (!\can_view_financials()) {
+            foreach (['amount', 'amount_in_cad', 'exchange_rate_to_cad',
+                      'currency_markup_pct', 'overpayment_amount', 'refund_amount',
+                      'payment_method', 'check_number', 'card_last_four',
+                      'customer_outstanding'] as $k) {
+                unset($pay[$k]);
+            }
+            foreach ($allocations as &$a) {
+                unset($a['allocated_amount'], $a['total_amount'], $a['balance_due']);
+            }
+            unset($a);
+        }
+
         return ['payment' => $pay, 'allocations' => $allocations];
     }
 

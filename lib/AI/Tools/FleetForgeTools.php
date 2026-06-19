@@ -47,9 +47,9 @@ class FleetForgeTools
     {
         return match ($toolName) {
             // Customer tools
-            'search_customers'         => self::searchCustomers($input),
-            'get_customer_details'     => self::getCustomerDetails($input),
-            'get_customer_leases'      => self::getCustomerLeases($input),
+            'search_customers'         => self::searchCustomers($input, $userId),
+            'get_customer_details'     => self::getCustomerDetails($input, $userId),
+            'get_customer_leases'      => self::getCustomerLeases($input, $userId),
             'get_customer_invoices'    => self::getCustomerInvoices($input, $userId),
 
             // ── Credit Application + Service Request tools (S-AI-READ-GAPS) ──
@@ -178,7 +178,7 @@ class FleetForgeTools
     // Searches customers by name, email, or city. Optionally
     // filters by status. Returns up to MAX_ROWS matches.
     // ────────────────────────────────────────────────────────────
-    private static function searchCustomers(array $input): array
+    private static function searchCustomers(array $input, ?int $userId = null): array
     {
         $query  = trim($input['query'] ?? '');
         $status = trim($input['status'] ?? '');
@@ -203,7 +203,7 @@ class FleetForgeTools
 
         $whereSql = implode(' AND ', $where);
 
-        return db_select(
+        $rows = db_select(
             "SELECT c.id, c.company_name, c.contact_name, c.email, c.phone,
                     c.city, c.province, c.status, c.risk_score,
                     c.active_lease_count, c.outstanding_balance
@@ -213,6 +213,10 @@ class FleetForgeTools
              LIMIT {$limit}",
             $params
         );
+
+        // WHY: dispatchers (ai:view without payments:view) may see customer
+        // identity/status but NOT balances — parity with get_customer_invoices.
+        return self::stripFinancials($rows, $userId);
     }
 
     // ────────────────────────────────────────────────────────────
@@ -221,7 +225,7 @@ class FleetForgeTools
     // Full profile for a single customer including contact info,
     // status, risk score, credit limit, and lease count.
     // ────────────────────────────────────────────────────────────
-    private static function getCustomerDetails(array $input): array|string
+    private static function getCustomerDetails(array $input, ?int $userId = null): array|string
     {
         $customerId = (int) ($input['customer_id'] ?? 0);
         if ($customerId <= 0) return 'Error: customer_id is required.';
@@ -240,7 +244,19 @@ class FleetForgeTools
             [$customerId]
         );
 
-        return $row ?? "No customer found with ID {$customerId}.";
+        if ($row === null) return "No customer found with ID {$customerId}.";
+
+        // WHY: strip dollar fields for users who can't view payments — mirrors
+        // getLeaseDetails. Without this, ai:view-only dispatchers read balances/
+        // credit limit/revenue through the AI assistant (a payments:view boundary).
+        if (!self::canViewFinancials($userId)) {
+            foreach (['credit_limit', 'total_revenue',
+                      'outstanding_balance', 'account_credit_balance'] as $k) {
+                unset($row[$k]);
+            }
+        }
+
+        return $row;
     }
 
     // ────────────────────────────────────────────────────────────
@@ -248,7 +264,7 @@ class FleetForgeTools
     //
     // Lists leases for a customer with optional status filter.
     // ────────────────────────────────────────────────────────────
-    private static function getCustomerLeases(array $input): array|string
+    private static function getCustomerLeases(array $input, ?int $userId = null): array|string
     {
         $customerId = (int) ($input['customer_id'] ?? 0);
         if ($customerId <= 0) return 'Error: customer_id is required.';
@@ -266,7 +282,7 @@ class FleetForgeTools
 
         $whereSql = implode(' AND ', $where);
 
-        return db_select(
+        $rows = db_select(
             "SELECT l.id, l.contract_number, l.unit_number_snapshot AS unit_number,
                     l.start_date, l.end_date, l.status,
                     l.monthly_rate, l.daily_rate, l.weekly_rate, l.currency,
@@ -277,6 +293,10 @@ class FleetForgeTools
              LIMIT {$limit}",
             $params
         );
+
+        // WHY: strip lease rates / balance for users without payments:view —
+        // parity with get_active_leases / get_lease_details.
+        return self::stripFinancials($rows, $userId);
     }
 
     // ────────────────────────────────────────────────────────────
@@ -2827,6 +2847,13 @@ class FleetForgeTools
             'outstanding_balance', 'total_invoiced', 'total_paid',
             'credit_limit', 'total_revenue', 'account_credit_balance',
             'subtotal', 'tax_total', 'discount_amount',
+            // Damage-claim money (list handlers rely on stripFinancials; detail
+            // variants hand-unset these — keep the two paths in sync).
+            'estimated_repair_cost', 'actual_repair_cost',
+            'customer_liable_amount', 'insurance_claim_amount',
+            // Credit-application money (getCreditApplications' comment already
+            // claims this is hidden — it wasn't until now).
+            'approved_credit_limit',
         ];
 
         return array_map(function (array $row) use ($financialKeys): array {

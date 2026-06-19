@@ -1160,7 +1160,17 @@ function FF_AiChat() {
                 .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
                 .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
                 .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+                // WHY: AI/document output is untrusted (prompt-injection). The
+                // step-1 escape only handles & < > — not " — so an unescaped URL
+                // like [x](" onmouseover="alert(1)) would break out of href=""
+                // into a live event handler, and javascript:/data: URIs would run
+                // on click. Allow only safe schemes and attribute-encode quotes;
+                // anything else degrades to the (already-escaped) link text.
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
+                    if (!/^\s*(https?:\/\/|mailto:|\/|#)/i.test(url)) return label;
+                    const href = url.trim().replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                    return '<a href="' + href + '" target="_blank" rel="noopener">' + label + '</a>';
+                });
 
             // 9. Paragraphs — split on blank lines, wrap chunks that aren't already block-level
             const blockTagRe = /^<(h[1-6]|ul|ol|table|pre|blockquote|hr|\u0000)/i;

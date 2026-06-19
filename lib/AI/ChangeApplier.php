@@ -58,11 +58,15 @@ class ChangeApplier
         $table       = $entry['table'];
         $auditModule = $entry['audit_module'];
         $softSql     = $entry['soft_delete'] ? ' AND deleted_at IS NULL' : '';
+        // WHY: only 4 of the 9 registry tables carry an updated_by column. Writing
+        // it to the others (vendors/yards/work orders/damage claims/rate cards)
+        // throws 1054 — apply-change.php only catches 23000, so it 500s.
+        $hasUpdatedBy = !empty($entry['has_updated_by']);
         $targets     = $payload['targets'] ?? [];
 
         $appliedDiff = [];
 
-        db_transaction(function () use ($targets, $userId, $userName, $ip, $table, $auditModule, $entityType, $softSql, &$appliedDiff): void {
+        db_transaction(function () use ($targets, $userId, $userName, $ip, $table, $auditModule, $entityType, $softSql, $hasUpdatedBy, &$appliedDiff): void {
             foreach ($targets as $t) {
                 $rowId  = (int) ($t['id'] ?? $t['unit_id'] ?? 0); // unit_id for back-compat with S-AI-WRITE-1 rows
                 $column = (string) ($t['column'] ?? '');
@@ -80,10 +84,11 @@ class ChangeApplier
                     continue;
                 }
 
-                db_update($table, [
-                    $column      => $newVal,
-                    'updated_by' => $userId,
-                ], 'id = ?', [$rowId]);
+                $updateData = [$column => $newVal];
+                if ($hasUpdatedBy) {
+                    $updateData['updated_by'] = $userId;
+                }
+                db_update($table, $updateData, 'id = ?', [$rowId]);
 
                 db_insert('audit_log', [
                     'user_id'      => $userId,
@@ -134,17 +139,21 @@ class ChangeApplier
         // Fall back to the table recorded in the diff (older S-AI-WRITE-1 rows
         // used equipment_units and an id/unit_id key).
         $auditModule = $entry['audit_module'] ?? 'equipment';
+        // Honor the per-entity updated_by flag (see apply()). Legacy rows with no
+        // registered entity targeted equipment_units, which has the column.
+        $hasUpdatedBy = $entry !== null ? !empty($entry['has_updated_by']) : true;
 
-        db_transaction(function () use ($diff, $userId, $userName, $ip, $entityType, $auditModule): void {
+        db_transaction(function () use ($diff, $userId, $userName, $ip, $entityType, $auditModule, $hasUpdatedBy): void {
             foreach ($diff as $d) {
                 $table = $d['table'] ?? 'equipment_units';
                 $rowId = (int) ($d['id'] ?? $d['unit_id'] ?? 0);
                 $label = (string) ($d['label'] ?? $d['unit_number'] ?? $rowId);
 
-                db_update($table, [
-                    $d['column'] => $d['before'],
-                    'updated_by' => $userId,
-                ], 'id = ?', [$rowId]);
+                $updateData = [$d['column'] => $d['before']];
+                if ($hasUpdatedBy) {
+                    $updateData['updated_by'] = $userId;
+                }
+                db_update($table, $updateData, 'id = ?', [$rowId]);
 
                 db_insert('audit_log', [
                     'user_id'      => $userId,

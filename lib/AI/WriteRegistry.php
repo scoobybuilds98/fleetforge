@@ -47,6 +47,11 @@ class WriteRegistry
      *   permission         can(<slug>,'edit') gate
      *   soft_delete        whether the table has deleted_at
      *   audit_module       audit_log.module value
+     *   has_updated_by     true only when the table carries an updated_by column
+     *                      (equipment_units/customers/reservations/leases). The
+     *                      applier MUST omit updated_by for the rest or the write
+     *                      throws 1054 (vendors/yards/work orders/damage claims/
+     *                      rate cards have no such column).
      *   resolve_column     column matched against the human identifier
      *   label_column       column shown back to the user
      *   fields[]           editable fields → validator spec
@@ -59,7 +64,7 @@ class WriteRegistry
             'equipment_unit' => [
                 'label' => 'equipment unit', 'table' => 'equipment_units',
                 'permission' => 'equipment', 'soft_delete' => true,
-                'audit_module' => 'equipment',
+                'audit_module' => 'equipment', 'has_updated_by' => true,
                 'resolve_column' => 'unit_number', 'label_column' => 'unit_number',
                 'fields' => [
                     'category'       => ['type' => 'template_category', 'column' => 'template_id', 'label' => 'Category'],
@@ -78,7 +83,7 @@ class WriteRegistry
             'customer' => [
                 'label' => 'customer', 'table' => 'customers',
                 'permission' => 'customers', 'soft_delete' => true,
-                'audit_module' => 'customers',
+                'audit_module' => 'customers', 'has_updated_by' => true,
                 'resolve_column' => 'company_name', 'label_column' => 'company_name',
                 'fields' => [
                     'contact_name'         => ['type' => 'string', 'max' => 255, 'label' => 'Contact name'],
@@ -148,7 +153,7 @@ class WriteRegistry
             'reservation' => [
                 'label' => 'reservation', 'table' => 'reservations',
                 'permission' => 'reservations', 'soft_delete' => true,
-                'audit_module' => 'reservations',
+                'audit_module' => 'reservations', 'has_updated_by' => true,
                 'resolve_column' => 'company_name', 'label_column' => 'company_name',
                 'fields' => [
                     'contact_name'  => ['type' => 'string', 'max' => 255, 'label' => 'Contact name'],
@@ -168,7 +173,7 @@ class WriteRegistry
             'lease' => [
                 'label' => 'lease', 'table' => 'leases',
                 'permission' => 'leases', 'soft_delete' => true,
-                'audit_module' => 'leases',
+                'audit_module' => 'leases', 'has_updated_by' => true,
                 'resolve_column' => 'contract_number', 'label_column' => 'contract_number',
                 'fields' => [
                     'po_number'      => ['type' => 'string', 'max' => 100,  'label' => 'PO number'],
