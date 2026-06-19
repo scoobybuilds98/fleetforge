@@ -601,6 +601,10 @@ $createLease = function () use (
     $kmToMilesFinal, $milesToKmFinal,
     $prechargeEnabled, $prechargeAmount,
     $minimumBillingDays,
+    // S-LEASE-MILEAGE-MODE / S-LEASE-HOURLY-BILLING / S-LEASE-SERVICE-CHARGES:
+    // these are referenced in the db_insert below and MUST be captured, or they
+    // resolve to undefined → NULL. mileage_tracking_mode is NOT NULL → 1048 abort.
+    $hourlyCost, $mileageTrackingMode, $engineHoursAtStart, $cartageAmount,
     &$leaseId
 ) {
     // D20: FOR UPDATE — lock the unit row before status check

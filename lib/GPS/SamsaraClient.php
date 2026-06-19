@@ -1888,7 +1888,16 @@ class SamsaraClient
                 $level,
                 $message
             );
-            file_put_contents($logPath, $line, FILE_APPEND | LOCK_EX);
+            // file_put_contents emits a PHP *warning* (not a Throwable) when the
+            // path is not writable, so the catch below never fires and the warning
+            // escapes to Sentry's error listener as an ErrorException. gps.log is
+            // best-effort debug output — guard on writability and silence the call
+            // so a non-writable logs/ dir can never surface as a Sentry error.
+            $target = file_exists($logPath) ? $logPath : dirname($logPath);
+            if (!is_writable($target)) {
+                return;
+            }
+            @file_put_contents($logPath, $line, FILE_APPEND | LOCK_EX);
         } catch (\Throwable) {
             // Logging failure must never crash the application
         }
