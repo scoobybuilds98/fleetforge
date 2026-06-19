@@ -120,34 +120,25 @@ db_transaction(function () use ($id, &$result) {
     // no mileage tracking at all. A non-samsara lease therefore skips the live
     // Samsara fetch entirely and leaves the odometer fields as the operator set
     // them (or NULL).
+    // S-LEASE-MILEAGE-MODE: the toggle is the SINGLE gate for Samsara. The live
+    // GPS odometer is pulled ONLY when mileage_tracking_mode='samsara' — never on
+    // a date heuristic. Back-dating a lease (7 days or 7 years) does NOT trigger
+    // an auto-capture; if the operator is entering a historical lease they set
+    // the toggle to Manual and key in the true starting odometer themselves. A
+    // wrong start that still slips through (e.g. samsara mode on a back-dated
+    // lease) is caught at close by the end>=start validation, not here.
     $mileageMode = $lease['mileage_tracking_mode'] ?? 'off';
 
-    // S-ODO-BACKDATE-GUARD: the live GPS odometer is only a valid STARTING reading
-    // when the lease is activated at/near its start_date. For a back-dated /
-    // historical lease (activated well after start_date) the current reading is
-    // "now" — potentially thousands of km past the true start — so recording it as
-    // odometer_start_km yields an impossible record where the start sits ABOVE the
-    // real later readings (cf. MTTS82: GPS start 17,112 captured Jun-2026 vs a
-    // Jan-2026 return reading of 12,198). When the lease is materially back-dated
-    // we skip the auto-capture and leave the start NULL, so the operator enters
-    // the true historical starting odometer manually.
-    $backdateGraceDays = 7;
-    $leaseStartTs = strtotime((string) ($lease['start_date'] ?? ''));
-    $isBackdated  = $leaseStartTs !== false && (time() - $leaseStartTs) > ($backdateGraceDays * 86400);
-
-    if ($mileageMode === 'samsara' && !$isBackdated) {
+    $odoCapture = [
+        'success' => false,
+        'is_stale' => false,
+        'error'   => $mileageMode === 'manual'
+            ? 'manual mileage mode — operator enters odometer'
+            : 'mileage tracking off for this lease',
+    ];
+    if ($mileageMode === 'samsara') {
         $odoCapture = (new \FleetForge\GPS\OdometerService())
             ->captureCurrentReading((int) $lease['equipment_unit_id']);
-    } else {
-        $odoCapture = [
-            'success'  => false,
-            'is_stale' => false,
-            'error'    => $mileageMode !== 'samsara'
-                ? ($mileageMode === 'manual'
-                    ? 'manual mileage mode — operator enters odometer'
-                    : 'mileage tracking off for this lease')
-                : 'back-dated activation (lease started ' . $lease['start_date'] . ') — current GPS reading is not the start-of-lease odometer; enter it manually',
-        ];
     }
 
     $startKm        = null;
