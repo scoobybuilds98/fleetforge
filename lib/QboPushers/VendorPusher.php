@@ -279,14 +279,17 @@ class VendorPusher
         } catch (QuickBooksException $e) {
             // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
             // in map row. HTTP-level sync_log is written by QuickBooksClient.
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // QuickBooksException exposes httpStatus / errorCode as public
+            // readonly PROPERTIES, not methods — method_exists() is ALWAYS false
+            // for them and silently dropped the real HTTP status + QBO fault code.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffVendorId, $e->getMessage(), $httpCode);
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
                 'outcome'    => 'failed',
                 'error'      => $e->getMessage(),
-                'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
+                'error_code' => $e->errorCode ?? null,
             ] + self::RESULT_BASE;
         }
 

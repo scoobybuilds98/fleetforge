@@ -101,6 +101,13 @@ $riskBadgeClass = match($customer['risk_score']) {
     default  => 'badge-neutral',
 };
 
+// Serve-time financial redaction — mirrors api/v1/customers/show.php:106-107.
+// Roles without payments:view (e.g. dispatchers) must not see dollar figures.
+// Gates the SAME key set the API redacts: outstanding_balance, total_revenue,
+// account_credit_balance, credit_limit. Without this the directly-reachable
+// profile page leaked AR/credit data the API layer already hid.
+$canSeeMoney = can_view_financials();
+
 $pageTitle      = $customer['company_name'];
 $helpModuleSlug = 'customers';
 require_once FF_ROOT . '/includes/header.php';
@@ -237,6 +244,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <div class="stat-delta text-secondary">of <?= e($customer['lease_count']) ?> total</div>
     </div>
 
+    <?php if ($canSeeMoney): ?>
     <div class="stat-card" style="cursor:pointer"
          :class="{ 'ring-active': activeTab === 'invoices' }"
          @click="activeTab = 'invoices'"
@@ -263,6 +271,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <div class="stat-label">Account Credit</div>
         <div class="stat-value currency"><?= e(format_currency($customer['account_credit_balance'])) ?></div>
     </a>
+    <?php endif; ?>
 
     <?php
     $_aiCachedCustomer = db_row(
@@ -526,8 +535,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         <dd style="margin:0;"><?= e(str_replace('_', ' ', $customer['billing_cycle'])) ?></dd>
                         <dt class="text-secondary text-sm">Payment Terms</dt>
                         <dd style="margin:0;"><?= e($customer['payment_terms'] ?? '—') ?></dd>
+                        <?php if ($canSeeMoney): ?>
                         <dt class="text-secondary text-sm">Credit Limit</dt>
                         <dd style="margin:0;" class="currency"><?= e(format_currency($customer['credit_limit'])) ?></dd>
+                        <?php endif; ?>
                         <dt class="text-secondary text-sm">Discount</dt>
                         <dd style="margin:0;">
                             <?php

@@ -126,7 +126,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <?php if ($customerRow['email_disabled_at']): ?>
                                 on <?= e(date('Y-m-d', strtotime($customerRow['email_disabled_at']))) ?>
                             <?php endif; ?>
-                            <?php if (current_user_can('customers', 'edit') && (is_manager() || is_super_admin())): ?>
+                            <?php if (can('customers', 'edit') && (is_super_admin() || (current_user()['role_slug'] ?? '') === 'manager')): ?>
                             <button type="button" class="btn btn-sm btn-warning ms-2"
                                     @click="reenableEmail()"
                                     x-bind:disabled="reenabling">

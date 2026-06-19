@@ -260,14 +260,18 @@ class CustomerPusher
             // in map row (push_status='failed' + push_error). HTTP-level
             // sync_log is written by QuickBooksClient itself on the failed
             // request, so no separate sync_log write needed here.
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // QuickBooksException exposes httpStatus / errorCode as public
+            // readonly PROPERTIES, not methods — method_exists() is ALWAYS false
+            // for them and silently dropped the real HTTP status + QBO fault code
+            // (e.g. 6240 duplicate) that drive retry classification + Push State.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffCustomerId, $e->getMessage(), $httpCode);
             return [
                 'success'    => false,
                 'status'     => 'qbo_error',
                 'outcome'    => 'failed',
                 'error'      => $e->getMessage(),
-                'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
+                'error_code' => $e->errorCode ?? null,
             ] + self::RESULT_BASE;
         }
 

@@ -86,91 +86,120 @@ try {
     // decisions to skip ones for FF customers under manual lock.
     $decisions = CustomerMatcher::matchAll($qboCustomers);
 
-    $matchedCount = 0;
-    $ffOnlyCount  = 0;
-    $qboOnlyCount = 0;
-    $userId       = current_user_id();
-    $now          = date('Y-m-d H:i:s');
+    $userId = current_user_id();
+    $now    = date('Y-m-d H:i:s');
 
-    foreach ($decisions as $d) {
-        // Skip auto-match for FF customers operator already locked.
-        if ($d['ff_customer_id'] !== null && isset($manualLockedFfIds[(int) $d['ff_customer_id']])) {
-            continue;
-        }
+    // Apply ALL mapping decisions atomically. Previously the loop ran in
+    // autocommit, so a uq_ff_customer collision midway (when an FF customer was
+    // already mapped to a DIFFERENT QBO id) committed the prior decisions and
+    // surfaced only as a blanket 500 — leaving partial, non-atomic rewrites.
+    // Wrapping in a transaction makes the run all-or-nothing; the per-decision
+    // detach below removes the collision at its source.
+    $counts = db_transaction(function () use ($decisions, $manualLockedFfIds, $userId, $now) {
+        $matchedCount = 0;
+        $ffOnlyCount  = 0;
+        $qboOnlyCount = 0;
 
-        if ($d['mapping_status'] === 'mapped') {
-            // The qbo_only row for this qbo_customer_id likely already
-            // exists (from pull.php). UPDATE it to link the FF side
-            // + set confidence. The UNIQUE(ff_customer_id) constraint
-            // guarantees one FF row per mapping.
-            //
-            // Edge: if an old ff_only row also exists for this FF
-            // customer, we must DELETE it first to avoid a UNIQUE
-            // collision when we set ff_customer_id on the qbo_only row.
-            db_execute(
-                "DELETE FROM acc_qbo_customer_map
-                  WHERE ff_customer_id = ?
-                    AND qbo_customer_id IS NULL",
-                [(int) $d['ff_customer_id']]
-            );
-
-            $rowsUpdated = db_execute(
-                "UPDATE acc_qbo_customer_map SET
-                    ff_customer_id   = ?,
-                    mapping_status   = 'mapped',
-                    match_confidence = ?,
-                    last_synced_at   = ?
-                  WHERE qbo_customer_id = ?",
-                [
-                    (int) $d['ff_customer_id'],
-                    (string) $d['match_confidence'],
-                    $now,
-                    (string) $d['qbo_customer_id'],
-                ]
-            );
-
-            if ($rowsUpdated > 0) {
-                $matchedCount++;
+        foreach ($decisions as $d) {
+            // Skip auto-match for FF customers operator already locked.
+            if ($d['ff_customer_id'] !== null && isset($manualLockedFfIds[(int) $d['ff_customer_id']])) {
+                continue;
             }
-            continue;
+
+            if ($d['mapping_status'] === 'mapped') {
+                $ffId  = (int) $d['ff_customer_id'];
+                $qboId = (string) $d['qbo_customer_id'];
+
+                // Detach this FF customer from ANY row it is currently linked to
+                // except the target qbo row, so setting ff_customer_id on the
+                // target cannot collide on uq_ff_customer. Manual-locked FF ids
+                // never reach here (skipped above), so detaching is always safe.
+                //  - stale ff_only row (qbo_customer_id IS NULL): remove it.
+                db_execute(
+                    "DELETE FROM acc_qbo_customer_map
+                      WHERE ff_customer_id = ?
+                        AND qbo_customer_id IS NULL",
+                    [$ffId]
+                );
+                //  - stale mapped row pointing at a DIFFERENT qbo id: demote it
+                //    back to qbo_only and free the FF link.
+                db_execute(
+                    "UPDATE acc_qbo_customer_map
+                        SET ff_customer_id   = NULL,
+                            mapping_status   = 'qbo_only',
+                            match_confidence = NULL
+                      WHERE ff_customer_id = ?
+                        AND qbo_customer_id IS NOT NULL
+                        AND qbo_customer_id <> ?",
+                    [$ffId, $qboId]
+                );
+
+                $rowsUpdated = db_execute(
+                    "UPDATE acc_qbo_customer_map SET
+                        ff_customer_id   = ?,
+                        mapping_status   = 'mapped',
+                        match_confidence = ?,
+                        last_synced_at   = ?
+                      WHERE qbo_customer_id = ?",
+                    [$ffId, (string) $d['match_confidence'], $now, $qboId]
+                );
+
+                if ($rowsUpdated > 0) {
+                    $matchedCount++;
+                }
+                continue;
+            }
+
+            if ($d['mapping_status'] === 'ff_only') {
+                // Ensure an ff_only row exists. Use INSERT … ON DUPLICATE
+                // KEY UPDATE to handle the case where the row already
+                // exists (e.g., set by a prior auto_match run).
+                db_execute(
+                    "INSERT INTO acc_qbo_customer_map
+                        (ff_customer_id, mapping_status, created_by_user_id)
+                     VALUES (?, 'ff_only', ?)
+                     ON DUPLICATE KEY UPDATE
+                        mapping_status   = IF(match_confidence='manual', mapping_status, 'ff_only'),
+                        match_confidence = IF(match_confidence='manual', match_confidence, NULL)",
+                    [(int) $d['ff_customer_id'], $userId]
+                );
+                $ffOnlyCount++;
+                continue;
+            }
+
+            if ($d['mapping_status'] === 'qbo_only') {
+                // pull.php already inserted the qbo_only row. Confirm by
+                // ensuring no FF link snuck in via a partial earlier match.
+                // (No-op in the common case.)
+                $qboOnlyCount++;
+            }
         }
 
-        if ($d['mapping_status'] === 'ff_only') {
-            // Ensure an ff_only row exists. Use INSERT … ON DUPLICATE
-            // KEY UPDATE to handle the case where the row already
-            // exists (e.g., set by a prior auto_match run).
-            db_execute(
-                "INSERT INTO acc_qbo_customer_map
-                    (ff_customer_id, mapping_status, created_by_user_id)
-                 VALUES (?, 'ff_only', ?)
-                 ON DUPLICATE KEY UPDATE
-                    mapping_status   = IF(match_confidence='manual', mapping_status, 'ff_only'),
-                    match_confidence = IF(match_confidence='manual', match_confidence, NULL)",
-                [(int) $d['ff_customer_id'], $userId]
-            );
-            $ffOnlyCount++;
-            continue;
-        }
-
-        if ($d['mapping_status'] === 'qbo_only') {
-            // pull.php already inserted the qbo_only row. Confirm by
-            // ensuring no FF link snuck in via a partial earlier match.
-            // (No-op in the common case.)
-            $qboOnlyCount++;
-        }
-    }
+        return [
+            'matched'  => $matchedCount,
+            'ff_only'  => $ffOnlyCount,
+            'qbo_only' => $qboOnlyCount,
+        ];
+    });
 
     json_success([
-        'matched'          => $matchedCount,
-        'ff_only'          => $ffOnlyCount,
-        'qbo_only'         => $qboOnlyCount,
+        'matched'          => $counts['matched'],
+        'ff_only'          => $counts['ff_only'],
+        'qbo_only'         => $counts['qbo_only'],
         'manual_preserved' => $manualPreserved,
     ]);
 
+} catch (\PDOException $e) {
+    // A residual uq_ff_customer / unique collision (defence-in-depth — the
+    // detach above should prevent it) surfaces as a clear conflict, not a 500.
+    if ($e->getCode() === '23000') {
+        json_error(
+            'CONFLICT',
+            'Auto-match hit a mapping conflict (a customer is already linked to a different QuickBooks record). Resolve it manually and retry.',
+            409
+        );
+    }
+    json_error('INTERNAL_ERROR', 'Auto-match failed: ' . $e->getMessage(), 500);
 } catch (\Throwable $e) {
-    json_error(
-        'INTERNAL_ERROR',
-        'Auto-match failed: ' . $e->getMessage(),
-        500
-    );
+    json_error('INTERNAL_ERROR', 'Auto-match failed: ' . $e->getMessage(), 500);
 }

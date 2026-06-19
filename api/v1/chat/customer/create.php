@@ -106,14 +106,24 @@ $channel = db_row(
     [$userId, $channelId]
 );
 
-db_insert('audit_log', [
-    'user_id'     => $userId,
-    'action'      => 'created',
-    'module'      => 'chat',
-    'entity_type' => 'chat_channel',
-    'entity_id'   => $channelId,
-    'description' => 'Started customer conversation: ' . $subject . ' with ' . $customer['company_name'],
-    'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-]);
+// Audit-log the new conversation. action='create' is the valid enum value
+// ('created' is NOT in audit_log.action) and the free-text column is `notes`,
+// NOT `description` (no such column). Wrapped in try/catch so an audit-log
+// failure can never 500 a request whose primary work (the channel, members and
+// messages) already committed in the transaction above.
+try {
+    db_insert('audit_log', [
+        'user_id'     => $userId,
+        'user_name'   => $user['name'] ?? 'system',
+        'action'      => 'create',
+        'module'      => 'chat',
+        'entity_type' => 'chat_channel',
+        'entity_id'   => $channelId,
+        'notes'       => 'Started customer conversation: ' . $subject . ' with ' . $customer['company_name'],
+        'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+    ]);
+} catch (\Throwable $e) {
+    error_log('chat/customer/create.php audit_log insert failed: ' . $e->getMessage());
+}
 
 json_success($channel, 201);

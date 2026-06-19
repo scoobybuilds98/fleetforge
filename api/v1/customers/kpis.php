@@ -65,8 +65,17 @@ $creditHold = db_count(
 // WHY join customers: ensures we don't double-count balances belonging to
 // soft-deleted customers (which can still have overdue invoice rows).
 // WHY bcround: monetary totals must not go through float math per D16.
+// WHY CASE: invoices may be billed in USD; CAD-canonical reporting policy
+// requires converting USD balances via exchange_rate_to_cad before summing,
+// matching dashboard/kpis.php and reports/revenue.php. Summing raw balance_due
+// would add USD 1:1 to CAD and understate overdue AR for USD-billed customers.
 $overdueRow = db_row(
-    "SELECT COALESCE(SUM(i.balance_due), 0) AS total
+    "SELECT COALESCE(SUM(
+                CASE WHEN i.currency = 'USD'
+                     THEN i.balance_due * COALESCE(i.exchange_rate_to_cad, 1)
+                     ELSE i.balance_due
+                END
+            ), 0) AS total
        FROM invoices i
        JOIN customers c ON c.id = i.customer_id
       WHERE i.deleted_at IS NULL
