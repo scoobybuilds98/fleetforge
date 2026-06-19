@@ -171,6 +171,8 @@ Fix: Add `internal_notes` to the FOR UPDATE SELECT at line 69.
 Verification: Void a credit note that has internal_notes set; confirm notes are preserved + appended.
 
 ### [Medium] Email attachments are silently dropped — Mailer uses SES `sendEmail` (not `sendRawEmail`), so invoice/dunning PDFs are logged "attached" but never delivered
+> ✅ **REMEDIATED 2026-06-20 — S-INVOICE-AUDIT-FIX-2.** `Mailer::send()` now takes `array $attachments=[]`; `sendViaSes()` routes attachment-bearing mail through SES `sendRawEmail` with a hand-built `multipart/mixed` MIME (nested `multipart/alternative` text+html body + base64 `application/pdf` parts), and `EmailService::send()` threads the resolved bytes through (read via new `StorageClient::read()`), **fail-closed** if a file can't be read. No-attachment mail keeps the plain `sendEmail` path. Note: of the two cited callers, only the Compose modal (`api/v1/email/send.php`) actually passes attachments — `dunning_letter.php:89-94` calls `Mailer::send()` with the HTML body only (its PDF is archived, not attached; routing dunning through EmailService is the separate **I15**). Unit-verified by `tests/_smoke_mailer_attachments.php` 22/22; live-SES round-trip = operator follow-up **F36**.
+
 File: `lib/Notifications/Mailer.php:51-58,113-171`
 ```php
 public static function send(string $toEmail, string $toName, string $subject, string $htmlBody, string $textBody = '', array $replyTo = [])  // no $attachments

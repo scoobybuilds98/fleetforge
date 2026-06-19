@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace FleetForge\Email;
 
 use FleetForge\Notifications\Mailer;
+use FleetForge\Storage\StorageClient;
 use Throwable;
 
 /**
@@ -172,6 +173,43 @@ class EmailService
             }
         }
 
+        // ── Resolve attachment bytes for actual delivery (I14) ───
+        // The metadata loop above records what was attached; here we
+        // read the real file contents from storage so Mailer can build
+        // a multipart/mixed MIME message via SES sendRawEmail.
+        // WHY fail-closed: if a requested attachment cannot be read, we
+        // must NOT deliver an email that the history tab claims carried
+        // a PDF — that mismatch is the exact billing/audit lie I14 fixes.
+        $mailAttachments = [];
+        foreach ($attachments as $att) {
+            $attPath = (string)($att['path'] ?? '');
+            $attName = (string)($att['name'] ?? '');
+            if ($attPath === '' || $attName === '') continue;
+
+            try {
+                $bytes = StorageClient::read($attPath);
+            } catch (Throwable $e) {
+                error_log('[EmailService] attachment read failed for ' . $attPath . ': ' . $e->getMessage());
+                $bytes = null;
+            }
+
+            if ($bytes === null) {
+                $msg = 'Attachment "' . $attName . '" could not be read from storage; email not sent.';
+                error_log('[EmailService] ' . $msg . ' (key=' . $attPath . ')');
+                db_execute(
+                    "UPDATE email_logs SET status = 'failed', error_message = ? WHERE id = ?",
+                    [$msg, $logId]
+                );
+                return ['success' => false, 'log_id' => $logId, 'error' => $msg];
+            }
+
+            $mailAttachments[] = [
+                'content' => $bytes,
+                'name'    => $attName,
+                'type'    => (string)($att['type'] ?? '') ?: 'application/octet-stream',
+            ];
+        }
+
         // ── Attempt SMTP delivery via Mailer ─────────────────────
         $replyToArr = $replyTo
             ? [['email' => $replyTo, 'name' => '']]
@@ -181,12 +219,13 @@ class EmailService
         $errorMsg = null;
         try {
             $sent = Mailer::send(
-                toEmail:  $toEmail,
-                toName:   $toName,
-                subject:  $subject,
-                htmlBody: $wrappedHtml,
-                textBody: $bodyText,
-                replyTo:  $replyToArr,
+                toEmail:     $toEmail,
+                toName:      $toName,
+                subject:     $subject,
+                htmlBody:    $wrappedHtml,
+                textBody:    $bodyText,
+                replyTo:     $replyToArr,
+                attachments: $mailAttachments,
             );
         } catch (Throwable $e) {
             $errorMsg = $e->getMessage();

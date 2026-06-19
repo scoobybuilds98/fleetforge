@@ -142,6 +142,27 @@ class StorageClient
     }
 
     // ============================================================
+    // read() — return the raw bytes of a stored file.
+    //
+    // $key — the storage key (as returned by upload()).
+    //
+    // Returns the full file contents as a binary string, or null if
+    // the file does not exist. This is the driver-agnostic way to
+    // pull a stored file into memory (e.g. to build an email MIME
+    // attachment) without round-tripping through a temp file.
+    //
+    // Throws RuntimeException only on unexpected backend errors —
+    // a plain "not found" returns null so callers can skip cleanly.
+    // ============================================================
+    public static function read(string $key): ?string
+    {
+        self::validateStoragePath($key);
+        return self::driver() === 's3'
+            ? self::readS3($key)
+            : self::readLocal($key);
+    }
+
+    // ============================================================
     // listByPrefix() — list all stored files under a path prefix.
     //
     // Returns array of:
@@ -336,6 +357,21 @@ class StorageClient
         }
     }
 
+    private static function readLocal(string $key): ?string
+    {
+        $path = FF_ROOT . '/storage/' . $key;
+        if (!is_file($path)) {
+            return null; // missing file → null (not an error)
+        }
+        $data = file_get_contents($path);
+        if ($data === false) {
+            throw new RuntimeException(
+                "StorageClient: could not read local file for key '{$key}'."
+            );
+        }
+        return $data;
+    }
+
     // ----------------------------------------------------------
     // S3 DRIVER — private implementation
     // ----------------------------------------------------------
@@ -502,6 +538,23 @@ class StorageClient
         } catch (S3Exception $e) {
             throw new RuntimeException(
                 "StorageClient S3 download failed: " . $e->getMessage()
+            );
+        }
+    }
+
+    private static function readS3(string $key): ?string
+    {
+        try {
+            $result = self::s3()->getObject([
+                'Bucket' => self::bucket(),
+                'Key'    => $key,
+            ]);
+            $body = $result['Body'] ?? null;
+            return $body !== null ? (string) $body : null;
+        } catch (S3Exception $e) {
+            if ($e->getStatusCode() === 404) return null; // missing → null
+            throw new RuntimeException(
+                "StorageClient S3 read failed: " . $e->getMessage()
             );
         }
     }
