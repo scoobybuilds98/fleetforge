@@ -258,4 +258,24 @@ $statusLog = db_select(
 
 $lease['status_log'] = $statusLog;
 
+// Serve-time financial redaction — roles without payments:view (dispatchers, who
+// per config/permissions.php get "no financial amounts") see the operational lease
+// minus AR/payment-outcome amounts: balances, totals invoiced/paid, the running
+// precharge balance, and actually-billed closeout charges. Contract RATES
+// (daily/weekly/monthly/mileage/hourly_rate, precharge_amount, service costs,
+// discount) are intentionally NOT redacted: dispatchers hold leases:create+edit
+// ($VCE) and set those rates, so hiding them here would be inconsistent and break
+// the create/edit flow. Mirrors api/v1/customers/show.php (AR dollar fields only).
+// NOTE: precharge_balance is intentionally NOT redacted — the close modal reads
+// it to decide whether to prompt for the mandatory precharge refund, and close.php
+// (leases:edit, held by dispatchers) rejects a close that omits the refund block
+// when a residual exists. Hiding it would silently break the dispatcher close flow.
+if (!can_view_financials()) {
+    $lease = redact_keys($lease, [
+        'outstanding_balance', 'total_invoiced', 'total_paid',
+        'total_estimated_charge', 'final_total_charge',
+        'closeout_charges',
+    ]);
+}
+
 json_success($lease);

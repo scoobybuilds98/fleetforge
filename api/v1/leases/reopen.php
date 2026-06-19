@@ -59,7 +59,8 @@ $result = null;
 db_transaction(function () use ($id, $reopenReason, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     $lease = db_row(
-        "SELECT id, status, contract_number, company_name_snapshot, equipment_unit_id, unit_number_snapshot
+        "SELECT id, status, contract_number, company_name_snapshot, equipment_unit_id, unit_number_snapshot,
+                precharge_refund_method
          FROM leases WHERE id = ? AND deleted_at IS NULL",
         [$id]
     );
@@ -72,6 +73,22 @@ db_transaction(function () use ($id, $reopenReason, &$result) {
     if ($lease['status'] !== 'completed') {
         json_error('INVALID_TRANSITION',
             "Cannot reopen lease {$lease['contract_number']}: status is '{$lease['status']}'. Only completed leases can be reopened.", 409);
+    }
+
+    // ── L09: a precharge refund issued at close cannot be auto-reversed ──
+    // Reopen un-does the close, but the precharge refund (a credit note or a cash
+    // settlement) and the drawdown balance are NOT reversed here, and the close
+    // path locks on precharge_refund_method (PRECHARGE_REFUND_LOCKED). Silently
+    // clearing the markers would let the re-close issue a SECOND refund of the
+    // same money; leaving them set makes the re-close fail — the stuck state.
+    // Until a reverse-the-refund flow exists, block reopen with a clear, actionable
+    // message rather than create either a double-refund or a dead-end lease.
+    if (!empty($lease['precharge_refund_method'])) {
+        json_error(
+            'PRECHARGE_REFUND_ISSUED',
+            "Cannot reopen lease {$lease['contract_number']}: a precharge refund ({$lease['precharge_refund_method']}) was issued at close. Reverse or reconcile that refund (void the credit note, or recover the cash) before reopening — automatic reversal is not yet supported.",
+            409
+        );
     }
 
     // ── D20: FOR UPDATE lock on unit — must be available ──────

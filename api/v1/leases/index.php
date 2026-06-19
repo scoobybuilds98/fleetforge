@@ -135,4 +135,14 @@ $rows = db_select(
     $params
 );
 
+// Serve-time financial redaction — roles without payments:view (dispatchers,
+// per config/permissions.php "no financial amounts") get the operational lease
+// list with AR/payment-outcome amounts stripped. Contract RATES are intentionally
+// NOT redacted: dispatchers hold leases:create+edit ($VCE) and set those rates,
+// so hiding them on the list would be both inconsistent and break their workflow.
+// Mirrors the customers fix (AR dollar fields only).
+if (!can_view_financials()) {
+    $rows = redact_rows($rows, ['outstanding_balance', 'total_invoiced']);
+}
+
 json_paginated($rows, $total, $page, $perPage);

@@ -60,6 +60,10 @@ try {
          JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
          WHERE l.status = 'active'
            AND l.deleted_at IS NULL
+           -- L04: honor the per-lease Samsara gate. Only 'samsara'-mode leases
+           -- auto-capture GPS odometer; 'manual' leases must never be auto-
+           -- overwritten and 'off' leases track no mileage at all.
+           AND l.mileage_tracking_mode = 'samsara'
            AND eu.gps_device_id IS NOT NULL
            AND eu.gps_device_id != ''",
         []

@@ -457,6 +457,19 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // S-FIX-2 Bug #1: include discount_* and JOIN customer.province so the
     // legacy_append_mileage_to_full_month_draft helper can recompute totals
     // with the right discount + tax rules on a last-day-of-month close.
+    // ── L01: acquire the lease row lock BEFORE reading state ─────
+    // Without this, the status gate below runs on an UNLOCKED snapshot, so two
+    // concurrent POST /close both pass it, serialize only on the equipment_unit
+    // lock (acquired later), and the second re-runs the entire close — a duplicate
+    // 'completed' write plus a duplicate closeout/adjustment invoice. Locking the
+    // lease row first (lease-before-unit, matching activate.php's order to avoid
+    // deadlock) makes the second call block here, then see status='completed' and
+    // get rejected by the gate. Lock the lease row only (not the joined customer).
+    db_row(
+        "SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+        [$id]
+    );
+
     $lease = db_row(
         "SELECT l.id, l.status, l.contract_number, l.company_name_snapshot, l.customer_id,
                 l.equipment_unit_id, l.unit_number_snapshot, l.mileage_at_start,
@@ -487,6 +500,25 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     if ($lease['status'] !== 'active') {
         json_error('INVALID_TRANSITION',
             "Cannot close lease {$lease['contract_number']}: current status is '{$lease['status']}'. Only active leases can be closed.", 409);
+    }
+
+    // ── L11: actual return date must not precede the lease start ──
+    // A mistyped/early return date makes the overshoot reconciliation treat
+    // EVERY invoice as billed past the (clamped-to-start) billable extent and
+    // void / credit-note them all — silently zeroing the lease. Reject it, like
+    // the odometer-below-start guard. ISO 'Y-m-d' strings compare correctly.
+    if ($actualReturnDate !== null && !empty($lease['start_date'])
+        && $actualReturnDate < (string) $lease['start_date']) {
+        json_error(
+            'RETURN_BEFORE_START',
+            sprintf(
+                'Return date (%s) is before the lease start date (%s). Enter a return date on or after the start.',
+                $actualReturnDate,
+                $lease['start_date']
+            ),
+            422,
+            ['fields' => ['actual_return_date' => 'Return date cannot be before the lease start date.']]
+        );
     }
 
     // S-LEASE-MILEAGE-MODE: an 'off' lease tracks no mileage, so never stamp a
@@ -600,7 +632,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             : 'Close notes: ' . $closeNotes;
     }
 
-    db_update('leases', $leaseUpdate, 'id = ?', [$id]);
+    // L01 belt-and-suspenders: only complete a still-active lease, so even if the
+    // FOR UPDATE lock above were ever bypassed the status flip can't double-apply.
+    db_update('leases', $leaseUpdate, 'id = ? AND status = ?', [$id, 'active']);
 
     // ── Update unit → available ────────────────────────────────
     db_execute(
@@ -1304,6 +1338,22 @@ try {
 } catch (\Throwable $e) {
     error_log('[S-ACCT-LESSOR-3 termination] ' . $e->getMessage());
     $result['termination_je'] = ['posted' => false, 'error' => $e->getMessage()];
+}
+
+// L43: roles without payments:view (dispatchers can close via leases:edit) must
+// not see AR dollar figures in the close response. Strip the server-computed
+// refund amount + capital-lease residual write-off; status, ids, refund method,
+// dates, and operational actions remain so the closer still sees what happened.
+if (!can_view_financials()) {
+    if (isset($result['precharge_refund']) && is_array($result['precharge_refund'])) {
+        unset(
+            $result['precharge_refund']['amount'],
+            $result['precharge_refund']['precharge_balance_at_close']
+        );
+    }
+    if (isset($result['termination_je']) && is_array($result['termination_je'])) {
+        unset($result['termination_je']['residual_written_off']);
+    }
 }
 
 json_success($result);

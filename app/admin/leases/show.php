@@ -155,6 +155,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
      filtered by this specific lease. Currency tile remains display-only. -->
 <div class="stat-grid" style="margin-bottom:24px;">
 
+    <?php /* L03: AR/payment-outcome tiles are hidden from roles without
+             payments:view (dispatchers). Contract rates stay visible — the same
+             role holds leases:create+edit and sets them. */ ?>
+    <?php if (can_view_financials()): ?>
     <a class="stat-card"
        href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>"
        style="cursor:pointer;text-decoration:none"
@@ -178,6 +182,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <div class="stat-label">Outstanding</div>
         <div class="stat-value currency"><?= e(format_currency($lease['outstanding_balance'] ?? 0)) ?></div>
     </a>
+    <?php endif; ?>
 
     <!-- Currency is metadata, not a drill target — stays display-only -->
     <div class="stat-card">

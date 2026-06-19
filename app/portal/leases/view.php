@@ -38,10 +38,14 @@ if (!$lease) {
 }
 
 // Invoices for this lease
+// L08: customers must never see draft (internal-only) or void invoices — only
+// invoices disclosed to them. Mirrors the portal draft-hiding invariant applied
+// elsewhere (the unfiltered query previously leaked drafts + voids to the customer).
 $invoices = db_select(
     "SELECT id, invoice_number, invoice_date, due_date, total_amount, balance_due, status
      FROM invoices
      WHERE lease_id = ? AND customer_id = ? AND deleted_at IS NULL
+       AND status NOT IN ('draft', 'void')
      ORDER BY invoice_date DESC",
     [$leaseId, $cid]
 );
