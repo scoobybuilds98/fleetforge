@@ -110,7 +110,7 @@ try {
     $metrics = MorningBriefingRenderer::buildPayload();
 
     // ── Call Claude ──
-    $model = (string) settings_get('ai.model', 'claude-sonnet-4-20250514');
+    $model = (string) settings_get('ai.model', 'claude-sonnet-4-6');
     $system = "You are a fleet operations analyst writing a morning briefing for the fleet manager. "
             . "Write 200-300 words of plain prose (no bullets, no lists, no markdown headings). "
             . "Lead with the most important issue or trend. End with one clear, actionable recommendation. "

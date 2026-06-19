@@ -129,7 +129,7 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 |---|---|---|
 | `ai.enabled` | `1` | Master switch — when `0`, ai_fleet_brief skips with audit_log entry |
 | `ai.daily_token_limit` | `500000` | Daily token budget. Brief skips if today's usage + 3000 projected would exceed. `0` = unlimited |
-| `ai.model` | `claude-sonnet-4-20250514` | Anthropic model used for the brief |
+| `ai.model` | `claude-sonnet-4-6` | Anthropic model used for the brief |
 | `company.timezone` | `America/Vancouver` | IANA timezone — drives notification_digest's "is it 07:00 local?" gate |
 | `notifications.digest_hour` | `7` | Local hour the digest fires. Override per-deployment if needed |
 

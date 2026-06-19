@@ -140,8 +140,8 @@ class SummaryEngine
     // ────────────────────────────────────────────────────────────
     // cacheSummary()
     //
-    // Stores a generated summary in ai_summaries table.
-    // Marks previous summaries for the same entity+type as not current.
+    // Upserts a generated summary into ai_summaries (one row per
+    // entity+type, keyed by UNIQUE(entity_type,entity_id,summary_type)).
     // ────────────────────────────────────────────────────────────
     public static function cacheSummary(
         string $entityType,
@@ -153,30 +153,60 @@ class SummaryEngine
         ?int   $userId
     ): void {
         try {
-            $ttlHours = (int) settings_get('ai.summary_ttl_hours', self::DEFAULT_TTL_HOURS);
+            $ttlHours  = (int) settings_get('ai.summary_ttl_hours', self::DEFAULT_TTL_HOURS);
             $expiresAt = date('Y-m-d H:i:s', strtotime("+{$ttlHours} hours"));
+            $now       = date('Y-m-d H:i:s');
 
-            // WHY: Mark old summaries as not current before inserting new one
+            // WHY: ai_summaries has UNIQUE(entity_type,entity_id,summary_type) — at
+            // most one row per tuple. The old "UPDATE is_current=0 then INSERT the
+            // same tuple" collided with that key (1062) on EVERY regeneration; the
+            // error was swallowed and the row left is_current=0, so getCached()
+            // returned null forever and each later request re-billed Claude
+            // (S-AI-AUDIT-HIGH-FIX). Upsert in place instead — the dead is_current
+            // "history" rotation is impossible under the unique key.
             db_execute(
-                "UPDATE ai_summaries SET is_current = 0
-                 WHERE entity_type = ? AND entity_id = ? AND summary_type = ?",
-                [$entityType, $entityId, $summaryType]
+                "INSERT INTO ai_summaries
+                    (entity_type, entity_id, summary_type, content, tokens_used,
+                     model_used, generated_at, expires_at, generated_by, is_current)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                 ON DUPLICATE KEY UPDATE
+                    content      = VALUES(content),
+                    tokens_used  = VALUES(tokens_used),
+                    model_used   = VALUES(model_used),
+                    generated_at = VALUES(generated_at),
+                    expires_at   = VALUES(expires_at),
+                    generated_by = VALUES(generated_by),
+                    is_current   = 1",
+                [$entityType, $entityId, $summaryType, $content, $tokensUsed,
+                 $model, $now, $expiresAt, $userId]
             );
+        } catch (\Throwable $e) {
+            // Cache write failure is non-fatal to the user (the summary already
+            // streamed), but DON'T swallow it silently — a schema mismatch (e.g. a
+            // summary_type missing from the ENUM → 1265) would otherwise hide here
+            // forever while re-billing tokens. Log it so the drift is observable.
+            self::logCacheFailure($summaryType, $e);
+        }
+    }
 
-            db_insert('ai_summaries', [
-                'entity_type'  => $entityType,
-                'entity_id'    => $entityId,
-                'summary_type' => $summaryType,
-                'content'      => $content,
-                'tokens_used'  => $tokensUsed,
-                'model_used'   => $model,
-                'generated_at' => date('Y-m-d H:i:s'),
-                'expires_at'   => $expiresAt,
-                'generated_by' => $userId,
-                'is_current'   => 1,
-            ]);
+    /** Append a one-line cache-write failure to logs/ai.log (never throws). */
+    private static function logCacheFailure(string $summaryType, \Throwable $e): void
+    {
+        try {
+            $logPath = dirname(__DIR__, 2) . '/logs/ai.log';
+            $canWrite = file_exists($logPath) ? is_writable($logPath) : is_writable(dirname($logPath));
+            if (!$canWrite) {
+                return;
+            }
+            $line = sprintf(
+                "[%s] [WARN] cacheSummary failed (summary_type=%s): %s\n",
+                date('Y-m-d H:i:s'),
+                $summaryType,
+                $e->getMessage()
+            );
+            file_put_contents($logPath, $line, FILE_APPEND | LOCK_EX);
         } catch (\Throwable) {
-            // Cache write failure is non-fatal
+            // logging must never crash the request
         }
     }
 

@@ -20,7 +20,7 @@ namespace FleetForge\AI;
  * ai_query_log persists input/output tokens (prompt_tokens / completion_tokens)
  * and created_at, but has NO per-row `model` column (verified vs DATABASE_MASTER
  * + live schema). FleetForge calls a single model — the `ai.model` setting
- * (default 'claude-sonnet-4-20250514', see lib/AI/ClaudeClient.php) — so every
+ * (default 'claude-sonnet-4-6', see lib/AI/ClaudeClient.php) — so every
  * logged row is attributed to the currently-configured model for pricing. If the
  * configured model is absent from the Pricing table it is "unpriced": its spend
  * contributes $0 and the model is surfaced in `unpriced_models` so the UI can say
@@ -68,7 +68,7 @@ final class CreditEstimator
     {
         // ai_query_log carries no per-row model → bucket all rows under the
         // currently-configured model. (See class docblock caveat.)
-        $model = (string) (settings_get('ai.model') ?: 'claude-sonnet-4-20250514');
+        $model = (string) (settings_get('ai.model') ?: 'claude-sonnet-4-6');
 
         $row = db_row(
             "SELECT COALESCE(SUM(prompt_tokens), 0)     AS in_tok,

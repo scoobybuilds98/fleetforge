@@ -88,20 +88,31 @@ if (($payload['kind'] ?? '') === 'action') {
         json_error('EXPIRED', 'This action proposal has expired. Ask the AI again for a fresh one.', 409);
     }
 
+    // Atomically CLAIM the proposal before running the (non-undoable) action:
+    // a conditional UPDATE only one concurrent request can win. Without it, two
+    // parallel requests both pass the pending check above and double-execute the
+    // action (e.g. a send/void posted twice → double-counted balance counters).
+    // S-AI-AUDIT-HIGH-FIX.
+    $claimed = db_update('ai_pending_changes', [
+        'status'     => 'applied',
+        'applied_at' => date('Y-m-d H:i:s'),
+        'applied_by' => $userId,
+    ], 'id = ? AND status = ?', [$proposalId, 'pending']);
+    if ($claimed !== 1) {
+        json_error('CONFLICT', 'This action is no longer pending (it may have just been applied).', 409);
+    }
+
     try {
         $res = \FleetForge\AI\ActionRegistry::execute(
             (string) $payload['action'], (int) ($payload['entity_id'] ?? 0),
             $payload['params'] ?? [], $userId, $userName, $ip
         );
     } catch (\FleetForge\AI\Actions\ActionException $e) {
+        // Release the claim so a business/transient failure doesn't strand the
+        // proposal as "applied" when the action never actually ran.
+        db_update('ai_pending_changes', ['status' => 'pending', 'applied_at' => null, 'applied_by' => null], 'id = ?', [$proposalId]);
         json_error($e->errorCode, $e->getMessage(), $e->status);
     }
-
-    db_update('ai_pending_changes', [
-        'status'     => 'applied',
-        'applied_at' => date('Y-m-d H:i:s'),
-        'applied_by' => $userId,
-    ], 'id = ?', [$proposalId]);
 
     json_success(['id' => $proposalId, 'status' => 'applied', 'summary' => $proposal['summary'], 'result' => $res]);
 }
@@ -124,13 +135,19 @@ if ($action === 'undo') {
     if ($proposal['status'] !== 'applied') {
         json_error('CONFLICT', 'Only an applied change can be undone (this one is "' . $proposal['status'] . '").', 409);
     }
+    // Atomically claim the applied→undone transition so a double-click / parallel
+    // tab can't revert the same change twice (S-AI-AUDIT-HIGH-FIX).
+    $claimed = db_update('ai_pending_changes', ['status' => 'undone'], 'id = ? AND status = ?', [$proposalId, 'applied']);
+    if ($claimed !== 1) {
+        json_error('CONFLICT', 'Only an applied change can be undone (it may have already been undone).', 409);
+    }
     try {
         $reverted = \FleetForge\AI\ChangeApplier::undo($proposal, $userId, $userName, $ip);
     } catch (\RuntimeException $e) {
+        // Release the claim back to applied so the undo can be retried.
+        db_update('ai_pending_changes', ['status' => 'applied'], 'id = ?', [$proposalId]);
         json_error('CONFLICT', $e->getMessage(), 409);
     }
-
-    db_update('ai_pending_changes', ['status' => 'undone'], 'id = ?', [$proposalId]);
 
     json_success([
         'id'            => $proposalId,
@@ -154,12 +171,27 @@ if (!$targets) {
     json_error('CONFLICT', 'This proposal has no changes to apply.', 422);
 }
 
+// Atomically CLAIM the proposal so two concurrent requests can't both apply it
+// (S-AI-AUDIT-HIGH-FIX). The before-check above is a fast-fail; this conditional
+// UPDATE is the real gate — only one request flips pending→applied.
+$claimed = db_update('ai_pending_changes', [
+    'status'     => 'applied',
+    'applied_at' => date('Y-m-d H:i:s'),
+    'applied_by' => $userId,
+], 'id = ? AND status = ?', [$proposalId, 'pending']);
+if ($claimed !== 1) {
+    json_error('CONFLICT', 'This change is no longer pending (it may have just been applied).', 409);
+}
+
 // Delegate the write to ChangeApplier (mirrors the manual Edit Unit path:
 // db_transaction + audit per row, last-write-wins). It re-reads each row at
 // apply time for the audit old_values and the undo before-snapshot.
 try {
     $result = \FleetForge\AI\ChangeApplier::apply($proposal, $userId, $userName, $ip);
 } catch (\PDOException $e) {
+    // Release the claim — ChangeApplier is transactional so nothing landed; the
+    // proposal returns to pending and can be retried after the cause is fixed.
+    db_update('ai_pending_changes', ['status' => 'pending', 'applied_at' => null, 'applied_by' => null], 'id = ?', [$proposalId]);
     // Mirror the unique-key handling of the manual update endpoint.
     if ($e->getCode() === '23000') {
         json_error('CONFLICT', 'The change collided with a unique constraint and was not applied.', 409);
@@ -168,14 +200,14 @@ try {
 }
 
 if ($result['count'] === 0) {
+    db_update('ai_pending_changes', ['status' => 'pending', 'applied_at' => null, 'applied_by' => null], 'id = ?', [$proposalId]);
     json_error('CONFLICT', 'The target unit(s) no longer exist, so nothing was changed.', 409);
 }
 
+// The claim already flipped status→applied; now record the before/after diff so
+// the change can be undone.
 db_update('ai_pending_changes', [
-    'status'       => 'applied',
     'applied_diff' => json_encode($result['diff']),
-    'applied_at'   => date('Y-m-d H:i:s'),
-    'applied_by'   => $userId,
 ], 'id = ?', [$proposalId]);
 
 json_success([

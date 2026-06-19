@@ -8,7 +8,7 @@ declare(strict_types=1);
  * risk_scores 03:30, so the brief sees today's freshly-scored data).
  *
  * Generates a 200-300 word natural-language morning briefing using Claude
- * (settings.ai.model, default claude-sonnet-4-20250514). The brief is
+ * (settings.ai.model, default claude-sonnet-4-6). The brief is
  * cached in report_cache (report_type='ai_fleet_brief', expires 24h) so
  * the dashboard's "AI Insights" widget can render it without making real-
  * time API calls during business hours.

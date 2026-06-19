@@ -71,7 +71,7 @@ Both an enabled toggle **and** a valid API key are required before chat, reports
 <details>
 <summary>Under the hood — how it works technically</summary>
 
-- **Provider & model** — every AI feature routes through `lib/AI/ClaudeClient.php`, which calls the Anthropic Messages API (`https://api.anthropic.com/v1/messages`). The model defaults to `claude-sonnet-4-20250514` and is overridable via the `ai.model` setting.
+- **Provider & model** — every AI feature routes through `lib/AI/ClaudeClient.php`, which calls the Anthropic Messages API (`https://api.anthropic.com/v1/messages`). The model defaults to `claude-sonnet-4-6` and is overridable via the `ai.model` setting.
 - **Readiness gate** — the page computes `$aiReady = ai.enabled && ai.anthropic_api_key`. Credentials are read settings-table-first, `.env` second (the `ai.*` rows let admins rotate the key without redeploying). If either is missing, the not-configured card renders and no API calls are made.
 - **Tool-calling, real data** — chat sends a system prompt plus a tool registry (`lib/AI/ToolRegistry.php`). Claude requests a tool, the server runs the SQL lookup, returns the result, and loops — up to 5 iterations (`ClaudeClient::MAX_TOOL_ITERATIONS`) — before answering. Financial tools are gated behind the `payments:view` permission.
 - **Streaming** — responses stream over Server-Sent Events (`api/v1/ai/stream.php`) for the typewriter effect; if SSE fails (e.g. a proxy blocks it) the page falls back to the non-streaming `api/v1/ai/chat.php`. A one-shot retry absorbs Anthropic rate-limit (HTTP 429) bursts, and partial answers are preserved if a stream is cut off mid-response.
