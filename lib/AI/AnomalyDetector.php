@@ -29,6 +29,13 @@ namespace FleetForge\AI;
  */
 class AnomalyDetector
 {
+    /** After an alert is acknowledged, stay quiet about the same condition this long. */
+    private const ACK_COOLDOWN_DAYS = 7;
+    /** Auto-acknowledge unacknowledged alerts older than this (stop re-surfacing stale ones). */
+    private const RETENTION_AUTOACK_DAYS = 30;
+    /** Hard-delete alerts older than this so the table can't grow unbounded. */
+    private const RETENTION_DELETE_DAYS = 90;
+
     // ────────────────────────────────────────────────────────────
     // runAll()
     //
@@ -55,13 +62,26 @@ class AnomalyDetector
             try {
                 $alerts = self::$method();
                 foreach ($alerts as $alert) {
-                    self::storeAlert($alert, $userId);
-                    $alertCount++;
+                    // Count only genuinely-new inserts (storeAlert returns false
+                    // when it de-dups/escalates-in-place) so the cron's "N new
+                    // alerts" line is accurate.
+                    if (self::storeAlert($alert, $userId)) {
+                        $alertCount++;
+                    }
                 }
             } catch (\Throwable $e) {
                 // WHY: Log but don't stop — other detectors should still run
                 error_log("AnomalyDetector::{$method} failed: " . $e->getMessage());
             }
+        }
+
+        // Retention sweep — auto-ack stale open alerts + prune very old rows so a
+        // chronic condition can't grow ai_anomaly_alerts unbounded. Isolated so a
+        // sweep failure never masks the scan result.
+        try {
+            self::pruneStaleAlerts();
+        } catch (\Throwable $e) {
+            error_log('AnomalyDetector::pruneStaleAlerts failed: ' . $e->getMessage());
         }
 
         return $alertCount;
@@ -166,16 +186,17 @@ class AnomalyDetector
     // ────────────────────────────────────────────────────────────
     private static function detectComplianceRisks(): array
     {
-        $deadline = date('Y-m-d', strtotime('+14 days'));
-        $today    = date('Y-m-d');
-
-        // WHY: Count how many compliance types are expiring per unit
+        // WHY: compute the window bounds in SQL (CURDATE / DATE_ADD) so the date
+        // comparison stays in the DB's timezone. Mixing PHP date() (APP_TIMEZONE,
+        // America/Vancouver) with UTC DB date columns produced a one-day
+        // divergence at the nightly cron's 04:30-UTC run time. `db_today` carries
+        // CURDATE() back so the PHP-side `$expired` check uses the same clock.
         $rows = db_select(
-            "SELECT eu.id AS unit_id, eu.unit_number,
-                    SUM(CASE WHEN eu.cvi_expiry <= ? THEN 1 ELSE 0 END) AS cvi_expiring,
-                    SUM(CASE WHEN eu.registration_expiry <= ? THEN 1 ELSE 0 END) AS reg_expiring,
-                    SUM(CASE WHEN eu.mvi_expiry <= ? THEN 1 ELSE 0 END) AS mvi_expiring,
-                    SUM(CASE WHEN eu.insurance_expiry <= ? THEN 1 ELSE 0 END) AS ins_expiring,
+            "SELECT eu.id AS unit_id, eu.unit_number, CURDATE() AS db_today,
+                    SUM(CASE WHEN eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS cvi_expiring,
+                    SUM(CASE WHEN eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS reg_expiring,
+                    SUM(CASE WHEN eu.mvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS mvi_expiring,
+                    SUM(CASE WHEN eu.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS ins_expiring,
                     LEAST(
                         COALESCE(eu.cvi_expiry, '9999-12-31'),
                         COALESCE(eu.registration_expiry, '9999-12-31'),
@@ -185,19 +206,18 @@ class AnomalyDetector
              FROM equipment_units eu
              WHERE eu.status NOT IN ('decommissioned', 'inactive')
                AND eu.deleted_at IS NULL
-               AND (eu.cvi_expiry <= ? OR eu.registration_expiry <= ?
-                    OR eu.mvi_expiry <= ? OR eu.insurance_expiry <= ?)
+               AND (eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
+                    OR eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
+                    OR eu.mvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
+                    OR eu.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY))
              GROUP BY eu.id, eu.unit_number
              HAVING (cvi_expiring + reg_expiring + mvi_expiring + ins_expiring) >= 2
-                OR earliest_expiry < ?",
-            [$deadline, $deadline, $deadline, $deadline,
-             $deadline, $deadline, $deadline, $deadline,
-             $today]
+                OR earliest_expiry < CURDATE()"
         );
 
         $alerts = [];
         foreach ($rows as $row) {
-            $expired = $row['earliest_expiry'] < $today;
+            $expired = $row['earliest_expiry'] < $row['db_today'];
             $severity = $expired ? 'high' : 'medium';
             $expiringCount = (int) $row['cvi_expiring'] + (int) $row['reg_expiring']
                            + (int) $row['mvi_expiring'] + (int) $row['ins_expiring'];
@@ -230,45 +250,53 @@ class AnomalyDetector
     // ────────────────────────────────────────────────────────────
     private static function detectMaintenanceSpikes(): array
     {
-        $thirtyDaysAgo = date('Y-m-d', strtotime('-30 days'));
-
-        // WHY: Compare last 30 days cost vs historical average per unit
+        // WHY (TZ): the 30-day window is computed in SQL (DATE_SUB(CURDATE(...)))
+        // so it doesn't drift against UTC DB dates like a PHP date() value would.
+        // WHY (baseline): the comparison must EXCLUDE the recent window —
+        // eu.total_maintenance_cost is the monotonic all-time total that already
+        // contains recent_cost, so the old "(lifetime/months)*2" baseline was
+        // inflated by the spike itself (for a 1-month unit it reduced to
+        // recent > recent*2 and never fired). Compare against the PRIOR-period
+        // average: (lifetime − recent) / (months − 1), and require ≥2 months of
+        // history so a brand-new unit with no baseline doesn't false-positive.
         $rows = db_select(
             "SELECT eu.id AS unit_id, eu.unit_number,
                     recent.recent_cost, recent.recent_count,
                     COALESCE(eu.total_maintenance_cost, 0) AS lifetime_cost,
-                    GREATEST(TIMESTAMPDIFF(MONTH, eu.created_at, CURDATE()), 1) AS months_active
+                    GREATEST(TIMESTAMPDIFF(MONTH, eu.created_at, CURDATE()), 1) AS months_active,
+                    GREATEST(COALESCE(eu.total_maintenance_cost, 0) - recent.recent_cost, 0)
+                        / GREATEST(TIMESTAMPDIFF(MONTH, eu.created_at, CURDATE()) - 1, 1) AS prior_monthly_avg
              FROM equipment_units eu
              INNER JOIN (
                  SELECT wo.equipment_unit_id,
                         SUM(wo.total_cost) AS recent_cost,
                         COUNT(*) AS recent_count
                  FROM maintenance_work_orders wo
-                 WHERE wo.completed_date >= ?
+                 WHERE wo.completed_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
                    AND wo.status = 'completed'
                    AND wo.deleted_at IS NULL
                  GROUP BY wo.equipment_unit_id
              ) recent ON recent.equipment_unit_id = eu.id
              WHERE eu.deleted_at IS NULL
-             HAVING recent_cost > (lifetime_cost / months_active) * 2
-                AND recent_cost > 500",
-            [$thirtyDaysAgo]
+               AND TIMESTAMPDIFF(MONTH, eu.created_at, CURDATE()) >= 2
+             HAVING recent_cost > prior_monthly_avg * 2
+                AND recent_cost > 500"
         );
 
         $alerts = [];
         foreach ($rows as $row) {
-            $monthlyAvg = (float) $row['lifetime_cost'] / max((int) $row['months_active'], 1);
+            $priorAvg = (float) $row['prior_monthly_avg'];
 
             $alerts[] = [
                 'alert_type'    => 'maintenance_spike',
-                'severity'      => ((float) $row['recent_cost'] > $monthlyAvg * 3) ? 'high' : 'medium',
+                'severity'      => ((float) $row['recent_cost'] > $priorAvg * 3) ? 'high' : 'medium',
                 'title'         => "Maintenance spike: Unit {$row['unit_number']}",
                 'description'   => sprintf(
-                    'Unit %s spent $%s on %d work orders in the last 30 days (monthly avg: $%s).',
+                    'Unit %s spent $%s on %d work orders in the last 30 days (prior monthly avg: $%s).',
                     $row['unit_number'],
                     number_format((float) $row['recent_cost'], 2),
                     $row['recent_count'],
-                    number_format($monthlyAvg, 2)
+                    number_format($priorAvg, 2)
                 ),
                 'entity_type'   => 'equipment_unit',
                 'entity_id'     => (int) $row['unit_id'],
@@ -384,21 +412,50 @@ class AnomalyDetector
     // ────────────────────────────────────────────────────────────
     // storeAlert()
     //
-    // Saves an anomaly alert to the database. Deduplicates by
-    // checking for identical alert within the last 24 hours.
+    // Persists an anomaly alert, de-duplicating so a chronic condition doesn't
+    // flood the list on every nightly run. Returns true only when a genuinely
+    // new row is inserted (false on de-dup / escalate-in-place / ack-cooldown).
     // ────────────────────────────────────────────────────────────
-    private static function storeAlert(array $alert, ?int $userId): void
+    private static function storeAlert(array $alert, ?int $userId): bool
     {
-        // WHY: Prevent duplicate alerts within 24 hours for same entity + type
-        $existing = db_row(
-            "SELECT id FROM ai_anomaly_alerts
-             WHERE alert_type = ? AND entity_type = ? AND entity_id = ?
-               AND created_at > DATE_SUB(NOW(), INTERVAL 24 HOUR)
-             LIMIT 1",
+        // 1) An OPEN (unacknowledged) alert for this entity+type already covers
+        //    the condition — don't insert a nightly duplicate. If THIS run is more
+        //    severe, escalate the open alert in place rather than spawning a new
+        //    one. (The old logic used a 24h window that re-alerted every night and
+        //    was acknowledgment-blind, so acking never stopped the duplicate.)
+        $open = db_row(
+            "SELECT id, severity FROM ai_anomaly_alerts
+              WHERE alert_type = ? AND entity_type = ? AND entity_id = ?
+                AND acknowledged_at IS NULL
+              ORDER BY id DESC LIMIT 1",
             [$alert['alert_type'], $alert['entity_type'], $alert['entity_id']]
         );
+        if ($open) {
+            if (self::severityRank((string) $alert['severity']) > self::severityRank((string) $open['severity'])) {
+                db_update('ai_anomaly_alerts', [
+                    'severity'      => $alert['severity'],
+                    'title'         => $alert['title'],
+                    'description'   => $alert['description'],
+                    'data_snapshot' => json_encode($alert['data_snapshot'] ?? []),
+                ], 'id = ?', [(int) $open['id']]);
+            }
+            return false;
+        }
 
-        if ($existing) return;
+        // 2) The operator ACKNOWLEDGED this condition recently — stay quiet for a
+        //    cooldown so a still-active chronic issue doesn't immediately re-alert.
+        //    Once the cooldown lapses it re-surfaces as a reminder if still active.
+        $ackedRecently = db_row(
+            "SELECT id FROM ai_anomaly_alerts
+              WHERE alert_type = ? AND entity_type = ? AND entity_id = ?
+                AND acknowledged_at IS NOT NULL
+                AND acknowledged_at > DATE_SUB(NOW(), INTERVAL " . self::ACK_COOLDOWN_DAYS . " DAY)
+              ORDER BY id DESC LIMIT 1",
+            [$alert['alert_type'], $alert['entity_type'], $alert['entity_id']]
+        );
+        if ($ackedRecently) {
+            return false;
+        }
 
         db_insert('ai_anomaly_alerts', [
             'alert_type'    => $alert['alert_type'],
@@ -410,5 +467,34 @@ class AnomalyDetector
             'data_snapshot' => json_encode($alert['data_snapshot'] ?? []),
             'generated_by'  => $userId,
         ]);
+        return true;
+    }
+
+    /** low/medium/high → 1/2/3 for severity comparisons. */
+    private static function severityRank(string $severity): int
+    {
+        return ['low' => 1, 'medium' => 2, 'high' => 3][$severity] ?? 0;
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // pruneStaleAlerts()
+    //
+    // Retention sweep run after each scan: auto-acknowledge unacknowledged alerts
+    // older than RETENTION_AUTOACK_DAYS (a chronic condition shouldn't sit open
+    // forever) and hard-delete alerts older than RETENTION_DELETE_DAYS so the
+    // table can't grow without bound. acknowledged_by is left NULL (system-acked).
+    // ────────────────────────────────────────────────────────────
+    private static function pruneStaleAlerts(): void
+    {
+        db_execute(
+            "UPDATE ai_anomaly_alerts
+                SET acknowledged_at = NOW()
+              WHERE acknowledged_at IS NULL
+                AND created_at < DATE_SUB(NOW(), INTERVAL " . self::RETENTION_AUTOACK_DAYS . " DAY)"
+        );
+        db_execute(
+            "DELETE FROM ai_anomaly_alerts
+              WHERE created_at < DATE_SUB(NOW(), INTERVAL " . self::RETENTION_DELETE_DAYS . " DAY)"
+        );
     }
 }

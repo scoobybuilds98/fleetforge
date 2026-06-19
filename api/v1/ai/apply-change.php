@@ -45,8 +45,8 @@ $action     = strtolower(trim((string) ($body['action'] ?? 'apply')));
 if (!$proposalId) {
     json_validation_error(['proposal_id' => 'A proposal id is required.']);
 }
-if (!in_array($action, ['apply', 'undo'], true)) {
-    json_validation_error(['action' => 'Action must be "apply" or "undo".']);
+if (!in_array($action, ['apply', 'undo', 'cancel'], true)) {
+    json_validation_error(['action' => 'Action must be "apply", "undo", or "cancel".']);
 }
 
 // ── Load the proposal (must belong to this user) ───────────────────────────
@@ -63,6 +63,24 @@ $targets = $payload['targets'] ?? [];
 
 $userName = current_user()['name'] ?? 'system';
 $ip       = $_SERVER['REMOTE_ADDR'] ?? null;
+
+// ── CANCEL — dismiss a still-pending proposal so it can never be applied ──────
+// No entity write (just flips the proposal's own status), so ownership — already
+// enforced by the user-scoped load above — plus ai:view is sufficient; the
+// per-entity edit permission is NOT required to cancel. Atomic claim mirrors the
+// apply/undo paths. Handles both action-kind and field-edit proposals.
+if ($action === 'cancel') {
+    $cancelled = db_update(
+        'ai_pending_changes',
+        ['status' => 'cancelled'],
+        'id = ? AND status = ?',
+        [$proposalId, 'pending']
+    );
+    if ($cancelled !== 1) {
+        json_error('CONFLICT', 'This proposal is no longer pending (status: "' . $proposal['status'] . '").', 409);
+    }
+    json_success(['id' => $proposalId, 'status' => 'cancelled', 'summary' => $proposal['summary']]);
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 //  LIFECYCLE ACTIONS (S-AI-ACTION-1) — status transitions, not field edits.

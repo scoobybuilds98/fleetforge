@@ -846,8 +846,15 @@ function FF_AiChat() {
                 });
 
                 if (!response.ok) {
+                    // A real server response (rate/token limit, auth, validation).
+                    // Mark it so the catch below renders it directly instead of
+                    // falling back to a duplicate POST — sendMessageFallback would
+                    // re-hit the same limit AND double-increment the rate counter.
+                    // S-AI-AUDIT-HIGH-FIX.
                     const err = await response.json().catch(() => ({}));
-                    throw new Error(err.message || 'Request failed');
+                    const e = new Error(err.error?.message || err.message || 'Request failed');
+                    e.serverError = true;
+                    throw e;
                 }
 
                 const reader = response.body.getReader();
@@ -911,9 +918,18 @@ function FF_AiChat() {
                     }
                 }
             } catch(e) {
-                console.error('Chat error:', e);
-                // WHY: Fall back to non-streaming if SSE fails
-                await this.sendMessageFallback(text);
+                if (e && e.serverError) {
+                    // A real 4xx/5xx from the stream endpoint — show it and do NOT
+                    // re-POST (that would re-hit the limit + double-count the rate
+                    // limiter). The fallback is only for genuine network/SSE faults.
+                    this.messages.push({ role: 'assistant', content: 'Error: ' + e.message });
+                    this.streamText = '';
+                } else {
+                    console.error('Chat error:', e);
+                    // WHY: Fall back to non-streaming only when SSE genuinely fails
+                    // (e.g. a proxy blocks event-streams or the connection drops).
+                    await this.sendMessageFallback(text);
+                }
             }
 
             this.sending = false;
@@ -937,7 +953,8 @@ function FF_AiChat() {
                     this.messages.push({ role: 'assistant', content: r.content });
                     this.loadSessions();
                 } else {
-                    this.messages.push({ role: 'assistant', content: 'Error: ' + (r.message || 'Something went wrong.') });
+                    // json_error puts the text at r.error.message, not r.message.
+                    this.messages.push({ role: 'assistant', content: 'Error: ' + (r.error?.message || r.message || 'Something went wrong.') });
                 }
             } catch(e) {
                 this.messages.push({ role: 'assistant', content: 'Failed to reach the AI service. Please try again.' });
@@ -961,7 +978,7 @@ function FF_AiChat() {
                     this.reportResult = r.report;
                     this.reportTokens = r.tokens_used || 0;
                 } else {
-                    this.reportResult = 'Error: ' + (r.message || 'Failed to generate report.');
+                    this.reportResult = 'Error: ' + (r.error?.message || r.message || 'Failed to generate report.');
                 }
             } catch(e) {
                 this.reportResult = 'Network error. Please try again.';
@@ -1002,7 +1019,7 @@ function FF_AiChat() {
                     this.docFileName = data.file_name || this.docFile.name;
                     this.docTokens = data.tokens_used || 0;
                 } else {
-                    this.docResult = 'Error: ' + (data.message || 'Analysis failed.');
+                    this.docResult = 'Error: ' + (data.error?.message || data.message || 'Analysis failed.');
                 }
             } catch(e) {
                 this.docResult = 'Network error. Please try again.';
@@ -1028,13 +1045,19 @@ function FF_AiChat() {
 
         async acknowledgeAlert(id) {
             try {
-                await FF_Api.post('<?= base_url('api/v1/ai/anomalies') ?>', {
+                const r = await FF_Api.post('<?= base_url('api/v1/ai/anomalies') ?>', {
                     action: 'acknowledge',
                     alert_id: id,
                 });
-                // Mark locally
-                const alert = this.alerts.find(a => a.id === id);
-                if (alert) alert.acknowledged_at = new Date().toISOString();
+                // FF_Api.post RESOLVES on a 4xx, so gate on !r.error (mirrors
+                // runAnomalyScan) — don't optimistically flip the UI when the
+                // acknowledge actually failed (403/429/5xx). S-AI-AUDIT-HIGH-FIX.
+                if (!r.error) {
+                    const alert = this.alerts.find(a => a.id === id);
+                    if (alert) alert.acknowledged_at = new Date().toISOString();
+                } else {
+                    FF_Toast?.error?.(r.error?.message || 'Could not acknowledge the alert.');
+                }
             } catch(e) { console.error('Failed to acknowledge alert:', e); }
         },
 

@@ -752,7 +752,7 @@ function FF_AiChatWidget() {
                         });
                     }
                 } else {
-                    this.widgetMessages.push({ role: 'assistant', content: 'Error: ' + (r.message || 'Something went wrong.') });
+                    this.widgetMessages.push({ role: 'assistant', content: 'Error: ' + (r.error?.message || r.message || 'Something went wrong.') });
                 }
             } catch(e) {
                 this.widgetMessages.push({ role: 'assistant', content: 'Failed to reach AI service.' });
@@ -815,9 +815,32 @@ function FF_AiChatWidget() {
             }
         },
 
-        cancelProposal(idx) {
+        async cancelProposal(idx) {
             const msg = this.widgetMessages[idx];
-            if (msg) msg.proposalState = 'cancelled';
+            if (!msg || msg.busy) return;
+            msg.busy = true;
+            try {
+                // Flip the pending row to 'cancelled' server-side so it can't be
+                // applied later via a crafted POST (the old client-only version
+                // left the row pending until lazy 30-min expiry). S-AI-AUDIT-HIGH-FIX.
+                const r = await FF_Api.post('<?= base_url('api/v1/ai/apply-change') ?>', {
+                    proposal_id: msg.proposal.id,
+                    action: 'cancel',
+                });
+                // Success — or already not-pending (expired/applied elsewhere): it
+                // can't be applied, so reflect cancelled either way.
+                if (r.success || r.error?.code === 'CONFLICT' || r.error?.code === 'EXPIRED') {
+                    msg.proposalState = 'cancelled';
+                } else {
+                    msg.proposalError = r.error?.message || 'Could not cancel the change.';
+                }
+            } catch (e) {
+                // Network failure — keep the card actionable rather than lying.
+                msg.proposalError = 'Failed to reach the server.';
+            } finally {
+                msg.busy = false;
+                this.$nextTick(() => this.scrollDown());
+            }
         },
 
         scrollDown() {
