@@ -56,6 +56,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Rates',
+        'icon'   => 'currency-dollar',
+        'url'    => '/rates',
+        'module' => 'rates',
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Invoices',
         'icon'   => 'banknotes',
         'url'    => '/invoices',
@@ -96,13 +103,6 @@ return [
         'icon'   => 'credit-card',
         'url'    => '/payments',
         'module' => 'payments',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Rates',
-        'icon'   => 'currency-dollar',
-        'url'    => '/rates',
-        'module' => 'rates',
         'badge'  => null,
     ],
     [
