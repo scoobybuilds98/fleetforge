@@ -69,7 +69,7 @@ if (!$updatedAt) json_error('MISSING_REQUIRED', 'updated_at is required for opti
 // CRA D14 spirit: dollars billed are frozen).
 $existing = db_row(
     "SELECT id, status, contract_number, company_name_snapshot, updated_at,
-            precharge_invoiced_at
+            precharge_invoiced_at, cartage_billed_at
      FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -245,6 +245,26 @@ if (array_key_exists('engine_hours_at_end', $body)) {
             $fields['engine_hours_at_end'] = 'Ending engine hours cannot be negative.';
         } else {
             $data['engine_hours_at_end'] = $d;
+        }
+    }
+}
+
+// S-LEASE-SERVICE-CHARGES: cartage is editable only until it bills. Once
+// cartage_billed_at is set the charge is locked (editing wouldn't re-bill it).
+if (array_key_exists('cartage_amount', $body)) {
+    if ($existing['cartage_billed_at'] !== null) {
+        $fields['cartage_amount'] = 'Cartage has already been billed and can no longer be changed.';
+    } else {
+        $raw = $body['cartage_amount'];
+        if ($raw === null || $raw === '') {
+            $data['cartage_amount'] = null;
+        } else {
+            $d = clean_decimal($raw);
+            if ($d === null || bccomp($d, '0', 2) < 0) {
+                $fields['cartage_amount'] = 'Cartage charge cannot be negative.';
+            } else {
+                $data['cartage_amount'] = $d;
+            }
         }
     }
 }

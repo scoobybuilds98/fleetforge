@@ -617,6 +617,27 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
                 </div>
+
+                <!-- S-LEASE-SERVICE-CHARGES: cartage (delivery) charge — editable until
+                     it bills. Once billed (cartage_billed_at set) the API rejects
+                     changes, so render it read-only then. -->
+                <div class="form-row-2">
+                    <div class="form-group">
+                        <label class="form-label"<?= empty($lease['cartage_billed_at']) ? ' for="cartage_amount"' : '' ?>>Cartage (delivery charge)</label>
+                        <?php if (empty($lease['cartage_billed_at'])): ?>
+                        <div class="input-group" style="max-width:220px;">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number" id="cartage_amount" class="form-control font-mono"
+                                   x-model="form.cartage_amount" step="0.01" min="0" placeholder="0.00">
+                        </div>
+                        <div class="form-hint">One-time delivery charge; bills on the first invoice. Leave blank if none.</div>
+                        <?php else: ?>
+                        <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;max-width:220px;"
+                             title="Already billed — cannot be changed">$<?= e(number_format((float)$lease['cartage_amount'], 2)) ?></div>
+                        <div class="form-hint">Already billed on the first invoice — locked.</div>
+                        <?php endif; ?>
+                    </div>
+                </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -702,6 +723,8 @@ function FF_EditLease() {
             gps_opt_in:              <?= $lease['gps_opt_in'] ? 'true' : 'false' ?>,
             gps_cost:                <?= json_encode($lease['gps_cost'] ?? '1.00') ?>,
             hourly_rate:             <?= json_encode($lease['hourly_rate'] ?? null) ?>,
+            // S-LEASE-SERVICE-CHARGES: cartage editable until billed (pending-only field).
+            cartage_amount:          <?= json_encode($lease['cartage_amount'] ?? '') ?>,
             // S-LEASE-HOURLY-BILLING: ending hours is pending-only (set at close on active).
             engine_hours_at_end:     <?= json_encode($lease['engine_hours_at_end'] ?? '') ?>,
             notes:                   <?= json_encode($lease['notes'] ?? '') ?>,

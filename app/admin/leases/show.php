@@ -419,16 +419,33 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                                         + ' → '
                                                         + (lease.engine_hours_at_end != null ? parseFloat(lease.engine_hours_at_end).toFixed(2) : '—') + ' hrs'"></td>
                                         </tr>
-                                        <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge -->
-                                        <tr x-show="parseFloat(lease.cartage_amount) > 0">
+                                        <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge — always shown; N/A when unused -->
+                                        <tr>
                                             <td class="text-secondary">Cartage</td>
                                             <td class="font-mono">
-                                                $<span x-text="parseFloat(lease.cartage_amount || 0).toFixed(2)"></span>
-                                                <span class="badge badge-no-dot"
-                                                      :class="lease.cartage_billed_at ? 'badge-success' : 'badge-neutral'"
-                                                      x-text="lease.cartage_billed_at ? 'billed' : 'pending first invoice'"
-                                                      style="margin-left:6px;"></span>
+                                                <span x-show="parseFloat(lease.cartage_amount) > 0">
+                                                    $<span x-text="parseFloat(lease.cartage_amount || 0).toFixed(2)"></span>
+                                                    <span class="badge badge-no-dot"
+                                                          :class="lease.cartage_billed_at ? 'badge-success' : 'badge-neutral'"
+                                                          x-text="lease.cartage_billed_at ? 'billed' : 'pending first invoice'"
+                                                          style="margin-left:6px;"></span>
+                                                </span>
+                                                <span x-show="!(parseFloat(lease.cartage_amount) > 0)" class="text-secondary">N/A</span>
                                             </td>
+                                        </tr>
+                                        <!-- S-LEASE-SERVICE-CHARGES: closeout charges — shown once the lease is closed.
+                                             Amounts come from the actually-billed invoice line items (lease.closeout_charges). -->
+                                        <tr x-show="lease.status === 'completed'">
+                                            <td class="text-secondary">Sweep out</td>
+                                            <td class="font-mono" x-text="(lease.closeout_charges && parseFloat(lease.closeout_charges.sweep) > 0) ? '$' + parseFloat(lease.closeout_charges.sweep).toFixed(2) : 'N/A'"></td>
+                                        </tr>
+                                        <tr x-show="lease.status === 'completed'">
+                                            <td class="text-secondary">Wash out</td>
+                                            <td class="font-mono" x-text="(lease.closeout_charges && parseFloat(lease.closeout_charges.wash) > 0) ? '$' + parseFloat(lease.closeout_charges.wash).toFixed(2) : 'N/A'"></td>
+                                        </tr>
+                                        <tr x-show="lease.status === 'completed'">
+                                            <td class="text-secondary">Fuel</td>
+                                            <td class="font-mono" x-text="(lease.closeout_charges && parseFloat(lease.closeout_charges.fuel) > 0) ? '$' + parseFloat(lease.closeout_charges.fuel).toFixed(2) : 'N/A'"></td>
                                         </tr>
                                         <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
                                              secondary muted with ≈ prefix, custom-conversion badge when factors

@@ -222,6 +222,24 @@ $latestPeriodInv = db_row(
 );
 $lease['latest_invoice_period_end'] = $latestPeriodInv['billing_period_end'] ?? null;
 
+// S-LEASE-SERVICE-CHARGES: actually-billed service charges, summed from this
+// lease's non-void invoice line items, so the Rates section can show cartage +
+// the closeout sweep/wash/fuel amounts (null = not charged → UI shows N/A).
+$svcRows = db_select(
+    "SELECT li.item_type, SUM(li.amount) AS total
+       FROM invoice_line_items li
+       JOIN invoices i ON i.id = li.invoice_id
+      WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+        AND li.item_type IN ('sweep','wash','fuel','cartage')
+      GROUP BY li.item_type",
+    [$id]
+);
+$closeout = ['sweep' => null, 'wash' => null, 'fuel' => null, 'cartage' => null];
+foreach ($svcRows as $r) {
+    $closeout[$r['item_type']] = (float) $r['total'];
+}
+$lease['closeout_charges'] = $closeout;
+
 // S-MILEAGE-3 D-F: prior_excess_km block retired 2026-05-13.
 // excess_distance_km column dropped in S-MILEAGE-2B C4 migration
 // 202605120907; the SUM query above would have failed silently

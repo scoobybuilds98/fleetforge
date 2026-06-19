@@ -101,6 +101,22 @@ try {
         . " fuel=" . ($fu['amount'] ?? 'none') . " base=" . ($base ? 'present' : 'absent')
         . " (expect 30/120/130 / no base)");
 
+    // ── T4: show-API closeout aggregation returns the billed amounts ──
+    // Mirrors the query in api/v1/leases/show.php that feeds lease.closeout_charges.
+    $agg = [];
+    foreach (db_select(
+        "SELECT li.item_type, SUM(li.amount) AS total
+           FROM invoice_line_items li
+           JOIN invoices i ON i.id = li.invoice_id
+          WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+            AND li.item_type IN ('sweep','wash','fuel','cartage')
+          GROUP BY li.item_type", [$ls]) as $r) {
+        $agg[$r['item_type']] = (string) $r['total'];
+    }
+    check('T4', 'show-API closeout aggregation',
+        ($agg['sweep'] ?? null) === '30.00' && ($agg['wash'] ?? null) === '120.00' && ($agg['fuel'] ?? null) === '130.00',
+        "agg sweep=" . ($agg['sweep'] ?? 'null') . " wash=" . ($agg['wash'] ?? 'null') . " fuel=" . ($agg['fuel'] ?? 'null') . " (expect 30/120/130)");
+
     db_execute("ROLLBACK");
 } catch (\Throwable $e) {
     db_execute("ROLLBACK");
