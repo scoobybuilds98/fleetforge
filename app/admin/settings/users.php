@@ -317,7 +317,7 @@ $statusBadge = [
                                 <input type="hidden" name="target_user_id" value="<?= e((string)$u['id']) ?>">
                                 <input type="hidden" name="new_status" value="suspended">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-warning);"
-                                        onclick="return (await FF_Confirm.ask('Suspend this user?'))">Suspend</button>
+                                        onclick="event.preventDefault();var f=this.form;FF_Confirm.ask('Suspend this user?').then(function(ok){if(ok)f.submit();});">Suspend</button>
                             </form>
                             <?php elseif (in_array($u['status'], ['inactive', 'suspended', 'locked'], true)): ?>
                             <form method="POST" style="display:inline;">
@@ -333,7 +333,7 @@ $statusBadge = [
                                 <input type="hidden" name="user_action" value="delete_user">
                                 <input type="hidden" name="target_user_id" value="<?= e((string)$u['id']) ?>">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-danger);"
-                                        onclick="return (await FF_Confirm.ask('Delete this user? This action is reversible (soft delete).'))">Delete</button>
+                                        onclick="event.preventDefault();var f=this.form;FF_Confirm.ask('Delete this user? This action is reversible (soft delete).').then(function(ok){if(ok)f.submit();});">Delete</button>
                             </form>
                         </div>
                         <?php endif; ?>

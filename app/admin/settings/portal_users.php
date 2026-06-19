@@ -393,7 +393,7 @@ $statusBadge = [
                                 <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
                                 <input type="hidden" name="portal_action" value="reset_portal_password">
                                 <input type="hidden" name="target_pu_id" value="<?= e((string)$pu['id']) ?>">
-                                <button type="submit" class="btn btn-ghost btn-xs" onclick="return (await FF_Confirm.ask('Send password reset link to <?= e($pu['email']) ?>?'))">Reset PW</button>
+                                <button type="submit" class="btn btn-ghost btn-xs" onclick="event.preventDefault();var f=this.form;FF_Confirm.ask('Send password reset link to <?= e($pu['email']) ?>?').then(function(ok){if(ok)f.submit();});">Reset PW</button>
                             </form>
 
                             <!-- Status toggle -->
@@ -404,7 +404,7 @@ $statusBadge = [
                                 <input type="hidden" name="target_pu_id" value="<?= e((string)$pu['id']) ?>">
                                 <input type="hidden" name="new_status" value="inactive">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-warning);"
-                                        onclick="return (await FF_Confirm.ask('Deactivate this portal user?'))">Deactivate</button>
+                                        onclick="event.preventDefault();var f=this.form;FF_Confirm.ask('Deactivate this portal user?').then(function(ok){if(ok)f.submit();});">Deactivate</button>
                             </form>
                             <?php elseif ($pu['status'] === 'inactive'): ?>
                             <form method="POST" style="display:inline;">
@@ -423,7 +423,7 @@ $statusBadge = [
                                 <input type="hidden" name="portal_action" value="delete_portal_user">
                                 <input type="hidden" name="target_pu_id" value="<?= e((string)$pu['id']) ?>">
                                 <button type="submit" class="btn btn-ghost btn-xs" style="color:var(--color-danger);"
-                                        onclick="return (await FF_Confirm.ask('Permanently delete this portal user? This cannot be undone.'))">Delete</button>
+                                        onclick="event.preventDefault();var f=this.form;FF_Confirm.ask('Permanently delete this portal user? This cannot be undone.').then(function(ok){if(ok)f.submit();});">Delete</button>
                             </form>
                             <?php endif; ?>
                         </div>
