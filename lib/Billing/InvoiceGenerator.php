@@ -990,20 +990,37 @@ class InvoiceGenerator
             }
 
             // --- Step 4b: Cartage — one-time delivery charge (S-LEASE-SERVICE-CHARGES) ---
-            // Entered at lease creation; bills exactly ONCE, on the first invoice.
-            // FOR UPDATE re-read of cartage_billed_at (D20 serialization point) so
-            // an advance batch / concurrent first invoice can't double-bill it.
-            // Excluded from mileage_only/adjustment/credit_note invoices.
+            // Entered at lease creation; bills exactly ONCE — on the first invoice
+            // that actually STICKS. Excluded from mileage_only/adjustment/credit_note.
+            //
+            // LIVE-AWARE guard (S-ODO/charges fix): emit only when NO non-void invoice
+            // already carries a cartage line — NOT a one-shot `cartage_billed_at` flag.
+            // The flag left cartage stranded when its first invoice was voided +
+            // reissued at close (overshoot reconciliation: adv_void_invoice() then a
+            // fresh createFromLease) — the flag stayed set so cartage never re-billed
+            // and the customer was silently undercharged (dev e2e: lease returned
+            // within its first billing period). The FOR UPDATE on the lease row still
+            // serializes concurrent generation (advance batch / parallel request) so a
+            // live cartage line from an in-flight same-txn segment is seen before this
+            // one emits — no double-bill. cartage_billed_at is still stamped (drives the
+            // show-page badge + the edit-lock), but it no longer gates the emit.
             if (bccomp((string) ($lease['cartage_amount'] ?? '0'), '0', 2) > 0
                 && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
             ) {
                 $cartLocked = db_row(
-                    "SELECT cartage_amount, cartage_billed_at FROM leases
+                    "SELECT cartage_amount FROM leases
                        WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
                     [$leaseId]
                 );
+                $cartLive = db_row(
+                    "SELECT 1 FROM invoice_line_items li
+                       JOIN invoices i ON i.id = li.invoice_id
+                      WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+                        AND li.item_type = 'cartage' LIMIT 1",
+                    [$leaseId]
+                );
                 if ($cartLocked
-                    && $cartLocked['cartage_billed_at'] === null
+                    && $cartLive === null
                     && bccomp((string) ($cartLocked['cartage_amount'] ?? '0'), '0', 2) > 0
                 ) {
                     $cartAmt = (string) $cartLocked['cartage_amount'];

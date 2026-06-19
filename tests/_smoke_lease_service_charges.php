@@ -69,8 +69,19 @@ try {
     $inv2 = $gen->createFromLease(['lease_id'=>$lc,'period_start'=>'2026-06-01','period_end'=>'2026-06-30',
         'billing_type'=>'full_month','invoice_type'=>'regular','created_by'=>$user]);
     $c2 = $lineOf($inv2['invoice_id'], 'cartage');
-    check('T2', 'cartage NOT re-billed on 2nd invoice', $c2 === null,
+    check('T2', 'cartage NOT re-billed while a live cartage line exists', $c2 === null,
         "second_invoice_cartage=" . ($c2 ? 'present' : 'absent') . " (expect absent)");
+
+    // ── T2b: cartage RE-bills after its carrier invoice is VOIDED (live-aware guard) ──
+    // Reproduces the close overshoot reconciliation (void the first invoice + reissue):
+    // with the only cartage line now on a void invoice, the next invoice must re-emit it
+    // (the old cartage_billed_at flag left it stranded → customer silently undercharged).
+    db_execute("UPDATE invoices SET status='void' WHERE id = ?", [$inv1['invoice_id']]);
+    $inv3 = $gen->createFromLease(['lease_id'=>$lc,'period_start'=>'2026-07-01','period_end'=>'2026-07-31',
+        'billing_type'=>'full_month','invoice_type'=>'regular','created_by'=>$user]);
+    $c3 = $lineOf($inv3['invoice_id'], 'cartage');
+    check('T2b', 'cartage re-bills after its carrier is voided', $c3 !== null && $c3['amount'] === '175.00',
+        "reissue_cartage=" . ($c3['amount'] ?? 'none') . " (expect 175.00 — re-billed onto a live invoice)");
 
     // ── T3: sweep+wash+fuel closeout lines on an adjustment invoice ──
     // Mirror close.php's builder: sweep flat, wash flat, fuel = gallons × rate.
