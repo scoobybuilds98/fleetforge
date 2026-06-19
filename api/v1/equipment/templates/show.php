@@ -44,7 +44,7 @@ if (!$row) {
     json_error('NOT_FOUND', 'Equipment template not found.', 404);
 }
 
-json_success([
+$template = [
     'id'                               => (int) $row['id'],
     'name'                             => $row['name'],
     'slug'                             => $row['slug'],
@@ -79,4 +79,15 @@ json_success([
     'unit_count'                       => (int) $row['unit_count'],
     'created_at'                       => $row['created_at'],
     'updated_at'                       => $row['updated_at'],
-]);
+];
+
+// E14: strip the template default rate-card fields for roles without
+// can_view_financials() (dispatchers don't manage rates). Specs + intervals stay.
+if (!can_view_financials()) {
+    $template = redact_keys($template, [
+        'default_daily_rate', 'default_weekly_rate',
+        'default_monthly_rate', 'default_mileage_rate',
+    ]);
+}
+
+json_success($template);

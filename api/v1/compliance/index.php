@@ -68,21 +68,30 @@ if ($status = clean_string($_GET['status'] ?? null)) {
 // Filter: expired_only — units with at least one doc past expiry date
 // WHY: separate from window — "Expired Documents" KPI tile drills down to only
 //      past-due units, not "expiring soon" ones.
+// E04: use company-local "today" (matching kpis.php + reports/compliance.php),
+// NOT CURDATE() — the DB connection is pinned to UTC (+00:00), so CURDATE() rolls
+// to tomorrow during the Vancouver evening and the grid then disagrees with the
+// KPI tiles / CSV / report on what is expired.
+$today = date('Y-m-d');
 if (clean_string($_GET['expired_only'] ?? '') === '1') {
-    $where[] = "(
-        (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry < CURDATE())
-        OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry < CURDATE())
+    $where[]  = "(
+        (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry < ?)
+        OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry < ?)
     )";
+    $params[] = $today;
+    $params[] = $today;
 }
 
-// Filter: window — units with CVI or Registration expiry <= CURDATE + N days
+// Filter: window — units with CVI or Registration expiry <= today + N days
 $window = clean_int($_GET['window'] ?? 0) ?? 0;
 if ($window > 0) {
     $where[]  = "(
-        (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
-        OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
+        (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry <= DATE_ADD(?, INTERVAL ? DAY))
+        OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= DATE_ADD(?, INTERVAL ? DAY))
     )";
+    $params[] = $today;
     $params[] = $window;
+    $params[] = $today;
     $params[] = $window;
 }
 

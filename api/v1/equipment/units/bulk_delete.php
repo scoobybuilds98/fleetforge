@@ -101,10 +101,21 @@ foreach ($cleanIds as $id) {
     try {
         db_transaction(function () use ($id, $userId, $userName, $ipAddress, $unit): void {
             // FIX #32: record who deleted the unit
-            db_execute(
-                "UPDATE equipment_units SET deleted_at = NOW(), updated_by = ? WHERE id = ?",
+            // E12: gate on the unit still being deletable (status was read unlocked
+            // above) so a concurrent lease activation / reservation can't be soft-
+            // deleted here and orphan the live lease/reservation. 0 rows = state
+            // changed → abort this id (the outer catch records it as a skip).
+            $affected = db_execute(
+                "UPDATE equipment_units
+                    SET deleted_at = NOW(), updated_by = ?
+                  WHERE id = ?
+                    AND deleted_at IS NULL
+                    AND status NOT IN ('on_lease', 'reserved')",
                 [$userId, $id]
             );
+            if ($affected === 0) {
+                throw new \RuntimeException('status changed (now on lease/reserved, or already deleted)');
+            }
 
             // FIX #33: status log entry for full deletion history
             db_insert('equipment_status_log', [

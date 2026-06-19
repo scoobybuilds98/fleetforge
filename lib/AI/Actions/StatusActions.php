@@ -63,6 +63,24 @@ class StatusActions
                     "Cannot change unit {$unit['unit_number']} status from '{$oldStatus}' to '{$newStatus}'.", 409);
             }
 
+            // E13: leaving 'on_lease' manually must not orphan a live lease. The
+            // legitimate way a unit leaves on_lease is closing its lease (which
+            // flips the unit to 'available' itself). If an active lease still
+            // references this unit, block the manual transition so the unit can't
+            // be moved to available/maintenance — and re-leased — while on lease.
+            if ($oldStatus === 'on_lease') {
+                $activeLease = db_row(
+                    "SELECT id, contract_number FROM leases
+                      WHERE equipment_unit_id = ? AND status = 'active' AND deleted_at IS NULL
+                      LIMIT 1",
+                    [$id]
+                );
+                if ($activeLease) {
+                    throw new ActionException('UNIT_ON_ACTIVE_LEASE',
+                        "Cannot change unit {$unit['unit_number']} off 'on_lease': lease {$activeLease['contract_number']} is still active. Close the lease first.", 409);
+                }
+            }
+
             if ($newStatus === 'decommissioned') {
                 db_execute(
                     "UPDATE equipment_units

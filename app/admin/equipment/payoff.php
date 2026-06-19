@@ -116,13 +116,18 @@ if ($asset) {
         $totalFinancingPaid = bcmul($n($asset['financing_monthly_payment']), (string) $monthsSince, 2);
     }
 
+    // E15: exclude DRAFT (unsent) invoices — they aren't realized revenue and
+    // diverge from the send-only total_revenue counter + the CAD-canonical policy.
+    // E16: convert USD invoices via exchange_rate_to_cad before summing.
     $revRow = db_row(
-        "SELECT COALESCE(SUM(ili.amount),0) AS t
+        "SELECT COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                                  THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                                  ELSE ili.amount END), 0) AS t
            FROM invoice_line_items ili
            JOIN invoices i ON i.id = ili.invoice_id
            JOIN leases  l ON l.id = i.lease_id
           WHERE l.equipment_unit_id = ? AND l.deleted_at IS NULL
-            AND i.deleted_at IS NULL AND i.status NOT IN ('void','written_off')
+            AND i.deleted_at IS NULL AND i.status NOT IN ('void','written_off','draft')
             AND ili.is_credit = 0", [$eqUnitId]);
     $totalRevenue = $n($revRow['t']);
 
@@ -157,11 +162,13 @@ if ($asset) {
 $revenueByLease = db_select(
     "SELECT l.id, l.contract_number, l.start_date, l.end_date, l.status,
             c.company_name AS customer_name,
-            COALESCE(SUM(ili.amount), 0) AS revenue
+            COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                              THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                              ELSE ili.amount END), 0) AS revenue
        FROM leases l
        JOIN customers c ON c.id = l.customer_id
        LEFT JOIN invoices i   ON i.lease_id = l.id AND i.deleted_at IS NULL
-                              AND i.status NOT IN ('void','written_off')
+                              AND i.status NOT IN ('void','written_off','draft')
        LEFT JOIN invoice_line_items ili ON ili.invoice_id = i.id AND ili.is_credit = 0
       WHERE l.equipment_unit_id = ? AND l.deleted_at IS NULL
       GROUP BY l.id
@@ -174,12 +181,14 @@ $revenueByLease = db_select(
 $revByMonth = [];
 foreach (db_select(
     "SELECT DATE_FORMAT(i.invoice_date,'%Y-%m') AS ym,
-            COALESCE(SUM(ili.amount),0) AS rev
+            COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                              THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                              ELSE ili.amount END), 0) AS rev
        FROM invoice_line_items ili
        JOIN invoices i ON i.id = ili.invoice_id
        JOIN leases   l ON l.id = i.lease_id
       WHERE l.equipment_unit_id = ? AND l.deleted_at IS NULL
-        AND i.deleted_at IS NULL AND i.status NOT IN ('void','written_off')
+        AND i.deleted_at IS NULL AND i.status NOT IN ('void','written_off','draft')
         AND ili.is_credit = 0
         AND i.invoice_date >= (CURDATE() - INTERVAL 24 MONTH)
       GROUP BY ym ORDER BY ym DESC", [$unitId]

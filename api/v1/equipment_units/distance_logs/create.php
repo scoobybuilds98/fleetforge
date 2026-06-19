@@ -69,8 +69,13 @@ if ($periodEnd === '') {
 }
 if ($distance === null || $distance === '') {
     $errors['distance'] = 'distance is required and must not be null.';
-} elseif (!is_numeric($distance) || bccomp($distance, '0', 2) < 0) {
-    $errors['distance'] = 'distance must be a non-negative decimal string.';
+} elseif (!preg_match('/^\d+(\.\d+)?$/', (string) $distance)) {
+    // E47: validate with a strict non-negative-decimal regex BEFORE any bcmath.
+    // is_numeric() accepts scientific notation ("1e5"), which bccomp() then rejects
+    // with a ValueError → uncaught 500. The regex confines $distance to a plain
+    // non-negative decimal (also rejects negatives/signs), so downstream bcmath
+    // is always safe and a bad value returns a clean 422.
+    $errors['distance'] = 'distance must be a non-negative decimal number (e.g. 123.45).';
 }
 if (!$unit) {
     $errors['unit'] = "unit must be 'km' or 'miles'.";

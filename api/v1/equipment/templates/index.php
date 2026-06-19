@@ -138,4 +138,15 @@ foreach ($rows as $row) {
     ];
 }
 
+// E14: template default rate-card fields are financial config a dispatcher does
+// not manage (denied the rates module + financials). Strip them for roles without
+// can_view_financials(); the operational template fields (name/category/specs/
+// unit_count) stay. Mirrors the customers/leases/invoices redaction.
+if (!can_view_financials()) {
+    $items = redact_rows($items, [
+        'default_daily_rate', 'default_weekly_rate',
+        'default_monthly_rate', 'default_mileage_rate',
+    ]);
+}
+
 json_paginated($items, $total, $page, $perPage);

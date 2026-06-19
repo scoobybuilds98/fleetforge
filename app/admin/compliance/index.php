@@ -738,6 +738,17 @@ function FF_Compliance() {
                     updated_at:  this.modal.updatedAt,
                 });
 
+                // E02: FF_Api.post RESOLVES (does not reject) on HTTP 4xx, so a
+                // rejected save (422 impossible date, 404 unit deleted by another
+                // session) would otherwise fall through and NULL the grid cells +
+                // close the modal as if it saved — silent data loss on a regulatory
+                // screen. Gate on resp.success: keep the modal open, show the error,
+                // and leave the displayed values untouched.
+                if (!resp || !resp.success) {
+                    this.modal.error = (resp && resp.error && resp.error.message) || 'Failed to save. Please try again.';
+                    return;
+                }
+
                 // Update row in-place so grid reflects changes immediately
                 const idx = this.rows.findIndex(r => r.id === this.modal.unitId);
                 if (idx !== -1) {

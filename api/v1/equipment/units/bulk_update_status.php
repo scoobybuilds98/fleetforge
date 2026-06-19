@@ -155,6 +155,27 @@ foreach ($cleanIds as $id) {
                 return;
             }
 
+            // E13: leaving 'on_lease' must not orphan a live lease — a unit
+            // returned to available/maintenance while its lease is still active
+            // can be double-booked. Block if an active lease still references it;
+            // the lease close is the legitimate path off on_lease.
+            if ($oldStatus === 'on_lease') {
+                $activeLease = db_row(
+                    "SELECT contract_number FROM leases
+                      WHERE equipment_unit_id = ? AND status = 'active' AND deleted_at IS NULL
+                      LIMIT 1",
+                    [$id]
+                );
+                if ($activeLease) {
+                    $skipped++;
+                    $errors[] = [
+                        'id'     => $id,
+                        'reason' => "Unit {$unit['unit_number']}: lease {$activeLease['contract_number']} is still active — close the lease before changing status.",
+                    ];
+                    return;
+                }
+            }
+
             // 3. Update unit status
             db_execute(
                 "UPDATE equipment_units

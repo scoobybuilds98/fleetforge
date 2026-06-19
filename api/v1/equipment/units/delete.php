@@ -65,12 +65,23 @@ if ($unit['status'] === 'reserved') {
 
 $userId = current_user_id();
 
-db_transaction(function () use ($id, $userId, $unit): void {
-    // FIX #32: include updated_by so the audit trail knows who deleted it
-    db_execute(
-        "UPDATE equipment_units SET deleted_at = NOW(), updated_by = ? WHERE id = ?",
+$deleted = db_transaction(function () use ($id, $userId, $unit): bool {
+    // E11: gate the soft-delete on the unit STILL being deletable. status +
+    // deleted_at were read unlocked above, so a concurrent lease activation or
+    // reservation could have flipped this unit to on_lease/reserved since the
+    // guard — an unconditional UPDATE would soft-delete it anyway and orphan the
+    // live lease/reservation. 0 rows affected = state changed → abort the delete.
+    $affected = db_execute(
+        "UPDATE equipment_units
+            SET deleted_at = NOW(), updated_by = ?
+          WHERE id = ?
+            AND deleted_at IS NULL
+            AND status NOT IN ('on_lease', 'reserved')",
         [$userId, $id]
     );
+    if ($affected === 0) {
+        return false;
+    }
 
     // FIX #33: write a status log entry on deletion for full history
     db_insert('equipment_status_log', [
@@ -94,7 +105,14 @@ db_transaction(function () use ($id, $userId, $unit): void {
         'new_values'   => null,
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
+
+    return true;
 });
+
+if (!$deleted) {
+    json_error('UNIT_STATE_CHANGED',
+        "Cannot delete unit {$unit['unit_number']}: its status changed (it is now on lease or reserved, or was already deleted). Refresh and try again.", 409);
+}
 
 // D-SAMSARA-DELETE-1: unit delete does NOT propagate to Samsara (use samsara/unlink.php to intentionally decouple).
 
