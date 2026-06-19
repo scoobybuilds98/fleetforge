@@ -91,8 +91,14 @@ foreach ($ids as $id) {
     // Each delete is its own transaction; failures are isolated.
     try {
         db_transaction(function () use ($id, $invoice, $now, $userId, $userName, $ipAddress) {
-            // Soft-delete the invoice row.
-            db_update('invoices', ['deleted_at' => $now], 'id = ?', [$id]);
+            // Soft-delete the invoice row. I06: gate on deleted_at IS NULL so a
+            // concurrent/overlapping bulk-delete cannot delete the same row twice
+            // and double-reverse the Path-B counters below. 0 rows = already
+            // deleted → abort this id's transaction.
+            $affected = db_update('invoices', ['deleted_at' => $now], 'id = ? AND deleted_at IS NULL', [$id]);
+            if ($affected === 0) {
+                throw new \RuntimeException('Invoice already deleted (modified concurrently).');
+            }
 
             // ── Path B counter logic (S-FIX-2) ──────────────────────────────
             // Mirrors the exact branching in invoices/delete.php; comments there

@@ -240,7 +240,8 @@ class CreditMemoPusher
                 (string) ($mapping['qbo_sync_token'] ?? '0')
             );
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // readonly PROPERTY, not a method — method_exists() is always false.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffCreditNoteId, $cn, 'Void failed: ' . $e->getMessage(), $httpCode);
             return [
                 'success' => false,
@@ -413,7 +414,8 @@ class CreditMemoPusher
                 $response = $client->createEntity('creditmemo', $payload);
             }
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // readonly PROPERTY, not a method — method_exists() is always false.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffCreditNoteId, $cn, $e->getMessage(), $httpCode);
             return [
                 'success'   => false,

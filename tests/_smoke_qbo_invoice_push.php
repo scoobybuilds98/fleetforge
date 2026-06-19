@@ -1963,28 +1963,30 @@ if ($src === false) {
 if (empty($c60Errors)) { echo "PASS C60 InvoicePusher has pushVoid + pushVoidImpl + recordVoid + voidEntity call (S-QBO-12)\n"; $pass++; }
 else { echo "FAIL C60 " . implode('; ', $c60Errors) . "\n"; $failures[] = 'C60'; }
 
-// ── C61: void.php enqueues 'void' operation after db_transaction ──
-// Verifies the FF-side trigger wiring — api/v1/invoices/void.php must
-// fire InvoiceEnqueuer::enqueue(..., 'void') AFTER db_transaction so
-// the void state is durably persisted before QBO sync attempts.
+// ── C61: voidInvoice enqueues 'void' operation after db_transaction ──
+// The void trigger wiring moved out of api/v1/invoices/void.php (which now just
+// delegates) into FinancialActions::voidInvoice. Verify the service fires
+// InvoiceEnqueuer::enqueue($id, 'void') AFTER its db_transaction closure so the
+// void state is durably persisted before the QBO sync attempt.
 $total++;
 $c61Errors = [];
-$voidSrc = file_get_contents(__DIR__ . '/../api/v1/invoices/void.php');
-if ($voidSrc === false) {
-    $c61Errors[] = "could not read api/v1/invoices/void.php";
+$faSrc = file_get_contents(__DIR__ . '/../lib/AI/Actions/FinancialActions.php');
+if ($faSrc === false) {
+    $c61Errors[] = "could not read lib/AI/Actions/FinancialActions.php";
 } else {
-    if (!str_contains($voidSrc, "InvoiceEnqueuer::enqueue((int) \$id, 'void')")) {
-        $c61Errors[] = "void.php should call InvoiceEnqueuer::enqueue((int) \$id, 'void')";
+    if (!str_contains($faSrc, "InvoiceEnqueuer::enqueue(\$id, 'void')")) {
+        $c61Errors[] = "FinancialActions::voidInvoice should call InvoiceEnqueuer::enqueue(\$id, 'void')";
     }
-    // Verify enqueue is AFTER the db_transaction closure (not inside it).
-    // db_transaction closes with `});` followed by enqueue call + json_success.
-    $enqueuePos = strpos($voidSrc, "InvoiceEnqueuer::enqueue");
-    $txnEndPos  = strrpos($voidSrc, "});");
-    if ($enqueuePos !== false && $txnEndPos !== false && $enqueuePos < $txnEndPos) {
-        $c61Errors[] = "InvoiceEnqueuer::enqueue should fire AFTER the db_transaction(...) closure, not inside it (pattern matches send.php)";
+    // The enqueue must sit AFTER the void db_transaction(...) closure (best-effort,
+    // post-commit). The void closure opens at the first `db_transaction(function`
+    // and the enqueue follows its closing `});`.
+    $txnPos     = strpos($faSrc, 'db_transaction(function');
+    $enqueuePos = strpos($faSrc, "InvoiceEnqueuer::enqueue(\$id, 'void')");
+    if ($txnPos !== false && $enqueuePos !== false && $enqueuePos < $txnPos) {
+        $c61Errors[] = "InvoiceEnqueuer::enqueue('void') should fire AFTER the db_transaction(...) closure, not before it";
     }
 }
-if (empty($c61Errors)) { echo "PASS C61 api/v1/invoices/void.php enqueues 'void' after db_transaction commits (S-QBO-12)\n"; $pass++; }
+if (empty($c61Errors)) { echo "PASS C61 FinancialActions::voidInvoice enqueues 'void' after db_transaction commits (S-QBO-12)\n"; $pass++; }
 else { echo "FAIL C61 " . implode('; ', $c61Errors) . "\n"; $failures[] = 'C61'; }
 
 } finally {

@@ -151,4 +151,15 @@ $rows = db_select(
     $params
 );
 
+// I03: dispatchers (invoices:view, payments:NONE) get the operational list —
+// invoice_number, status, dates, customer/unit — but NOT amounts. config/
+// permissions.php documents this "status + dates only — no amounts (enforced in
+// API)" contract; it was never implemented. Mirrors customers/leases redaction.
+if (!can_view_financials()) {
+    $rows = redact_rows($rows, [
+        'subtotal', 'discount_amount', 'subtotal_after_discount', 'tax_total',
+        'total_amount', 'amount_paid', 'credits_applied', 'balance_due',
+    ]);
+}
+
 json_paginated($rows, $total, $page, $perPage);

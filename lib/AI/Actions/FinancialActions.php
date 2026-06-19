@@ -58,14 +58,24 @@ class FinancialActions
             $decOb      = ($preVoidStatus === 'draft') ? '0.00' : $balanceDue;
             $decRevenue = ($preVoidStatus === 'sent') ? $totalAmount : '0.00';
 
-            db_update('invoices', [
+            // I05: self-guarding status flip. The status was read OUTSIDE this
+            // transaction with no row lock, so two concurrent voids could both pass
+            // the VOIDABLE check above and both run the counter decrements below,
+            // double-reversing Path-B OB/revenue. Gate the UPDATE on the exact
+            // pre-void status; a concurrent void serializes on the row lock, then
+            // matches 0 rows and we abort BEFORE any counter is touched.
+            $affected = db_update('invoices', [
                 'status'      => 'void',
                 'balance_due' => '0.00',
                 'voided_date' => date('Y-m-d'),
                 'void_reason' => $voidReason,
                 'voided_by'   => $userId,
                 'updated_by'  => $userId,
-            ], 'id = ?', [$id]);
+            ], 'id = ? AND status = ?', [$id, $preVoidStatus]);
+            if ($affected === 0) {
+                throw new ActionException('INVALID_TRANSITION',
+                    "Invoice {$invoice['invoice_number']} was modified concurrently (no longer '{$preVoidStatus}'). Refresh and retry.", 409);
+            }
 
             if ($invoice['lease_id']) {
                 db_execute(
@@ -204,7 +214,13 @@ class FinancialActions
                 }
             }
 
-            db_update('invoices', [
+            // I05: self-guarding draft→sent flip. status was read OUTSIDE this
+            // transaction with no row lock, so two concurrent sends could both pass
+            // the draft check above and both run the Path-B counter increments
+            // below (double OB/revenue). Gate the UPDATE on status='draft'; a
+            // concurrent send serializes on the row lock, matches 0 rows, and we
+            // abort BEFORE any counter is touched.
+            $affected = db_update('invoices', [
                 'status'          => 'sent',
                 'sent_date'       => date('Y-m-d'),
                 'sent_at'         => $now,
@@ -212,7 +228,11 @@ class FinancialActions
                 'sent_to_email'   => $sentToEmail,
                 'delivery_method' => 'email',
                 'updated_by'      => $userId,
-            ], 'id = ?', [$id]);
+            ], 'id = ? AND status = ?', [$id, 'draft']);
+            if ($affected === 0) {
+                throw new ActionException('INVALID_TRANSITION',
+                    "Invoice {$invoice['invoice_number']} was modified concurrently (no longer draft). Refresh and retry.", 409);
+            }
 
             $balanceDue  = (string) $invoice['balance_due'];
             $totalAmount = (string) $invoice['total_amount'];

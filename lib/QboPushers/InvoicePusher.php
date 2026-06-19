@@ -322,7 +322,9 @@ class InvoicePusher
                 $response = $client->createEntity('invoice', $qboPayload);
             }
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // QuickBooksException exposes httpStatus/errorCode as readonly PROPERTIES,
+            // not methods — method_exists() is always false (drops the real status/code).
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffInvoiceId, $invoice, $e->getMessage(), $httpCode);
             return [
                 'success'    => false,
@@ -330,7 +332,7 @@ class InvoicePusher
                 'outcome'    => 'failed',
                 'error'      => $e->getMessage(),
                 'http_code'  => $httpCode,
-                'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
+                'error_code' => $e->errorCode ?? null,
             ] + self::RESULT_BASE;
         }
 
@@ -815,7 +817,9 @@ class InvoicePusher
                 (string) ($mapping['qbo_sync_token'] ?? '0')
             );
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // QuickBooksException exposes httpStatus/errorCode as readonly PROPERTIES,
+            // not methods — method_exists() is always false (drops the real status/code).
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffInvoiceId, $invoice, "Void failed: " . $e->getMessage(), $httpCode);
             return [
                 'success'    => false,
@@ -823,7 +827,7 @@ class InvoicePusher
                 'outcome'    => 'failed',
                 'error'      => "Void failed: " . $e->getMessage(),
                 'http_code'  => $httpCode,
-                'error_code' => method_exists($e, 'getErrorCode') ? $e->getErrorCode() : null,
+                'error_code' => $e->errorCode ?? null,
             ] + self::RESULT_BASE;
         }
 

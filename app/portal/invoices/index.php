@@ -19,7 +19,16 @@ if (!empty($_GET['ajax'])) {
 
     $tab = clean_string($_GET['tab'] ?? 'outstanding');
 
-    $where  = ['i.customer_id = ?', 'i.deleted_at IS NULL'];
+    // I02: customers never see void or regular-draft invoices; advance drafts are
+    // intentionally disclosed (pre-paid future periods). Base predicate so the
+    // "All" tab ROWS match the 'all' COUNT below (previously the rows had no
+    // status filter and leaked drafts + voids).
+    $where  = [
+        'i.customer_id = ?',
+        'i.deleted_at IS NULL',
+        "i.status <> 'void'",
+        "(i.status <> 'draft' OR i.generation_source = 'advance')",
+    ];
     $params = [$cid];
 
     if ($tab === 'outstanding') {
@@ -57,7 +66,7 @@ if (!empty($_GET['ajax'])) {
         'outstanding' => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status IN ('sent','partially_paid','overdue') AND deleted_at IS NULL", [$cid]),
         'paid'        => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status = 'paid' AND deleted_at IS NULL", [$cid]),
         // advance drafts are visible in the All tab so include them in the count
-        'all'         => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL AND (status != 'draft' OR generation_source = 'advance')", [$cid]),
+        'all'         => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL AND status <> 'void' AND (status != 'draft' OR generation_source = 'advance')", [$cid]),
     ];
 
     echo json_encode(['success' => true, 'data' => ['invoices' => $rows, 'counts' => $counts]]);

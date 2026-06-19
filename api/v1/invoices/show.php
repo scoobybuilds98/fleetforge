@@ -142,4 +142,24 @@ unset($item);
 
 $invoice['line_items'] = $lineItems;
 
+// I03: dispatchers (invoices:view, payments:NONE) see the operational invoice —
+// number, status, dates, customer/unit, line-item descriptions — but NOT dollar
+// amounts (the documented "status + dates only — no amounts" contract). Strip the
+// invoice-level money fields and the per-line dollar columns; keep descriptions,
+// item types, periods, and tax/discount RATES (not amounts) for context.
+if (!can_view_financials()) {
+    $invoice = redact_keys($invoice, [
+        'subtotal', 'discount_value', 'discount_amount', 'subtotal_after_discount',
+        'tax_gst_amount', 'tax_pst_amount', 'tax_hst_amount', 'tax_total',
+        'total_amount', 'amount_paid', 'credits_applied', 'balance_due',
+        'late_fee_amount',
+    ]);
+    if (isset($invoice['line_items']) && is_array($invoice['line_items'])) {
+        $invoice['line_items'] = redact_rows($invoice['line_items'], [
+            'unit_price', 'amount',
+            'tax_gst_amount', 'tax_pst_amount', 'tax_hst_amount', 'mileage_rate',
+        ]);
+    }
+}
+
 json_success($invoice);

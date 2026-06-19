@@ -284,7 +284,15 @@ function createCreditNote() {
 
             FF_Api.post('<?= base_url('api/v1/credit_notes/create') ?>', payload)
                 .then(data => {
-                    if (data.success && this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT (only on confirmed success)
+                    // I09: gate the whole success path on data.success — FF_Api.post
+                    // resolves on 422, so this previously showed the success overlay
+                    // and redirected to ?id=undefined on a failed create.
+                    if (!data || !data.success) {
+                        this.error = (data && data.error && data.error.message) || 'Failed to create credit note.';
+                        this.submitting = false;
+                        return;
+                    }
+                    if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT (only on confirmed success)
                     // Show success overlay then redirect to the new credit note's detail page
                     this.showSuccessOverlay = true;
                     const _newId = data.data.id;

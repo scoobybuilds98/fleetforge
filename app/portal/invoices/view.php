@@ -24,7 +24,9 @@ $inv = db_row(
     "SELECT i.*, l.contract_number
      FROM invoices i
      LEFT JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
-     WHERE i.id = ? AND i.customer_id = ? AND i.deleted_at IS NULL",
+     WHERE i.id = ? AND i.customer_id = ? AND i.deleted_at IS NULL
+       AND i.status <> 'void'
+       AND (i.status <> 'draft' OR i.generation_source = 'advance')",
     [$invoiceId, $cid]
 );
 
@@ -138,10 +140,22 @@ function payOnlineButton(invoiceId, enabled) {
                 const r = await FF_Api.post('<?= e(base_url('api/v1/portal/invoices/initiate_qbo_payment')) ?>', {
                     invoice_id: invoiceId,
                 });
-                if (r.success) {
-                    window.location.href = r.url;
+                // I10: json_success double-nests — the body is
+                //   { success:true, data:{ success:<bool>, url, status, error } }
+                // and json_error (422) resolves (FF_Api.post does not reject) as
+                //   { success:false, error:{ message } }.
+                // The old code read r.url/r.error off the OUTER envelope, so it
+                // always navigated to `undefined` and never surfaced the error.
+                if (r && r.success && r.data) {
+                    if (r.data.success && r.data.url) {
+                        window.location.href = r.data.url;
+                        return;
+                    }
+                    this.error = r.data.error || ('Unable to start payment: ' + (r.data.status || 'unknown error'));
+                    this.loading = false;
                 } else {
-                    this.error = r.error || ('Unable to start payment: ' + (r.status || 'unknown error'));
+                    const em = (r && r.error && (r.error.message || r.error)) || 'unknown error';
+                    this.error = 'Unable to start payment: ' + (typeof em === 'string' ? em : 'unknown error');
                     this.loading = false;
                 }
             } catch (e) {

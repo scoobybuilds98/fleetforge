@@ -90,4 +90,14 @@ $applications = db_select(
 
 $cn['applications'] = $applications;
 
+// I03: strip credit-note dollar amounts (note + per-application) for roles
+// without payments:view; operational fields (number, source, status, dates,
+// linked invoice numbers) stay visible.
+if (!can_view_financials()) {
+    $cn = redact_keys($cn, ['amount', 'amount_remaining']);
+    if (isset($cn['applications']) && is_array($cn['applications'])) {
+        $cn['applications'] = redact_rows($cn['applications'], ['amount_applied', 'invoice_total']);
+    }
+}
+
 json_success($cn);

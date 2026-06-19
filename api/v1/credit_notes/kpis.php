@@ -54,10 +54,13 @@ $expiredThisMonth = db_row(
     []
 );
 
+// I03: dollar totals hidden from roles without payments:view; counts stay.
+$canSeeMoney = can_view_financials();
+
 json_success([
-    'active_balance' => $activeBalance['total'] ?? '0.00',
+    'active_balance' => $canSeeMoney ? ($activeBalance['total'] ?? '0.00') : '0.00',
     'active_cnt'     => (int)($activeBalance['cnt'] ?? 0),
-    'issued_total'   => $issuedThisMonth['total'] ?? '0.00',
+    'issued_total'   => $canSeeMoney ? ($issuedThisMonth['total'] ?? '0.00') : '0.00',
     'issued_cnt'     => (int)($issuedThisMonth['cnt'] ?? 0),
     'fully_used_cnt' => (int)($fullyUsedThisMonth['cnt'] ?? 0),
     'expired_cnt'    => (int)($expiredThisMonth['cnt'] ?? 0),

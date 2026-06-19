@@ -143,7 +143,8 @@ class CreditApplicationPusher
                 (string) ($mapping['qbo_sync_token'] ?? '0')
             );
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // readonly PROPERTY, not a method — method_exists() is always false.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffApplicationId, ['credit_note_id' => 0, 'invoice_id' => 0], 'Void failed: ' . $e->getMessage(), $httpCode);
             return ['success' => false, 'status' => 'qbo_error', 'outcome' => 'failed', 'error' => 'Void failed: ' . $e->getMessage()] + self::RESULT_BASE;
         }
@@ -256,7 +257,8 @@ class CreditApplicationPusher
         try {
             $response = $client->createEntity('payment', $payload);
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // readonly PROPERTY, not a method — method_exists() is always false.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffApplicationId, $app, $e->getMessage(), $httpCode);
             return [
                 'success'   => false,

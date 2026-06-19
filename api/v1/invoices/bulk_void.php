@@ -131,14 +131,21 @@ foreach ($ids as $id) {
             // prevent a subsequent super_admin delete from double-decrementing.
             $decOb = ($preVoidStatus === 'draft') ? '0.00' : $balanceDue;
 
-            db_update('invoices', [
+            // I06: self-guarding flip — gate on the pre-void status so a concurrent
+            // or overlapping bulk-void cannot pass the gate twice and double-reverse
+            // the Path-B counters below. 0 rows = already transitioned → abort this
+            // id's transaction (recorded as a skip by the outer catch).
+            $affected = db_update('invoices', [
                 'status'      => 'void',
                 'balance_due' => '0.00',
                 'voided_date' => date('Y-m-d'),
                 'void_reason' => $voidReason,
                 'voided_by'   => $userId,
                 'updated_by'  => $userId,
-            ], 'id = ?', [$id]);
+            ], 'id = ? AND status = ?', [$id, $preVoidStatus]);
+            if ($affected === 0) {
+                throw new \RuntimeException("Invoice no longer '{$preVoidStatus}' (modified concurrently).");
+            }
 
             // Reverse denormalized counters (Trap 6 / Path B).
             // total_revenue tracks sent invoice amounts — only reverse when was sent
@@ -242,6 +249,10 @@ foreach ($ids as $id) {
         $errors[] = ['id' => $id, 'reason' => 'Void failed due to a server error.'];
     }
 }
+
+// I06: invalidate the dashboard cache so AR tiles reflect the voids
+// (bulk_delete already does this; bulk_void previously did not).
+invalidate_dashboard_cache();
 
 json_success([
     'actioned' => $actioned,

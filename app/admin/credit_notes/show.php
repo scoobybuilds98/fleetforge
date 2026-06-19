@@ -467,6 +467,12 @@ function applyForm() {
                 amount: this.amount,
             })
             .then(data => {
+                // I09: FF_Api.post RESOLVES on 422 — gate on data.success or this
+                // success path (and the page reload) runs on a failed apply.
+                if (!data || !data.success) {
+                    this.error = (data && data.error && data.error.message) || 'Failed to apply credit note.';
+                    return;
+                }
                 this.success = 'Applied ' + this.amount + ' to invoice ' + data.data.invoice_number + '. Invoice status: ' + data.data.invoice_status + '.';
                 this.invoiceId = '';
                 this.amount = '';
@@ -502,7 +508,13 @@ function editMeta() {
                 expires_at: this.expiresAt || null,
                 internal_notes: this.internalNotes,
             })
-            .then(() => {
+            .then(data => {
+                // I09: gate on data.success — FF_Api.post resolves on 422, so this
+                // previously showed "Changes saved." even when the update failed.
+                if (!data || !data.success) {
+                    this.error = (data && data.error && data.error.message) || 'Failed to save changes.';
+                    return;
+                }
                 this.success = 'Changes saved.';
             })
             .catch(err => {
@@ -532,7 +544,14 @@ function voidModal() {
                 id: <?= (int)$id ?>,
                 reason: this.reason,
             })
-            .then(() => {
+            .then(data => {
+                // I09: gate on data.success — FF_Api.post resolves on 422, so this
+                // previously reloaded (masking the error) even when the void failed.
+                if (!data || !data.success) {
+                    this.error = (data && data.error && data.error.message) || 'Failed to void credit note.';
+                    this.submitting = false;
+                    return;
+                }
                 location.reload();
             })
             .catch(err => {

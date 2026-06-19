@@ -171,7 +171,8 @@ class RefundReceiptPusher
         try {
             $response = $client->createEntity('refundreceipt', $payload);
         } catch (QuickBooksException $e) {
-            $httpCode = method_exists($e, 'getHttpStatus') ? (int) $e->getHttpStatus() : 0;
+            // readonly PROPERTY, not a method — method_exists() is always false.
+            $httpCode = $e->httpStatus ?? 0;
             self::recordPushFailure($ffLeaseId, $lease, $e->getMessage(), $httpCode);
             return [
                 'success'   => false,

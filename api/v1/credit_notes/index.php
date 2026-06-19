@@ -120,4 +120,10 @@ $rows = db_select(
     $params
 );
 
+// I03: strip credit-note dollar amounts for roles without payments:view; the
+// operational fields (number, customer, source, status, dates) stay visible.
+if (!can_view_financials()) {
+    $rows = redact_rows($rows, ['amount', 'amount_remaining']);
+}
+
 json_paginated($rows, $total, $page, $perPage);

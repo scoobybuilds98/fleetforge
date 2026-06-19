@@ -121,6 +121,37 @@ foreach ($lineItems as &$item) {
 }
 unset($item);
 
+// I03: server-rendered financial redaction. Dispatchers (invoices:view,
+// payments:NONE) get the operational invoice — number/status/dates/parties and
+// line-item descriptions — but NOT dollar amounts (the documented "status +
+// dates only — no amounts" contract). Zero the money fields at the SOURCE so
+// every downstream format_currency() (incl. the @media print summary card)
+// renders $0.00 instead of the real figure, and drop the per-line calc
+// breakdown (which embeds rates/amounts). The list + API already redact; this
+// closes the server-rendered detail page. NOTE: the payments / credit-application
+// / drawdown-audit sub-panels lower in this page still render their own amounts
+// (tracked I03 follow-up); the summary + line-items surface is covered here.
+if (!can_view_financials()) {
+    foreach ([
+        'subtotal', 'subtotal_after_discount', 'discount_value', 'discount_amount',
+        'tax_gst_amount', 'tax_pst_amount', 'tax_hst_amount', 'tax_total',
+        'total_amount', 'amount_paid', 'balance_due', 'credits_applied', 'late_fee_amount',
+    ] as $mk) {
+        if (array_key_exists($mk, $invoice)) {
+            $invoice[$mk] = '0.00';
+        }
+    }
+    foreach ($lineItems as &$li) {
+        foreach (['unit_price', 'amount', 'tax_gst_amount', 'tax_pst_amount', 'tax_hst_amount', 'mileage_rate'] as $lk) {
+            if (array_key_exists($lk, $li)) {
+                $li[$lk] = '0.00';
+            }
+        }
+        $li['_detail'] = null;
+    }
+    unset($li);
+}
+
 /**
  * S-BILLING-INVOICE-CALC-DISPLAY — render a clean, detailed calculation
  * breakdown for a line item's decoded detail_lines.
