@@ -41,6 +41,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('health_scores')) { error_log('[CRON] health_scores disabled - skipping.'); exit(0); }
+
 // D21: Advisory lock prevents overlapping runs. Silent exit when held —
 // a parallel invocation would double-count nothing (idempotent recompute)
 // but would waste resources and spam audit_log.

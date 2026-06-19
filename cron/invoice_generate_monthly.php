@@ -348,6 +348,14 @@ function ff_run_monthly_billing(string $today): array
 // ─────────────────────────────────────────────────────────────────────────────
 if (!defined('FF_MONTHLY_BILLING_INCLUDE')) {
 
+    // Operator on/off switch (settings → Intelligence → Scheduled Jobs). When off,
+    // the cron exits cleanly without generating any invoices. Inside the execution
+    // wrapper (not the top of file) so a test `require` is never gated. S-CRON-TOGGLES.
+    if (!cron_enabled('invoice_generate_monthly')) {
+        error_log('[CRON] invoice_generate_monthly disabled — skipping.');
+        exit(0);
+    }
+
     // D21: Advisory lock prevents two overlapping cron executions from double-invoicing
     $lock = db_row("SELECT GET_LOCK('ff_cron_invoice_generate_monthly', 0) AS ok", []);
     if (!$lock || (int) $lock['ok'] !== 1) {

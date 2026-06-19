@@ -44,6 +44,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('promise_to_pay_check')) { error_log('[CRON] promise_to_pay_check disabled - skipping.'); exit(0); }
+
 // Advisory lock prevents overlapping runs
 $lock = db_row("SELECT GET_LOCK('ff_cron_promise_check', 0) AS ok", []);
 if (!$lock || (int)$lock['ok'] !== 1) {

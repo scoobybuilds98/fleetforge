@@ -1913,6 +1913,61 @@ $lastAnomalyScan = settings_get('ai.last_anomaly_scan', null);
 </div>
 <?php endif; ?>
 
+<!-- ── 1b. Scheduled Jobs (per-cron on/off) ────────────────────────── -->
+<?php
+// S-CRON-TOGGLES: operator on/off switches for business-automation crons. Source
+// of truth = config/cron_jobs.php (drives the gate + the seed migration too).
+$cronJobs = require FF_ROOT . '/config/cron_jobs.php';
+$cronByCat = [];
+foreach ($cronJobs as $cronName => $cronMeta) {
+    $cronByCat[$cronMeta['category']][$cronName] = $cronMeta;
+}
+?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
+        Scheduled Jobs
+        <span class="badge badge-info" style="font-size:0.7rem;">Crons</span>
+    </div>
+    <div class="card-body">
+        <p style="font-size:0.8125rem;color:var(--text-muted);margin:0 0 14px;">
+            Turn individual automated background jobs on or off. A disabled job exits
+            immediately on its next scheduled run without doing any work. Critical
+            infrastructure (backups, QuickBooks sync, cache) is intentionally not listed.
+        </p>
+        <form method="POST" action="">
+            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+            <input type="hidden" name="_group"     value="cron">
+            <?php foreach ($cronByCat as $cronCat => $cronGroup): ?>
+            <div style="font-size:0.72rem;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;margin:14px 0 8px;"><?= e($cronCat) ?></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px 24px;">
+            <?php foreach ($cronGroup as $cronName => $cronMeta):
+                $cronKey = 'cron.' . $cronName . '_enabled';
+                $cronCur = (string) settings_get($cronKey, $cronMeta['default']);
+            ?>
+            <input type="hidden" name="_form_keys[]" value="<?= e($cronKey) ?>">
+            <div class="form-group" style="margin-bottom:0;">
+                <div class="form-check">
+                    <input type="checkbox" id="<?= e($cronKey) ?>" name="<?= e($cronKey) ?>" value="1"
+                           <?= $cronCur === '1' ? 'checked' : '' ?> <?= !$canEdit ? 'disabled' : '' ?>>
+                    <label for="<?= e($cronKey) ?>" style="margin-left:6px;font-size:0.875rem;font-weight:500;"><?= e($cronMeta['label']) ?></label>
+                </div>
+                <?php if (!empty($cronMeta['description'])): ?>
+                <p class="text-muted" style="font-size:0.72rem;margin:2px 0 0 22px;"><?= e($cronMeta['description']) ?></p>
+                <?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+            </div>
+            <?php endforeach; ?>
+
+            <?php if ($canEdit): ?>
+            <div style="padding-top:20px;margin-top:20px;border-top:1px solid var(--border-default);">
+                <button type="submit" class="btn btn-primary btn-sm">Save Scheduled Jobs</button>
+            </div>
+            <?php endif; ?>
+        </form>
+    </div>
+</div>
+
 <!-- ── 2. Anthropic Connection + Usage (moved from Integrations) ──── -->
 <?php if ($isSuperAdmin): ?>
 <div class="card" style="margin-bottom:20px;" x-data="FF_AiTest()">

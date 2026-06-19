@@ -20,6 +20,9 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('accounting_recurring_entries')) { error_log('[CRON] accounting_recurring_entries disabled - skipping.'); exit(0); }
+
 use FleetForge\Accounting\RecurringEntryService;
 use FleetForge\Accounting\AutoEntryBridge;
 

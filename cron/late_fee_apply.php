@@ -25,6 +25,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('late_fee_apply')) { error_log('[CRON] late_fee_apply disabled - skipping.'); exit(0); }
+
 use FleetForge\Billing\InvoiceGenerator;
 
 // D21: Advisory lock prevents two concurrent runs from double-charging late fees

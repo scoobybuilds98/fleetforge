@@ -38,6 +38,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('compliance_alerts')) { error_log('[CRON] compliance_alerts disabled - skipping.'); exit(0); }
+
 // D21: Advisory lock prevents overlapping runs from creating duplicate notifications
 $lock = db_row("SELECT GET_LOCK('ff_cron_compliance', 0) AS ok", []);
 if (!$lock || (int)$lock['ok'] !== 1) {

@@ -40,6 +40,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('stale_reservations')) { error_log('[CRON] stale_reservations disabled - skipping.'); exit(0); }
+
 use FleetForge\Notifications\NotificationService;
 
 // ── Advisory lock (D21) ──────────────────────────────────────────────────────

@@ -20,6 +20,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('invoice_overdue')) { error_log('[CRON] invoice_overdue disabled - skipping.'); exit(0); }
+
 // D21: Advisory lock prevents overlapping runs from marking the same invoices twice
 $lock = db_row("SELECT GET_LOCK('ff_cron_invoice_overdue', 0) AS ok", []);
 if (!$lock || (int)$lock['ok'] !== 1) {

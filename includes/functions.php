@@ -308,6 +308,27 @@ function settings_get(string $key, mixed $default = null): mixed
 }
 }
 
+// cron_enabled() — operator on/off switch for a business-automation cron.
+// Reads cron.<name>_enabled (seeded by the S-CRON-TOGGLES migration, toggled in
+// Settings → Intelligence → Scheduled Jobs), falling back to the registry default
+// in config/cron_jobs.php when the row is absent. Any cron NOT in the registry
+// (infra: backups, QBO, cache, …) is ALWAYS enabled — never gated from settings.
+if (!function_exists('cron_enabled')) {
+function cron_enabled(string $name): bool
+{
+    static $registry = null;
+    if ($registry === null) {
+        $registry = @require FF_ROOT . '/config/cron_jobs.php';
+        if (!is_array($registry)) { $registry = []; }
+    }
+    if (!isset($registry[$name])) {
+        return true; // not operator-toggleable
+    }
+    $default = (string) ($registry[$name]['default'] ?? '1');
+    return (string) settings_get("cron.{$name}_enabled", $default) === '1';
+}
+}
+
 // ============================================================
 // LEGAL / COMPANY METADATA
 // S-LEGAL-FOOTER-COMMERCIAL: helpers over $GLOBALS['_ff_legal']

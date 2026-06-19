@@ -43,6 +43,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('samsara_sync')) { error_log('[CRON] samsara_sync disabled - skipping.'); exit(0); }
+
 use FleetForge\GPS\SamsaraClient;
 
 // ── Advisory lock (D21) — prevents two parallel cron ticks ─

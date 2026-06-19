@@ -39,6 +39,9 @@ declare(strict_types=1);
 require_once dirname(__DIR__) . '/config/app.php';
 \FleetForge\Observability\Sentry::init();
 
+// Operator on/off switch (Settings -> Intelligence -> Scheduled Jobs). S-CRON-TOGGLES.
+if (!cron_enabled('risk_scores')) { error_log('[CRON] risk_scores disabled - skipping.'); exit(0); }
+
 // D21: Advisory lock prevents overlapping runs.
 $lock = db_row("SELECT GET_LOCK('ff_cron_risk_scores', 0) AS ok", []);
 if (!$lock || (int)$lock['ok'] !== 1) {
