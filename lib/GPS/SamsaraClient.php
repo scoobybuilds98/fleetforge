@@ -76,170 +76,126 @@ class SamsaraClient
     // getMileageForLease()
     //
     // Returns the total distance driven (in km, D34 default)
-    // for a Samsara vehicle between two dates (inclusive).
+    // for a Samsara vehicle OR trailer between two dates (inclusive).
     //
     // Used in two places:
     //   1. api/v1/gps/mileage.php — pre-fills close-lease form
     //   2. cron/gps_mileage_sync.php — daily odometer snapshot
     //
-    // @param  string $vehicleId  Samsara vehicle ID (equipment_units.gps_device_id)
-    // @param  string $start      Start date 'Y-m-d' (lease start date)
-    // @param  string $end        End date   'Y-m-d' (today or return date)
-    // @return float|null         km driven as float, or null on any failure
+    // L06/L07 (audit 2026-06-19, verified live 2026-06-20):
+    //   This method previously hit the per-vehicle PATH form
+    //   `GET /fleet/vehicles/{id}/stats/history`, which 404s in the
+    //   current Samsara API ("404 page not found"), AND parsed the
+    //   response as a flat list of scalar `obdOdometerMeters` points —
+    //   neither matched reality, so it returned null for EVERY unit.
+    //   It was also trailer-blind (trailers expose gpsOdometerMeters
+    //   on /fleet/trailers, never OBD).
+    //
+    //   It now delegates to getDistanceForPeriod(), which uses the
+    //   correct FLEET-form endpoint (`/fleet/{vehicles|trailers}/stats/
+    //   history?...Ids=`), parses the verified nested shape
+    //   `{data:[{id, <type>:[{time,value},...]}]}`, dispatches on
+    //   $entityType (vehicle→obd/gpsDistance, trailer→gpsOdometer),
+    //   and applies the ±24h wider-window + sparse handling. Fixture
+    //   mode is honored inside getDistanceForPeriod (fixture-first),
+    //   so this method works hermetically too.
+    //
+    //   Boundary: getDistanceForPeriod caps the window at 90 days. A
+    //   lease open longer than that returns null here (pre-fill stays
+    //   manual) — same graceful "unavailable" outcome as before, just
+    //   for a far narrower set of cases.
+    //
+    // @param  string $vehicleId   Samsara vehicle/trailer ID (equipment_units.samsara_vehicle_id)
+    // @param  string $start       Start date 'Y-m-d' (lease start date)
+    // @param  string $end         End date   'Y-m-d' (today or return date)
+    // @param  string $entityType  'vehicle' (default) or 'trailer'
+    // @return float|null          km driven as float, or null on any failure
     // --------------------------------------------------------
-    public function getMileageForLease(string $vehicleId, string $start, string $end): ?float
+    public function getMileageForLease(string $vehicleId, string $start, string $end, string $entityType = 'vehicle'): ?float
     {
-        // Dev mode: blank API key → return null without HTTP call.
-        // Org ID is optional (single-org tokens omit it).
-        if ($this->apiKey === '') {
-            $this->log('GPS_SKIP', "API key not configured — returning null (dev mode). vehicleId=$vehicleId");
-            return null;
-        }
-
         if ($vehicleId === '') {
             $this->log('GPS_SKIP', "Empty vehicleId — returning null.");
             return null;
         }
 
-        // Samsara vehicle stats API: returns odometer/mileage stats over a time window
-        // Endpoint: GET /fleet/vehicles/{id}/stats/history
-        // We use startTime/endTime in RFC3339 format (midnight UTC for each day)
-        $startRfc = $start . 'T00:00:00Z';
-        $endRfc   = $end   . 'T23:59:59Z';
-
-        $url = self::API_BASE . '/fleet/vehicles/' . urlencode($vehicleId)
-             . '/stats/history?types=engineTotalIdleMilliseconds,obdOdometerMeters'
-             . '&startTime=' . urlencode($startRfc)
-             . '&endTime='   . urlencode($endRfc);
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_HTTPHEADER     => [
-                'Authorization: Bearer ' . $this->apiKey,
-                'X-Org-Id: '            . $this->orgId,
-                'Accept: application/json',
-            ],
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
-
-        $raw  = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err  = curl_error($ch);
-        curl_close($ch);
-
-        if ($raw === false || $err !== '') {
-            $this->log('GPS_CURL_ERROR', "vehicleId=$vehicleId start=$start end=$end error=$err");
+        // Build UTC instants from the lease date strings. getDistanceForPeriod
+        // re-normalizes to UTC and widens by ±24h internally, so plain
+        // midnight→end-of-day bounds are correct here.
+        try {
+            $utc      = new \DateTimeZone('UTC');
+            $startUtc = new \DateTimeImmutable($start . 'T00:00:00', $utc);
+            $endUtc   = new \DateTimeImmutable($end   . 'T23:59:59', $utc);
+        } catch (\Throwable $e) {
+            $this->log('GPS_SKIP', "Invalid date range start=$start end=$end — " . $e->getMessage());
             return null;
         }
 
-        if ($code !== 200) {
-            $this->log('GPS_HTTP_ERROR', "vehicleId=$vehicleId start=$start end=$end HTTP=$code body=" . substr((string)$raw, 0, 500));
+        // Delegate to the verified billing-grade history reader. It owns
+        // fixture-mode dispatch and the blank-API-key failure path, so we
+        // don't pre-check $this->apiKey here (fixture mode must work keyless).
+        $result = $this->getDistanceForPeriod($vehicleId, $startUtc, $endUtc, 'km', $entityType);
+
+        if (($result['distance'] ?? null) === null) {
+            $this->log('GPS_NO_DATA', sprintf(
+                'vehicleId=%s type=%s start=%s end=%s — getDistanceForPeriod returned null (reason=%s)',
+                $vehicleId, $entityType, $start, $end, $result['reason'] ?? 'unknown'
+            ));
             return null;
         }
 
-        $data = json_decode((string) $raw, true);
-        if (!is_array($data)) {
-            $this->log('GPS_PARSE_ERROR', "vehicleId=$vehicleId start=$start end=$end — invalid JSON");
-            return null;
-        }
-
-        // Extract odometer readings: find first and last obdOdometerMeters entries
-        // Samsara returns an array of time-series data points
-        $points = $data['data'] ?? [];
-        if (!is_array($points) || count($points) < 2) {
-            $this->log('GPS_NO_DATA', "vehicleId=$vehicleId start=$start end=$end — insufficient data points (" . count($points) . ")");
-            return null;
-        }
-
-        // Find the obdOdometerMeters values at start and end of the period
-        $firstMeters = null;
-        $lastMeters  = null;
-
-        foreach ($points as $point) {
-            $meters = $point['obdOdometerMeters'] ?? null;
-            if ($meters === null) continue;
-
-            if ($firstMeters === null) $firstMeters = (float) $meters;
-            $lastMeters = (float) $meters;
-        }
-
-        if ($firstMeters === null || $lastMeters === null || $lastMeters < $firstMeters) {
-            $this->log('GPS_INVALID_RANGE', "vehicleId=$vehicleId start=$start end=$end firstMeters=$firstMeters lastMeters=$lastMeters");
-            return null;
-        }
-
-        // Convert meters → km (D34: km is FleetForge default unit)
-        $distanceMeters = $lastMeters - $firstMeters;
-        $distanceKm     = $distanceMeters / 1000.0;
-
-        $this->log('GPS_SUCCESS', sprintf(
-            "vehicleId=%s start=%s end=%s distance=%.1f km (%.0f m)",
-            $vehicleId, $start, $end, $distanceKm, $distanceMeters
-        ));
-
-        return round($distanceKm, 1);
+        // getDistanceForPeriod returns a bcmath string (no float drift); the
+        // legacy ?float contract expects a float, so cast at the boundary.
+        return (float) $result['distance'];
     }
 
     // --------------------------------------------------------
     // getOdometerReading()
     //
-    // Returns the latest odometer reading (in km) for a vehicle.
-    // Used by the daily GPS sync cron to store absolute readings
-    // in mileage_logs.odometer_reading.
+    // Returns the latest absolute odometer reading (in km) for a
+    // vehicle OR trailer. Used by the daily GPS sync cron to store
+    // absolute readings in mileage_logs.odometer_reading.
     //
-    // @param  string $vehicleId  Samsara vehicle ID
-    // @return int|null           odometer in km (rounded), or null on failure
+    // L05/L07 (audit 2026-06-19, verified live 2026-06-20):
+    //   This method previously hit the per-vehicle PATH form
+    //   `GET /fleet/vehicles/{id}/stats`, which 404s in the current
+    //   Samsara API, AND read `data.obdOdometerMeters.value` from an
+    //   object (the fleet endpoint returns `data` as a LIST). It was
+    //   also trailer-blind — trailers have no OBD odometer; they
+    //   expose gpsOdometerMeters under /fleet/trailers.
+    //
+    //   It now delegates to getEntityStats(), which dispatches on
+    //   $entityType to the correct fleet-form stats endpoint
+    //   (vehicle → /fleet/vehicles/stats obdOdometerMeters;
+    //    trailer → /fleet/trailers/stats gpsOdometerMeters) and
+    //   returns a normalized absolute odometer_km. Verified live:
+    //   trailer 12TR1309 → 9063.38 km.
+    //
+    //   Returns null when the entity reports no absolute odometer
+    //   (e.g. a GPS-only asset gateway that emits gpsDistanceMeters
+    //   but no obd/gps odometer) — the cron then skips that unit,
+    //   non-blocking.
+    //
+    // @param  string $vehicleId   Samsara vehicle/trailer ID
+    // @param  string $entityType  'vehicle' (default) or 'trailer'
+    // @return int|null            odometer in km (rounded), or null on failure
     // --------------------------------------------------------
-    public function getOdometerReading(string $vehicleId): ?int
+    public function getOdometerReading(string $vehicleId, string $entityType = 'vehicle'): ?int
     {
-        if ($this->apiKey === '') {
+        if ($this->apiKey === '' || $vehicleId === '') {
             return null;
         }
 
-        if ($vehicleId === '') {
+        $stats = $this->getEntityStats($entityType, $vehicleId);
+        $odoKm = $stats['odometer_km'] ?? null;
+
+        if ($odoKm === null) {
+            $this->log('GPS_ODOMETER_MISSING',
+                "vehicleId=$vehicleId type=$entityType — no absolute odometer in stats response");
             return null;
         }
 
-        // Samsara vehicle stats (current): returns latest obdOdometerMeters
-        $url = self::API_BASE . '/fleet/vehicles/' . urlencode($vehicleId)
-             . '/stats?types=obdOdometerMeters';
-
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_HTTPHEADER     => [
-                'Authorization: Bearer ' . $this->apiKey,
-                'X-Org-Id: '            . $this->orgId,
-                'Accept: application/json',
-            ],
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
-
-        $raw  = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err  = curl_error($ch);
-        curl_close($ch);
-
-        if ($raw === false || $err !== '' || $code !== 200) {
-            $this->log('GPS_ODOMETER_ERROR', "vehicleId=$vehicleId HTTP=$code error=$err");
-            return null;
-        }
-
-        $data = json_decode((string) $raw, true);
-
-        // Samsara current stats response: data.obdOdometerMeters.value
-        $meters = $data['data']['obdOdometerMeters']['value'] ?? null;
-
-        if ($meters === null) {
-            $this->log('GPS_ODOMETER_MISSING', "vehicleId=$vehicleId — obdOdometerMeters not in response");
-            return null;
-        }
-
-        // Convert meters → km, round to nearest km
-        return (int) round((float) $meters / 1000.0);
+        // Round km to nearest whole unit (mileage_logs.odometer_reading is integer-grade)
+        return (int) round((float) $odoKm);
     }
 
     // --------------------------------------------------------

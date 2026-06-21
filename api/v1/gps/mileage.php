@@ -33,10 +33,13 @@ if (!$leaseId) {
 }
 
 // ── Load lease with unit GPS info
+// L07 (audit 2026-06-19): key off samsara_vehicle_id + samsara_entity_type
+// (the canonical Samsara link), NOT the dead gps_device_id column which is
+// empty for every unit. samsara_entity_type routes trailers to gpsOdometerMeters.
 $lease = db_row(
     "SELECT l.id, l.start_date, l.end_date, l.actual_return_date, l.status,
             l.equipment_unit_id, l.mileage_at_start, l.mileage_unit,
-            eu.gps_device_id
+            eu.samsara_vehicle_id, eu.samsara_entity_type
      FROM leases l
      JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
      WHERE l.id = ? AND l.deleted_at IS NULL",
@@ -54,10 +57,11 @@ if ($endDate > date('Y-m-d')) {
     $endDate = date('Y-m-d'); // don't query future dates
 }
 
-$vehicleId = $lease['gps_device_id'] ?? '';
+$vehicleId  = (string) ($lease['samsara_vehicle_id'] ?? '');
+$entityType = (string) ($lease['samsara_entity_type'] ?? 'vehicle');
 
 // ── No GPS device configured on this unit
-if (!$vehicleId) {
+if ($vehicleId === '') {
     json_success([
         'distance_km'       => null,
         'odometer_estimate' => null,
@@ -66,9 +70,9 @@ if (!$vehicleId) {
     ]);
 }
 
-// ── Call Samsara
+// ── Call Samsara (entity-type aware: trailer → /fleet/trailers gpsOdometerMeters)
 $gps          = new SamsaraClient();
-$distanceKm   = $gps->getMileageForLease($vehicleId, $startDate, $endDate);
+$distanceKm   = $gps->getMileageForLease($vehicleId, $startDate, $endDate, $entityType);
 
 if ($distanceKm === null) {
     json_success([

@@ -44,8 +44,15 @@ try {
     // ── Instantiate GPS client (returns null if API keys blank — dev safe)
     $gps = new SamsaraClient();
 
-    // ── Query all active leases with GPS-enabled units
-    // gps_device_id is the Samsara vehicle ID stored on equipment_units
+    // ── Query all active leases with GPS-linked units
+    // L05/L07 (audit 2026-06-19): the canonical Samsara link lives in
+    // samsara_vehicle_id + samsara_entity_type (set by api/v1/samsara/link.php).
+    // gps_device_id is a dead legacy column — empty for every unit, so the old
+    // `gps_device_id != ''` filter matched ZERO rows and this cron was a no-op.
+    // We now key off samsara_vehicle_id (matching the working cron/samsara_sync.php
+    // and api/v1/samsara/current_odometer.php) and carry samsara_entity_type so
+    // trailers route to /fleet/trailers + gpsOdometerMeters instead of the
+    // vehicle-only path (169 trailers were silently never syncing).
     $leases = db_select(
         "SELECT
             l.id           AS lease_id,
@@ -54,7 +61,8 @@ try {
             l.equipment_unit_id,
             l.mileage_unit,
             eu.unit_number,
-            eu.gps_device_id,
+            eu.samsara_vehicle_id,
+            eu.samsara_entity_type,
             eu.mileage     AS current_odometer
          FROM leases l
          JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
@@ -64,16 +72,17 @@ try {
            -- auto-capture GPS odometer; 'manual' leases must never be auto-
            -- overwritten and 'off' leases track no mileage at all.
            AND l.mileage_tracking_mode = 'samsara'
-           AND eu.gps_device_id IS NOT NULL
-           AND eu.gps_device_id != ''",
+           AND eu.samsara_vehicle_id IS NOT NULL
+           AND eu.samsara_vehicle_id != ''",
         []
     );
 
     foreach ($leases as $lease) {
-        $vehicleId = $lease['gps_device_id'];
-        $unitId    = $lease['equipment_unit_id'];
-        $leaseId   = $lease['lease_id'];
-        $unitNum   = $lease['unit_number'];
+        $vehicleId  = (string) $lease['samsara_vehicle_id'];
+        $entityType = (string) ($lease['samsara_entity_type'] ?? 'vehicle');
+        $unitId     = $lease['equipment_unit_id'];
+        $leaseId    = $lease['lease_id'];
+        $unitNum    = $lease['unit_number'];
 
         // ── Skip if we already have a gps_sync entry for today on this unit
         $alreadySynced = db_exists(
@@ -87,12 +96,13 @@ try {
             continue;
         }
 
-        // ── Fetch current odometer from Samsara
-        $odometerKm = $gps->getOdometerReading($vehicleId);
+        // ── Fetch current odometer from Samsara (entity-type aware:
+        //    vehicle → obdOdometerMeters, trailer → gpsOdometerMeters)
+        $odometerKm = $gps->getOdometerReading($vehicleId, $entityType);
 
         if ($odometerKm === null) {
             // GPS unavailable — log and continue (non-blocking)
-            error_log("[GPS_SYNC] Unit $unitNum (vehicle $vehicleId): GPS returned null — skipping.");
+            error_log("[GPS_SYNC] Unit $unitNum ($entityType $vehicleId): GPS returned null — skipping.");
             $skipped++;
             continue;
         }
