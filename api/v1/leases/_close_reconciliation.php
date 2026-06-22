@@ -464,3 +464,105 @@ function reconcile_overshoot_invoices(int $leaseId, array $lease, string $extent
 
     return $actions;
 }
+
+/**
+ * S-CLOSE-MANUAL-MILEAGE-BRIDGE — build the close-time mileage line for a MANUAL
+ * lease from the operator-entered "Actual Mileage (for billing)" value
+ * (leases.mileage_at_end), so that field actually bills instead of being
+ * silently orphaned. This is the second half of the MTTS68 / INV-2026-00150
+ * trap: a manual lease with mileage_rate_km set, the operator typed an actual
+ * mileage at close, and NO mileage line appeared because the modern biller reads
+ * only the decimal odometer_*_km columns and the legacy overage path needs
+ * mileage_at_start (NULL on a SAMSARA-3-era lease).
+ *
+ * Returns ONE mileage_usage extra-line (distance × mileage_rate_km, km-canonical
+ * to match the odometer path) for close.php to append to $extraLines — the same
+ * guaranteed carrier sweep/wash/fuel ride (it reaches the rental final invoice,
+ * the advance mileage_only invoice, OR a standalone adjustment invoice). Returns
+ * NULL when the bridge does not apply.
+ *
+ * Cannot double-bill — each guard removes exactly one competing path:
+ *   - mode must be 'manual'      → 'off' is suppressed+warned; 'samsara'
+ *                                  auto-bills via GPS distance.
+ *   - mileage_at_start IS NULL   → the legacy overage path (reads mileage_at_start
+ *                                  + the old mileage_rate column) does not fire.
+ *   - odoAtClose IS NULL         → the modern odometer auto-line does not fire
+ *                                  (close.php derives the period-start odometer
+ *                                  only when a closing odometer was supplied).
+ *   - $priorMileageBilled false  → a per-period mileage model already in effect
+ *                                  on this lease is not re-billed as a lump total.
+ *
+ * Pure function (no DB) so the gating is unit-testable; the caller supplies
+ * $priorMileageBilled from a prior-invoice probe.
+ *
+ * @param array       $lease              close.php lease row (needs
+ *                                        mileage_tracking_mode, mileage_rate_km,
+ *                                        mileage_at_start, mileage_unit,
+ *                                        km_to_miles_conversion)
+ * @param int|null    $mileageAtEnd       operator-entered actual mileage (lease unit)
+ * @param string|null $odoAtClose         decimal closing odometer (km), or null
+ * @param bool        $priorMileageBilled a non-void invoice already carries a mileage line
+ * @return array|null  one mileage_usage extra-line, or null if inapplicable
+ */
+function ff_close_manual_mileage_bridge_line(
+    array $lease,
+    ?int $mileageAtEnd,
+    ?string $odoAtClose,
+    bool $priorMileageBilled
+): ?array {
+    // Manual mode only.
+    if (($lease['mileage_tracking_mode'] ?? 'off') !== 'manual') {
+        return null;
+    }
+    // Needs a per-km rate to bill against.
+    if (bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0) {
+        return null;
+    }
+    // Needs an operator-entered actual mileage > 0.
+    if ($mileageAtEnd === null || $mileageAtEnd <= 0) {
+        return null;
+    }
+    // Legacy overage path owns mileage_at_start-bearing leases.
+    if (($lease['mileage_at_start'] ?? null) !== null) {
+        return null;
+    }
+    // Modern odometer path owns closing-odometer-bearing closes.
+    if ($odoAtClose !== null) {
+        return null;
+    }
+    // Per-period mileage already billed — don't re-bill the total.
+    if ($priorMileageBilled) {
+        return null;
+    }
+
+    // Bill km-canonical (matches the odometer path + mileage_rate_km). Convert a
+    // miles-unit lease's actual mileage to km via the lease's conversion factor.
+    $unit = (string) ($lease['mileage_unit'] ?? 'km');
+    if ($unit === 'miles') {
+        $conv = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
+        if (bccomp($conv, '0', 6) <= 0) {
+            $conv = '0.621371';
+        }
+        // miles ÷ (miles per km) = km
+        $distanceKm = bcdiv((string) $mileageAtEnd, $conv, 4);
+    } else {
+        $distanceKm = (string) $mileageAtEnd;
+    }
+
+    $rateKm = (string) $lease['mileage_rate_km'];
+    $charge = bcround(bcmul($distanceKm, $rateKm, 6), 2);
+    if (bccomp($charge, '0', 2) <= 0) {
+        return null;
+    }
+
+    return [
+        'item_type'   => 'mileage_usage',
+        'description' => 'Mileage usage: ' . number_format((float) $distanceKm, 2) . ' km × $' . $rateKm . '/km',
+        'quantity'    => $distanceKm,
+        'unit'        => 'km',
+        'unit_price'  => $rateKm,
+        'amount'      => $charge,
+        'is_credit'   => 0,
+        'taxable'     => 1,
+    ];
+}

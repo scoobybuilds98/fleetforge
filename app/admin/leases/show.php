@@ -2795,6 +2795,22 @@ function FF_LeaseDetail() {
         },
 
         async closeLease() {
+            // S-CLOSE-MANUAL-MILEAGE-WARN (gap a): a manual-mileage lease with a
+            // per-km rate is being closed with no closing odometer AND no actual
+            // mileage entered — it will bill $0 mileage. Warn before submit so the
+            // operator can enter the reading instead of silently under-billing.
+            if (this.lease
+                && this.lease.mileage_tracking_mode === 'manual'
+                && parseFloat(this.lease.mileage_rate_km || 0) > 0
+                && (this.closeForm.mileage_at_end === '' || this.closeForm.mileage_at_end === null)
+                && (this.closeForm.odometer_at_close_km === '' || this.closeForm.odometer_at_close_km === null)) {
+                if (!confirm('This lease tracks mileage manually and has a $'
+                        + parseFloat(this.lease.mileage_rate_km).toFixed(4)
+                        + '/km rate, but you haven\'t entered a closing odometer or actual mileage.\n\n'
+                        + 'No mileage will be billed on this close. Continue anyway?')) {
+                    return;
+                }
+            }
             this.actionInProgress = true;
             this.closing          = true;
             this.actionError      = null;
@@ -2864,6 +2880,12 @@ function FF_LeaseDetail() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);
                 if (r.success) {
+                    // S-CLOSE-MANUAL-MILEAGE-WARN: surface the server-side $0-mileage
+                    // warning (manual lease, rate set, nothing entered) before the
+                    // page reloads, so it isn't lost.
+                    if (r.data && r.data.mileage_warning) {
+                        alert(r.data.mileage_warning);
+                    }
                     window.location.reload();
                 } else {
                     this.actionError = r.message || 'Failed to close lease.';

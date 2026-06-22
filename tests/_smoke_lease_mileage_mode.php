@@ -26,6 +26,8 @@ require_once __DIR__ . '/../config/app.php';
 require_once FF_ROOT . '/includes/db.php';
 require_once FF_ROOT . '/includes/functions.php';
 require_once FF_ROOT . '/vendor/autoload.php';
+// S-CLOSE-MANUAL-MILEAGE-BRIDGE: the close-time manual-mileage bridge helper.
+require_once FF_ROOT . '/api/v1/leases/_close_reconciliation.php';
 
 $pass = 0;
 $fail = 0;
@@ -202,6 +204,56 @@ try {
         (string) $row4['odometer_start_km'] === '5000.00' && $row4['odometer_start_source'] === 'manual',
         "odometer_start_km=" . $row4['odometer_start_km'] . " source=" . $row4['odometer_start_source']
         . " (expect 5000.00 / manual — NOT overwritten by GPS 0)");
+
+    // ── T6: manual-mileage bridge helper gating (pure, no DB) ──
+    // S-CLOSE-MANUAL-MILEAGE-BRIDGE: the close "Actual Mileage (for billing)"
+    // field must bill on a manual lease (the MTTS68 175 km × $0.06 = $10.50 fix)
+    // but never double-bill the legacy overage / modern odometer / per-period
+    // paths, and must convert a miles-unit lease to km.
+    $hbase = ['mileage_tracking_mode' => 'manual', 'mileage_rate_km' => '0.0600',
+              'mileage_at_start' => null, 'mileage_unit' => 'km', 'km_to_miles_conversion' => '0.621371'];
+    $h1 = ff_close_manual_mileage_bridge_line($hbase, 175, null, false);                       // bills
+    $h2 = ff_close_manual_mileage_bridge_line(['mileage_tracking_mode' => 'off'] + $hbase, 175, null, false); // off
+    $h3 = ff_close_manual_mileage_bridge_line($hbase, 175, '5000.00', false);                  // odometer path owns it
+    $h4 = ff_close_manual_mileage_bridge_line(['mileage_at_start' => 100] + $hbase, 175, null, false); // legacy owns it
+    $h5 = ff_close_manual_mileage_bridge_line($hbase, 175, null, true);                        // prior mileage billed
+    $h6 = ff_close_manual_mileage_bridge_line(['mileage_unit' => 'miles'] + $hbase, 175, null, false); // miles → km
+    check('T6', 'manual mileage bridge gating + unit conversion',
+        $h1 !== null && $h1['amount'] === '10.50' && $h1['item_type'] === 'mileage_usage'
+        && $h2 === null && $h3 === null && $h4 === null && $h5 === null
+        && $h6 !== null && $h6['amount'] === '16.90',
+        "manual/175=" . ($h1['amount'] ?? 'null') . " off=" . ($h2 === null ? 'null' : 'LEAK')
+        . " odo=" . ($h3 === null ? 'null' : 'LEAK') . " legacy=" . ($h4 === null ? 'null' : 'LEAK')
+        . " prior=" . ($h5 === null ? 'null' : 'LEAK') . " miles=" . ($h6['amount'] ?? 'null')
+        . " (expect 10.50/null/null/null/null/16.90)");
+
+    // ── T7: bridged line bills through createFromLease (the carrier) ──
+    // close.php appends the helper's line to $extraLines on an 'adjustment'
+    // invoice (the guaranteed fallback carrier); assert the mileage_usage line
+    // materializes with the right amount and no auto-drawdown double.
+    $l6  = $makeLease('manual', 'BRIDGE');  // mileage_rate_km = 0.18
+    $brg = ff_close_manual_mileage_bridge_line(
+        array_merge(
+            ['mileage_at_start' => null, 'mileage_unit' => 'km', 'km_to_miles_conversion' => '0.621371'],
+            db_row("SELECT mileage_tracking_mode, mileage_rate_km FROM leases WHERE id = ?", [$l6])
+        ),
+        200, null, false
+    );
+    $inv6 = $gen->createFromLease([
+        'lease_id' => $l6, 'period_start' => '2026-05-25', 'period_end' => '2026-05-25',
+        'billing_type' => 'adjustment', 'invoice_type' => 'final', 'created_by' => $user,
+        'extra_lines' => [$brg],
+    ]);
+    $ml6 = $mileageLine($inv6['invoice_id']);
+    // 200 km × $0.18/km = $36.00; exactly one mileage_usage line (no auto double).
+    $ml6count = (int) (db_row(
+        "SELECT COUNT(*) c FROM invoice_line_items WHERE invoice_id = ? AND item_type = 'mileage_usage'",
+        [$inv6['invoice_id']]
+    )['c'] ?? 0);
+    check('T7', 'bridged mileage line bills on adjustment invoice (no double)',
+        $ml6 !== null && (string) $ml6['amount'] === '36.00' && $ml6count === 1,
+        "mileage_line=" . ($ml6 ? ('present amt=' . $ml6['amount']) : 'absent')
+        . " count=" . $ml6count . " (expect present 36.00 count=1)");
 
     db_execute("ROLLBACK");
 } catch (\Throwable $e) {

@@ -771,6 +771,33 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         }
     }
 
+    // S-CLOSE-MANUAL-MILEAGE-BRIDGE: make the "Actual Mileage (for billing)"
+    // field (mileage_at_end) actually bill on a MANUAL lease. The legacy overage
+    // block above only fires for mileage_at_start-bearing leases; a SAMSARA-3-era
+    // manual lease (mileage_at_start NULL but mileage_rate_km set) silently
+    // dropped the entered mileage — the second half of the MTTS68 /
+    // INV-2026-00150 trap. Bridge it through the same guaranteed $extraLines
+    // carrier as the closeout charges. The helper returns NULL unless this is
+    // genuinely the manual-distance case and cannot overlap the legacy overage or
+    // modern odometer paths (see ff_close_manual_mileage_bridge_line's guards).
+    if (!$hasMileageLine) {
+        $priorMileageBilled = (bool) db_row(
+            "SELECT 1 FROM invoice_line_items li
+               JOIN invoices i ON i.id = li.invoice_id
+              WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+                AND li.item_type IN ('mileage_usage', 'mileage')
+              LIMIT 1",
+            [$id]
+        );
+        $bridgeLine = ff_close_manual_mileage_bridge_line(
+            $lease, $mileageAtEnd, $odoAtClose, $priorMileageBilled
+        );
+        if ($bridgeLine !== null) {
+            $extraLines[]   = $bridgeLine;
+            $hasMileageLine = true;
+        }
+    }
+
     // S-LEASE-SERVICE-CHARGES: closeout charges (sweep/wash/fuel) ride on the
     // final invoice alongside any mileage overage. The post-pass below guarantees
     // they still bill when no rental final invoice is generated.
@@ -794,6 +821,63 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             $odoPeriodStart = $prev['odometer_at_period_end_km'];
         } elseif ($lease['odometer_start_km'] !== null) {
             $odoPeriodStart = $lease['odometer_start_km'];
+        }
+    }
+
+    // S-CLOSE-MANUAL-MILEAGE-WARN (gap a): a MANUAL lease with a per-km rate that
+    // closes with NO billable mileage — no actual mileage entered (so the bridge
+    // above produced nothing) AND no usable closing-vs-start odometer pair (so the
+    // modern odometer auto-line won't fire) — silently bills $0 mileage. The
+    // common cause is a manual lease whose starting odometer was never captured
+    // (activation skips capture for non-samsara modes). Surface it non-blockingly
+    // (audit + response field) so the operator notices the missing reading instead
+    // of discovering it on the invoice. Never blocks the close.
+    $mileageWarning = null;
+    // Mirror InvoiceGenerator's drawdownGate exactly, including its precharge
+    // sub-condition (precharge_invoiced_at IS NOT NULL OR precharge_enabled = 0):
+    // a never-invoiced precharge lease (precharge_enabled=1 AND
+    // precharge_invoiced_at IS NULL) suppresses the auto mileage line even with a
+    // valid odometer pair, so without this term the warning would be wrongly
+    // skipped (low-severity miss caught in adversarial review). No new query —
+    // both columns are already in the lease SELECT above.
+    $modernMileageWillBill = (
+        $odoAtClose !== null && $odoPeriodStart !== null
+        && bccomp((string) $odoAtClose, (string) $odoPeriodStart, 2) > 0
+        && (($lease['precharge_invoiced_at'] ?? null) !== null
+            || (int) ($lease['precharge_enabled'] ?? 0) === 0)
+    );
+    if (($lease['mileage_tracking_mode'] ?? 'off') === 'manual'
+        && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
+        && !$hasMileageLine
+        && !$modernMileageWillBill
+    ) {
+        $mileageWarning = sprintf(
+            'Lease %s tracks mileage manually and has a $%s/km rate, but no closing odometer or actual mileage was entered — $0 mileage billed on this close.',
+            (string) ($lease['contract_number'] ?? ''),
+            (string) $lease['mileage_rate_km']
+        );
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => $changedBy,
+            'action'       => 'update',
+            'module'       => 'billing',
+            'entity_type'  => 'lease',
+            'entity_id'    => $id,
+            'entity_label' => $lease['contract_number'] ?? null,
+            'notes'        => '[FLEETFORGE_BILLING_WARNING] ' . $mileageWarning,
+            'old_values'   => null,
+            'new_values'   => json_encode([
+                'mileage_tracking_mode' => 'manual',
+                'mileage_rate_km'       => (string) $lease['mileage_rate_km'],
+                'mileage_at_end'        => $mileageAtEnd,
+                'odometer_at_close_km'  => $odoAtClose,
+            ]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+        try {
+            \FleetForge\Observability\Sentry::captureMessage($mileageWarning, 'warning');
+        } catch (\Throwable) {
+            // Observability must never block the close path.
         }
     }
 
@@ -1275,6 +1359,10 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         // Populated with method + amount + settled_at + credit_note_*
         // when refund dispatch fired.
         'precharge_refund'  => $prechargeRefundResult,
+        // S-CLOSE-MANUAL-MILEAGE-WARN: non-null when a manual lease with a
+        // mileage rate closed without any billable mileage (gap a). The UI
+        // surfaces it so the operator can correct the draft before sending.
+        'mileage_warning'   => $mileageWarning,
     ];
 
     // ── In-app notifications (NOTIF-1) ─────────────────────────
