@@ -129,9 +129,20 @@ db_transaction(function () use ($id, &$result) {
     // lease) is caught at close by the end>=start validation, not here.
     $mileageMode = $lease['mileage_tracking_mode'] ?? 'off';
 
+    // S-LEASE-ACTIVATE-ODO-KEYS: mirror the FULL OdometerService result contract
+    // (success/odometer_km/source/fetched_at/is_stale/reading_age_seconds/error).
+    // When mileage_tracking_mode is 'off'/'manual' we skip the live Samsara fetch,
+    // but the $odoBlock response below reads odometer_km/source/reading_age_seconds
+    // unconditionally — so every key the service returns must exist here too, or
+    // those reads emit "Undefined array key" warnings (prod 2026-06-22 activate.php
+    // lines 327/328/330; captured by Sentry).
     $odoCapture = [
-        'success' => false,
-        'is_stale' => false,
+        'success'             => false,
+        'odometer_km'         => null,
+        'source'              => 'unavailable',
+        'fetched_at'          => null,
+        'is_stale'            => false,
+        'reading_age_seconds' => null,
         'error'   => $mileageMode === 'manual'
             ? 'manual mileage mode — operator enters odometer'
             : 'mileage tracking off for this lease',
