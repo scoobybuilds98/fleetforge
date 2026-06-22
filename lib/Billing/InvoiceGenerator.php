@@ -596,6 +596,62 @@ class InvoiceGenerator
                 $odoEndKm   = null;
             }
 
+            // ════════════════════════════════════════════════════════════════
+            // S-MILEAGE-MODE-OFF-WARN — billing-time net for the silent
+            // "rate configured but tracking Off" misconfiguration.
+            //
+            // A lease that carries a mileage_rate_km > 0 but has
+            // mileage_tracking_mode = 'off' will bill ZERO mileage on every
+            // invoice: the off branch above nulls the odometer, and the
+            // mileage_usage drawdown gate further requires mileageMode !== 'off'.
+            // That is exactly the MTTS68 / INV-2026-00150 incident — an operator
+            // set a $/km rate and entered a reading, but the mode stayed at its
+            // 'off' column default, so the invoice silently shipped no mileage
+            // line. Surface it LOUDLY but NON-BLOCKINGLY here so the
+            // contradiction is caught no matter which path generated the invoice
+            // (close.php, manual api/v1/invoices/create, or the monthly cron) —
+            // the create-form guard only covers the interactive create path.
+            // Mirrors the D-C soft-warning pattern further down (Sentry
+            // 'warning' + audit_log row, never throws). Excludes
+            // mileage_only/adjustment/credit_note, which legitimately never
+            // carry a base mileage line.
+            if ($mileageMode === 'off'
+                && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
+                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
+            ) {
+                $offWarnMsg = sprintf(
+                    'Lease #%d (%s) has a mileage rate configured (mileage_rate_km=%s) but mileage_tracking_mode is OFF — invoice %s..%s will bill $0 mileage. Set the lease to manual or samsara tracking to bill mileage.',
+                    $leaseId,
+                    (string) ($lease['contract_number'] ?? ''),
+                    (string) $lease['mileage_rate_km'],
+                    $periodStart, $periodEnd
+                );
+                try {
+                    \FleetForge\Observability\Sentry::captureMessage($offWarnMsg, 'warning');
+                } catch (\Throwable) {
+                    // Observability MUST NOT block the billing path.
+                }
+                db_insert('audit_log', [
+                    'user_id'      => $params['created_by'] ?? null,
+                    'user_name'    => (function_exists('current_user') && current_user())
+                                        ? (current_user()['name'] ?? 'system') : 'system',
+                    'action'       => 'update',
+                    'module'       => 'billing',
+                    'entity_type'  => 'lease',
+                    'entity_id'    => $leaseId,
+                    'entity_label' => $lease['contract_number'] ?? null,
+                    'notes'        => '[FLEETFORGE_BILLING_WARNING] ' . $offWarnMsg,
+                    'old_values'   => null,
+                    'new_values'   => json_encode([
+                        'mileage_tracking_mode' => 'off',
+                        'mileage_rate_km'       => (string) ($lease['mileage_rate_km'] ?? '0'),
+                        'period_start'          => $periodStart,
+                        'period_end'            => $periodEnd,
+                    ]),
+                    'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
+
             $periodDistanceKm     = null;
             $cumulativeDistanceKm = null;
             if ($odoStartKm !== null && $odoEndKm !== null) {

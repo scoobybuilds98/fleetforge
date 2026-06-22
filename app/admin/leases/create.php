@@ -785,13 +785,29 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- Off-mode notice: no mileage tracking on this lease -->
-                <div x-show="form.mileage_tracking_mode === 'off'"
+                <!-- Off-mode notice: no mileage tracking on this lease (no rate set) -->
+                <div x-show="form.mileage_tracking_mode === 'off' && !(parseFloat(form.mileage_rate) > 0)"
                      class="alert alert-warning"
                      style="margin-bottom:0;padding:0.5rem 0.75rem;font-size:0.875rem;">
                     Mileage tracking is <strong>Off</strong> — this lease won't capture an
                     odometer reading or bill any mileage. Pick <strong>Manual</strong> or
                     <strong>Samsara</strong> if this lease should track mileage.
+                </div>
+
+                <!-- S-MILEAGE-MODE-OFF-WARN: escalated notice — a mileage RATE is configured
+                     but tracking is Off. This is the silent rate>0 + mode='off' trap that
+                     produced lease MTTS68 / INV-2026-00150 (a $/km rate was set, the mode
+                     stayed at its 'off' default, and the invoice billed $0 mileage). The
+                     generic notice above read as a benign "no mileage" message; this one
+                     names the contradiction so the operator can't miss it. -->
+                <div x-show="form.mileage_tracking_mode === 'off' && parseFloat(form.mileage_rate) > 0"
+                     class="alert alert-danger"
+                     style="margin-bottom:0;padding:0.5rem 0.75rem;font-size:0.875rem;">
+                    ⚠️ You set a <strong>mileage rate</strong>
+                    ($<span x-text="form.mileage_rate"></span>/<span x-text="form.mileage_unit === 'km' ? 'km' : 'mile'"></span>)
+                    but tracking is <strong>Off</strong> — <strong>no mileage will be billed</strong>
+                    and the rate is ignored. Choose <strong>Manual</strong> (you enter the odometer)
+                    or <strong>Samsara</strong> (auto) to actually bill mileage.
                 </div>
 
                 <!-- Odometer capture — hidden entirely when tracking is Off -->
@@ -1592,8 +1608,26 @@ function FF_CreateLease() {
             // before creating a lease that won't track or bill any mileage, in
             // case they forgot to pick Manual or Samsara. They can still proceed
             // — 'off' is valid for leases with no mileage component.
+            //
+            // S-MILEAGE-MODE-OFF-WARN: escalate the wording when a mileage RATE
+            // is configured but tracking is Off — the silent rate>0 + mode='off'
+            // trap that produced MTTS68 / INV-2026-00150 ($/km rate set, mode left
+            // at its 'off' default, invoice billed $0 mileage). A bare "no mileage"
+            // confirm read as benign; naming the rate makes the contradiction
+            // explicit so the operator catches it at the decision point.
             if (this.form.mileage_tracking_mode === 'off') {
-                if (!confirm('Mileage tracking is set to Off — this lease will not capture an odometer reading or bill any mileage.\n\nChoose Manual or Samsara if this lease should track mileage.\n\nCreate the lease with mileage tracking Off?')) {
+                const mr = parseFloat(this.form.mileage_rate);
+                const unit = this.form.mileage_unit === 'km' ? 'km' : 'mile';
+                const msg = (mr > 0)
+                    ? ('⚠️ You set a mileage rate of $' + mr.toFixed(4) + '/' + unit
+                        + ' but Mileage Tracking is OFF.\n\n'
+                        + 'With tracking Off, NO mileage will be billed on any invoice — the rate is ignored.\n\n'
+                        + 'Choose Manual (you enter the odometer) or Samsara (auto) to actually bill mileage.\n\n'
+                        + 'Create the lease with mileage tracking Off anyway?')
+                    : ('Mileage tracking is set to Off — this lease will not capture an odometer reading or bill any mileage.\n\n'
+                        + 'Choose Manual or Samsara if this lease should track mileage.\n\n'
+                        + 'Create the lease with mileage tracking Off?');
+                if (!confirm(msg)) {
                     return;
                 }
             }

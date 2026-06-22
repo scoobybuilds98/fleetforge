@@ -427,6 +427,23 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-show="form.mileage_tracking_mode === 'off'">Off — no mileage tracking or billing on this lease.</span>
                         <span x-show="form.mileage_tracking_mode === 'samsara'">Samsara — readings come from the unit's GPS during auto-billing.</span>
                     </div>
+
+                    <?php $editHasMileageRate = ((float)($lease['mileage_rate_km'] ?? $lease['mileage_rate'] ?? 0)) > 0; ?>
+                    <?php if ($editHasMileageRate): ?>
+                    <!-- S-MILEAGE-MODE-OFF-WARN: this lease has a configured mileage rate, so
+                         switching tracking to Off means it silently bills $0 mileage — the
+                         rate>0 + mode='off' trap (MTTS68 / INV-2026-00150). The rate is
+                         read-only here, so a server-rendered gate is sufficient; the x-show
+                         keeps it reactive to the live mode toggle. -->
+                    <div x-show="form.mileage_tracking_mode === 'off'"
+                         class="alert alert-danger"
+                         style="margin:0 auto 24px;max-width:540px;padding:0.5rem 0.75rem;font-size:0.875rem;">
+                        ⚠️ This lease has a <strong>mileage rate</strong> of
+                        $<?= e(number_format((float)($lease['mileage_rate_km'] ?? $lease['mileage_rate'] ?? 0), 4)) ?>/<?= e(($lease['mileage_unit'] ?? 'km') === 'miles' ? 'mile' : 'km') ?>,
+                        but tracking is <strong>Off</strong> — <strong>no mileage will be billed</strong>.
+                        Switch to <strong>Manual</strong> or <strong>Samsara</strong> to bill mileage.
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Odometer readings — start is editable for active leases; end is set at close -->
@@ -855,6 +872,20 @@ function FF_EditLease() {
 
         async submit() {
             if (!this.validate()) return;
+
+            // S-MILEAGE-MODE-OFF-WARN: warn before saving a rate-bearing lease with
+            // mileage tracking Off — it will silently bill $0 mileage (the
+            // rate>0 + mode='off' trap, MTTS68 / INV-2026-00150). Rate is read-only
+            // here, so the guard is gated server-side on the persisted rate.
+            <?php $editSubmitRate = (float)($lease['mileage_rate_km'] ?? $lease['mileage_rate'] ?? 0); ?>
+            <?php if ($editSubmitRate > 0): ?>
+            if (this.form.mileage_tracking_mode === 'off') {
+                if (!confirm('⚠️ This lease has a mileage rate of $<?= e(number_format($editSubmitRate, 4)) ?>/<?= e(($lease['mileage_unit'] ?? 'km') === 'miles' ? 'mile' : 'km') ?> but Mileage Tracking is OFF.\n\nWith tracking Off, NO mileage will be billed — the rate is ignored.\n\nSwitch to Manual or Samsara to bill mileage.\n\nSave with mileage tracking Off anyway?')) {
+                    return;
+                }
+            }
+            <?php endif; ?>
+
             this.submitting = true;
             const f = document.querySelector('form');
 

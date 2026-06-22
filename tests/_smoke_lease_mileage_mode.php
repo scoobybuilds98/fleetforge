@@ -142,6 +142,28 @@ try {
         . " odo_end=" . ($row3['odometer_at_period_end_km'] ?? 'null')
         . " mileage_line=" . ($ml3 ? 'present' : 'absent') . " (expect null / null / absent)");
 
+    // ── T5: off mode + configured mileage rate → billing WARNING emitted ──
+    // S-MILEAGE-MODE-OFF-WARN: l3 (off) carries mileage_rate_km=0.18, so the
+    // generator must write a non-blocking [FLEETFORGE_BILLING_WARNING] audit_log
+    // row flagging the silent rate>0 + mode='off' trap (the MTTS68 /
+    // INV-2026-00150 incident). l2 (manual, same rate) must NOT — manual mode
+    // bills mileage normally and is not a misconfiguration.
+    $warnRow = function (int $leaseId): ?array {
+        return db_row(
+            "SELECT id FROM audit_log
+              WHERE entity_type = 'lease' AND entity_id = ? AND module = 'billing'
+                AND notes LIKE '[FLEETFORGE_BILLING_WARNING]%mileage_tracking_mode is OFF%'
+              ORDER BY id DESC LIMIT 1",
+            [$leaseId]
+        );
+    };
+    $w3 = $warnRow($l3);
+    $w2 = $warnRow($l2);
+    check('T5', 'off+rate emits billing warning; manual does not',
+        $w3 !== null && $w2 === null,
+        "off_lease_warn=" . ($w3 ? 'present' : 'absent')
+        . " manual_lease_warn=" . ($w2 ? 'present' : 'absent') . " (expect present / absent)");
+
     // ── T4: activation guard never overwrites a manual odometer ──
     // Insert a pending lease carrying an operator-entered manual reading, then
     // run the exact activation UPDATE with a GPS reading of 0 (the failure that
