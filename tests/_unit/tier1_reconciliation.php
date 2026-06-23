@@ -219,17 +219,19 @@ function test_RR_015(): void {
 }
 
 // ── RR-020..029 reconciliation credit generation (10) ───────
-// RR-020: 15-day lease spanning Mar→Apr. R2 §4.2/§5: above the monthly crossover
-// (weeklyMath(15)=$750 > $700) AND spanning, with NO complete month → both partials
-// prorate at monthly÷30: Mar 28-31 (4d=$93.33) + Apr 1-11 (11d=$256.67) = $350.00
-// cumulative. Inv 1 billed $200 (4d daily) → delta $150.00. (A spanning sub-30-day
-// lease prorates BELOW the flat month — the "commit longer, better per-day" rule.)
+// RR-020: 15-day lease spanning Mar→Apr. Above the monthly crossover
+// (weeklyMath(15)=$750 > $700) AND ≤ one month (15 days), so S-MONTHLY-SHORT-FLAT
+// bills the FLAT monthly $700 cumulative — the same as a 15-day lease wholly
+// inside one month — NOT the partial-month proration ($350). Inv 1 billed $200
+// (4d daily) → delta $500.00. (Operator policy 2026-06-24 reversed the original
+// R2 §4.2/§5 "commit longer, better per-day" undercharge for ≤1-month straddles;
+// prod INV-2026-00171 / lease MTTS73 surfaced it.)
 function test_RR_020(): void {
     DbState::inTransaction(function() {
         $lease = _rr_makeLease('2026-03-28');
         Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start');
         $inv2 = Fixtures::generateInvoice($lease, '2026-04-01', '2026-04-11', 'partial_end');  // 15 cumulative
-        Assert::bcequal('150.00', _rr_lineAmount($inv2['invoice_id']));
+        Assert::bcequal('500.00', _rr_lineAmount($inv2['invoice_id']));
         // No reconciliation credit line (delta is positive).
         Assert::lineCount($inv2['invoice_id'], 'base_rental_reconciliation_credit', 0);
     });

@@ -14,9 +14,13 @@ declare(strict_types=1);
  *      monthly → weekly math; weeklyMath > monthly → MONTHLY applies.
  *   3. cumulative_correct THROUGH this invoice's period_end:
  *        sub-month tier → the whole-lease amount;
- *        monthly, single calendar month → flat monthly (28/29/30/31);
- *        monthly, spans → Σ calendar-month segments (complete months flat,
- *        partial start/end months at days × monthly÷30).
+ *        monthly, total extent ≤ one month (≤30 days) → flat monthly,
+ *          whether inside one calendar month OR straddling a boundary
+ *          (S-MONTHLY-SHORT-FLAT — the monthly rate is the cap for any
+ *          ≤1-month monthly-tier lease; basis 'monthly_single_month' for
+ *          the in-month case, 'monthly_short_flat' for the straddle case);
+ *        monthly, extent > one month → Σ calendar-month segments (complete
+ *          months flat, partial start/end months at days × monthly÷30).
  *   4. already_billed = NET base_rental of all non-void prior invoices.
  *   5. delta = cumulative_correct − already_billed. Positive → base_rental;
  *      negative → base_rental_reconciliation_credit; zero → no line.
@@ -25,11 +29,12 @@ declare(strict_types=1);
  * "whichever pays more" at activation. A full calendar month bills flat at
  * the monthly rate regardless of length (the 30-day-block math that charged
  * a 31-day month an extra day is removed). There is NO special first-invoice
- * branch: the single-calendar-month-flat rule plus the running
- * reconciliation give the same protection — a 22–30 day single-month lease
- * pays the flat month; a lease known to span prorates its partial
- * immediately; a span discovered later re-prorates the past month down to
- * its /30 value via a reconciliation credit ("prorate in the past").
+ * branch: the ≤1-month-flat rule plus the running reconciliation give the
+ * same protection — any ≤30-day monthly-tier lease pays the flat month
+ * (inside one calendar month OR straddling a boundary, S-MONTHLY-SHORT-FLAT);
+ * a lease known to run LONGER than a month prorates its partial start month
+ * immediately; a longer span discovered later re-prorates the past month down
+ * to its /30 value via a reconciliation credit ("prorate in the past").
  *
  * Pure math + ONE read query (already_billed SUM); no DB writes (D3:
  * InvoiceGenerator is the sole DB writer in billing). applyTierFormula() and
@@ -424,6 +429,37 @@ class HolisticLeaseEngine
                     'explanation' => [
                         "{$total} cumulative days, single calendar month: weekly math \$" . bcround($weeklyMath, 2)
                             . " exceeds monthly — flat monthly rate = \${$amount}",
+                    ],
+                    'segments' => []];
+        }
+
+        // S-MONTHLY-SHORT-FLAT — a monthly-tier lease whose TOTAL extent is one
+        // month or less (≤30 days) but which STRADDLES a calendar-month boundary
+        // still bills the FLAT monthly rate, exactly like the single-calendar-
+        // month case above — NOT the sum of two partial-month prorations.
+        //
+        // Without this, a 22-day lease wholly inside July bills the flat $monthly
+        // (the branch above), while the same 22 days across Jul 24–Aug 14 billed
+        // only 22 × (monthly÷30) — a silent discount handed out purely for where
+        // the lease falls on the calendar. (This reverses the original R2 §4.2/§5
+        // "commit longer, better per-day" behaviour for the ≤1-month spanning
+        // case — operator policy decision 2026-06-24: once the monthly tier
+        // applies, a ≤1-month lease IS the monthly rate, straddle or not. Prod
+        // INV-2026-00171 / lease MTTS73 surfaced it.)
+        //
+        // "≤ one month" = ≤30 days, matching the engine's own monthly÷30 daily
+        // basis (D-R2-5): at exactly 30 days the spanning proration already
+        // equals the flat month (30 × monthly÷30 = monthly), so the boundary is
+        // smooth — a 31st day re-prorates the whole span up at monthly÷30 via the
+        // spanning path below. Like §4.1, this is the WHOLE-lease cap and ignores
+        // $through (an interim invoice that has already crossed the weekly→monthly
+        // rate crossover bills the flat month; the close reconciles to it).
+        if ($total <= 30) {
+            $amount = bcround($monthly, 2);
+            return ['amount' => $amount, 'tier' => 'monthly', 'basis' => 'monthly_short_flat',
+                    'explanation' => [
+                        "{$total} cumulative days (≤ one month) spanning a calendar boundary: weekly math \$"
+                            . bcround($weeklyMath, 2) . " exceeds monthly — flat monthly rate = \${$amount}",
                     ],
                     'segments' => []];
         }

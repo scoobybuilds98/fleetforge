@@ -67,16 +67,20 @@ function test_ML_006(): void {
     DbState::inTransaction(function() {
         $lease = _ml_makeLease('2026-03-28');
         $inv = Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-11', 'single_period');
-        // R2: 15d spans Mar→Apr (monthly applies, no complete month) → 15 × $700/30 = $350.00
-        Assert::bcequal('350.00', _ml_lineSum($inv['invoice_id']));
+        // S-MONTHLY-SHORT-FLAT: 15d spans Mar→Apr, monthly applies (weeklyMath(15)=$750>$700)
+        // and is ≤ one month → FLAT monthly $700 (same as a 15d single-month lease), not the
+        // old partial proration $350. Operator policy 2026-06-24.
+        Assert::bcequal('700.00', _ml_lineSum($inv['invoice_id']));
     });
 }
 function test_ML_007(): void {
     DbState::inTransaction(function() {
         $lease = _ml_makeLease('2026-03-28');
         $inv = Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-25', 'single_period');
-        // R2: 29d spans Mar→Apr (no complete month) → Mar 28-31 ($93.33) + Apr 1-25 ($583.33) = $676.67
-        Assert::bcequal('676.67', _ml_lineSum($inv['invoice_id']));
+        // S-MONTHLY-SHORT-FLAT: 29d spans Mar→Apr, monthly applies, ≤ one month → FLAT monthly
+        // $700 (the cap), not the old partial proration $676.67. At 30d the proration already
+        // equals $700, so the boundary is smooth (see ML-008). Operator policy 2026-06-24.
+        Assert::bcequal('700.00', _ml_lineSum($inv['invoice_id']));
     });
 }
 function test_ML_008(): void {
