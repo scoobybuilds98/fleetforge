@@ -265,6 +265,21 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         </button>
         <?php endif; ?>
 
+        <?php /* S-LEASE-REOPEN-UI: surface the existing reopen endpoint (it had no
+                 button — the only way to correct a completed lease, e.g. a missed
+                 mileage line, was a raw API call). Manager-gated to match
+                 api/v1/leases/reopen.php's role check; the modal collects the
+                 required reopen_reason. Reopen flips completed → active so mileage
+                 mode + a re-close can recompute the final invoice. */
+           $canReopen = can('leases', 'edit')
+               && in_array(current_user()['role_slug'] ?? '', ['super_admin', 'manager'], true);
+        ?>
+        <?php if ($canReopen && $lease['status'] === 'completed'): ?>
+        <button class="btn btn-outline-warning" @click="reopenModal.open = true" :disabled="actionInProgress">
+            Reopen Lease
+        </button>
+        <?php endif; ?>
+
         <?php /* S-INVOICE-CREATION-UX C3 (Issue 3): Generate Invoice
                  navigates to /invoices/create?lease_id={id}; the form's
                  init() (C2) reads the URL param and triggers onLeaseChange
@@ -931,6 +946,45 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                 </table>
             </div>
 
+        </div>
+    </template>
+
+    <!-- ── S-LEASE-REOPEN-UI: REOPEN MODAL ──────────────────── -->
+    <template x-if="reopenModal.open">
+        <div class="modal-overlay" @click.self="reopenModal.open = false">
+            <div class="modal modal-md" @click.stop>
+                <div class="modal-header">
+                    <h3 class="modal-title">Reopen Lease</h3>
+                    <button class="modal-close-btn" @click="reopenModal.open = false" aria-label="Close">
+                        <?= heroicon('x-mark', 'modal-icon') ?>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning" style="margin-bottom:1rem;">
+                        This sets lease <strong><?= e($lease['contract_number']) ?></strong> back to
+                        <strong>Active</strong> and the unit to <strong>On Lease</strong>. The recorded
+                        return date and the closing mileage reading are cleared — after reopening you can
+                        adjust the lease (e.g. set Mileage Tracking to Manual) and <strong>close it again</strong>
+                        to regenerate the final invoice. Existing draft invoices are reconciled on the next close.
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="reopen_reason">Reason <span style="color:var(--color-danger);">*</span></label>
+                        <textarea id="reopen_reason" class="form-control" x-model="reopenModal.reason" rows="3"
+                                  placeholder="e.g. Re-close to bill missed mileage (manual reading)."></textarea>
+                        <span class="form-hint">Required — recorded on the audit log and status history.</span>
+                    </div>
+                    <div class="alert alert-danger" x-show="actionError" x-text="actionError" style="margin-top:0.75rem;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost btn-sm" @click="reopenModal.open = false">Cancel</button>
+                    <button class="btn btn-warning btn-sm"
+                            @click="reopenLease()"
+                            :disabled="reopening || !reopenModal.reason.trim()">
+                        <span x-show="!reopening">Reopen Lease</span>
+                        <span x-show="reopening">Reopening…</span>
+                    </button>
+                </div>
+            </div>
         </div>
     </template>
 
@@ -1926,6 +1980,9 @@ function FF_LeaseDetail() {
         closing:             false,
         actionError:         null,
         showCloseModal:      false,
+        // S-LEASE-REOPEN-UI: reopen modal (reason is required by the endpoint)
+        reopenModal:         { open: false, reason: '' },
+        reopening:           false,
 
         // Invoices tab state
         invoices:            [],
@@ -2603,6 +2660,34 @@ function FF_LeaseDetail() {
             }
             this.actionInProgress = false;
             this.activating       = false;
+        },
+
+        // ── S-LEASE-REOPEN-UI: reopen a completed lease ──────────
+        // Wraps api/v1/leases/reopen.php (manager-gated, reason required). On
+        // success the lease is Active again — the page reloads so the Close
+        // action + active-lease edits (e.g. mileage mode) become available.
+        async reopenLease() {
+            const reason = this.reopenModal.reason.trim();
+            if (!reason) { this.actionError = 'A reason is required to reopen.'; return; }
+            this.actionInProgress = true;
+            this.reopening        = true;
+            this.actionError      = null;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/leases/reopen') ?>', {
+                    id: <?= $leaseId ?>,
+                    reopen_reason: reason,
+                });
+                if (r.success) {
+                    if (window.FF_Toast) window.FF_Toast.success('Lease reopened', 'Status is now Active.');
+                    window.location.reload();
+                } else {
+                    this.actionError = (r.error && r.error.message) || r.message || 'Failed to reopen lease.';
+                }
+            } catch(e) {
+                this.actionError = 'Network error. Please try again.';
+            }
+            this.actionInProgress = false;
+            this.reopening        = false;
         },
 
         // ── SAMSARA-1: Close-modal pre-fill helpers ──────────────

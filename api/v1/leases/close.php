@@ -234,8 +234,12 @@ function legacy_handle_existing_full_month_draft(
     ?string $odoSource,
     ?string $odoFetchedAt
 ): ?array {
-    // Find ANY existing full_month invoice for the closing month (any status)
-    // so we can surface non-draft conflicts before silently double-billing.
+    // Find any LIVE (non-void) full_month invoice for the closing month so we can
+    // surface a genuine non-draft conflict (sent/paid/written_off) before silently
+    // double-billing. S-LEASE-REOPEN-RECLOSE-FIX: exclude status='void' — a voided
+    // full_month (e.g. left behind by a PRIOR close cycle on a reopen→reclose) is
+    // already neutralised and is NOT a conflict; treating it as one made the second
+    // close of a start-on-the-1st lease fail with INVOICE_CONFLICT on a void row.
     $existing = db_row(
         "SELECT id, invoice_number, status, billing_period_start, billing_period_end,
                 subtotal, discount_amount, subtotal_after_discount, total_amount,
@@ -247,6 +251,7 @@ function legacy_handle_existing_full_month_draft(
          WHERE lease_id      = ?
            AND billing_type  = 'full_month'
            AND deleted_at    IS NULL
+           AND status        <> 'void'
            AND YEAR(billing_period_start)  = YEAR(?)
            AND MONTH(billing_period_start) = MONTH(?)
          ORDER BY id DESC
