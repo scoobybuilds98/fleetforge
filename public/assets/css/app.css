@@ -364,6 +364,18 @@ hr {
     --bg-surface-2:          #f1f5f9;
     --bg-surface-hover:      #f8fafc;
 
+    /* S-NOTIF-LIGHT-HOVER (2026-06-23): the light palette was missing
+       --bg-muted / --bg-hover — they were defined ONLY under
+       [data-theme="dark"] (#1f1e1d / #2a2927). Every light-mode rule using
+       var(--bg-muted | --bg-hover, <dark literal>) therefore fell through to
+       a near-black literal. Most visible symptom: the hovered unread
+       notification row (.notif-item--unread:hover → var(--bg-hover, #2a2a2a))
+       rendered a near-black box with dark text in DAY mode. Mirror the
+       dark-theme relationship (muted == surface-2; hover one step beyond) with
+       on-palette slate values so all hover surfaces resolve light. */
+    --bg-muted:              #f1f5f9;  /* slate-100, mirrors --bg-surface-2 */
+    --bg-hover:              #e2e8f0;  /* slate-200, perceptible row/item hover */
+
     --text-primary:          #0f172a;
     --text-secondary:        #475569;
     --text-tertiary:         #94a3b8;
