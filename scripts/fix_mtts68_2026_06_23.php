@@ -88,12 +88,20 @@ foreach ($bogus as $inv) {
 }
 
 // ── 2. Reset lease return date + put it in manual-mileage mode ──
+// mileage_at_start=0 trap: the manual-mileage bridge (ff_close_manual_mileage_bridge_line)
+// skips any lease whose mileage_at_start !== null, deferring to the legacy overage path.
+// MTTS68 carries mileage_at_start=0 (a meaningless "not recorded" default for a manual
+// trailer with no start reading), which silently suppressed the bridge -> no mileage line.
+// Normalise 0/null -> NULL so the bridge applies; never clobber a real start reading.
 echo "  SET actual_return_date {$lease['actual_return_date']} -> " . REAL_RETURN
-   . "; mileage_tracking_mode {$lease['mileage_tracking_mode']} -> manual; mileage_at_end -> " . MILEAGE_END . "\n";
+   . "; mileage_tracking_mode {$lease['mileage_tracking_mode']} -> manual; mileage_at_end -> " . MILEAGE_END
+   . "; mileage_at_start " . var_export($lease['mileage_at_start'], true) . " -> NULL (if 0/empty, so the bridge applies)\n";
 if ($apply) {
     db_execute(
         "UPDATE leases SET actual_return_date = ?, actual_return_time = NULL,
-                mileage_tracking_mode = 'manual', mileage_at_end = ?, updated_at = NOW()
+                mileage_tracking_mode = 'manual', mileage_at_end = ?,
+                mileage_at_start = IF(COALESCE(mileage_at_start, 0) = 0, NULL, mileage_at_start),
+                updated_at = NOW()
           WHERE id = ?",
         [REAL_RETURN, MILEAGE_END, $FIX_LEASE_ID]
     );
@@ -108,10 +116,16 @@ $priorMileageBilled = (int) db_count(
     [$FIX_LEASE_ID]
 ) > 0;
 
-$bridgeLine = ff_close_manual_mileage_bridge_line(
-    $apply ? $lease : array_merge($lease, ['mileage_tracking_mode' => 'manual']),
-    MILEAGE_END, null, $priorMileageBilled
-);
+// In DRY RUN $lease is the un-mutated row; mirror step 2's edits (mode=manual,
+// mileage_at_start 0->NULL) so the preview reflects what --apply will actually do.
+$bridgeLease = $lease;
+if (!$apply) {
+    $bridgeLease = array_merge($lease, ['mileage_tracking_mode' => 'manual']);
+    if ((int) ($bridgeLease['mileage_at_start'] ?? 0) === 0) {
+        $bridgeLease['mileage_at_start'] = null;
+    }
+}
+$bridgeLine = ff_close_manual_mileage_bridge_line($bridgeLease, MILEAGE_END, null, $priorMileageBilled);
 
 if ($priorMileageBilled) {
     echo "  (mileage already billed on a live invoice — skipping, no double-bill)\n";
