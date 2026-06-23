@@ -129,7 +129,13 @@ require_once FF_ROOT . '/includes/header.php';
             Email Customer
         </button>
         <?php endif; ?>
-        <?php if (can('leases', 'edit') && $lease['status'] === 'pending'): ?>
+        <?php /* S-LEASE-REOPEN-UI: Edit is available on pending AND active leases.
+                 On an active lease the form is distance-fields-only (start odometer,
+                 allowance, conversions, mileage tracking mode) — the supported way to
+                 e.g. flip a reopened lease's Mileage Tracking to Manual before
+                 re-closing. Previously the button showed for pending only, so an
+                 active/reopened lease had no path to the mileage-mode toggle. */ ?>
+        <?php if (can('leases', 'edit') && in_array($lease['status'], ['pending', 'active'], true)): ?>
         <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit</a>
         <?php endif; ?>
         <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>

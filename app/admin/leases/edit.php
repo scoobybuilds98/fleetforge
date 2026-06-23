@@ -722,6 +722,13 @@ function FF_EditLease() {
             estimated_mileage_miles: <?= json_encode($lease['estimated_mileage_miles'] ?? '') ?>,
             km_to_miles_conversion:  <?= (float)($lease['km_to_miles_conversion'] ?? 0.621371) ?>,
             miles_to_km_conversion:  <?= (float)($lease['miles_to_km_conversion'] ?? 1.609344) ?>,
+            // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
+            // The mileage data SOURCE is a distance setting — update.php whitelists it
+            // on ACTIVE leases (alongside mileage_at_start / estimated_mileage). It must
+            // be in the form model regardless of status so the segment control reflects
+            // the current mode AND a change is actually sent (S-LEASE-REOPEN-UI: needed
+            // to flip a reopened lease Off→Manual before re-closing).
+            mileage_tracking_mode:   <?= json_encode($lease['mileage_tracking_mode'] ?? 'off') ?>,
             <?php if (!$isActive): ?>
             // Pending-only fields — locked on active leases (API returns 422 ACTIVE_LEASE_DISTANCE_ONLY)
             po_number:               <?= json_encode($lease['po_number'] ?? '') ?>,
@@ -730,8 +737,6 @@ function FF_EditLease() {
             rate_notes:              <?= json_encode($lease['rate_notes'] ?? '') ?>,
             // S-LEASE-MIN-DAYS: frozen short-lease floor, editable on pending leases.
             minimum_billing_days:    <?= json_encode($lease['minimum_billing_days'] ?? '') ?>,
-            // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
-            mileage_tracking_mode:   <?= json_encode($lease['mileage_tracking_mode'] ?? 'off') ?>,
             mileage_at_end:          <?= json_encode($lease['mileage_at_end'] ?? '') ?>,
             insurance_opt_in:        <?= $lease['insurance_opt_in'] ? 'true' : 'false' ?>,
             insurance_cost:          <?= json_encode($lease['insurance_cost'] ?? '0.00') ?>,
