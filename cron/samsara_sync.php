@@ -68,10 +68,11 @@ $now       = date('Y-m-d H:i:s');
 
 // Pending alerts keyed by type — filled per-unit, dispatched as
 // grouped notifications after the loop (one notif per type, not per unit).
+// NOTE: 'samsara.not_connected' (device-offline) was intentionally removed
+// 2026-06-23 — see [NOTIF-OFFLINE-REMOVED] below.
 $pendingAlerts = [
     'samsara.battery_critical' => [],
     'samsara.battery_low'      => [],
-    'samsara.not_connected'    => [],
 ];
 
 /**
@@ -109,18 +110,9 @@ try {
 
     ff_samsara_log('CRON_START', sprintf('Tick: %d linked units to sync', count($linked)));
 
-    // Resolve the offline-alert timezone once outside the unit loop.
-    // samsara_last_connected_at is stored as a local-tz string (date() uses
-    // APP_TIMEZONE); using DateTimeImmutable with an explicit DateTimeZone
-    // gives an accurate Unix timestamp for the >8h offline threshold, avoiding
-    // the prior ~7-8h skew from strtotime($lastConn . ' UTC').
-    // (D-SAMSARA-OFFLINE-TZ, locked S-CRON-FIX-REMAINING 2026-06-03)
-    $tzName = (string) settings_get('company.timezone', APP_TIMEZONE);
-    try {
-        $alertTz = new \DateTimeZone($tzName);
-    } catch (\Exception) {
-        $alertTz = new \DateTimeZone(APP_TIMEZONE);
-    }
+    // (The offline-alert timezone resolution that used to live here was removed
+    // with the device-offline notification — see [NOTIF-OFFLINE-REMOVED]. Offline
+    // status is still computed for the dashboard in api/v1/samsara/fleet.php.)
 
     foreach ($linked as $unit) {
         $unitId     = (int) $unit['id'];
@@ -221,12 +213,11 @@ try {
                 ff_samsara_log('CRON_SYNC', "Unit $unitNum: telemetry updated (no movement)");
             }
 
-            // ── [NOTIF-1] Battery + connectivity alerts — accumulate ─
+            // ── [NOTIF-1] Battery alerts — accumulate ───────────────
             // Dispatch is grouped after the full sync loop so
-            // "5 units offline" fires as one notification, not five.
+            // "5 units low battery" fires as one notification, not five.
             try {
                 $batteryPct = isset($stats['battery_pct']) ? (int) $stats['battery_pct'] : null;
-                $lastConn   = $update['samsara_last_connected_at'];
 
                 if ($batteryPct !== null) {
                     if ($batteryPct < 10) {
@@ -237,16 +228,13 @@ try {
                             ['id' => $unitId, 'num' => $unitNum, 'pct' => $batteryPct];
                     }
                 }
-                if ($lastConn !== null) {
-                    $lastConnDt = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $lastConn, $alertTz);
-                    $hoursSince = $lastConnDt !== false
-                        ? (int) floor((time() - $lastConnDt->getTimestamp()) / 3600)
-                        : 0;
-                    if ($hoursSince > 8) {
-                        $pendingAlerts['samsara.not_connected'][] =
-                            ['id' => $unitId, 'num' => $unitNum, 'hours' => $hoursSince];
-                    }
-                }
+                // [NOTIF-OFFLINE-REMOVED 2026-06-23] Device-offline ("not connected
+                // for 8+ hours") notifications were generating hundreds of alerts a
+                // day: unpowered trailers normally go quiet for 8h+, so the alert was
+                // almost entirely noise rather than an actionable fault. Offline
+                // status is still surfaced on the Samsara fleet dashboard
+                // (api/v1/samsara/fleet.php) — we just no longer push it as a
+                // notification. Battery alerts above are unaffected.
             } catch (\Throwable $notifErr) {
                 error_log('[NOTIF samsara] ' . $notifErr->getMessage());
             }
@@ -286,16 +274,8 @@ try {
                     ))
                     . ' — charge needed.',
             ],
-            'samsara.not_connected' => [
-                'sev'   => 'warning',
-                'title' => static fn(int $n): string  => $n === 1
-                    ? '1 unit offline'
-                    : "{$n} units offline",
-                'msg'   => static fn(array $us): string => 'Not connected for 8+ hours: '
-                    . implode(', ', array_map(
-                        static fn($u) => $u['num'] . " ({$u['hours']}h)", $us
-                    )) . '.',
-            ],
+            // 'samsara.not_connected' (device-offline) removed 2026-06-23 —
+            // see [NOTIF-OFFLINE-REMOVED]. Battery alerts only from here on.
         ];
 
         foreach ($alertMeta as $type => $meta) {
