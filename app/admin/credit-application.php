@@ -597,7 +597,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="noindex, nofollow">
     <title><?= $pageTitle ?></title>
-    <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
+    <?= ff_favicon_tags() ?>
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <style id="ff-cca-brand-override">
         :root {

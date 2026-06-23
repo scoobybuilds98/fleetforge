@@ -22,10 +22,14 @@ if (!defined('FF_LOADED')) {
     return;
 }
 
-// Resolve asset base safely — APP_URL is a raw constant, no DB needed
+// Resolve asset base safely — APP_URL is a raw constant, no DB needed.
+// $_baseUrl (with FF_BASE_PATH) is for in-app links (e.g. /dashboard);
+// static assets are served from the docroot ROOT, NOT under FF_BASE_PATH,
+// so css/favicon must use $_assetBase or they 404 on prod (S-FAVICON-EXTEND).
 $_baseUrl    = rtrim((string) APP_URL, '/') . FF_BASE_PATH;
-$_cssUrl     = $_baseUrl . '/assets/css/app.css?v=' . FF_ASSET_VERSION;
-$_faviconUrl = $_baseUrl . '/assets/icons/favicon.svg';
+$_assetBase  = rtrim((string) APP_URL, '/');
+$_cssUrl     = $_assetBase . '/assets/css/app.css?v=' . FF_ASSET_VERSION;
+$_faviconUrl = $_assetBase . '/assets/icons/favicon.svg';
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -109,4 +113,4 @@ $_faviconUrl = $_baseUrl . '/assets/icons/favicon.svg';
 </div>
 </body>
 </html>
-<?php unset($_baseUrl, $_cssUrl, $_faviconUrl); ?>
+<?php unset($_baseUrl, $_assetBase, $_cssUrl, $_faviconUrl); ?>

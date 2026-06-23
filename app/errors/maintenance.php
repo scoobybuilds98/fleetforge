@@ -18,13 +18,17 @@ if (!headers_sent()) {
     header('Retry-After: 3600'); // suggest retry in 1 hour
 }
 
-// Safe asset base from constants only — no DB, no functions
+// Safe asset base from constants only — no DB, no functions.
+// $_baseUrl carries FF_BASE_PATH for in-app links; static assets serve from
+// the docroot ROOT (no FF_BASE_PATH), so css/favicon use $_assetBase or they
+// 404 on prod (S-FAVICON-EXTEND).
 $_baseUrl = defined('APP_URL') && defined('FF_BASE_PATH')
     ? rtrim((string) APP_URL, '/') . FF_BASE_PATH
     : '';
+$_assetBase = defined('APP_URL') ? rtrim((string) APP_URL, '/') : '';
 
-$_cssUrl     = $_baseUrl !== '' ? $_baseUrl . '/assets/css/app.css?v=' . (defined('FF_ASSET_VERSION') ? FF_ASSET_VERSION : '1') : '';
-$_faviconUrl = $_baseUrl !== '' ? $_baseUrl . '/assets/icons/favicon.svg' : '';
+$_cssUrl     = $_assetBase !== '' ? $_assetBase . '/assets/css/app.css?v=' . (defined('FF_ASSET_VERSION') ? FF_ASSET_VERSION : '1') : '';
+$_faviconUrl = $_assetBase !== '' ? $_assetBase . '/assets/icons/favicon.svg' : '';
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -202,4 +206,4 @@ $_faviconUrl = $_baseUrl !== '' ? $_baseUrl . '/assets/icons/favicon.svg' : '';
 </div>
 </body>
 </html>
-<?php unset($_baseUrl, $_cssUrl, $_faviconUrl); ?>
+<?php unset($_baseUrl, $_assetBase, $_cssUrl, $_faviconUrl); ?>

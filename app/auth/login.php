@@ -349,11 +349,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
 
     <title>Sign In — <?= e($loginName) ?></title>
 
-    <?php if ($loginFaviconUrl !== ''): ?>
-    <link rel="icon" type="image/png" href="<?= e($loginFaviconUrl) ?>">
-    <?php else: ?>
-    <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
-    <?php endif; ?>
+    <?= ff_favicon_tags() ?>
 
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
 

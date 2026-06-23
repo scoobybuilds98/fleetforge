@@ -150,11 +150,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
 
     <title>Sign In — <?= e($_companyName) ?> Portal</title>
 
-    <?php if ($loginFaviconUrl !== ''): ?>
-    <link rel="icon" type="image/png" href="<?= e($loginFaviconUrl) ?>">
-    <?php else: ?>
-    <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
-    <?php endif; ?>
+    <?= ff_favicon_tags() ?>
 
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
