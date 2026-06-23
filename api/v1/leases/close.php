@@ -62,6 +62,12 @@ $actualReturnDate = clean_date($body['actual_return_date'] ?? null) ?? date('Y-m
 $actualReturnTime = clean_time($body['actual_return_time'] ?? null);
 $mileageAtEnd     = clean_int($body['mileage_at_end'] ?? null);
 $closeNotes       = clean_string($body['close_notes'] ?? null, 5000);
+// S-CLOSE-RETURN-FAR-PAST-END: explicit operator confirmation that a return date
+// well beyond the lease's scheduled end_date is intentional. Guards a fat-fingered
+// far-future date (e.g. wrong year) that would otherwise silently bill every
+// period through that date. Checked inside the transaction once $lease.end_date is
+// loaded; captured here so it rides into the transaction closure's use() list.
+$confirmExtendedReturn = !empty($body['confirm_extended_return']);
 
 // ── S-MILEAGE-3 D-K: precharge_refund block ────────────────────
 // When the lease has precharge_enabled=1 AND precharge_balance > 0
@@ -220,6 +226,7 @@ require_once __DIR__ . "/_close_reconciliation.php";
 function legacy_handle_existing_full_month_draft(
     int $leaseId,
     string $returnDate,
+    string $extentEnd,
     array $lease,
     array $extraLines,
     ?string $odoPeriodStart,
@@ -270,16 +277,31 @@ function legacy_handle_existing_full_month_draft(
         );
     }
 
-    $isLastDayOfMonth = ($returnDate === date('Y-m-t', strtotime($returnDate)));
+    // S-CLOSE-REMOVE-DAYS-FIX: append (keep the full month as the final invoice)
+    // ONLY when the full_month draft is entirely within the lease's billable
+    // extent — i.e. the closing-month full_month period_end (always month-end)
+    // does not exceed $extentEnd. That is true exactly when the lease is returned
+    // on the last day of the month AND no billable days were removed.
+    //
+    // Previously this gated on `$returnDate === last-day-of-month`, which IGNORED
+    // billing_days_removed: a "Remove N days" close on the last day of the month
+    // shortened the extent (e.g. → 06-25) yet still appended-and-kept the full
+    // 06-01→06-30 draft, silently billing the removed days (and the same blind
+    // spot would mis-handle a return-time that pulls the extent back to the prior
+    // day). Comparing the draft's period_end against the canonical extent makes the
+    // append/void decision agree with the extent the final invoice amount uses.
+    $fullMonthWithinExtent = ($extentEnd >= (string) $existing['billing_period_end']);
 
-    if ($isLastDayOfMonth) {
+    if ($fullMonthWithinExtent) {
         return legacy_append_mileage_to_full_month_draft(
             $existing, $lease, $extraLines,
             $odoPeriodStart, $odoAtClose, $odoSource, $odoFetchedAt
         );
     }
 
-    // Mid-month close → void the draft. Path B canonical truth for draft → void:
+    // Overshooting full_month (mid-month close, or removed-days/return-time
+    // shortened the extent below month-end) → void the draft. Path B canonical
+    // truth for draft → void:
     //   total_invoiced -= total_amount; OB unchanged.
     // adv_void_invoice() already implements this status-aware logic.
     adv_void_invoice($existing, $lease,
@@ -449,7 +471,7 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
-db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $closeoutLines, $reconMode, $prechargeRefund, $billingDaysRemoved, &$result) {
+db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $closeoutLines, $reconMode, $prechargeRefund, $billingDaysRemoved, $confirmExtendedReturn, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
     // start odometer for the final invoice when the user supplies a
@@ -519,6 +541,42 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             422,
             ['fields' => ['actual_return_date' => 'Return date cannot be before the lease start date.']]
         );
+    }
+
+    // ── S-CLOSE-RETURN-FAR-PAST-END: confirm an absurdly late return ──
+    // The billable extent (and therefore every period the final invoice bills)
+    // follows actual_return_date, NOT the scheduled end_date — billing a real
+    // overrun is intentional. But a fat-fingered far-future date (wrong year, a
+    // stray digit) would silently bill many spurious extra months with no signal.
+    // Normal short overruns (a few days/weeks past end_date) pass untouched; only
+    // a return more than the grace window past end_date requires the operator to
+    // re-submit with confirm_extended_return=true (the close modal turns this 422
+    // into an "are you sure?" prompt). Skipped entirely for open-ended leases
+    // (no end_date).
+    if (!$confirmExtendedReturn
+        && !empty($lease['end_date'])
+        && $actualReturnDate > (string) $lease['end_date']) {
+        $graceDays = (int) settings_get('lease.close_extended_return_grace_days', '31');
+        $threshold = (new DateTimeImmutable((string) $lease['end_date']))
+            ->modify("+{$graceDays} day")->format('Y-m-d');
+        if ($actualReturnDate > $threshold) {
+            $daysPast = (int) (new DateTimeImmutable($actualReturnDate))
+                ->diff(new DateTimeImmutable((string) $lease['end_date']))->days;
+            json_error(
+                'RETURN_FAR_PAST_END',
+                sprintf(
+                    'Return date (%s) is %d days past the lease end date (%s). Closing will bill every period through %s. Re-submit with confirmation if this is correct.',
+                    $actualReturnDate, $daysPast, $lease['end_date'], $actualReturnDate
+                ),
+                422,
+                [
+                    'confirm_required' => 'confirm_extended_return',
+                    'days_past_end'    => $daysPast,
+                    'end_date'         => $lease['end_date'],
+                    'return_date'      => $actualReturnDate,
+                ]
+            );
+        }
     }
 
     // S-LEASE-MILEAGE-MODE: an 'off' lease tracks no mileage, so never stamp a
@@ -994,7 +1052,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         // Concurrency: helper uses FOR UPDATE on the draft row; outer txn already
         // holds the equipment_unit lock so the cron cannot insert mid-flight.
         $draftAction = legacy_handle_existing_full_month_draft(
-            $id, $actualReturnDate, $lease, $extraLines,
+            $id, $actualReturnDate, $extentEnd, $lease, $extraLines,
             $odoPeriodStart, $odoAtClose, $odoSource, $odoFetchedAt
         );
 
@@ -1041,7 +1099,20 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     AND billing_period_start <= ?",
                 [$id, $extentEnd]
             );
-            $coverageEnd = $coverageRow['max_end'] ?? ($lease['last_billed_date'] ?: null);
+            // S-CLOSE-ZEROBILL-FIX: trust ONLY the live invoice coverage (the MAX
+            // above, restricted to non-void invoices starting on/before the
+            // extent). Do NOT fall back to the denormalized leases.last_billed_date:
+            // it is a monotonic GREATEST() that is NOT walked back when an invoice
+            // is voided, so after legacy_handle_existing_full_month_draft() voids the
+            // closing-month full_month draft (mid-month close — or a removed-days
+            // close — of a lease that started on the 1st), last_billed_date still
+            // points at month-end. Using it as the anchor pushed periodStart past the
+            // extent and SKIPPED this partial_end regeneration entirely, zero-billing
+            // the actual rental (repro: start 2026-05-01, return 2026-05-20 → $0).
+            // A NULL live MAX correctly means "no live invoice covers any of this
+            // lease" → bill from start_date. This is exactly the "live MAX is
+            // authoritative" contract the block comment above already states.
+            $coverageEnd = $coverageRow['max_end'] ?: null;
 
             $periodStart = $coverageEnd
                 ? date('Y-m-d', strtotime($coverageEnd . ' +1 day'))

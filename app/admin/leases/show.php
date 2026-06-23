@@ -2884,7 +2884,21 @@ function FF_LeaseDetail() {
             // refund picker above is the canonical close-time disposition
             // for residual mileage balance).
             try {
-                const r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);
+                let r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);
+                // S-CLOSE-RETURN-FAR-PAST-END: a return date far beyond the lease's
+                // scheduled end_date needs explicit confirmation (guards a
+                // fat-fingered far-future date that would silently bill many
+                // spurious months). Prompt and re-submit once confirmed.
+                if (!r.success && r.error && r.error.code === 'RETURN_FAR_PAST_END') {
+                    if (confirm(r.error.message + '\n\nProceed with this return date?')) {
+                        payload.confirm_extended_return = true;
+                        r = await FF_Api.post('<?= base_url('api/v1/leases/close') ?>', payload);
+                    } else {
+                        this.actionInProgress = false;
+                        this.closing          = false;
+                        return;
+                    }
+                }
                 if (r.success) {
                     // S-CLOSE-MANUAL-MILEAGE-WARN: surface the server-side $0-mileage
                     // warning (manual lease, rate set, nothing entered) before the
@@ -2894,7 +2908,7 @@ function FF_LeaseDetail() {
                     }
                     window.location.reload();
                 } else {
-                    this.actionError = r.message || 'Failed to close lease.';
+                    this.actionError = (r.error && r.error.message) || r.message || 'Failed to close lease.';
                 }
             } catch(e) {
                 this.actionError = 'Network error. Please try again.';
