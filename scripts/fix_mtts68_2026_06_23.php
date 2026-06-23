@@ -108,7 +108,14 @@ if ($apply) {
     $lease = db_row("SELECT * FROM leases WHERE id = ?", [$FIX_LEASE_ID]); // reload for the bridge
 }
 
-// ── 3. Bill the mileage once: 175 km × rate, on a clean adjustment invoice ──
+// ── 3. Bill the mileage ON THE SAME invoice as the rental ──
+// We do NOT emit a second invoice for one period (you can't send two invoices for
+// the same rental period). Instead, void the single live rental draft and regenerate
+// ONE final invoice for the same period with the mileage line merged in — base rental
+// + GPS + mileage on one invoice. This mirrors a normal close, where extra_lines ride
+// on the rental final invoice. Safe here: MTTS68 is a single 8-day period, all drafts.
+// Aborts if the lease has >1 live rental invoice (a multi-period lease needs per-period
+// handling, not a single collapsed invoice).
 $priorMileageBilled = (int) db_count(
     "SELECT COUNT(*) FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
       WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
@@ -127,27 +134,49 @@ if (!$apply) {
 }
 $bridgeLine = ff_close_manual_mileage_bridge_line($bridgeLease, MILEAGE_END, null, $priorMileageBilled);
 
+// Live rental invoice(s) we'd merge the mileage into.
+$liveRentals = db_select(
+    "SELECT id, invoice_number, status, total_amount, balance_due, billing_type,
+            billing_period_start, billing_period_end, customer_id, lease_id
+       FROM invoices
+      WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
+        AND billing_type IN ('partial_start','partial_end','full_month','single_period')
+      ORDER BY id",
+    [$FIX_LEASE_ID]
+);
+
 if ($priorMileageBilled) {
     echo "  (mileage already billed on a live invoice — skipping, no double-bill)\n";
 } elseif ($bridgeLine === null) {
     echo "  (mileage bridge inapplicable — no mileage line added)\n";
+} elseif (count($liveRentals) !== 1) {
+    echo "  !! ABORT mileage merge: expected exactly 1 live rental invoice, found " . count($liveRentals)
+       . " — manual review needed (multi-period lease shouldn't collapse to one invoice).\n";
 } else {
-    echo "  ADD mileage invoice: {$bridgeLine['description']} = \${$bridgeLine['amount']} (+tax), adjustment dated " . REAL_RETURN . "\n";
+    $r = $liveRentals[0];
+    echo "  MERGE mileage into the rental invoice: void {$r['invoice_number']} "
+       . "({$r['billing_period_start']}..{$r['billing_period_end']}) and regenerate ONE invoice "
+       . "= rental + GPS + {$bridgeLine['description']} (\${$bridgeLine['amount']} +tax)\n";
     if ($apply) {
-        $gen = new \FleetForge\Billing\InvoiceGenerator();
-        $adj = $gen->createFromLease([
-            'lease_id'          => $FIX_LEASE_ID,
-            'period_start'      => REAL_RETURN,
-            'period_end'        => REAL_RETURN,
-            'billing_type'      => 'adjustment',
-            'invoice_type'      => 'final',
-            'notes'             => 'MTTS68 mileage (manual): ' . MILEAGE_END . ' km.',
-            'created_by'        => current_user_id(),
-            'auto_generated'    => 1,
-            'generation_source' => 'lease_close',
-            'extra_lines'       => [$bridgeLine],
-        ]);
-        echo "  -> created {$adj['invoice_number']} (#{$adj['invoice_id']})\n";
+        $newLabel = null;
+        db_transaction(function () use ($r, $lease, $bridgeLine, $FIX_LEASE_ID, &$newLabel) {
+            adv_void_invoice($r, $lease, 'MTTS68: merging mileage into one final invoice (no second invoice for one period).');
+            $gen = new \FleetForge\Billing\InvoiceGenerator();
+            $merged = $gen->createFromLease([
+                'lease_id'          => $FIX_LEASE_ID,
+                'period_start'      => $r['billing_period_start'],
+                'period_end'        => $r['billing_period_end'],
+                'billing_type'      => $r['billing_type'],
+                'invoice_type'      => 'final',
+                'notes'             => 'MTTS68 single final invoice: rental + GPS + mileage (' . MILEAGE_END . ' km, manual).',
+                'created_by'        => current_user_id(),
+                'auto_generated'    => 1,
+                'generation_source' => 'lease_close',
+                'extra_lines'       => [$bridgeLine],
+            ]);
+            $newLabel = $merged['invoice_number'] . ' (#' . $merged['invoice_id'] . ')';
+        });
+        echo "  -> created {$newLabel} — rental + GPS + mileage on one invoice\n";
     }
 }
 
