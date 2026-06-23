@@ -10379,6 +10379,59 @@ tr.ff-row-selected > td {
 }
 /* ────────── S-LEASE-UNITS END ────────── */
 
+/* ────────── S-LEASE-RATES-REDESIGN ──────────
+   Compact, multi-per-row Rates card (replaces the one-field-per-row table).
+   A responsive auto-fill grid of label/value cells packs many fields into the
+   horizontal space; richer blocks (mileage & allowance, precharge, total driven)
+   sit full-width below, separated by hairline rules. */
+.ff-rates-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 16px 24px;
+}
+.ff-rate-cell { min-width: 0; }
+.ff-rate-label {
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+.ff-rate-value {
+    font-family: var(--font-mono, 'DM Mono', monospace);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+.ff-rate-value--sm { font-size: 0.8125rem; }
+.ff-rate-block {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border-color);
+}
+/* Total-distance-driven callout (closed leases). */
+.ff-rate-driven {
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    display: flex;
+    align-items: baseline;
+    column-gap: 20px;
+    row-gap: 4px;
+    flex-wrap: wrap;
+}
+.ff-rate-notes {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+/* ────────── S-LEASE-RATES-REDESIGN END ────────── */
+
 /* ────────── S-PERM-USERS-ACCESS-WALL ──────────
    Custom developer-only access wall, rendered inside the normal
    admin shell (sidebar + topbar) for the Users module when the

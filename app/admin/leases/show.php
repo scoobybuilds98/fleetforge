@@ -405,220 +405,179 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         <div class="card">
                             <div class="card-header"><div class="card-title">Rates</div></div>
                             <div class="card-body">
-                                <table class="table">
-                                    <tbody>
-                                        <tr><td class="text-secondary">Daily Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.daily_rate).toFixed(2)"></td></tr>
-                                        <tr><td class="text-secondary">Weekly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.weekly_rate).toFixed(2)"></td></tr>
-                                        <tr><td class="text-secondary">Monthly Rate</td><td class="font-mono" x-text="'$' + parseFloat(lease.monthly_rate).toFixed(2)"></td></tr>
-                                        <!-- S-LEASE-MIN-DAYS: short-lease minimum billing floor. The floor
-                                             only binds when minDays >= 2, so 0/1/null render as an em-dash
-                                             ("no minimum"); a binding value shows "N days". -->
-                                        <tr><td class="text-secondary">Minimum Billing</td>
-                                            <td x-text="parseInt(lease.minimum_billing_days) >= 2 ? parseInt(lease.minimum_billing_days) + ' days' : '—'"></td>
-                                        </tr>
-                                        <!-- S-LEASE-MILEAGE-MODE: per-lease mileage data source. -->
-                                        <tr>
-                                            <td class="text-secondary">Mileage Tracking</td>
-                                            <td>
-                                                <span class="badge badge-no-dot"
-                                                      :class="{
-                                                          'badge-neutral': lease.mileage_tracking_mode === 'manual',
-                                                          'badge-warning': lease.mileage_tracking_mode === 'off',
-                                                          'badge-info':    lease.mileage_tracking_mode === 'samsara'
-                                                      }"
-                                                      x-text="lease.mileage_tracking_mode === 'manual' ? 'Manual'
-                                                            : (lease.mileage_tracking_mode === 'samsara' ? 'Samsara' : 'Off')"></span>
-                                            </td>
-                                        </tr>
-                                        <tr x-show="parseInt(lease.gps_opt_in) === 1">
-                                            <td class="text-secondary">GPS Tracking</td>
-                                            <td class="font-mono" x-text="parseFloat(lease.gps_cost) > 0 ? 'Included · $' + parseFloat(lease.gps_cost).toFixed(2) + ' / day' : 'Included'"></td>
-                                        </tr>
-                                        <tr>
-                                            <td class="text-secondary">Hourly Rate</td>
-                                            <td class="font-mono" x-text="lease.hourly_rate && parseFloat(lease.hourly_rate) > 0 ? '$' + parseFloat(lease.hourly_rate).toFixed(4) + ' / hr' : 'N/A'"></td>
-                                        </tr>
-                                        <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (only when billed hourly) -->
-                                        <tr x-show="parseFloat(lease.hourly_rate) > 0">
-                                            <td class="text-secondary">Engine Hours</td>
-                                            <td class="font-mono"
-                                                x-text="(lease.engine_hours_at_start != null ? parseFloat(lease.engine_hours_at_start).toFixed(2) : '—')
-                                                        + ' → '
-                                                        + (lease.engine_hours_at_end != null ? parseFloat(lease.engine_hours_at_end).toFixed(2) : '—') + ' hrs'"></td>
-                                        </tr>
-                                        <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge — always shown; N/A when unused -->
-                                        <tr>
-                                            <td class="text-secondary">Cartage</td>
-                                            <td class="font-mono">
-                                                <span x-show="parseFloat(lease.cartage_amount) > 0">
-                                                    $<span x-text="parseFloat(lease.cartage_amount || 0).toFixed(2)"></span>
-                                                    <span class="badge badge-no-dot"
-                                                          :class="lease.cartage_billed_at ? 'badge-success' : 'badge-neutral'"
-                                                          x-text="lease.cartage_billed_at ? 'billed' : 'pending first invoice'"
-                                                          style="margin-left:6px;"></span>
-                                                </span>
-                                                <span x-show="!(parseFloat(lease.cartage_amount) > 0)" class="text-secondary">N/A</span>
-                                            </td>
-                                        </tr>
-                                        <!-- S-LEASE-SERVICE-CHARGES: closeout charges — shown once the lease is closed.
-                                             Amounts come from the actually-billed invoice line items (lease.closeout_charges). -->
-                                        <tr x-show="lease.status === 'completed'">
-                                            <td class="text-secondary">Sweep out</td>
-                                            <td class="font-mono" x-text="(lease.closeout_charges && parseFloat(lease.closeout_charges.sweep) > 0) ? '$' + parseFloat(lease.closeout_charges.sweep).toFixed(2) : 'N/A'"></td>
-                                        </tr>
-                                        <tr x-show="lease.status === 'completed'">
-                                            <td class="text-secondary">Wash out</td>
-                                            <td class="font-mono" x-text="(lease.closeout_charges && parseFloat(lease.closeout_charges.wash) > 0) ? '$' + parseFloat(lease.closeout_charges.wash).toFixed(2) : 'N/A'"></td>
-                                        </tr>
-                                        <tr x-show="lease.status === 'completed'">
-                                            <td class="text-secondary">Fuel</td>
-                                            <td class="font-mono" x-text="(lease.closeout_charges && parseFloat(lease.closeout_charges.fuel) > 0) ? '$' + parseFloat(lease.closeout_charges.fuel).toFixed(2) : 'N/A'"></td>
-                                        </tr>
-                                        <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance — primary prominent,
-                                             secondary muted with ≈ prefix, custom-conversion badge when factors
-                                             differ from international standard. -->
-                                        <tr x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0">
-                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;font-size:0.8125rem;white-space:nowrap;width:1%;">Mileage &amp; allowance</td>
-                                            <td>
-                                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-                                                    <!-- Per-unit rate -->
-                                                    <div>
-                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Per-unit rate</div>
-                                                        <template x-if="lease.mileage_unit === 'km'">
-                                                            <div>
-                                                                <div class="ff-show-primary" style="white-space:nowrap;"
-                                                                     x-text="'$' + parseFloat(lease.mileage_rate_km || lease.mileage_rate || 0).toFixed(4) + ' / km'"></div>
-                                                                <div class="ff-show-secondary" style="white-space:nowrap;"
-                                                                     x-text="'≈ $' + parseFloat(lease.mileage_rate_miles || 0).toFixed(4) + ' / mile'"></div>
-                                                            </div>
-                                                        </template>
-                                                        <template x-if="lease.mileage_unit !== 'km'">
-                                                            <div>
-                                                                <div class="ff-show-primary" style="white-space:nowrap;"
-                                                                     x-text="'$' + parseFloat(lease.mileage_rate_miles || lease.mileage_rate || 0).toFixed(4) + ' / mile'"></div>
-                                                                <div class="ff-show-secondary" style="white-space:nowrap;"
-                                                                     x-text="'≈ $' + parseFloat(lease.mileage_rate_km || 0).toFixed(4) + ' / km'"></div>
-                                                            </div>
-                                                        </template>
-                                                    </div>
-                                                    <!-- Allowance -->
-                                                    <div>
-                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Allowance</div>
-                                                        <template x-if="lease.mileage_unit === 'km'">
-                                                            <div>
-                                                                <div class="ff-show-primary" style="white-space:nowrap;"
-                                                                     x-text="parseFloat(lease.estimated_mileage_km || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
-                                                                <div class="ff-show-secondary" style="white-space:nowrap;"
-                                                                     x-text="'≈ ' + parseFloat(lease.estimated_mileage_miles || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
-                                                            </div>
-                                                        </template>
-                                                        <template x-if="lease.mileage_unit !== 'km'">
-                                                            <div>
-                                                                <div class="ff-show-primary" style="white-space:nowrap;"
-                                                                     x-text="parseFloat(lease.estimated_mileage_miles || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
-                                                                <div class="ff-show-secondary" style="white-space:nowrap;"
-                                                                     x-text="'≈ ' + parseFloat(lease.estimated_mileage_km || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
-                                                            </div>
-                                                        </template>
-                                                    </div>
-                                                </div>
-                                                <div class="ff-show-caption" style="white-space:nowrap;">
-                                                    <span x-text="'1 km = ' + Number(lease.km_to_miles_conversion || 0.621371).toFixed(6) + ' mi · 1 mile = ' + Number(lease.miles_to_km_conversion || 1.609344).toFixed(6) + ' km'"></span>
-                                                    <span class="ff-badge-custom"
-                                                          x-show="Math.abs(Number(lease.km_to_miles_conversion || 0.621371) - 0.621371) > 0.0001
-                                                               || Math.abs(Number(lease.miles_to_km_conversion || 1.609344) - 1.609344) > 0.0001">
-                                                        Custom conversion
-                                                    </span>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                        <!-- S-MILEAGE-1 Model B: precharge row.
-                                             Hidden unless precharge_enabled = 1.
-                                             Shows: original amount, current balance,
-                                             billed status, and refund settlement
-                                             (after lease close in S-MILEAGE-3). -->
-                                        <tr x-show="Number(lease.precharge_enabled) === 1">
-                                            <td class="text-secondary" style="vertical-align:top;padding-top:9px;">Mileage precharge</td>
-                                            <td>
-                                                <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
-                                                    <div>
-                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Amount</div>
-                                                        <div class="ff-show-primary"
-                                                             x-text="'$' + parseFloat(lease.precharge_amount || 0).toFixed(2)"></div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Balance</div>
-                                                        <template x-if="lease.precharge_balance !== null && lease.precharge_balance !== undefined">
-                                                            <div class="ff-show-primary"
-                                                                 x-text="'$' + parseFloat(lease.precharge_balance).toFixed(2)"></div>
-                                                        </template>
-                                                        <template x-if="lease.precharge_balance === null || lease.precharge_balance === undefined">
-                                                            <div class="ff-show-secondary">Not yet activated</div>
-                                                        </template>
-                                                    </div>
-                                                </div>
-                                                <div class="ff-show-caption">
-                                                    <template x-if="lease.precharge_invoiced_at">
-                                                        <span x-text="'Billed on ' + new Date(lease.precharge_invoiced_at).toLocaleDateString('en-CA')"></span>
-                                                    </template>
-                                                    <template x-if="!lease.precharge_invoiced_at">
-                                                        <span>Not yet billed</span>
-                                                    </template>
-                                                    <template x-if="lease.precharge_refund_method">
-                                                        <span x-text="' · Refund method: ' + lease.precharge_refund_method"></span>
-                                                    </template>
-                                                    <template x-if="lease.precharge_refund_settled_at">
-                                                        <span x-text="' · Settled ' + new Date(lease.precharge_refund_settled_at).toLocaleDateString('en-CA')"></span>
-                                                    </template>
-                                                </div>
+                                <!-- S-LEASE-RATES-REDESIGN: compact multi-per-row grid (was a one-field-per-row table) -->
+                                <div class="ff-rates-grid">
+                                    <div class="ff-rate-cell"><div class="ff-rate-label">Daily</div><div class="ff-rate-value" x-text="'$' + parseFloat(lease.daily_rate).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell"><div class="ff-rate-label">Weekly</div><div class="ff-rate-value" x-text="'$' + parseFloat(lease.weekly_rate).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell"><div class="ff-rate-label">Monthly</div><div class="ff-rate-value" x-text="'$' + parseFloat(lease.monthly_rate).toFixed(2)"></div></div>
+                                    <!-- S-LEASE-MIN-DAYS: floor binds only at >=2 days; else em-dash. -->
+                                    <div class="ff-rate-cell"><div class="ff-rate-label">Min. billing</div><div class="ff-rate-value" x-text="parseInt(lease.minimum_billing_days) >= 2 ? parseInt(lease.minimum_billing_days) + ' days' : '—'"></div></div>
+                                    <!-- S-LEASE-MILEAGE-MODE: per-lease mileage data source. -->
+                                    <div class="ff-rate-cell">
+                                        <div class="ff-rate-label">Mileage tracking</div>
+                                        <div><span class="badge badge-no-dot"
+                                                  :class="{
+                                                      'badge-neutral': lease.mileage_tracking_mode === 'manual',
+                                                      'badge-warning': lease.mileage_tracking_mode === 'off',
+                                                      'badge-info':    lease.mileage_tracking_mode === 'samsara'
+                                                  }"
+                                                  x-text="lease.mileage_tracking_mode === 'manual' ? 'Manual'
+                                                        : (lease.mileage_tracking_mode === 'samsara' ? 'Samsara' : 'Off')"></span></div>
+                                    </div>
+                                    <div class="ff-rate-cell" x-show="parseInt(lease.gps_opt_in) === 1"><div class="ff-rate-label">GPS tracking</div><div class="ff-rate-value ff-rate-value--sm" x-text="parseFloat(lease.gps_cost) > 0 ? 'Incl · $' + parseFloat(lease.gps_cost).toFixed(2) + '/day' : 'Included'"></div></div>
+                                    <div class="ff-rate-cell" x-show="lease.hourly_rate && parseFloat(lease.hourly_rate) > 0"><div class="ff-rate-label">Hourly</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.hourly_rate).toFixed(4) + '/hr'"></div></div>
+                                    <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (only when billed hourly) -->
+                                    <div class="ff-rate-cell" x-show="parseFloat(lease.hourly_rate) > 0"><div class="ff-rate-label">Engine hours</div><div class="ff-rate-value ff-rate-value--sm" x-text="(lease.engine_hours_at_start != null ? parseFloat(lease.engine_hours_at_start).toFixed(2) : '—') + ' → ' + (lease.engine_hours_at_end != null ? parseFloat(lease.engine_hours_at_end).toFixed(2) : '—') + ' hrs'"></div></div>
+                                    <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) — only when set -->
+                                    <div class="ff-rate-cell" x-show="parseFloat(lease.cartage_amount) > 0">
+                                        <div class="ff-rate-label">Cartage</div>
+                                        <div class="ff-rate-value ff-rate-value--sm">$<span x-text="parseFloat(lease.cartage_amount || 0).toFixed(2)"></span>
+                                            <span class="badge badge-no-dot"
+                                                  :class="lease.cartage_billed_at ? 'badge-success' : 'badge-neutral'"
+                                                  x-text="lease.cartage_billed_at ? 'billed' : 'pending'"
+                                                  style="margin-left:4px;"></span>
+                                        </div>
+                                    </div>
+                                    <!-- S-LEASE-SERVICE-CHARGES: closeout charges — shown when a closed lease actually billed them -->
+                                    <div class="ff-rate-cell" x-show="lease.status === 'completed' && lease.closeout_charges && parseFloat(lease.closeout_charges.sweep) > 0"><div class="ff-rate-label">Sweep out</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.closeout_charges.sweep).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell" x-show="lease.status === 'completed' && lease.closeout_charges && parseFloat(lease.closeout_charges.wash) > 0"><div class="ff-rate-label">Wash out</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.closeout_charges.wash).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell" x-show="lease.status === 'completed' && lease.closeout_charges && parseFloat(lease.closeout_charges.fuel) > 0"><div class="ff-rate-label">Fuel</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.closeout_charges.fuel).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell" x-show="lease.discount_type !== 'none'"><div class="ff-rate-label">Discount</div><div class="ff-rate-value ff-rate-value--sm" x-text="lease.discount_type === 'percentage' ? parseFloat(lease.discount_value).toFixed(2) + '%' : '$' + parseFloat(lease.discount_value).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell" x-show="parseInt(lease.insurance_opt_in) === 1 && parseFloat(lease.insurance_cost) > 0"><div class="ff-rate-label">Insurance</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.insurance_cost).toFixed(2)"></div></div>
+                                    <div class="ff-rate-cell" x-show="parseInt(lease.warranty_opt_in) === 1 && parseFloat(lease.warranty_cost) > 0"><div class="ff-rate-label">Warranty</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.warranty_cost).toFixed(2)"></div></div>
+                                </div>
 
-                                                <!-- ── S-MILEAGE-3 D-B (i) / D-K: Mark Refund Settled button ──
-                                                     Renders only when:
-                                                       lease.status = 'completed' AND
-                                                       lease.precharge_refund_method = 'cash' AND
-                                                       lease.precharge_refund_settled_at IS NULL
-                                                     Companion to the close-modal cash branch — once the
-                                                     physical disbursement happens (cheque issued, EFT sent),
-                                                     the operator clicks this to stamp settled_at = NOW().
-                                                     Idempotent on retry (409 PRECHARGE_REFUND_ALREADY_SETTLED).
-                                                     ─────────────────────────────────────────────────── -->
-                                                <template x-if="lease.status === 'completed'
-                                                                && lease.precharge_refund_method === 'cash'
-                                                                && !lease.precharge_refund_settled_at">
-                                                    <div style="margin-top:0.75rem;">
-                                                        <button type="button"
-                                                                class="btn btn-warning btn-sm"
-                                                                @click="markRefundSettled()"
-                                                                :disabled="markRefundInProgress">
-                                                            <span x-show="!markRefundInProgress">Mark Refund Settled</span>
-                                                            <span x-show="markRefundInProgress">Stamping…</span>
-                                                        </button>
-                                                        <template x-if="markRefundError">
-                                                            <div class="form-error" style="margin-top:6px;font-size:0.75rem;"
-                                                                 x-text="markRefundError"></div>
-                                                        </template>
-                                                    </div>
-                                                </template>
-                                            </td>
-                                        </tr>
-                                        <tr x-show="lease.discount_type !== 'none'">
-                                            <td class="text-secondary">Discount</td>
-                                            <td x-text="lease.discount_type === 'percentage'
-                                                ? parseFloat(lease.discount_value).toFixed(2) + '%'
-                                                : '$' + parseFloat(lease.discount_value).toFixed(2)"></td>
-                                        </tr>
-                                        <!-- Add-ons: insurance + warranty (flat-per-period) -->
-                                        <tr x-show="parseInt(lease.insurance_opt_in) === 1 && parseFloat(lease.insurance_cost) > 0">
-                                            <td class="text-secondary">Insurance</td>
-                                            <td class="font-mono" x-text="'$' + parseFloat(lease.insurance_cost).toFixed(2)"></td>
-                                        </tr>
-                                        <tr x-show="parseInt(lease.warranty_opt_in) === 1 && parseFloat(lease.warranty_cost) > 0">
-                                            <td class="text-secondary">Warranty</td>
-                                            <td class="font-mono" x-text="'$' + parseFloat(lease.warranty_cost).toFixed(2)"></td>
-                                        </tr>
-                                        <tr x-show="lease.rate_notes"><td class="text-secondary">Rate Notes</td><td class="text-sm" x-text="lease.rate_notes"></td></tr>
-                                    </tbody>
-                                </table>
+                                <!-- S-LEASE-RATES-REDESIGN: total distance driven over the lease (closed leases) -->
+                                <div class="ff-rate-driven" x-show="lease.status === 'completed' && drivenKm() !== null">
+                                    <div>
+                                        <div class="ff-rate-label">Total distance driven</div>
+                                        <div class="ff-show-primary" x-text="drivenKm().toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                        <div class="ff-show-secondary" x-text="'≈ ' + (drivenKm() * (Number(lease.km_to_miles_conversion) || 0.621371)).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
+                                    </div>
+                                    <div class="ff-show-caption" style="margin-top:0;">
+                                        <template x-if="lease.odometer_start_km != null && lease.odometer_end_km != null">
+                                            <span x-text="'Odometer ' + Number(lease.odometer_start_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' → ' + Number(lease.odometer_end_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'"></span>
+                                        </template>
+                                        <template x-if="!(lease.odometer_start_km != null && lease.odometer_end_km != null)">
+                                            <span x-text="lease.mileage_tracking_mode === 'manual' ? 'Manual reading' : 'Recorded at close'"></span>
+                                        </template>
+                                    </div>
+                                </div>
+
+                                <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance -->
+                                <div class="ff-rate-block" x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0">
+                                    <div class="ff-rate-label" style="margin-bottom:10px;">Mileage &amp; allowance</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:520px;">
+                                        <!-- Per-unit rate -->
+                                        <div>
+                                            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Per-unit rate</div>
+                                            <template x-if="lease.mileage_unit === 'km'">
+                                                <div>
+                                                    <div class="ff-show-primary" style="white-space:nowrap;"
+                                                         x-text="'$' + parseFloat(lease.mileage_rate_km || lease.mileage_rate || 0).toFixed(4) + ' / km'"></div>
+                                                    <div class="ff-show-secondary" style="white-space:nowrap;"
+                                                         x-text="'≈ $' + parseFloat(lease.mileage_rate_miles || 0).toFixed(4) + ' / mile'"></div>
+                                                </div>
+                                            </template>
+                                            <template x-if="lease.mileage_unit !== 'km'">
+                                                <div>
+                                                    <div class="ff-show-primary" style="white-space:nowrap;"
+                                                         x-text="'$' + parseFloat(lease.mileage_rate_miles || lease.mileage_rate || 0).toFixed(4) + ' / mile'"></div>
+                                                    <div class="ff-show-secondary" style="white-space:nowrap;"
+                                                         x-text="'≈ $' + parseFloat(lease.mileage_rate_km || 0).toFixed(4) + ' / km'"></div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <!-- Allowance -->
+                                        <div>
+                                            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Allowance</div>
+                                            <template x-if="lease.mileage_unit === 'km'">
+                                                <div>
+                                                    <div class="ff-show-primary" style="white-space:nowrap;"
+                                                         x-text="parseFloat(lease.estimated_mileage_km || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                                    <div class="ff-show-secondary" style="white-space:nowrap;"
+                                                         x-text="'≈ ' + parseFloat(lease.estimated_mileage_miles || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
+                                                </div>
+                                            </template>
+                                            <template x-if="lease.mileage_unit !== 'km'">
+                                                <div>
+                                                    <div class="ff-show-primary" style="white-space:nowrap;"
+                                                         x-text="parseFloat(lease.estimated_mileage_miles || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
+                                                    <div class="ff-show-secondary" style="white-space:nowrap;"
+                                                         x-text="'≈ ' + parseFloat(lease.estimated_mileage_km || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="ff-show-caption" style="white-space:nowrap;">
+                                        <span x-text="'1 km = ' + Number(lease.km_to_miles_conversion || 0.621371).toFixed(6) + ' mi · 1 mile = ' + Number(lease.miles_to_km_conversion || 1.609344).toFixed(6) + ' km'"></span>
+                                        <span class="ff-badge-custom"
+                                              x-show="Math.abs(Number(lease.km_to_miles_conversion || 0.621371) - 0.621371) > 0.0001
+                                                   || Math.abs(Number(lease.miles_to_km_conversion || 1.609344) - 1.609344) > 0.0001">
+                                            Custom conversion
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- S-MILEAGE-1 Model B: precharge block (only when precharge_enabled = 1) -->
+                                <div class="ff-rate-block" x-show="Number(lease.precharge_enabled) === 1">
+                                    <div class="ff-rate-label" style="margin-bottom:10px;">Mileage precharge</div>
+                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:520px;">
+                                        <div>
+                                            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Amount</div>
+                                            <div class="ff-show-primary"
+                                                 x-text="'$' + parseFloat(lease.precharge_amount || 0).toFixed(2)"></div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Balance</div>
+                                            <template x-if="lease.precharge_balance !== null && lease.precharge_balance !== undefined">
+                                                <div class="ff-show-primary"
+                                                     x-text="'$' + parseFloat(lease.precharge_balance).toFixed(2)"></div>
+                                            </template>
+                                            <template x-if="lease.precharge_balance === null || lease.precharge_balance === undefined">
+                                                <div class="ff-show-secondary">Not yet activated</div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div class="ff-show-caption">
+                                        <template x-if="lease.precharge_invoiced_at">
+                                            <span x-text="'Billed on ' + new Date(lease.precharge_invoiced_at).toLocaleDateString('en-CA')"></span>
+                                        </template>
+                                        <template x-if="!lease.precharge_invoiced_at">
+                                            <span>Not yet billed</span>
+                                        </template>
+                                        <template x-if="lease.precharge_refund_method">
+                                            <span x-text="' · Refund method: ' + lease.precharge_refund_method"></span>
+                                        </template>
+                                        <template x-if="lease.precharge_refund_settled_at">
+                                            <span x-text="' · Settled ' + new Date(lease.precharge_refund_settled_at).toLocaleDateString('en-CA')"></span>
+                                        </template>
+                                    </div>
+                                    <!-- S-MILEAGE-3 D-B (i) / D-K: Mark Refund Settled (cash refund, not yet settled) -->
+                                    <template x-if="lease.status === 'completed'
+                                                    && lease.precharge_refund_method === 'cash'
+                                                    && !lease.precharge_refund_settled_at">
+                                        <div style="margin-top:0.75rem;">
+                                            <button type="button"
+                                                    class="btn btn-warning btn-sm"
+                                                    @click="markRefundSettled()"
+                                                    :disabled="markRefundInProgress">
+                                                <span x-show="!markRefundInProgress">Mark Refund Settled</span>
+                                                <span x-show="markRefundInProgress">Stamping…</span>
+                                            </button>
+                                            <template x-if="markRefundError">
+                                                <div class="form-error" style="margin-top:6px;font-size:0.75rem;"
+                                                     x-text="markRefundError"></div>
+                                            </template>
+                                        </div>
+                                    </template>
+                                </div>
+
+                                <!-- Rate notes -->
+                                <div class="ff-rate-notes" x-show="lease.rate_notes">
+                                    <span class="ff-rate-label" style="display:block;margin-bottom:4px;">Rate notes</span>
+                                    <span x-text="lease.rate_notes"></span>
+                                </div>
 
                                 <!-- ── S-LEASE-RATE-AMENDMENT: amend rates action ──
                                      Button visible only while the lease is `active`
@@ -2643,6 +2602,30 @@ function FF_LeaseDetail() {
                 // Non-fatal — page still renders with server-side data
             }
             this.loading = false;
+        },
+
+        // S-LEASE-RATES-REDESIGN: total distance driven over the whole lease, in km
+        // (canonical). Prefers the close-time total_distance_km, then odometer
+        // end−start, then a manual actual-mileage / closing reading (converted from
+        // miles when the lease is a miles unit). Returns null when nothing usable —
+        // the "Total distance driven" callout only renders for completed leases when
+        // this is non-null.
+        drivenKm() {
+            const l = this.lease;
+            if (!l) return null;
+            const num = (v) => (v === null || v === undefined || v === '') ? null : parseFloat(v);
+            const td = num(l.total_distance_km);
+            if (td !== null && td > 0) return td;
+            const os = num(l.odometer_start_km), oe = num(l.odometer_end_km);
+            if (os !== null && oe !== null && oe >= os) return oe - os;
+            let manual = num(l.actual_mileage);
+            if (!(manual > 0)) manual = num(l.mileage_at_end);
+            if (!(manual > 0)) return null;
+            // manual reading is in the lease's mileage_unit — normalise to km
+            if ((l.mileage_unit || 'km') === 'miles') {
+                return manual * (num(l.miles_to_km_conversion) || 1.609344);
+            }
+            return manual;
         },
 
         async activate() {
