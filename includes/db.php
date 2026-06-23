@@ -37,6 +37,81 @@ const SOFT_DELETE_TABLES = [
 ];
 
 // ============================================================
+// db_is_transient_connect_error() — S-DB-CONNECT-RETRY
+//
+// True when a CONNECT-phase PDOException is a transient "server not
+// reachable yet" condition a retry can ride out — mysqld restarting
+// during an unattended-upgrades security update (observed prod
+// 2026-06-23 06:11, mysql-server .2→.3; also 2026-06-03) — as opposed
+// to a permanent misconfiguration (bad credentials / unknown database)
+// where retrying only adds latency before the same failure.
+//
+// On a connect failure PDO usually leaves errorInfo unset and encodes
+// the driver code in the message ("SQLSTATE[HY000] [2002] Connection
+// refused"), so check BOTH errorInfo and the message text.
+//   transient: 2002 can't connect (refused/socket), 2003 can't connect
+//              to server, 2006 server gone away, 2013 lost connection,
+//              1040 too many connections, 1053 server shutdown in progress.
+//   NOT transient: 1045 access denied, 1049 unknown database.
+// ============================================================
+function db_is_transient_connect_error(\PDOException $e): bool
+{
+    $transient = [2002, 2003, 2006, 2013, 1040, 1053];
+
+    $code = isset($e->errorInfo[1]) ? (int) $e->errorInfo[1] : 0;
+    if (in_array($code, $transient, true)) {
+        return true;
+    }
+
+    $msg = $e->getMessage();
+    foreach ($transient as $c) {
+        if (str_contains($msg, "[{$c}]")) {
+            return true;
+        }
+    }
+    return stripos($msg, 'connection refused') !== false
+        || stripos($msg, 'server has gone away') !== false
+        || stripos($msg, "can't connect") !== false;
+}
+
+// ============================================================
+// db_connect_with_retry() — S-DB-CONNECT-RETRY
+//
+// new PDO() with bounded exponential-backoff retry on TRANSIENT connect
+// failures. A single attempt (the old behaviour) turned every brief
+// MySQL restart into an unhandled "SQLSTATE[HY000] [2002] Connection
+// refused" PDOException — a 500 + Sentry event on whatever request
+// (often the high-frequency unread-count pollers) landed in the ~10s
+// window. Permanent errors (bad credential / unknown db) still fail fast
+// on the first attempt. Worst-case added wait with the defaults is
+// ~1.4s (200+400+800ms) — bounded so a request never hangs indefinitely
+// on a genuinely-down database.
+// ============================================================
+function db_connect_with_retry(
+    string $dsn,
+    string $user,
+    string $pass,
+    array $options,
+    int $maxRetries = 3,
+    int $baseBackoffMs = 200
+): PDO {
+    $attempt   = 0;
+    $backoffMs = $baseBackoffMs;
+    while (true) {
+        try {
+            return new PDO($dsn, $user, $pass, $options);
+        } catch (\PDOException $e) {
+            $attempt++;
+            if ($attempt > $maxRetries || !db_is_transient_connect_error($e)) {
+                throw $e;
+            }
+            usleep($backoffMs * 1000);
+            $backoffMs *= 2;
+        }
+    }
+}
+
+// ============================================================
 // db_pdo() — PDO singleton [PASS-8:1]
 //
 // Uses function-static so the connection is created once and
@@ -58,7 +133,10 @@ function db_pdo(): PDO
         FF_DB_NAME
     );
 
-    $pdo = new PDO($dsn, FF_DB_USER, FF_DB_PASS, [
+    // S-DB-CONNECT-RETRY: ride out a transient MySQL restart (e.g. an
+    // unattended-upgrades security update) instead of throwing a raw
+    // "[2002] Connection refused" on the first failed connect.
+    $pdo = db_connect_with_retry($dsn, FF_DB_USER, FF_DB_PASS, [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES   => false,       // true prepared statements (security)
