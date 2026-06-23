@@ -1512,7 +1512,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                              Each pre-filled with the global default; clear to $0 to skip. -->
                         <div style="margin-top:1.25rem;border-top:1px solid var(--border-color);padding-top:1rem;">
                             <div class="form-label" style="margin-bottom:0.5rem;">Closeout charges</div>
-                            <div class="form-hint" style="margin-bottom:0.75rem;">Pre-filled with defaults — clear any field to skip that charge.</div>
+                            <div class="form-hint" style="margin-bottom:0.75rem;">Optional — leave blank to skip a charge, or enter an amount to bill it.</div>
                             <div style="display:flex;gap:12px;flex-wrap:wrap;">
                                 <div class="form-group" style="flex:1 1 120px;min-width:0;margin-bottom:0.5rem;">
                                     <label class="form-label" for="sweep_amount">Sweep ($)</label>
@@ -2016,9 +2016,15 @@ function FF_LeaseDetail() {
             odometer_fetched_at:   null,   // ISO datetime if GPS
             // S-LEASE-HOURLY-BILLING: closing engine/reefer hours (manual)
             engine_hours_at_close: '',
-            // S-LEASE-SERVICE-CHARGES: closeout charges, pre-filled with global defaults.
-            sweep_amount:  '<?= e(number_format((float) settings_get('lease.sweep_charge_default', '30.00'), 2, '.', '')) ?>',
-            wash_amount:   '<?= e(number_format((float) settings_get('lease.wash_charge_default', '120.00'), 2, '.', '')) ?>',
+            // S-LEASE-SERVICE-CHARGES: closeout charges default to BLANK (no charge)
+            // so sweep / wash / fuel are opt-in at close — the operator enters an
+            // amount to bill, or leaves blank to skip. (Sweep/wash were previously
+            // pre-filled from lease.sweep_charge_default / lease.wash_charge_default
+            // = $30 / $120; per operator request 2026-06-23 they now default to 0,
+            // matching fuel. $svcDec() in close.php treats blank/0/≤0 alike as
+            // "no line", so a blank field bills nothing.)
+            sweep_amount:  '',
+            wash_amount:   '',
             fuel_gallons:  '',
             // ADV-BILL-1 D-H: only sent for advance leases; ignored otherwise.
             reconciliation_mode:   'refund_unused',
