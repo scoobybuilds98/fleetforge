@@ -116,25 +116,7 @@ if ($apply) {
 // on the rental final invoice. Safe here: MTTS68 is a single 8-day period, all drafts.
 // Aborts if the lease has >1 live rental invoice (a multi-period lease needs per-period
 // handling, not a single collapsed invoice).
-$priorMileageBilled = (int) db_count(
-    "SELECT COUNT(*) FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
-      WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
-        AND li.item_type IN ('mileage_usage','mileage')",
-    [$FIX_LEASE_ID]
-) > 0;
-
-// In DRY RUN $lease is the un-mutated row; mirror step 2's edits (mode=manual,
-// mileage_at_start 0->NULL) so the preview reflects what --apply will actually do.
-$bridgeLease = $lease;
-if (!$apply) {
-    $bridgeLease = array_merge($lease, ['mileage_tracking_mode' => 'manual']);
-    if ((int) ($bridgeLease['mileage_at_start'] ?? 0) === 0) {
-        $bridgeLease['mileage_at_start'] = null;
-    }
-}
-$bridgeLine = ff_close_manual_mileage_bridge_line($bridgeLease, MILEAGE_END, null, $priorMileageBilled);
-
-// Live rental invoice(s) we'd merge the mileage into.
+// Live rental invoice(s) — the period to merge the mileage into.
 $liveRentals = db_select(
     "SELECT id, invoice_number, status, total_amount, balance_due, billing_type,
             billing_period_start, billing_period_end, customer_id, lease_id
@@ -144,23 +126,57 @@ $liveRentals = db_select(
       ORDER BY id",
     [$FIX_LEASE_ID]
 );
+// Standalone closeout/mileage adjustment invoices to FOLD IN — the wrong "second
+// invoice for one period" left by an earlier run (e.g. INV-2026-00168, before the
+// merge logic existed). They get voided and their mileage re-billed on the merged invoice.
+$liveAdjustments = db_select(
+    "SELECT id, invoice_number, status, total_amount, balance_due, billing_type,
+            billing_period_start, billing_period_end, customer_id, lease_id
+       FROM invoices
+      WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
+        AND billing_type IN ('adjustment','mileage_only')
+      ORDER BY id",
+    [$FIX_LEASE_ID]
+);
 
-if ($priorMileageBilled) {
-    echo "  (mileage already billed on a live invoice — skipping, no double-bill)\n";
+// Idempotency: is the mileage ALREADY on the single rental invoice? Then we're done.
+$mileageOnRental = (count($liveRentals) === 1) && ((int) db_count(
+    "SELECT COUNT(*) FROM invoice_line_items
+      WHERE invoice_id = ? AND item_type IN ('mileage_usage','mileage')",
+    [$liveRentals[0]['id']]
+) > 0);
+
+// In DRY RUN $lease is the un-mutated row; mirror step 2's edits (mode=manual,
+// mileage_at_start 0->NULL) so the preview reflects what --apply will actually do.
+// priorMileageBilled=false: any existing mileage is voided when we merge.
+$bridgeLease = $lease;
+if (!$apply) {
+    $bridgeLease = array_merge($lease, ['mileage_tracking_mode' => 'manual']);
+    if ((int) ($bridgeLease['mileage_at_start'] ?? 0) === 0) {
+        $bridgeLease['mileage_at_start'] = null;
+    }
+}
+$bridgeLine = ff_close_manual_mileage_bridge_line($bridgeLease, MILEAGE_END, null, false);
+
+if ($mileageOnRental) {
+    echo "  (mileage already on the rental invoice {$liveRentals[0]['invoice_number']} — nothing to do)\n";
 } elseif ($bridgeLine === null) {
     echo "  (mileage bridge inapplicable — no mileage line added)\n";
 } elseif (count($liveRentals) !== 1) {
     echo "  !! ABORT mileage merge: expected exactly 1 live rental invoice, found " . count($liveRentals)
        . " — manual review needed (multi-period lease shouldn't collapse to one invoice).\n";
 } else {
-    $r = $liveRentals[0];
-    echo "  MERGE mileage into the rental invoice: void {$r['invoice_number']} "
-       . "({$r['billing_period_start']}..{$r['billing_period_end']}) and regenerate ONE invoice "
-       . "= rental + GPS + {$bridgeLine['description']} (\${$bridgeLine['amount']} +tax)\n";
+    $r       = $liveRentals[0];
+    $toVoid  = array_merge($liveAdjustments, [$r]); // fold standalone adjustments + the rental into one
+    $voidStr = implode(', ', array_map(static fn($x) => $x['invoice_number'], $toVoid));
+    echo "  MERGE into ONE invoice: void [{$voidStr}] and regenerate "
+       . "({$r['billing_period_start']}..{$r['billing_period_end']}) = rental + GPS + {$bridgeLine['description']} (\${$bridgeLine['amount']} +tax)\n";
     if ($apply) {
         $newLabel = null;
-        db_transaction(function () use ($r, $lease, $bridgeLine, $FIX_LEASE_ID, &$newLabel) {
-            adv_void_invoice($r, $lease, 'MTTS68: merging mileage into one final invoice (no second invoice for one period).');
+        db_transaction(function () use ($toVoid, $r, $lease, $bridgeLine, $FIX_LEASE_ID, &$newLabel) {
+            foreach ($toVoid as $inv) {
+                adv_void_invoice($inv, $lease, 'MTTS68: merging into one final invoice (no second invoice for one period).');
+            }
             $gen = new \FleetForge\Billing\InvoiceGenerator();
             $merged = $gen->createFromLease([
                 'lease_id'          => $FIX_LEASE_ID,
@@ -176,7 +192,7 @@ if ($priorMileageBilled) {
             ]);
             $newLabel = $merged['invoice_number'] . ' (#' . $merged['invoice_id'] . ')';
         });
-        echo "  -> created {$newLabel} — rental + GPS + mileage on one invoice\n";
+        echo "  -> created {$newLabel} — rental + GPS + mileage on ONE invoice\n";
     }
 }
 
