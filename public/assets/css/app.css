@@ -2405,6 +2405,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     font-weight: 500;
     border-radius: var(--radius-md);
     border: 1px solid transparent;
+    /* Fallback text colour. WHY: the global `button {}` reset (background:none,
+       border:none) leaves `color` unset, so any .btn missing a colour variant
+       (e.g. a stray `class="btn btn-sm"` or an undefined variant) falls through
+       to the UA system colour `buttontext` — which our CSS-variable dark theme
+       never adapts, rendering black text on the dark surface (unreadable).
+       Every colour variant below is defined after .btn and overrides this. */
+    color: var(--text-primary);
     cursor: pointer;
     text-decoration: none;
     white-space: nowrap;
@@ -2552,6 +2559,24 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     background: var(--color-danger-light);
     border-color: var(--color-danger);
     color: var(--color-danger);
+    text-decoration: none;
+}
+
+/* Soft-warning outline — amber accent for cautionary, non-destructive actions
+   (e.g. "Reopen Lease"). Mirrors .btn-outline-danger. Text uses
+   --color-warning-text (not raw --color-warning) because the bare amber is too
+   low-contrast as text; --color-warning-text is tuned for legibility in BOTH
+   themes (#facc15 on dark, #b45309 on light). Previously undefined, so the
+   button fell back to bare .btn and rendered unreadable in dark mode. */
+.btn-outline-warning {
+    background: transparent;
+    color: var(--color-warning-text);
+    border-color: color-mix(in srgb, var(--color-warning) 40%, transparent);
+}
+.btn-outline-warning:hover {
+    background: var(--color-warning-light);
+    border-color: var(--color-warning);
+    color: var(--color-warning-text);
     text-decoration: none;
 }
 
