@@ -467,7 +467,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance -->
                                 <div class="ff-rate-block" x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0">
                                     <div class="ff-rate-label" style="margin-bottom:10px;">Mileage &amp; allowance</div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:520px;">
+                                    <div class="ff-rate-pair">
                                         <!-- Per-unit rate -->
                                         <div>
                                             <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Per-unit rate</div>
@@ -522,7 +522,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 <!-- S-MILEAGE-1 Model B: precharge block (only when precharge_enabled = 1) -->
                                 <div class="ff-rate-block" x-show="Number(lease.precharge_enabled) === 1">
                                     <div class="ff-rate-label" style="margin-bottom:10px;">Mileage precharge</div>
-                                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:520px;">
+                                    <div class="ff-rate-pair">
                                         <div>
                                             <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Amount</div>
                                             <div class="ff-show-primary"
