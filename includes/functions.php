@@ -59,6 +59,48 @@ function asset_url(string $path = ''): string
 }
 
 // ============================================================
+// ff_favicon_tags() — the SINGLE <link rel="icon"> for every <head>
+//
+// Returns exactly ONE icon link, never two: the custom favicon uploaded
+// via Settings → Design (brand.favicon_path) when one is set, otherwise
+// the bundled SVG default. This is the fix for "I saved a favicon and it
+// didn't update": the admin <head> used to emit the static SVG AND the
+// uploaded PNG, and Chrome/Firefox prefer an SVG icon when one is present
+// regardless of DOM order — so the upload was declared but never used.
+// One link removes the ambiguity (S-FAVICON-SINGLE-LINK).
+//
+// Defensive: any settings/storage failure falls back to the SVG default,
+// so this never breaks a <head> (safe to call on error pages too). The
+// default carries ?v=FF_ASSET_VERSION so a changed bundled icon isn't
+// served stale from cache; the custom URL is already unique per upload.
+// ============================================================
+if (!function_exists('ff_favicon_tags')) {
+function ff_favicon_tags(): string
+{
+    $ver = defined('FF_ASSET_VERSION') ? FF_ASSET_VERSION : '1';
+    $svgDefault = '<link rel="icon" type="image/svg+xml" href="'
+        . e(asset_url('assets/icons/favicon.svg')) . '?v=' . e((string) $ver) . '">';
+
+    try {
+        $key = (string) (settings_get('brand.favicon_path') ?? '');
+        if ($key === '') {
+            return $svgDefault;
+        }
+        // Upload only accepts PNG/ICO (api/v1/settings/brand.php); match the
+        // <link type> to the stored key's extension so browsers get the hint
+        // even when S3 serves the object as application/octet-stream.
+        $ext  = strtolower(pathinfo($key, PATHINFO_EXTENSION));
+        $type = $ext === 'ico' ? 'image/x-icon' : 'image/png';
+        $href = \FleetForge\Storage\StorageClient::url($key, 86400);
+        return '<link rel="icon" type="' . e($type) . '" href="' . e($href) . '">';
+    } catch (\Throwable $e) {
+        // Storage/driver/DB hiccup — never break the head; show the default.
+        return $svgDefault;
+    }
+}
+}
+
+// ============================================================
 // SANITISATION HELPERS
 // ============================================================
 

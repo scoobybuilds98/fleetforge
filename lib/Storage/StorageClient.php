@@ -419,13 +419,28 @@ class StorageClient
 
     private static function uploadS3(string $tmpPath, string $storagePath): string
     {
+        // Set ContentType so browsers/CDNs get the right MIME (e.g. a favicon
+        // PNG renders as image/png, not application/octet-stream). Sniff the
+        // actual bytes; omit the header if it can't be determined so S3 keeps
+        // its default rather than us guessing wrong.
+        $params = [
+            'Bucket'     => self::bucket(),
+            'Key'        => $storagePath,
+            'SourceFile' => $tmpPath,
+            'ACL'        => 'private', // never public — always served via signed URLs
+        ];
+        if (is_file($tmpPath) && function_exists('finfo_open')) {
+            $fi = finfo_open(FILEINFO_MIME_TYPE);
+            if ($fi !== false) {
+                $sniffed = finfo_file($fi, $tmpPath);
+                finfo_close($fi);
+                if (is_string($sniffed) && $sniffed !== '') {
+                    $params['ContentType'] = $sniffed;
+                }
+            }
+        }
         try {
-            self::s3()->putObject([
-                'Bucket'     => self::bucket(),
-                'Key'        => $storagePath,
-                'SourceFile' => $tmpPath,
-                'ACL'        => 'private', // never public — always served via signed URLs
-            ]);
+            self::s3()->putObject($params);
         } catch (S3Exception $e) {
             throw new RuntimeException(
                 "StorageClient S3 upload failed: " . $e->getMessage()

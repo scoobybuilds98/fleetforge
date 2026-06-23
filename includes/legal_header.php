@@ -28,7 +28,7 @@ $_legal = legal_config();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="robots" content="index, follow">
     <title><?= e($pageTitle ?? 'Legal') ?> — <?= e($_legal['company']['product_name']) ?></title>
-    <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
+    <?= ff_favicon_tags() ?>
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <style>
         /* Legal page overrides — light theme forced, no sidebar.

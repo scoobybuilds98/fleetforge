@@ -98,7 +98,7 @@ $_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= e($_csrfToken) ?>">
     <title><?= e($_pageTitle) ?> — <?= e($_companyName) ?> Portal</title>
-    <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
+    <?= ff_favicon_tags() ?>
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <script>

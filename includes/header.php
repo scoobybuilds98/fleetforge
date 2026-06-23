@@ -100,7 +100,7 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
 
     <title><?= e($_pageTitle) ?> — <?= e($_appName) ?></title>
 
-    <link rel="icon" href="<?= asset_url('assets/icons/favicon.svg') ?>" type="image/svg+xml">
+    <?= ff_favicon_tags() ?>
 
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
 
@@ -134,15 +134,9 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
     </style>
     <?php endif; ?>
 
-    <?php
-    // Favicon override — must come AFTER the default <link rel="icon">
-    // above so this one wins via DOM order. Browsers pick the last
-    // matching <link rel="icon"> at load time.
-    $_ff_favicon = settings_get('brand.favicon_path');
-    if ($_ff_favicon):
-    ?>
-    <link rel="icon" type="image/png" href="<?= e(\FleetForge\Storage\StorageClient::url((string) $_ff_favicon, 86400)) ?>">
-    <?php endif; ?>
+    <!-- Favicon (custom-or-default) is emitted once via ff_favicon_tags()
+         in the <head> above. A second <link rel="icon"> here would let the
+         browser prefer the SVG default and ignore the upload (the old bug). -->
 
     <!-- ============================================================
          PERM-1 — per-user display font size injection.
@@ -206,6 +200,6 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
 <?php
 // Clean up local variables so they don't leak into page scope
 unset($_theme, $_pageTitle, $_appName, $_timezone, $_displayFontSize, $_displayDensity,
-      $_ff_primary, $_ff_hover, $_ff_light, $_ff_favicon);
+      $_ff_primary, $_ff_hover, $_ff_light);
 // Note: $_user and $_csrfToken are intentionally kept — pages may need them.
 ?>
