@@ -129,15 +129,8 @@ require_once FF_ROOT . '/includes/header.php';
             Email Customer
         </button>
         <?php endif; ?>
-        <?php /* S-LEASE-REOPEN-UI: Edit is available on pending AND active leases.
-                 On an active lease the form is distance-fields-only (start odometer,
-                 allowance, conversions, mileage tracking mode) — the supported way to
-                 e.g. flip a reopened lease's Mileage Tracking to Manual before
-                 re-closing. Previously the button showed for pending only, so an
-                 active/reopened lease had no path to the mileage-mode toggle. */ ?>
-        <?php if (can('leases', 'edit') && in_array($lease['status'], ['pending', 'active'], true)): ?>
-        <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit</a>
-        <?php endif; ?>
+        <?php /* Edit button moved to the lease action row (next to Close /
+                 Generate Invoice) — see below. */ ?>
         <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>
         <button class="btn btn-danger btn-sm" onclick="FF_Confirm.ask('Delete this pending lease? This cannot be undone.').then(function(ok){if(!ok)return;FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(function(r){if(r.success){window.location.href='<?= base_url('leases') ?>';}else{FF_Toast.error(r.error?.message||'Failed to delete');}});})">Delete</button>
         <?php endif; ?>
@@ -284,6 +277,14 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <button class="btn btn-outline-warning" @click="reopenModal.open = true" :disabled="actionInProgress">
             Reopen Lease
         </button>
+        <?php endif; ?>
+
+        <?php /* Edit lives here with the other lease actions (next to Close /
+                 Generate Invoice), not up in the header — easier to find when
+                 correcting a lease. Pending: full edit; active: distance/mileage-mode
+                 fields only (the path to flip a reopened lease to Manual). */ ?>
+        <?php if (can('leases', 'edit') && in_array($lease['status'], ['pending', 'active'], true)): ?>
+        <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary">Edit Lease</a>
         <?php endif; ?>
 
         <?php /* S-INVOICE-CREATION-UX C3 (Issue 3): Generate Invoice
