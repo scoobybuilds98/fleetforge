@@ -143,13 +143,5 @@
     "engine_version": "holistic",
     "discount_type":  "flat",
     "discount_value": "50.0000"
-  },
-  "period_independent_lease": {
-    "daily_rate":   "50.00",
-    "weekly_rate":  "350.00",
-    "monthly_rate": "700.00",
-    "billing_cycle": "monthly",
-    "currency":     "CAD",
-    "engine_version": "period_independent"
   }
 }

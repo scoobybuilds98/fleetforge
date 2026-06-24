@@ -240,21 +240,9 @@ DbState::inTransaction(function () use ($gen) {
     eq('350.00', base_net($regen['invoices'][0]['invoice_id']), 'T6 reproduces $350');
 });
 
-// ════════════════════════════════════════════════════════════════════
-// T9 — period_independent lease: legacy path untouched (no fan-out, flat month).
-// ════════════════════════════════════════════════════════════════════
-DbState::inTransaction(function () use ($gen) {
-    $lease = r2_lease(['start_date' => '2026-06-01', 'end_date' => '2026-08-31', 'engine_version' => 'period_independent']);
-    $batch = $gen->generateForLease([
-        'lease_id' => $lease, 'period_start' => '2026-06-01', 'period_end' => '2026-06-30',
-        'billing_type' => 'full_month', 'created_by' => null, 'generation_source' => 'manual',
-    ]);
-    ok($batch['count'] === 1 && $batch['fanned'] === false, 'T9 period_independent: single invoice, no fan-out');
-    eq('1500.00', base_net($batch['invoices'][0]['invoice_id']), 'T9 legacy full_month flat $1,500');
-    // Legacy invoices leave the holistic audit columns NULL.
-    $row = db_row("SELECT total_days_at_period_end FROM invoices WHERE id=?", [$batch['invoices'][0]['invoice_id']]);
-    ok($row['total_days_at_period_end'] === null, 'T9 legacy invoice: holistic audit columns NULL');
-});
+// S-DELETE-LEGACY-ENGINE: T9 (period_independent legacy path — single invoice, no
+// fan-out, NULL audit columns) was removed with the legacy engine. The holistic
+// full-month-flat behaviour it shared is covered by T1 (30-day flat $1,500) + T3.
 
 // ════════════════════════════════════════════════════════════════════
 // T5 / T7 / T8 — gate scenarios via subprocess (json_error exits).

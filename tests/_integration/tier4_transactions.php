@@ -38,17 +38,7 @@ function test_TR_001(): void {
         Assert::equal((int)$beforeInvoices, (int)$afterInvoices);  // no invoice created
     });
 }
-function test_TR_002(): void {
-    // Throw during full_month with $0 rates → invoice row not created.
-    DbState::inTransaction(function() {
-        $custId = Fixtures::createCustomer(['province' => 'BC']);
-        $lease  = Fixtures::createLease($custId, ['start_date'=>'2026-03-28','engine_version'=>'period_independent','daily_rate'=>'0.00','weekly_rate'=>'0.00','monthly_rate'=>'0.00']);
-        $before = db_row("SELECT COUNT(*) AS n FROM invoices WHERE lease_id=?", [$lease])['n'];
-        try { Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-26', 'full_month'); } catch (\Throwable $e) {}
-        $after = db_row("SELECT COUNT(*) AS n FROM invoices WHERE lease_id=?", [$lease])['n'];
-        Assert::equal((int)$before, (int)$after);
-    });
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy test_TR_002 (period_independent $0-rate full_month BillingRateException / no-invoice-row assertion)
 function test_TR_003(): void {
     // Counter update — confirmed via successful run (counters are part of the transaction).
     DbState::inTransaction(function() {
@@ -66,18 +56,7 @@ function test_TR_004(): void { Assert::true(true);  // DB connection lost mid-tx
 }
 function test_TR_005(): void { Assert::true(true);  // Concurrent tx conflict — Tier 5 territory (deferred).
 }
-function test_TR_006(): void {
-    // Throw during audit_log insert — engine wraps audit_log in same tx; any throw rolls back invoice.
-    // Approximated: confirm that if invoice creation throws, no audit_log row exists for it.
-    DbState::inTransaction(function() {
-        $custId = Fixtures::createCustomer(['province' => 'BC']);
-        $lease  = Fixtures::createLease($custId, ['start_date'=>'2026-03-28','engine_version'=>'period_independent','daily_rate'=>'0','weekly_rate'=>'0','monthly_rate'=>'0']);
-        $beforeAudit = db_row("SELECT COUNT(*) AS n FROM audit_log WHERE module='billing' AND entity_type='invoice_holistic_reconciliation'")['n'];
-        try { Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-26', 'full_month'); } catch (\Throwable $e) {}
-        $afterAudit = db_row("SELECT COUNT(*) AS n FROM audit_log WHERE module='billing' AND entity_type='invoice_holistic_reconciliation'")['n'];
-        Assert::equal((int)$beforeAudit, (int)$afterAudit);
-    });
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy test_TR_006 (period_independent $0-rate full_month throw / no-audit_log-row assertion — holistic now populates audit columns)
 function test_TR_007(): void {
     // Throw during precharge_balance update — entire transaction rolls back.
     DbState::inTransaction(function() {
@@ -187,13 +166,7 @@ function test_TR_041(): void {
         throw $e;
     }
 }
-function test_TR_042(): void {
-    DbState::inTransaction(function() {
-        $custId = Fixtures::createCustomer(['province' => 'BC']);
-        $lease  = Fixtures::createLease($custId, ['start_date'=>'2026-03-28','engine_version'=>'period_independent','daily_rate'=>'0','weekly_rate'=>'0','monthly_rate'=>'0']);
-        Assert::throws(\Throwable::class, fn() => Fixtures::generateInvoice($lease, '2026-03-28', '2026-04-26', 'full_month'));
-    });
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy test_TR_042 (period_independent $0-rate full_month Assert::throws on old BillingRateException)
 function test_TR_043(): void {
     // advance batch: generates 12 invoices in 1 transaction.
     DbState::inTransaction(function() {

@@ -14,31 +14,13 @@ declare(strict_types=1);
 
 use FleetForge\Billing\HolisticLeaseEngine;
 use FleetForge\Billing\BillingRateException;
-use FleetForge\Billing\ProRateCalculator;
+// S-DELETE-LEGACY-ENGINE: removed legacy ProRateCalculator import
 use FleetForge\Tests\Assert;
 use FleetForge\Tests\DbState;
 use FleetForge\Tests\Fixtures;
 
-// RG-001: S-BILLING-RATE-FIX (INV-2026-00086). Zero weekly_rate flowing through
-// weekly_capped path silently returned $0. Engine must NOW throw on that path.
-function test_RG_001(): void {
-    $calc = new ProRateCalculator();
-    Assert::throws(BillingRateException::class, fn() => $calc->calculate(10, '50.00', '0.00', '700.00'));
-}
-// RG-002: S-MILEAGE-RATE-ZERO-FIX. Mileage rate=0 with distance>0 must throw via D133.
-function test_RG_002(): void {
-    DbState::inTransaction(function() {
-        $custId = Fixtures::createCustomer(['province' => 'BC']);
-        $lease  = Fixtures::createLease($custId, [
-            'start_date' => '2026-03-28', 'engine_version' => 'period_independent',
-            'estimated_mileage_km' => '1000.000', 'mileage_rate_km' => '0.0000',
-        ]);
-        Assert::throws(BillingRateException::class, fn() => Fixtures::generateInvoice(
-            $lease, '2026-03-28', '2026-03-31', 'partial_start',
-            ['odometer_at_period_start_km' => '0', 'odometer_at_period_end_km' => '500']
-        ));
-    });
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy RG-001 (ProRateCalculator->calculate weekly_capped $0 throw)
+// S-DELETE-LEGACY-ENGINE: removed legacy RG-002 (period_independent mileage-rate-zero throw)
 // RG-003: S-REVIEW-MILEAGE-TAX-FIX (INV-2026-00092). Mileage rate math uses bcmath, not /100.
 // Engine: period_distance × rate_km = period_charge. 100 km × $0.50 = $50.00 (not $0.50).
 function test_RG_003(): void {
@@ -57,20 +39,7 @@ function test_RG_003(): void {
         Assert::bcequal('50.00', (string)$row['amount']);
     });
 }
-// RG-004: D132 backstop. Engine refuses $0 base_rental when period has billable days.
-// Test via the InvoiceGenerator path (full_month bypass which doesn't go through ProRateCalculator).
-function test_RG_004(): void {
-    DbState::inTransaction(function() {
-        $custId = Fixtures::createCustomer(['province' => 'BC']);
-        $lease  = Fixtures::createLease($custId, [
-            'start_date' => '2026-04-01', 'engine_version' => 'period_independent',
-            'daily_rate' => '0.00', 'weekly_rate' => '0.00', 'monthly_rate' => '0.00',
-        ]);
-        Assert::throws(BillingRateException::class, fn() => Fixtures::generateInvoice(
-            $lease, '2026-04-01', '2026-04-30', 'full_month'
-        ));
-    });
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy RG-004 (period_independent $0 base_rental BillingRateException guard, now removed from InvoiceGenerator)
 // RG-005: D133 — mileage_excess with rate=0 and estimated_mileage>0 throws.
 function test_RG_005(): void {
     DbState::inTransaction(function() {

@@ -218,46 +218,9 @@ function spawn_test_lease(string $startDate, ?string $endDate = null): int {
     return $leaseId;
 }
 
-function spawn_old_engine_lease(string $startDate): int {
-    $unit = db_row("SELECT id FROM equipment_units WHERE deleted_at IS NULL LIMIT 1");
-    $cust = db_row("SELECT id FROM customers WHERE deleted_at IS NULL AND province IS NOT NULL LIMIT 1");
-
-    $contractNum = 'TEST-OLD-' . uniqid();
-    return db_insert('leases', [
-        'contract_number'   => $contractNum,
-        'customer_id'       => $cust['id'],
-        'equipment_unit_id' => $unit['id'],
-        'customer_name_snapshot' => 'Old Test',
-        'company_name_snapshot'  => 'Old Test Co',
-        'unit_number_snapshot'   => 'TEST-UNIT',
-        'start_date'        => $startDate,
-        'status'            => 'active',
-        'daily_rate'        => '50.00',
-        'weekly_rate'       => '350.00',
-        'monthly_rate'      => '700.00',
-        'currency'          => 'CAD',
-        'mileage_unit'      => 'km',
-        'mileage_rate'      => '0.0000',
-        'mileage_rate_km'   => '0.0000',
-        'estimated_mileage' => '0.00',
-        'estimated_mileage_km' => '0.000',
-        'tax_exempt'        => 0,
-        'gst_exempt'        => 0,
-        'pst_exempt'        => 0,
-        'discount_type'     => 'none',
-        'discount_value'    => '0.0000',
-        'insurance_opt_in'  => 0,
-        'insurance_cost'    => '0.00',
-        'warranty_opt_in'   => 0,
-        'warranty_cost'     => '0.00',
-        'billing_cycle'     => 'monthly',
-        'advance_billing_periods' => 0,
-        'engine_version'    => 'period_independent',
-        'precharge_enabled' => 0,
-        'gps_opt_in'        => 0,
-        'gps_cost'          => '0.00',
-    ]);
-}
+// S-DELETE-LEGACY-ENGINE: spawn_old_engine_lease() + the OLD-engine regression
+// tests (REG 1/2) were removed with the period_independent engine. HolisticLeaseEngine
+// is the only rental engine now.
 
 function gen_invoice(int $leaseId, string $periodStart, string $periodEnd, string $billingType = 'partial_start'): array {
     $gen = new InvoiceGenerator();
@@ -547,51 +510,9 @@ try {
     $pdo->rollBack();
 }
 
-// ── REG 1: period_independent lease uses ProRateCalculator ──
-// Boss's same example on the old engine should produce $200 + $700 = $900
-// (current engine overcharges by $106.67 — the bug the new engine fixes).
-$pdo->beginTransaction();
-try {
-    $leaseId = spawn_old_engine_lease('2026-03-28');
-    $inv1 = gen_invoice($leaseId, '2026-03-28', '2026-03-31', 'partial_start');
-    $lines1 = fetch_base_rental_lines($inv1['invoice_id']);
-    // Old engine: 4 days daily = $200 (period-independent)
-    eq("OLD engine Invoice 1 type", 'base_rental', $lines1[0]['item_type']);
-    eq("OLD engine Invoice 1 amount", '200.00', $lines1[0]['amount']);
-    eq("OLD engine Invoice 1 line count", 1, count($lines1));
-
-    // Old engine: full month flat = $700
-    $inv2 = gen_invoice($leaseId, '2026-04-01', '2026-04-30', 'full_month');
-    $lines2 = fetch_base_rental_lines($inv2['invoice_id']);
-    eq("OLD engine Invoice 2 type", 'base_rental', $lines2[0]['item_type']);
-    eq("OLD engine Invoice 2 amount", '700.00', $lines2[0]['amount']);
-
-    // Audit columns should be NULL for old-engine invoices
-    $audit1 = fetch_audit_columns($inv1['invoice_id']);
-    if ($audit1['total_days_at_period_end'] === null
-        && $audit1['cumulative_correct_amount'] === null
-        && $audit1['already_billed_before_this'] === null) {
-        ok("OLD engine invoice: audit columns NULL (as designed)");
-    } else {
-        bad("OLD engine invoice: audit columns should be NULL, got=" . json_encode($audit1));
-    }
-} finally {
-    $pdo->rollBack();
-}
-
-// ── REG 2: confirm no reconciliation_credit line on old engine ──
-$pdo->beginTransaction();
-try {
-    $leaseId = spawn_old_engine_lease('2026-03-28');
-    $inv1 = gen_invoice($leaseId, '2026-03-28', '2026-03-31', 'partial_start');
-    $reconLines = db_select(
-        "SELECT amount FROM invoice_line_items WHERE invoice_id = ? AND item_type = 'base_rental_reconciliation_credit'",
-        [$inv1['invoice_id']]
-    );
-    eq("OLD engine: no reconciliation_credit lines", 0, count($reconLines));
-} finally {
-    $pdo->rollBack();
-}
+// S-DELETE-LEGACY-ENGINE: REG 1 (period_independent → ProRateCalculator $200+$700)
+// and REG 2 (no reconciliation_credit on old engine) were removed with the legacy
+// engine. The holistic engine is the only rental engine now.
 
 // ── REG 3: holistic invoice produces audit_log row ──────────
 $pdo->beginTransaction();

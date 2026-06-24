@@ -221,18 +221,7 @@ function test_MI_046(): void {
         Assert::true(isset($inv['invoice_id']));
     });
 }
-function test_MI_047(): void {
-    DbState::inTransaction(function() {
-        $custId = Fixtures::createCustomer(['province' => 'BC']);
-        $lease  = Fixtures::createLease($custId, [
-            'start_date'=>'2026-03-28','engine_version'=>'period_independent',
-            'daily_rate'=>'0.00','weekly_rate'=>'0.00','monthly_rate'=>'0.00',
-        ]);
-        // D132 throws via InvoiceGenerator's full_month bypass backstop OR ProRateCalculator's assertNonZero.
-        Assert::throws(\FleetForge\Billing\BillingRateException::class,
-            fn() => Fixtures::generateInvoice($lease, '2026-03-28', '2026-03-31', 'partial_start'));
-    });
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy MI-047 (period_independent $0-rate ProRateCalculator BillingRateException assertion)
 
 // ── MI-060..066 SQL injection defense (7) ───────────────────
 // All FleetForge DB access uses prepared statements; ENUM/PK constraints reject malformed values.

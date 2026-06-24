@@ -15,7 +15,8 @@ declare(strict_types=1);
  * 41 sub-checks (updated S-QBO-PUSHER-CONTRACT-PAYDOWN):
  *   Structural (1-7): table + 5 classes + lint
  *   TaxOverride (8-10): builds TotalTax via bcmath / throws on empty / line-level
- *   LineBuilder (11-15): emits lines, resolves Items, GPS variant, throws on unmapped, throws on integrity violation
+ *   LineBuilder (11-14): emits lines, resolves Items, GPS variant, throws on unmapped
+ *       (S-DELETE-LEGACY-ENGINE: removed legacy C15 period_independent integrity-violation check)
  *   PreflightGate (16-19): pass/fail variants
  *   Pusher (20-23): skipped_by_mode / skipped_voided / failed_preflight / already_mapped
  *   Enqueuer (24-25): sync_enabled=0 / non-create returns false
@@ -72,7 +73,8 @@ use FleetForge\Exceptions\ChartOfAccountsIncompleteException;
 
 $failures = [];
 $pass     = 0;
-$total    = 52;
+// S-DELETE-LEGACY-ENGINE: was 52; dropped to 51 after removing legacy C15
+$total    = 51;
 
 // Sentinel IDs we'll clean up at end
 $sentinelInvoiceIds = [];
@@ -466,32 +468,7 @@ try {
 if (empty($c14Errors)) { echo "PASS C14 build() throws QuickBooksException for unmapped item_type\n"; $pass++; }
 else { echo "FAIL C14 " . implode('; ', $c14Errors) . "\n"; $failures[] = 'C14'; }
 
-// ── C15: build() throws on period_independent + recon_credit ─
-// Note: with no invoices.engine_version column on disk, this path
-// only triggers when the in-memory invoice dict has 'engine_version' =>
-// 'period_independent' explicitly. Use that pattern.
-$c15Errors = [];
-try {
-    $threw = false;
-    try {
-        InvoiceLineBuilder::build(
-            ['id'=>999990, 'engine_version'=>'period_independent'],
-            ['id'=>1, 'gps_revenue_presentation'=>'net'],
-            [['item_type'=>'base_rental_reconciliation_credit', 'description'=>'X', 'amount'=>'1.00', 'unit_price'=>'1.00', 'quantity'=>1, 'sort_order'=>1]]
-        );
-    } catch (QuickBooksException $e) {
-        $threw = true;
-        if (!str_contains($e->getMessage(), 'reconciliation_credit')
-            && !str_contains($e->getMessage(), 'period_independent')) {
-            $c15Errors[] = "expected message naming reconciliation_credit or period_independent, got: " . $e->getMessage();
-        }
-    }
-    if (!$threw) $c15Errors[] = 'expected QuickBooksException, none thrown';
-} catch (Throwable $e) {
-    $c15Errors[] = 'C15 threw: ' . $e->getMessage();
-}
-if (empty($c15Errors)) { echo "PASS C15 build() throws on period_independent invoice with base_rental_reconciliation_credit line (D-QBO-11-5)\n"; $pass++; }
-else { echo "FAIL C15 " . implode('; ', $c15Errors) . "\n"; $failures[] = 'C15'; }
+// S-DELETE-LEGACY-ENGINE: removed legacy C15 (period_independent + base_rental_reconciliation_credit ProRateCalculator BillingRateException assertion — engine deleted, holistic bills these differently)
 
 // ── Synthetic FF setup for preflight + pusher tests ─────────
 // Use sentinel customer + invoice to avoid interfering with live data.

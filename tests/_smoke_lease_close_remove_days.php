@@ -20,8 +20,8 @@ declare(strict_types=1);
  *       a $daysRemoved param and subtracts internally (used by the overshoot
  *       clamp so OTHER invoices clamp to the same reduced extent).
  *   (C) api/v1/leases/close.php — passes billing_days_removed into
- *       lease_billable_extent() so the final invoice's period_end + the legacy
- *       period_independent path reduce in step.
+ *       lease_billable_extent() so the final invoice's period_end reduces in step.
+ *       (S-DELETE-LEGACY-ENGINE: removed the legacy period_independent reference)
  * They MUST agree, or the overshoot clamp and the final invoice diverge
  * (S-CLOSE-OVERSHOOT invariant).
  *
@@ -60,9 +60,7 @@ declare(strict_types=1);
  *   T6  lease_billable_extent() unit check: $daysRemoved=1 returns one day
  *         earlier than $daysRemoved=0; an over-large $daysRemoved clamps to
  *         start_date.
- *   T7  LEGACY period_independent END-TO-END: a short period_independent lease
- *         billed with a reduced period_end bills the reduced day count without
- *         a fatal.
+ *   (S-DELETE-LEGACY-ENGINE: removed legacy T7 period_independent end-to-end case)
  *
  * Run:  php tests/_smoke_lease_close_remove_days.php     Exit 0 = pass, 1 = fail.
  *
@@ -360,43 +358,7 @@ DbState::inTransaction(function () use ($gen) {
     ok($clamped === '2026-06-01', "T6 over-large daysRemoved clamps to start_date 2026-06-01 (got '{$clamped}')");
 })();
 
-// ════════════════════════════════════════════════════════════════════
-// T7 — LEGACY period_independent path, END-TO-END. A short period_independent
-// lease billed with a reduced period_end (the day already removed by close.php
-// before it calls the generator) must bill the reduced day count with no fatal.
-// We bill 2026-06-01..2026-06-03 (3 inclusive days = the 4-day lease minus its
-// 1 removed day) and assert it persists and bills 3 × $100 = $300.
-// ════════════════════════════════════════════════════════════════════
-DbState::inTransaction(function () use ($gen) {
-    mbcron_bump_counter();
-    $lease = rd_lease([
-        'engine_version'       => 'period_independent',
-        'start_date'           => '2026-06-01',
-        'end_date'             => '2026-06-04',
-        'actual_return_date'   => '2026-06-04',   // displayed return: 4 days
-        'status'               => 'completed',
-        'billing_days_removed'  => 1,             // close.php reduces extent → 06-03
-    ]);
-    $threw = false;
-    $inv = null;
-    try {
-        // close.php drives the legacy path with a period_end already reduced by
-        // the removal (lease_billable_extent's local extentEnd) — emulate that
-        // by billing through the reduced 2026-06-03.
-        $batch = $gen->generateForLease([
-            'lease_id' => $lease, 'period_start' => '2026-06-01', 'period_end' => '2026-06-03',
-            'billing_type' => 'single_period', 'created_by' => null, 'generation_source' => 'manual',
-        ]);
-        $inv = $batch['invoices'][0]['invoice_id'];
-    } catch (\Throwable $e) {
-        $threw = true;
-    }
-    ok(!$threw, 'T7 legacy period_independent reduced period: persists without a fatal');
-    if ($inv !== null) {
-        // 3 reduced billable days on the legacy ladder = 3 × $100 = $300.
-        eq('300.00', base_net($inv), 'T7 legacy reduced 3 × $100 = $300 (removed day not billed)');
-    }
-});
+// S-DELETE-LEGACY-ENGINE: removed legacy T7 (period_independent end-to-end reduced-period billing) scenario
 
 echo "\n----------------------------------------------------------------------\n";
 echo "TOTAL: {$pass} pass / {$fail} fail\n";

@@ -16,7 +16,7 @@ declare(strict_types=1);
  */
 
 use FleetForge\Billing\HolisticLeaseEngine;
-use FleetForge\Billing\BillingRateException;
+// S-DELETE-LEGACY-ENGINE: removed legacy BillingRateException import (only used by deleted SC-025)
 use FleetForge\Tests\Assert;
 use FleetForge\Tests\DbState;
 use FleetForge\Tests\Fixtures;
@@ -171,10 +171,7 @@ function test_SC_024(): void {
     $rm = new ReflectionMethod(HolisticLeaseEngine::class, 'inclusiveDays');
     Assert::true($rm->isStatic(), 'inclusiveDays must be static');
 }
-function test_SC_025(): void {
-    $calc = new \FleetForge\Billing\ProRateCalculator();
-    Assert::throws(BillingRateException::class, fn() => $calc->calculate(30, '50.00', '350.00', '0.00'));
-}
+// S-DELETE-LEGACY-ENGINE: removed legacy SC-025 (ProRateCalculator instantiation + ->calculate() + old BillingRateException guard)
 
 // ── SC-040..045 schema conformance ──────────────────────────
 function test_SC_040(): void {

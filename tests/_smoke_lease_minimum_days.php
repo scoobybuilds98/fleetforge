@@ -56,7 +56,6 @@ require_once __DIR__ . '/helpers/Fixtures.php';
 
 use FleetForge\Billing\HolisticLeaseEngine;
 use FleetForge\Billing\InvoiceGenerator;
-use FleetForge\Billing\ProRateCalculator;
 use FleetForge\Tests\DbState;
 use FleetForge\Tests\Fixtures;
 
@@ -378,7 +377,6 @@ DbState::inTransaction(function () use ($gen) {
 // ════════════════════════════════════════════════════════════════════
 (function () {
     $h = new HolisticLeaseEngine();
-    $p = new ProRateCalculator();
 
     // ── HolisticLeaseEngine::cumulativeCorrect — binding case ──
     // 1-day extent (start=through=extent=2026-06-01), total=1 < 3, daily>0
@@ -400,39 +398,26 @@ DbState::inTransaction(function () use ($gen) {
     $zeroDaily = $h->cumulativeCorrect('2026-06-01', '2026-06-01', '2026-06-01', '0.00', MD_WEEKLY, MD_MONTHLY, 3);
     ok($zeroDaily['tier'] !== 'daily_minimum', 'T6 holistic $0 daily → floor no-op (tier != daily_minimum)');
 
-    // ── ProRateCalculator::calculate — binding case ──
-    // days=1 < 3, daily>0 → flat 3 × $100 = $300, method 'daily_minimum'.
-    $pbind = $p->calculate(1, MD_DAILY, MD_WEEKLY, MD_MONTHLY, 3);
-    eq('300.00', $pbind['amount'], 'T6 prorate calculate binds → flat $300');
-    ok($pbind['method'] === 'daily_minimum', "T6 prorate method = 'daily_minimum' (got '{$pbind['method']}')");
-
-    // ── ProRateCalculator::calculate — non-binding (5 days) ──
-    // days=5 >= 3 → normal ladder. At $100/$500 a 5-day period is daily ×5 = $500.
-    $pnob = $p->calculate(5, MD_DAILY, MD_WEEKLY, MD_MONTHLY, 3);
-    ok($pnob['method'] !== 'daily_minimum', "T6 prorate non-binding method != daily_minimum (got '{$pnob['method']}')");
-    eq('500.00', $pnob['amount'], 'T6 prorate non-binding 5 days → natural $500 (5 × $100)');
-
-    // ── ProRateCalculator — minDays 1 and $0 daily are no-ops ──
-    $pMinOne = $p->calculate(1, MD_DAILY, MD_WEEKLY, MD_MONTHLY, 1);
-    ok($pMinOne['method'] !== 'daily_minimum', 'T6 prorate minDays=1 → no-op (method != daily_minimum)');
-    eq('100.00', $pMinOne['amount'], 'T6 prorate minDays=1 → natural 1 × $100');
+    // S-DELETE-LEGACY-ENGINE: the ProRateCalculator direct-unit checks were removed
+    // with the engine; HolisticLeaseEngine is the only rental engine and its
+    // min-days floor is covered above + end-to-end in T7.
 })();
 
 // ════════════════════════════════════════════════════════════════════
-// T7 — LEGACY period_independent path, END-TO-END (regression guard).
-// The floor binds on the ProRateCalculator path with method='daily_minimum',
-// which is NOT a member of the invoices.rate_method_used / invoice_line_items
-// .rate_method ENUMs. Before the S-LEASE-MIN-DAYS clamp, writing it verbatim
-// 1265-truncated under STRICT_TRANS_TABLES and aborted the whole transaction —
-// a hard fatal on close of any short period_independent lease. This case drives
-// the real generator on that path and asserts: (a) it persists without throwing,
-// (b) bills the flat 3 × $100 = $300 floor, and (c) records the ENUM-safe
-// economic basis 'daily' (not 'daily_minimum', not 'none') in BOTH columns.
+// T7 — holistic min-days floor, END-TO-END (rate_method ENUM-clamp guard).
+// The floor binds with tier 'daily_minimum', which is NOT a member of the
+// invoices.rate_method_used / invoice_line_items.rate_method ENUMs — writing it
+// verbatim would 1265-truncate under STRICT_TRANS_TABLES and abort the whole
+// transaction. This drives the real generator and asserts: (a) it persists
+// without throwing, (b) bills the flat 3 × $100 = $300 floor, and (c) records
+// the ENUM-safe economic basis 'daily' (not 'daily_minimum', not 'none') in
+// BOTH columns. (S-DELETE-LEGACY-ENGINE: was the period_independent path; now
+// the only rental engine, holistic, carries the same floor + clamp.)
 // ════════════════════════════════════════════════════════════════════
 DbState::inTransaction(function () use ($gen) {
     mbcron_bump_counter();
     $lease = md_lease([
-        'engine_version'       => 'period_independent',
+        'engine_version'       => 'holistic',
         'start_date'           => '2026-06-01',
         'end_date'             => '2026-06-01',   // 1 inclusive day < 3-day floor
         'minimum_billing_days' => 3,
@@ -448,9 +433,9 @@ DbState::inTransaction(function () use ($gen) {
     } catch (\Throwable $e) {
         $threw = true;
     }
-    ok(!$threw, 'T7 legacy period_independent floor: persists without a 1265 ENUM-truncation fatal');
+    ok(!$threw, 'T7 holistic min-days floor: persists without a 1265 ENUM-truncation fatal');
     if ($inv !== null) {
-        eq('300.00', base_net($inv), 'T7 legacy base rental FLAT 3 × $100 (floor binds on ProRateCalculator path)');
+        eq('300.00', base_net($inv), 'T7 holistic base rental FLAT 3 × $100 (min-days floor binds)');
         // The flat-floor label is clamped to its economic basis 'daily' at BOTH
         // ENUM write sites (invoice row + line item) so the row persists.
         $rmu = db_row("SELECT rate_method_used FROM invoices WHERE id=?", [$inv]);

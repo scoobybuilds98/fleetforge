@@ -5,13 +5,14 @@ declare(strict_types=1);
  * lib/Billing/InvoiceGenerator.php
  *
  * Invoice orchestrator — the ONLY billing class that reads/writes the database.
- * Calls ProRateCalculator for rental math, TaxCalculator for tax, and LateFeeEngine
- * for late fee math. Handles invoice number generation (D15: gap-free, sequential,
- * FOR UPDATE lock D20).
+ * Calls HolisticLeaseEngine for rental math (running reconciliation — the SOLE
+ * rental engine since S-DELETE-LEGACY-ENGINE removed the legacy period_independent
+ * ProRateCalculator), TaxCalculator for tax, and LateFeeEngine for late fee math.
+ * Handles invoice number generation (D15: gap-free, sequential, FOR UPDATE lock D20).
  *
  * Required by: api/v1/invoices/create.php, cron/invoice_generate_monthly.php,
  *              cron/late_fee_apply.php
- * Requires: includes/db.php, lib/Billing/ProRateCalculator.php,
+ * Requires: includes/db.php, lib/Billing/HolisticLeaseEngine.php,
  *           lib/Billing/TaxCalculator.php, lib/Billing/LateFeeEngine.php
  * Defines: FleetForge\Billing\InvoiceGenerator
  *
@@ -57,17 +58,15 @@ namespace FleetForge\Billing;
 
 class InvoiceGenerator
 {
-    private ProRateCalculator     $proRate;
     private HolisticLeaseEngine   $holistic;
     private TaxCalculator         $taxCalc;
     private LateFeeEngine         $lateFee;
 
     public function __construct()
     {
-        $this->proRate  = new ProRateCalculator();
-        // S-BILLING-HOLISTIC-ENGINE: new running-reconciliation engine.
-        // Dispatched in createFromLease() based on lease.engine_version
-        // ('holistic' → this engine; 'period_independent' → ProRateCalculator).
+        // S-DELETE-LEGACY-ENGINE: HolisticLeaseEngine (running reconciliation) is
+        // the ONLY rental engine — the legacy ProRateCalculator / period_independent
+        // path has been removed. Every lease bills holistically.
         $this->holistic = new HolisticLeaseEngine();
         $this->taxCalc  = new TaxCalculator();
         $this->lateFee  = new LateFeeEngine();
@@ -77,7 +76,7 @@ class InvoiceGenerator
      * Create a manual invoice for a lease.
      *
      * Follows the Invoice Calculation Order (spec §9):
-     * 1. Base rental via ProRateCalculator
+     * 1. Base rental via HolisticLeaseEngine (running reconciliation)
      * 2. Mileage lines (pre-charge or reconciliation)
      * 3. Insurance/warranty/GPS add-ons
      * 4. subtotal = SUM(line_items)
@@ -142,10 +141,10 @@ class InvoiceGenerator
             $endDt = new \DateTimeImmutable($periodEnd);
             $days = (int)$startDt->diff($endDt)->days + 1;
 
-            // --- Step 1: Base rental — engine dispatch ---
-            // S-BILLING-HOLISTIC-ENGINE: branch on lease.engine_version.
-            //   'holistic'           → HolisticLeaseEngine (running reconciliation)
-            //   'period_independent' → ProRateCalculator (legacy THE LAW per period)
+            // --- Step 1: Base rental ---
+            // S-DELETE-LEGACY-ENGINE: HolisticLeaseEngine (running reconciliation) is
+            // the SOLE rental engine — the legacy period_independent / ProRateCalculator
+            // path was removed, so engine_version is no longer dispatched on here.
             //
             // ADV-BILL-1: 'mileage_only' (used by close.php for advance leases when
             // mileage overage needs its own invoice) skips the base rental entirely —
@@ -166,8 +165,6 @@ class InvoiceGenerator
             $rateMethod   = 'none';
             $explanation  = [];
             $holisticLineItem = null;  // Set by holistic branch when delta != 0
-
-            $engineVersion = (string)($lease['engine_version'] ?? 'period_independent');
 
             // S-LEASE-MIN-DAYS: establish the per-lease minimum-billing-days floor
             // once, defensively. The $lease array MAY NOT carry the
@@ -194,7 +191,10 @@ class InvoiceGenerator
                 $rentalAmount = '0.00';
                 $rateMethod   = 'none';
                 $explanation  = ['Adjustment / mileage-only — no base rental.'];
-            } elseif ($engineVersion === 'holistic') {
+            } else {
+                // S-DELETE-LEGACY-ENGINE: the holistic engine is the ONLY rental
+                // engine now (period_independent / ProRateCalculator removed). Every
+                // non-mileage_only invoice bills via running reconciliation.
                 // ── Holistic engine path ────────────────────────────
                 // D20: lock the lease row for the duration of the
                 // already_billed read + later UPDATE counters. Mirrors
@@ -317,11 +317,9 @@ class InvoiceGenerator
                     $rentalAmount = '0.00';
                 }
 
-                // Emit the engine's chosen line (if any). The legacy
-                // per-line append below for the period_independent branch
-                // handles the 'base_rental' shape; for the holistic engine
-                // we go through a parallel append so the description and
-                // detail_lines reflect the running reconciliation.
+                // Emit the holistic engine's chosen line (if any) — its own
+                // append so the description and detail_lines reflect the running
+                // reconciliation.
                 if ($engineResult['line_item_type'] !== 'none') {
                     // ── Honest line-item presentation ───────────────────
                     // A positive base_rental delta can be one of two things:
@@ -389,106 +387,14 @@ class InvoiceGenerator
                 }
                 // If line_item_type === 'none' (delta = 0), emit no
                 // base_rental line — spec §7.5.
-            } elseif ($billingType === 'full_month') {
-                // Legacy period_independent path: full month = flat monthly rate
-                $rentalAmount = bcround((string)$lease['monthly_rate'], 2);
-                $rateMethod = 'monthly';
-                $explanation = ['Full month — flat monthly rate: $' . $rentalAmount];
-            } else {
-                // Legacy period_independent path: partial period — use THE LAW
-                // S-LEASE-MIN-DAYS: pass the per-lease floor as the new 5th
-                // positional arg. ProRateCalculator binds the flat minDays × daily
-                // override (label 'daily_minimum') only when minDays>=2 AND
-                // $days<minDays AND daily_rate>0; 0/1/NULL is a NO-OP, preserving
-                // legacy tier selection for every long/normal period.
-                $result = $this->proRate->calculate(
-                    $days,
-                    (string)$lease['daily_rate'],
-                    (string)$lease['weekly_rate'],
-                    (string)$lease['monthly_rate'],
-                    $minBillingDays
-                );
-                $rentalAmount = $result['amount'];
-                $rateMethod = $result['method'];
-                $explanation = $result['explanation'];
-
-                // S-LEASE-MIN-DAYS: ProRateCalculator returns method='daily_minimum'
-                // when the flat short-lease floor binds. That label is NOT a member of
-                // the invoices.rate_method_used / invoice_line_items.rate_method ENUMs,
-                // so writing it verbatim would 1265-truncate under STRICT_TRANS_TABLES
-                // and abort the whole invoice/close transaction. Persist it as its
-                // economic basis 'daily' (the floor IS a flat N × daily_rate charge);
-                // the 'daily_minimum' identity is preserved in $explanation/detail_lines.
-                if ($rateMethod === 'daily_minimum') {
-                    $rateMethod = 'daily';
-                }
             }
 
-            // ════════════════════════════════════════════════════════════════
-            // S-BILLING-RATE-FIX D-E (D132 backstop) — refuse $0 base_rental
-            //
-            // ProRateCalculator now throws on its own zero-compute paths, but
-            // the full_month shortcut above bypasses ProRateCalculator and uses
-            // monthly_rate directly. If a lease ever sneaks past D132 with
-            // monthly_rate=0 (cron, fixtures, direct SQL), the full_month path
-            // would silently ship a $0 base_rental. Mirror the calculator's
-            // fail-loud behaviour here. mileage_only / adjustment / credit_note
-            // legitimately carry $0 base_rental and are exempt.
-            //
-            // S-BILLING-HOLISTIC-ENGINE: the holistic engine throws its own
-            // BillingRateException for the analogous zero-rate-with-period-days
-            // case (mirrors ProRateCalculator::assertNonZero), AND legitimately
-            // emits $0 base_rental when delta=0 OR when the engine emitted a
-            // reconciliation credit instead of a base_rental. So the holistic
-            // path is exempt from this belt-and-suspenders check — its own
-            // throw at the engine boundary is the load-bearing guard.
-            // ════════════════════════════════════════════════════════════════
-            $zeroAllowed = ['mileage_only', 'adjustment', 'credit_note'];
-            if ($engineVersion !== 'holistic'
-                && !in_array($billingType, $zeroAllowed, true)
-                && bccomp($rentalAmount, '0', 2) <= 0) {
-                throw new BillingRateException(
-                    sprintf(
-                        'InvoiceGenerator refused to write $0 base_rental: lease_id=%d, period=%s..%s (%d days), billing_type=%s, rate_method=%s, daily=%s, weekly=%s, monthly=%s. '
-                        . 'Upstream rate-tier-completeness invariant (D132) must be enforced at lease create — see api/v1/leases/create.php.',
-                        (int)$lease['id'], $periodStart, $periodEnd, $days, $billingType, $rateMethod,
-                        (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate']
-                    ),
-                    $rateMethod, $days,
-                    (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate'],
-                    [
-                        'lease_id'     => (int)$lease['id'],
-                        'period_start' => $periodStart,
-                        'period_end'   => $periodEnd,
-                        'billing_type' => $billingType,
-                    ]
-                );
-            }
-
-            // ADV-BILL-1: skip the base_rental and insurance/warranty lines on
-            // mileage_only adjustment invoices — they only carry mileage extra_lines.
-            //
-            // S-BILLING-HOLISTIC-ENGINE: the holistic path emits its own line
-            // above (or none, for delta=0). Skip the legacy append in both
-            // cases.
-            if ($billingType !== 'mileage_only' && $engineVersion !== 'holistic') {
-                $lineItems[] = [
-                    'sort_order'   => $sortOrder++,
-                    'item_type'    => 'base_rental',
-                    'description'  => "Base rental: {$periodStart} to {$periodEnd} ({$days} days)",
-                    'detail_lines' => json_encode($explanation),
-                    'quantity'     => '1.0000',
-                    'unit'         => 'period',
-                    'unit_price'   => $rentalAmount,
-                    'amount'       => $rentalAmount,
-                    'is_credit'    => 0,
-                    'taxable'      => 1,
-                    'billing_days' => $days,
-                    'rate_method'  => $rateMethod,
-                    'period_start' => $periodStart,
-                    'period_end'   => $periodEnd,
-                ];
-            }
+            // S-DELETE-LEGACY-ENGINE: the holistic engine is the sole rental engine.
+            // It emits its own base_rental / reconciliation line above (or none, for
+            // delta=0) and throws its own BillingRateException at the engine boundary
+            // for the zero-rate-with-period-days case — so the former legacy-only $0
+            // backstop and base_rental append (both gated on a non-holistic engine)
+            // are gone. mileage_only / adjustment invoices carry only extra_lines.
 
             // ════════════════════════════════════════════════════════════════
             // S-MILEAGE-2A: Invoice 1 mileage_precharge emission point (SHIPPED 2026-05-12, e1918df).
@@ -1797,7 +1703,6 @@ class InvoiceGenerator
                 json_error('NOT_FOUND', 'Lease not found.', 404);
             }
 
-            $engineVersion = (string)($lease['engine_version'] ?? 'period_independent');
             $billingType   = (string)($params['billing_type'] ?? 'single_period');
             $invoiceType   = (string)($params['invoice_type'] ?? 'regular');
             $allowOverlap  = !empty($params['allow_overlap']);
@@ -1852,8 +1757,8 @@ class InvoiceGenerator
                 return ['invoices' => [$inv], 'count' => 1, 'fanned' => false, 'billing_type' => $billingType];
             }
 
-            // ── Legacy / mileage_only → single invoice, honour the form ──
-            if ($engineVersion !== 'holistic' || $billingType === 'mileage_only') {
+            // ── mileage_only → single invoice, honour the form (never fans out) ──
+            if ($billingType === 'mileage_only') {
                 $this->assertNoOverlap($leaseId, $submittedStart, $submittedEnd, $allowOverlap, $billingType);
                 $inv = $this->createFromLease($common + $odo + [
                     'period_start' => $submittedStart,
