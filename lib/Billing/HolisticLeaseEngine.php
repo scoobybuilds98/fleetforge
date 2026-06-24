@@ -144,7 +144,11 @@ class HolisticLeaseEngine
         // base rental contributed by prior invoices. Caller holds FOR
         // UPDATE on the lease row across this read + the later counter
         // writes (D20).
-        $alreadyBilled = $this->sumAlreadyBilled($leaseId);
+        // Pass this invoice's period_end so future-period invoices are excluded
+        // (S-HOLISTIC-ALREADY-BILLED-ORDER): makes the reconciliation order-independent
+        // so regenerating an earlier invoice no longer counts later ones as already
+        // billed. No-op for in-order generation (later invoices don't exist yet).
+        $alreadyBilled = $this->sumAlreadyBilled($leaseId, $periodEnd);
 
         // ── Step 2: cumulative_correct THROUGH this invoice's period_end ──
         // R2 §4 + §7: classify on E, then —
@@ -970,18 +974,35 @@ class HolisticLeaseEngine
      *
      * The ONLY DB read the engine performs (D3 budget).
      */
-    private function sumAlreadyBilled(int $leaseId): string
+    /**
+     * NET base rental already billed on this lease's OTHER invoices.
+     *
+     * @param int          $leaseId
+     * @param string|null  $throughPeriodEnd  This invoice's period_end. When given,
+     *   ONLY invoices whose period STARTS on or before it are counted — i.e. invoices
+     *   for strictly-FUTURE periods (billing_period_start > throughPeriodEnd) are
+     *   excluded. This is what makes the running reconciliation ORDER-INDEPENDENT:
+     *   regenerating an EARLIER invoice while LATER ones already exist must not count
+     *   the later invoices as "already billed" (that would zero the earlier one).
+     *   During in-order generation later invoices don't exist yet, so the filter is a
+     *   no-op there — sequential behaviour is unchanged; it only corrects regenerate /
+     *   out-of-order recompute. null = legacy unfiltered (count every non-void invoice).
+     */
+    private function sumAlreadyBilled(int $leaseId, ?string $throughPeriodEnd = null): string
     {
-        $row = db_row(
-            "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.amount ELSE li.amount END), '0.00') AS sum_amount
-               FROM invoice_line_items li
-               JOIN invoices i ON i.id = li.invoice_id
-              WHERE i.lease_id = ?
-                AND i.deleted_at IS NULL
-                AND i.status <> 'void'
-                AND li.item_type IN ('base_rental', 'base_rental_reconciliation_credit')",
-            [$leaseId]
-        );
+        $sql = "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.amount ELSE li.amount END), '0.00') AS sum_amount
+                  FROM invoice_line_items li
+                  JOIN invoices i ON i.id = li.invoice_id
+                 WHERE i.lease_id = ?
+                   AND i.deleted_at IS NULL
+                   AND i.status <> 'void'
+                   AND li.item_type IN ('base_rental', 'base_rental_reconciliation_credit')";
+        $params = [$leaseId];
+        if ($throughPeriodEnd !== null && $throughPeriodEnd !== '') {
+            $sql .= " AND i.billing_period_start <= ?";
+            $params[] = $throughPeriodEnd;
+        }
+        $row = db_row($sql, $params);
         return (string)($row['sum_amount'] ?? '0.00');
     }
 }
