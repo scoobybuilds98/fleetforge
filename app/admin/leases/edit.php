@@ -48,8 +48,19 @@ if (!$lease) {
     exit;
 }
 
-// Only pending leases are fully editable — active leases have limited editing
-$isActive = $lease['status'] === 'active';
+// S-LEASE-EDIT-ACTIVE-UNLOCK (operator 2026-06-24): active leases are now fully
+// editable — dates, add-ons, precharge, notes, PO, etc. A banner warns that edits
+// apply to FUTURE billing only and never rewrite invoices that have already been
+// sent. Two flags drive the form:
+//   $isActive  — true when the lease is active; drives the warning banner only.
+//   $lockMeta  — field-level metadata lock. Now ALWAYS false (fields stay editable
+//                regardless of status); kept as a named flag so the locking intent
+//                is explicit and easy to re-tighten if policy ever changes.
+//   $lockClose — ending mileage / engine hours are captured at lease close, not
+//                mid-lease, so they remain read-only while the lease is active.
+$isActive  = $lease['status'] === 'active';
+$lockMeta  = false;
+$lockClose = $isActive;
 
 $pageTitle = 'Edit ' . $lease['contract_number'];
 $helpModuleSlug = 'leases';
@@ -78,9 +89,14 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php if ($isActive): ?>
 <div class="card card-body" style="background:var(--color-warning-light);color:var(--color-warning-text);margin-bottom:1.5rem;">
-    <strong>Active Lease — distance fields only.</strong> Only start odometer, allowance, and conversion factors can be edited while the lease is active.
-    Dates, notes, add-ons, rates, and financial fields are locked.
-    To change other metadata, the lease must be in <strong>pending</strong> status; rate changes use the
+    <strong>⚠️ This lease is active — edits apply to future billing only.</strong>
+    You can change dates, add-ons, precharge, notes, and other details, but these
+    changes <strong>will not alter invoices that have already been sent</strong> —
+    they apply only to invoices generated from here on (e.g. the next monthly run or
+    the final close invoice). Amounts that are already billed stay locked:
+    an already-invoiced <strong>precharge</strong> and an already-billed
+    <strong>cartage</strong> charge can't be changed, and the ending mileage / engine
+    hours are still captured at close. Rate changes go through the
     <a href="<?= e(base_url('leases/show?id=' . $leaseId)) ?>#amendments" class="text-link" style="color:inherit;text-decoration:underline;">Amendments tab</a>.
 </div>
 <?php endif; ?>
@@ -105,8 +121,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-hint">Contract number cannot be changed after creation.</div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"<?= $isActive ? '' : ' for="po_number"' ?>>PO Number</label>
-                        <?php if ($isActive): ?>
+                        <label class="form-label"<?= $lockMeta ? '' : ' for="po_number"' ?>>PO Number</label>
+                        <?php if ($lockMeta): ?>
                         <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['po_number'] ?? '—') ?></div>
                         <?php else: ?>
                         <input type="text" id="po_number" class="form-control"
@@ -144,8 +160,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-hint">Start date cannot be changed.</div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"<?= $isActive ? '' : ' for="end_date"' ?>>End Date</label>
-                        <?php if ($isActive): ?>
+                        <label class="form-label"<?= $lockMeta ? '' : ' for="end_date"' ?>>End Date</label>
+                        <?php if ($lockMeta): ?>
                         <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['end_date'] ?? '—') ?></div>
                         <?php else: ?>
                         <?php // [UI-AUDIT-1:M18] :min prevents picking a date before lease start. ?>
@@ -157,8 +173,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <?php endif; ?>
                     </div>
                     <div class="form-group">
-                        <label class="form-label"<?= $isActive ? '' : ' for="minimum_end_date"' ?>>Minimum End Date</label>
-                        <?php if ($isActive): ?>
+                        <label class="form-label"<?= $lockMeta ? '' : ' for="minimum_end_date"' ?>>Minimum End Date</label>
+                        <?php if ($lockMeta): ?>
                         <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['minimum_end_date'] ?? '—') ?></div>
                         <?php else: ?>
                         <?php // [UI-AUDIT-1:M18] Same constraint on minimum_end_date. ?>
@@ -206,8 +222,8 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label"<?= $isActive ? '' : ' for="rate_notes"' ?>>Rate Notes</label>
-                        <?php if ($isActive): ?>
+                        <label class="form-label"<?= $lockMeta ? '' : ' for="rate_notes"' ?>>Rate Notes</label>
+                        <?php if ($lockMeta): ?>
                         <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['rate_notes'] ?? '—') ?></div>
                         <?php else: ?>
                         <input type="text" id="rate_notes" class="form-control"
@@ -220,8 +236,8 @@ require_once FF_ROOT . '/includes/header.php';
                          rate instead of the tier ladder. Blank/0/1 = none. Editable on
                          pending leases only; shown read-only once active. -->
                     <div class="form-group">
-                        <label class="form-label"<?= $isActive ? '' : ' for="minimum_billing_days"' ?>>Minimum Billing Days</label>
-                        <?php if ($isActive): ?>
+                        <label class="form-label"<?= $lockMeta ? '' : ' for="minimum_billing_days"' ?>>Minimum Billing Days</label>
+                        <?php if ($lockMeta): ?>
                         <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;"><?= ((int)($lease['minimum_billing_days'] ?? 0) >= 2) ? e((string)(int)$lease['minimum_billing_days']) : '—' ?></div>
                         <?php else: ?>
                         <input type="number" id="minimum_billing_days" class="form-control font-mono"
@@ -455,7 +471,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label">Ending Mileage</label>
-                        <?php if ($isActive): ?>
+                        <?php if ($lockClose): ?>
                         <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;"
                              title="Set at lease close"><?= e($lease['mileage_at_end'] ?? '—') ?></div>
                         <div class="form-hint">Set at lease close.</div>
@@ -476,7 +492,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-group">
                         <label class="form-label">Ending Engine Hours</label>
-                        <?php if ($isActive): ?>
+                        <?php if ($lockClose): ?>
                         <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;"
                              title="Set at lease close"><?= e($lease['engine_hours_at_end'] ?? '—') ?></div>
                         <div class="form-hint">Set at lease close.</div>
@@ -488,10 +504,12 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
 
                 <!-- S-MILEAGE-1 Model B — Mileage precharge subsection
-                     Active leases: rendered read-only (precharge is locked after
-                     Invoice 1 billing; cannot change on an active lease at all). -->
+                     S-LEASE-EDIT-ACTIVE-UNLOCK: editable on active leases too; the
+                     `prechargeFrozen` flag still disables the inputs (and shows a
+                     "locked" hint) once Invoice 1 has actually billed the precharge,
+                     so already-sent dollars stay immutable. -->
                 <div style="border-top:1px solid var(--border-color);margin-top:24px;padding-top:24px;">
-                    <?php if ($isActive): ?>
+                    <?php if ($lockMeta): ?>
                     <div class="form-hint" style="opacity:0.7;">
                         <strong>Mileage precharge:</strong>
                         <?php if (!empty($lease['precharge_enabled'])): ?>
@@ -546,12 +564,12 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="card" style="margin-bottom:1.5rem;">
             <div class="card-header">
                 <div class="card-title">Add-ons</div>
-                <?php if ($isActive): ?>
+                <?php if ($lockMeta): ?>
                 <div style="font-size:0.8125rem;color:var(--text-secondary);">Locked while lease is active.</div>
                 <?php endif; ?>
             </div>
             <div class="card-body">
-                <?php if ($isActive): ?>
+                <?php if ($lockMeta): ?>
                 <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label">Insurance</label>
@@ -663,14 +681,14 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="card" style="margin-bottom:1.5rem;">
             <div class="card-header">
                 <div class="card-title">Notes</div>
-                <?php if ($isActive): ?>
+                <?php if ($lockMeta): ?>
                 <div style="font-size:0.8125rem;color:var(--text-secondary);">Locked while lease is active.</div>
                 <?php endif; ?>
             </div>
             <div class="card-body">
                 <div class="form-group">
-                    <label class="form-label"<?= $isActive ? '' : ' for="notes"' ?>>Notes</label>
-                    <?php if ($isActive): ?>
+                    <label class="form-label"<?= $lockMeta ? '' : ' for="notes"' ?>>Notes</label>
+                    <?php if ($lockMeta): ?>
                     <div class="form-control" style="background:var(--bg-muted);cursor:default;min-height:3rem;white-space:pre-wrap;"><?= e($lease['notes'] ?? '') ?: '<span style="color:var(--text-muted);">—</span>' ?></div>
                     <?php else: ?>
                     <textarea id="notes" class="form-control"
@@ -678,8 +696,8 @@ require_once FF_ROOT . '/includes/header.php';
                     <?php endif; ?>
                 </div>
                 <div class="form-group">
-                    <label class="form-label"<?= $isActive ? '' : ' for="internal_notes"' ?>>Internal Notes</label>
-                    <?php if ($isActive): ?>
+                    <label class="form-label"<?= $lockMeta ? '' : ' for="internal_notes"' ?>>Internal Notes</label>
+                    <?php if ($lockMeta): ?>
                     <div class="form-control" style="background:var(--bg-muted);cursor:default;min-height:3rem;white-space:pre-wrap;"><?= e($lease['internal_notes'] ?? '') ?: '<span style="color:var(--text-muted);">—</span>' ?></div>
                     <?php else: ?>
                     <textarea id="internal_notes" class="form-control"
@@ -705,8 +723,9 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
-// S-LEASE-DISTANCE-EDIT-ACTIVE: active leases only send distance fields.
-const _leaseIsActive = <?= $isActive ? 'true' : 'false' ?>;
+// S-LEASE-EDIT-ACTIVE-UNLOCK: the form posts only changed fields (dirty-tracking,
+// see _dirtyPayload) for every status now — there is no longer a status-gated
+// payload, so the old `_leaseIsActive` distance-only branch is gone.
 
 function FF_EditLease() {
     return {
@@ -729,8 +748,10 @@ function FF_EditLease() {
             // the current mode AND a change is actually sent (S-LEASE-REOPEN-UI: needed
             // to flip a reopened lease Off→Manual before re-closing).
             mileage_tracking_mode:   <?= json_encode($lease['mileage_tracking_mode'] ?? 'off') ?>,
-            <?php if (!$isActive): ?>
-            // Pending-only fields — locked on active leases (API returns 422 ACTIVE_LEASE_DISTANCE_ONLY)
+            <?php if (!$lockMeta): ?>
+            // S-LEASE-EDIT-ACTIVE-UNLOCK: editable for every status now (was pending-only).
+            // Fields with no input on active leases (ending mileage / engine hours) stay
+            // in the model harmlessly — dirty-tracking never marks an untouched field.
             po_number:               <?= json_encode($lease['po_number'] ?? '') ?>,
             end_date:                <?= json_encode($lease['end_date'] ?? '') ?>,
             minimum_end_date:        <?= json_encode($lease['minimum_end_date'] ?? '') ?>,
@@ -757,8 +778,16 @@ function FF_EditLease() {
         },
         errors:      {},
         submitting:  false,
-        <?php if (!$isActive): ?>
-        // S-MILEAGE-1: frozen once Invoice 1 has billed the precharge.
+        // S-LEASE-EDIT-DIRTY-ONLY: deep snapshot of the server-rendered values,
+        // captured once in init(). submit() diffs against it and posts ONLY the
+        // fields the user actually changed — so an untouched field is never sent
+        // and update.php's partial write can't reset/clear it.
+        _initial:    null,
+        _draft:      null,
+        <?php if (!$lockMeta): ?>
+        // S-MILEAGE-1: frozen once Invoice 1 has billed the precharge. Defined for
+        // every status now (precharge is editable on active leases too) so the
+        // already-invoiced freeze still disables the precharge inputs.
         prechargeFrozen: <?= !empty($lease['precharge_invoiced_at']) ? 'true' : 'false' ?>,
         <?php endif; ?>
 
@@ -775,6 +804,15 @@ function FF_EditLease() {
         },
 
         init() {
+            // S-LEASE-EDIT-DIRTY-ONLY: capture the server-rendered baseline ONCE
+            // (guard against Alpine's double-init — see project_alpine_double_init_trap)
+            // so submit() posts only the fields the user actually changed. This is
+            // the "don't change/clear a field unless the user does" guarantee,
+            // enforced at the payload level: untouched fields never leave the page.
+            if (!this._initial) {
+                this._initial = JSON.parse(JSON.stringify(this.form));
+            }
+
             // S-FORM-DRAFT-AUTOSAVE: mirror in-progress edits to localStorage so
             // a Back/refresh/close never loses them; offer a restore banner on
             // return. Keyed by lease id so each lease has its own draft.
@@ -841,8 +879,8 @@ function FF_EditLease() {
                 }
             });
 
-            <?php if (!$isActive): ?>
-            // Pending-only validation
+            <?php if (!$lockMeta): ?>
+            // S-LEASE-EDIT-ACTIVE-UNLOCK: validated for every status now (was pending-only)
             const startDate = <?= json_encode($lease['start_date']) ?>;
             if (this.form.end_date && this.form.end_date < startDate) {
                 FF_Validate.field(f, 'end_date', 'End date must be after start date.');
@@ -875,6 +913,23 @@ function FF_EditLease() {
             return ok;
         },
 
+        // S-LEASE-EDIT-DIRTY-ONLY: build the update payload from ONLY the fields
+        // whose current value differs from the server-rendered baseline. `id` +
+        // `updated_at` always travel (id = target row, updated_at = D19 optimistic
+        // lock token). A primitive string-coercion compare matches the form's value
+        // shapes (numbers, DECIMAL strings, booleans, '' vs null) without false
+        // diffs — e.g. DB int 1000 vs the "1000" the input holds compare equal.
+        _dirtyPayload() {
+            const payload = { id: this.form.id, updated_at: this.form.updated_at };
+            const norm = (v) => (v === null || v === undefined) ? '' : String(v);
+            const base = this._initial || {};
+            Object.keys(this.form).forEach((k) => {
+                if (k === 'id' || k === 'updated_at') return;
+                if (norm(this.form[k]) !== norm(base[k])) payload[k] = this.form[k];
+            });
+            return payload;
+        },
+
         async submit() {
             if (!this.validate()) return;
 
@@ -891,11 +946,23 @@ function FF_EditLease() {
             }
             <?php endif; ?>
 
-            this.submitting = true;
             const f = document.querySelector('form');
 
+            // S-LEASE-EDIT-DIRTY-ONLY: send only what changed. If nothing changed,
+            // don't POST (update.php 422s on an empty update) — treat it as a no-op
+            // save and return to the lease, exactly like a successful save.
+            const payload = this._dirtyPayload();
+            const changed = Object.keys(payload).filter((k) => k !== 'id' && k !== 'updated_at');
+            if (changed.length === 0) {
+                if (this._draft) this._draft.clear(true);
+                window.location.href = '<?= base_url('leases/show') ?>?id=<?= $leaseId ?>';
+                return;
+            }
+
+            this.submitting = true;
+
             try {
-                const r = await FF_Api.post('<?= base_url('api/v1/leases/update') ?>', this.form);
+                const r = await FF_Api.post('<?= base_url('api/v1/leases/update') ?>', payload);
                 if (r.success) {
                     // S-FORM-DRAFT-AUTOSAVE: server confirmed — wipe the draft
                     // (stop=true) BEFORE the hard redirect navigates away.

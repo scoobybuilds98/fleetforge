@@ -84,40 +84,21 @@ if (in_array($existing['status'], ['completed', 'cancelled'])) {
         "Lease {$existing['contract_number']} is {$existing['status']} and cannot be edited.", 422);
 }
 
-// S-LEASE-DISTANCE-EDIT-ACTIVE: once a lease is active the only permissible edits
-// are distance/odometer fields. Dates, notes, add-ons, precharge, and tax flags must
-// be configured while the lease is still pending; rate changes always go through the
-// amendment workflow. This keeps active-lease financial state stable between billing
-// cycles and avoids post-hoc edits that would invalidate already-sent invoices.
-if ($existing['status'] === 'active') {
-    $distanceAllowed = [
-        'id', 'updated_at',
-        'mileage_at_start',
-        'estimated_mileage', 'estimated_mileage_km', 'estimated_mileage_miles',
-        'km_to_miles_conversion', 'miles_to_km_conversion',
-        // S-LEASE-MILEAGE-MODE: the mileage data source is a distance setting and
-        // may be retuned on an active lease (e.g. a unit that was never linked to
-        // Samsara is switched from samsara→manual). Affects future billing only.
-        'mileage_tracking_mode',
-        // S-LEASE-HOURLY-BILLING: the manual starting engine-hours baseline is a
-        // usage reading and may be corrected on an active lease (end is set at close).
-        'engine_hours_at_start',
-    ];
-    $blocked = array_values(array_diff(array_keys($body), $distanceAllowed));
-    if ($blocked !== []) {
-        json_error(
-            'ACTIVE_LEASE_DISTANCE_ONLY',
-            'Only distance/odometer fields can be changed on an active lease '
-            . '(mileage_at_start, estimated_mileage, km_to_miles_conversion, '
-            . 'miles_to_km_conversion). Edit the lease while pending for other '
-            . 'metadata; use the amendment workflow for rate changes. '
-            . 'Blocked field' . (count($blocked) === 1 ? '' : 's') . ': '
-            . implode(', ', $blocked) . '.',
-            422,
-            ['blocked_fields' => $blocked]
-        );
-    }
-}
+// S-LEASE-EDIT-ACTIVE-UNLOCK (operator 2026-06-24): active leases are now fully
+// editable — dates, notes, add-ons, precharge, tax flags, etc. The blanket
+// "distance/odometer fields only" gate (formerly S-LEASE-DISTANCE-EDIT-ACTIVE) is
+// removed; the edit form warns the operator that changes apply to FUTURE billing
+// only and never rewrite invoices that have already been sent.
+//
+// Edits to an active lease affect future invoice generation (next monthly run /
+// the close invoice); already-sent invoices are immutable rows in `invoices` and
+// are not touched by a lease-row update. The hard immutability guards that protect
+// dollars ALREADY billed remain in force below and are NOT relaxed by this change:
+//   • completed / cancelled leases stay read-only (IMMUTABLE_RECORD, above).
+//   • precharge is frozen once Invoice 1 has billed it (PRECHARGE_LOCKED, below).
+//   • cartage is frozen once billed (cartage_billed_at, below).
+//   • rate fields still route through the amendment workflow (RATE_* block, below).
+//   • advance_billing_periods stays pending-only (locked once activated, below).
 
 // ── D19 Optimistic lock check ──────────────────────────────────
 if (!optimistic_lock_matches($updatedAt, $existing['updated_at'])) {
@@ -350,8 +331,8 @@ if (array_key_exists('minimum_billing_days', $body)) {
 }
 
 // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
-// Editable while pending and (via the distanceAllowed whitelist) on active
-// leases. Out-of-enum is a hard validation error.
+// Editable on pending and active leases (affects future billing only).
+// Out-of-enum is a hard validation error.
 if (array_key_exists('mileage_tracking_mode', $body)) {
     $raw = $body['mileage_tracking_mode'];
     if (in_array($raw, ['manual', 'off', 'samsara'], true)) {
