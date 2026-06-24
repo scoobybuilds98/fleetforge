@@ -1406,6 +1406,16 @@ require_once FF_ROOT . '/includes/header.php';
         <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance' && can('invoices', 'edit')): ?>
             <a href="<?= base_url('invoices/edit') ?>?id=<?= $invoiceId ?>" class="btn btn-secondary btn-sm">Edit Line Items</a>
         <?php endif; ?>
+        <?php /* S-INVOICE-DRAFT-EDIT: rebuild a draft from current lease state (regular, lease-linked, non-advance). */ ?>
+        <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance'
+                  && ($invoice['invoice_type'] ?? 'regular') === 'regular' && $invoice['lease_id'] && can('invoices', 'edit')): ?>
+            <button class="btn btn-secondary btn-sm"
+                    @click="regenerateFromLease(<?= $invoiceId ?>, <?= e(json_encode($invoice['updated_at'])) ?>)"
+                    :disabled="regenerating">
+                <span x-show="!regenerating">Regenerate from Lease</span>
+                <span x-show="regenerating">Regenerating…</span>
+            </button>
+        <?php endif; ?>
 
         <?php if (in_array($invoice['status'], ['draft', 'sent']) && can('invoices', 'edit')): ?>
             <button class="btn btn-danger btn-sm" @click="showVoidModal = true">Void</button>
@@ -3281,6 +3291,29 @@ function FF_InvoiceShow() {
         sending:        false,
         voiding:        false,
         deleting:       false,
+        regenerating:   false,
+
+        // S-INVOICE-DRAFT-EDIT: rebuild this draft from the lease's CURRENT state
+        // (same invoice number). Use after editing the lease so the draft catches
+        // up. Server-side draft-only/precharge guards return a clear message.
+        async regenerateFromLease(id, updatedAt) {
+            if (!confirm('Regenerate this invoice from the current lease state?\n\n'
+                + 'This replaces the line items with freshly-computed ones based on the lease as it is now '
+                + '(the invoice number is kept). Use this after editing the lease.')) return;
+            this.regenerating = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/regenerate') ?>', { id: id, updated_at: updatedAt });
+                if (r.success) {
+                    window.location.href = '<?= base_url('invoices/show') ?>?id=' + r.data.id;
+                } else {
+                    alert((r.error && r.error.message) || 'Failed to regenerate this invoice.');
+                    this.regenerating = false;
+                }
+            } catch (e) {
+                alert('Network error. Please try again.');
+                this.regenerating = false;
+            }
+        },
 
         /* ── Modal states ───────────────────────────────────── */
         showVoidModal:  false,

@@ -1309,7 +1309,13 @@ class InvoiceGenerator
             $balanceDue = $totalAmount;
 
             // --- Generate invoice number (D15: gap-free, D20: FOR UPDATE) ---
-            $invoiceNumber = $this->generateInvoiceNumber();
+            // S-INVOICE-DRAFT-EDIT regenerate: when re-creating a draft in place
+            // (api/v1/invoices/regenerate.php hard-deletes the old draft + its
+            // number, then calls this), reuse the SAME number instead of minting
+            // a new one — no counter bump, no gap. Only ever set for that path.
+            $invoiceNumber = isset($params['force_invoice_number']) && $params['force_invoice_number'] !== ''
+                ? (string) $params['force_invoice_number']
+                : $this->generateInvoiceNumber();
 
             // S-INVOICE-DATING-FIX: issue/due derive from THIS invoice's own
             // billing period, NOT the generation timestamp. Advance-billing
