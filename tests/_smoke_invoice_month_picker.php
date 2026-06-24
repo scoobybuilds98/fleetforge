@@ -17,6 +17,13 @@ declare(strict_types=1);
  *   P5  In-order: next_due_index always points at the first unbilled segment.
  *   P6  Live lease #2620 → fully billed (June=INV-50, July=INV-51).
  *   P7  Picker UI wired in the create form (static).
+ *   P10 ≤1-month STRADDLE (S-MONTHLY-SHORT-FLAT): a 22-day Jul24→Aug14 monthly
+ *       lease → ONE picker segment (single_period), generation writes ONE flat
+ *       $1,500 invoice (NOT two months with a $0 second). Picker now mirrors
+ *       generateForLease's spanning decision (basis branch in ff_billable_months).
+ *   P11 sub-month WEEKLY cross-month (9-day Jul28→Aug05): monthly tier does NOT
+ *       apply, so generation writes ONE weekly_math invoice → picker shows ONE
+ *       segment too (the latent non-monthly divergence, fixed by the same branch).
  *
  * Run: php tests/_smoke_invoice_month_picker.php   (0 = pass, 1 = fail)
  *
@@ -121,6 +128,80 @@ DbState::inTransaction(function () use ($gen) {
     // (subprocess: json_error exits). Verify the gate sees the June invoice.
     $ov = InvoiceGenerator::findOverlappingInvoice($lease, '2026-06-07', '2026-06-30');
     ok($ov !== null && $ov['status'] !== 'void', 'P5b overlap gate sees the billed June invoice');
+});
+
+// ── P10: ≤1-month STRADDLE (S-MONTHLY-SHORT-FLAT) — the picker mirrors the
+//         flat-month generation: ONE single_period segment + ONE flat invoice,
+//         never two calendar months with a contradictory $0 second month. ──
+DbState::inTransaction(function () use ($gen) {
+    // 22 days Jul 24 → Aug 14: monthly tier applies (weeklyMath 22d > $1,500)
+    // and the span straddles a boundary but is ≤ one calendar month → engine
+    // basis 'monthly_short_flat' → generation writes ONE flat $1,500 invoice.
+    $lease = r2_lease(['start_date' => '2026-07-24', 'end_date' => '2026-08-14']);
+
+    $m = ff_billable_months($lease);
+    eqs('1', count($m['months']), 'P10 ≤1-month straddle → ONE picker segment (not two)');
+    eqs('single_period', $m['months'][0]['billing_type'], 'P10 segment billing_type single_period');
+    eqs('2026-07-24', $m['months'][0]['period_start'], 'P10 segment spans whole lease (start)');
+    eqs('2026-08-14', $m['months'][0]['period_end'],   'P10 segment spans whole lease (end)');
+    eqs('22', $m['months'][0]['days'], 'P10 segment = 22 inclusive days');
+    eqs('unbilled', $m['months'][0]['status'], 'P10 unbilled');
+    eqs('0', $m['next_due_index'], 'P10 next_due = 0');
+    ok($m['months'][0]['is_final'] === true, 'P10 is_final (end_date set)');
+    ok($m['fully_billed'] === false, 'P10 not fully billed yet');
+
+    // Generate the one segment via the picker's single_segment flow → ONE flat
+    // monthly invoice (no fan-out, no $0 second month).
+    $seg = $m['months'][0];
+    $b = $gen->generateForLease([
+        'lease_id' => $lease, 'single_segment' => true,
+        'period_start' => $seg['period_start'], 'period_end' => $seg['period_end'],
+        'billing_type' => $seg['billing_type'], 'invoice_type' => $seg['is_final'] ? 'final' : 'regular',
+        'created_by' => null, 'generation_source' => 'manual',
+    ]);
+    eqs('1', $b['count'], 'P10 single_segment → exactly ONE invoice (no fan-out)');
+    ok($b['fanned'] === false, 'P10 not fanned');
+    eqs('1500.00', base_net($b['invoices'][0]['invoice_id']), 'P10 flat monthly base $1,500 (not a 2-month split)');
+
+    // Picker reflects fully billed in ONE step — no contradictory upcoming month.
+    $m = ff_billable_months($lease);
+    eqs('1', count($m['months']), 'P10 still ONE segment after billing');
+    eqs('billed', $m['months'][0]['status'], 'P10 segment now billed');
+    ok($m['next_due_index'] === null, 'P10 next_due = null');
+    ok($m['fully_billed'] === true, 'P10 fully billed in one invoice');
+});
+
+// ── P11: sub-month WEEKLY cross-month — the in-order gate touches ALL
+//         non-spanning cross-month leases, not just ≤30-day monthly. Monthly
+//         tier does NOT apply here, so generation writes ONE weekly_math
+//         invoice → the picker must present ONE segment too. ──
+DbState::inTransaction(function () use ($gen) {
+    // 9 days Jul 28 → Aug 05: weeklyMath(9d) $642.86 < $1,500 → monthly tier
+    // does NOT apply (basis weekly_math); the span straddles Jul/Aug but
+    // generation still writes ONE invoice for [Jul28, Aug05].
+    $lease = r2_lease(['start_date' => '2026-07-28', 'end_date' => '2026-08-05']);
+
+    $m = ff_billable_months($lease);
+    eqs('1', count($m['months']), 'P11 weekly cross-month → ONE picker segment (not two)');
+    eqs('single_period', $m['months'][0]['billing_type'], 'P11 segment billing_type single_period');
+    eqs('2026-07-28', $m['months'][0]['period_start'], 'P11 segment start');
+    eqs('2026-08-05', $m['months'][0]['period_end'],   'P11 segment end');
+    eqs('9', $m['months'][0]['days'], 'P11 segment = 9 inclusive days');
+    eqs('0', $m['next_due_index'], 'P11 next_due = 0');
+
+    $seg = $m['months'][0];
+    $b = $gen->generateForLease([
+        'lease_id' => $lease, 'single_segment' => true,
+        'period_start' => $seg['period_start'], 'period_end' => $seg['period_end'],
+        'billing_type' => $seg['billing_type'], 'invoice_type' => $seg['is_final'] ? 'final' : 'regular',
+        'created_by' => null, 'generation_source' => 'manual',
+    ]);
+    eqs('1', $b['count'], 'P11 single_segment weekly → ONE invoice (no fan-out)');
+    ok($b['fanned'] === false, 'P11 not fanned');
+    eqs('642.86', base_net($b['invoices'][0]['invoice_id']), 'P11 weekly_math base $642.86 (9 days)');
+
+    $m = ff_billable_months($lease);
+    ok($m['fully_billed'] === true, 'P11 fully billed in one invoice');
 });
 
 // ── P6: live lease #2620 — picker reflects REALITY + self-consistency ─

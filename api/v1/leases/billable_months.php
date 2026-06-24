@@ -13,8 +13,18 @@ declare(strict_types=1);
  *                               invoice_number + invoice_id)
  *                - 'void'     → only a VOID invoice covers it (re-billable)
  *                - 'unbilled' → no invoice covers it yet
- *              The segment dates come straight from HolisticLeaseEngine::
- *              segmentsFor() so they match exactly what generation would write.
+ *              The segments MIRROR generateForLease's spanning decision so they
+ *              match exactly what generation would write: the picker fans into
+ *              per-calendar-month segments (HolisticLeaseEngine::segmentsFor)
+ *              ONLY when the engine classifies the full-extent lease as
+ *              'monthly_multi_month'; every non-spanning case — sub-month
+ *              daily/weekly cross-month, single-calendar-month monthly, and the
+ *              ≤1-month straddle flat cap (basis 'monthly_short_flat',
+ *              S-MONTHLY-SHORT-FLAT) — is presented as ONE 'single_period'
+ *              segment [start, extent], exactly the one flat invoice generation
+ *              writes. (Before S-MONTHLY-SHORT-FLAT-PICKER this always called
+ *              segmentsFor(), so a ≤30-day straddle showed two months while
+ *              generation wrote one flat invoice — a contradictory split.)
  *              `next_due_index` is the FIRST unbilled segment (in-order gate
  *              4.5 — only that month may be generated next); `fully_billed`
  *              is true when every segment is billed.
@@ -47,7 +57,8 @@ function ff_billable_months(int $leaseId): ?array
 {
     $lease = db_row(
         "SELECT id, contract_number, start_date, end_date, actual_return_date,
-                status, engine_version, billing_cycle
+                status, engine_version, billing_cycle,
+                daily_rate, weekly_rate, monthly_rate
            FROM leases
           WHERE id = ? AND deleted_at IS NULL",
         [$leaseId]
@@ -72,7 +83,41 @@ function ff_billable_months(int $leaseId): ?array
     $nextDueIndex = null;
 
     if ($start !== '' && $extent >= $start) {
-        $segments = (new \FleetForge\Billing\HolisticLeaseEngine())->segmentsFor($start, $extent);
+        // Mirror generateForLease's spanning decision (R2 §3.6 contract above):
+        // present the SAME segments generation would write. Generation fans into
+        // per-calendar-month segments ONLY for a holistic lease the engine
+        // classifies as 'monthly_multi_month' (monthly tier spanning >1 calendar
+        // month). EVERY other case writes ONE invoice for [start, extent] and so
+        // must show ONE 'single_period' segment: non-holistic (legacy/mileage —
+        // the holistic rate ladder doesn't even apply, and the picker UI hides
+        // for it), sub-month daily/weekly cross-month, single-calendar-month
+        // monthly, and the ≤1-month straddle flat cap ('monthly_short_flat').
+        $engine   = new \FleetForge\Billing\HolisticLeaseEngine();
+        $spanning = false;
+        if (($lease['engine_version'] ?? '') === 'holistic') {
+            $cls = $engine->cumulativeCorrect(
+                $start, $extent, $extent,
+                (string) $lease['daily_rate'],
+                (string) $lease['weekly_rate'],
+                (string) $lease['monthly_rate']
+            );
+            $spanning = ($cls['basis'] === 'monthly_multi_month');
+        }
+
+        if ($spanning) {
+            $segments = $engine->segmentsFor($start, $extent);
+        } else {
+            // ONE invoice for the whole [start, extent] span — billing_type
+            // 'single_period', exactly generateForLease's non-spanning path.
+            // 'complete' is informational only; a cross-month/partial span is
+            // never a clean full calendar month, so false.
+            $segments = [[
+                'period_start' => $start,
+                'period_end'   => $extent,
+                'billing_type' => 'single_period',
+                'complete'     => false,
+            ]];
+        }
 
         // All non-deleted invoices, NON-VOID first so a live invoice always
         // wins over a void one for the same segment.
