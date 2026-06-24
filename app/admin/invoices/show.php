@@ -1401,6 +1401,12 @@ require_once FF_ROOT . '/includes/header.php';
             </a>
         <?php endif; ?>
 
+        <?php /* S-INVOICE-DRAFT-EDIT: hand-edit a draft's line items (totals recomputed
+                 server-side). Draft-only + non-advance — sent invoices are immutable. */ ?>
+        <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance' && can('invoices', 'edit')): ?>
+            <a href="<?= base_url('invoices/edit') ?>?id=<?= $invoiceId ?>" class="btn btn-secondary btn-sm">Edit Line Items</a>
+        <?php endif; ?>
+
         <?php if (in_array($invoice['status'], ['draft', 'sent']) && can('invoices', 'edit')): ?>
             <button class="btn btn-danger btn-sm" @click="showVoidModal = true">Void</button>
         <?php endif; ?>
