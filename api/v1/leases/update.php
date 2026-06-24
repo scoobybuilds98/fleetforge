@@ -612,4 +612,22 @@ db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdated
     }
 });
 
-json_success(['updated_at' => $newUpdatedAt]);
+// S-INVOICE-DRAFT-EDIT (prompt): surface this lease's regenerable DRAFT invoices
+// so the edit form can offer to regenerate them after the save (a lease edit does
+// NOT auto-flow into existing invoices). Mirror regenerate.php's eligibility:
+// draft + regular + non-advance; and skip entirely when the lease carries a
+// mileage precharge (regenerate refuses those). The operator decides.
+$affectedDrafts = [];
+$leasePrecharge = (int) (db_row("SELECT precharge_enabled FROM leases WHERE id = ?", [$id])['precharge_enabled'] ?? 0);
+if (!$leasePrecharge) {
+    $affectedDrafts = db_select(
+        "SELECT id, invoice_number FROM invoices
+          WHERE lease_id = ? AND status = 'draft' AND deleted_at IS NULL
+            AND invoice_type = 'regular'
+            AND COALESCE(generation_source, '') <> 'advance'
+          ORDER BY id ASC",
+        [$id]
+    );
+}
+
+json_success(['updated_at' => $newUpdatedAt, 'affected_drafts' => $affectedDrafts]);

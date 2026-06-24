@@ -930,6 +930,31 @@ function FF_EditLease() {
             return payload;
         },
 
+        // S-INVOICE-DRAFT-EDIT (prompt): after a successful lease save, offer to
+        // regenerate the lease's draft invoices so they reflect the edit (the
+        // server returns the regenerable drafts; precharge leases return none).
+        // Best-effort: regenerate each, report partial failures, then continue.
+        async maybeRegenerateDrafts(drafts) {
+            if (!Array.isArray(drafts) || drafts.length === 0) return;
+            const nums = drafts.map((d) => d.invoice_number).join(', ');
+            const n = drafts.length;
+            const msg = n + ' draft invoice' + (n > 1 ? 's' : '') + ' on this lease may be affected by your changes:\n\n'
+                + nums + '\n\nRegenerate ' + (n > 1 ? 'them' : 'it') + ' now from the updated lease? '
+                + '(Already-sent invoices are never changed.)';
+            if (!confirm(msg)) return;
+            let ok = 0, fail = 0;
+            for (const d of drafts) {
+                try {
+                    const rr = await FF_Api.post('<?= base_url('api/v1/invoices/regenerate') ?>', { id: d.id });
+                    if (rr && rr.success) ok++; else fail++;
+                } catch (e) { fail++; }
+            }
+            if (fail > 0) {
+                alert('Regenerated ' + ok + ' of ' + drafts.length + ' draft invoice(s). '
+                    + fail + ' could not be regenerated — open them individually to check.');
+            }
+        },
+
         async submit() {
             if (!this.validate()) return;
 
@@ -967,6 +992,10 @@ function FF_EditLease() {
                     // S-FORM-DRAFT-AUTOSAVE: server confirmed — wipe the draft
                     // (stop=true) BEFORE the hard redirect navigates away.
                     if (this._draft) this._draft.clear(true);
+                    // S-INVOICE-DRAFT-EDIT (prompt): a lease edit does NOT auto-flow
+                    // into existing invoices — offer to regenerate the lease's draft
+                    // invoices so they reflect the change. Sent invoices never change.
+                    await this.maybeRegenerateDrafts((r.data && r.data.affected_drafts) || []);
                     window.location.href = '<?= base_url('leases/show') ?>?id=<?= $leaseId ?>';
                 } else if (r.error?.code === 'STALE_DATA') {
                     FF_Validate.banner(f, (r.error.message || '') + ' Reload this page to get the latest version.');
