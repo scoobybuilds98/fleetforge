@@ -14,13 +14,14 @@ declare(strict_types=1);
  *      monthly → weekly math; weeklyMath > monthly → MONTHLY applies.
  *   3. cumulative_correct THROUGH this invoice's period_end:
  *        sub-month tier → the whole-lease amount;
- *        monthly, total extent ≤ one month (≤30 days) → flat monthly,
+ *        monthly, total extent ≤ one CALENDAR month → flat monthly,
  *          whether inside one calendar month OR straddling a boundary
  *          (S-MONTHLY-SHORT-FLAT — the monthly rate is the cap for any
- *          ≤1-month monthly-tier lease; basis 'monthly_single_month' for
- *          the in-month case, 'monthly_short_flat' for the straddle case);
- *        monthly, extent > one month → Σ calendar-month segments (complete
- *          months flat, partial start/end months at days × monthly÷30).
+ *          ≤1-month monthly-tier lease; calendar-aware so 28/29/30/31-day
+ *          months all count as one month, via withinOneCalendarMonth();
+ *          basis 'monthly_single_month' in-month, 'monthly_short_flat' straddle);
+ *        monthly, extent > one calendar month → Σ calendar-month segments
+ *          (complete months flat, partial start/end months at days × monthly÷30).
  *   4. already_billed = NET base_rental of all non-void prior invoices.
  *   5. delta = cumulative_correct − already_billed. Positive → base_rental;
  *      negative → base_rental_reconciliation_credit; zero → no line.
@@ -30,8 +31,9 @@ declare(strict_types=1);
  * the monthly rate regardless of length (the 30-day-block math that charged
  * a 31-day month an extra day is removed). There is NO special first-invoice
  * branch: the ≤1-month-flat rule plus the running reconciliation give the
- * same protection — any ≤30-day monthly-tier lease pays the flat month
- * (inside one calendar month OR straddling a boundary, S-MONTHLY-SHORT-FLAT);
+ * same protection — any monthly-tier lease that is at most one calendar month
+ * pays the flat month (inside one calendar month OR straddling a boundary,
+ * 28/29/30/31-day months alike, S-MONTHLY-SHORT-FLAT);
  * a lease known to run LONGER than a month prorates its partial start month
  * immediately; a longer span discovered later re-prorates the past month down
  * to its /30 value via a reconciliation credit ("prorate in the past").
@@ -433,8 +435,8 @@ class HolisticLeaseEngine
                     'segments' => []];
         }
 
-        // S-MONTHLY-SHORT-FLAT — a monthly-tier lease whose TOTAL extent is one
-        // month or less (≤30 days) but which STRADDLES a calendar-month boundary
+        // S-MONTHLY-SHORT-FLAT — a monthly-tier lease whose TOTAL extent is at
+        // most ONE CALENDAR MONTH but which STRADDLES a calendar-month boundary
         // still bills the FLAT monthly rate, exactly like the single-calendar-
         // month case above — NOT the sum of two partial-month prorations.
         //
@@ -447,18 +449,30 @@ class HolisticLeaseEngine
         // applies, a ≤1-month lease IS the monthly rate, straddle or not. Prod
         // INV-2026-00171 / lease MTTS73 surfaced it.)
         //
-        // "≤ one month" = ≤30 days, matching the engine's own monthly÷30 daily
-        // basis (D-R2-5): at exactly 30 days the spanning proration already
-        // equals the flat month (30 × monthly÷30 = monthly), so the boundary is
-        // smooth — a 31st day re-prorates the whole span up at monthly÷30 via the
-        // spanning path below. Like §4.1, this is the WHOLE-lease cap and ignores
-        // $through (an interim invoice that has already crossed the weekly→monthly
-        // rate crossover bills the flat month; the close reconciles to it).
-        if ($total <= 30) {
+        // "One month" is CALENDAR-AWARE, NOT a fixed day count. The flat cap
+        // applies when EITHER condition holds (their UNION):
+        //   (a) total ≤ 30 days — the engine's monthly÷30 day-basis (D-R2-5);
+        //   (b) withinOneCalendarMonth(start, extentEnd) — the span ends before
+        //       start's monthiversary (start + 1 calendar month).
+        // (b) is what makes a 31-day rolling month flat: a 31-day straddle
+        // (Jul 24 → Aug 23) is never penalised vs a 30-day one — operator
+        // 2026-06-24: "the engine should know what a month is — 30- and 31-day
+        // months are both one month." (a) is REQUIRED ALONGSIDE (b) to keep the
+        // charge MONOTONIC across SHORT (February) rolling months: a 28-day Feb
+        // straddle (Feb 15 → Mar 14) is within one month → flat $monthly, but the
+        // 29-day version (Feb 15 → Mar 15) passes the monthiversary and would
+        // prorate to LESS than the flat month (29 × monthly÷30 < monthly) — a
+        // longer lease costing less. The ≤30 arm catches it so it also flats,
+        // and the first day truly BEYOND ~a month (total ≥ 31 and not a single
+        // rolling month) re-prorates UP via the spanning path below. Like §4.1
+        // this is the WHOLE-lease cap and ignores $through (an interim invoice
+        // past the weekly→monthly crossover bills the flat month; close
+        // reconciles to it).
+        if ($total <= 30 || self::withinOneCalendarMonth($start, $extentEnd)) {
             $amount = bcround($monthly, 2);
             return ['amount' => $amount, 'tier' => 'monthly', 'basis' => 'monthly_short_flat',
                     'explanation' => [
-                        "{$total} cumulative days (≤ one month) spanning a calendar boundary: weekly math \$"
+                        "{$total} cumulative days (≤ one calendar month) spanning a boundary: weekly math \$"
                             . bcround($weeklyMath, 2) . " exceeds monthly — flat monthly rate = \${$amount}",
                     ],
                     'segments' => []];
@@ -623,6 +637,36 @@ class HolisticLeaseEngine
     {
         return (new \DateTimeImmutable($a))->format('Y-m')
             === (new \DateTimeImmutable($b))->format('Y-m');
+    }
+
+    /**
+     * True when the inclusive span [start, end] is at most ONE CALENDAR MONTH
+     * long — i.e. `end` falls strictly before `start`'s monthiversary (start +
+     * 1 calendar month). Calendar-aware so 28/29/30/31-day months ALL count as
+     * one month: a lease that runs exactly one month bills the flat monthly rate
+     * whether that month is February (28d) or July (31d), and a 31-day rolling
+     * month is never penalised over a 30-day one (S-MONTHLY-SHORT-FLAT).
+     *
+     * The monthiversary is the same day-of-month next month, CLAMPED to that
+     * month's length for end-of-month starts (Jan 31 → Feb 28 by the standard
+     * anniversary convention). `end == monthiversary` is one month + 0 days
+     * (e.g. Jul 24 → Aug 24 = 32 inclusive days) and is NOT within one month.
+     * Pure date math, no DB; D14 inclusive-day semantics preserved.
+     */
+    public static function withinOneCalendarMonth(string $start, string $end): bool
+    {
+        $s = new \DateTimeImmutable(self::ymd($start));
+        $e = new \DateTimeImmutable(self::ymd($end));
+        if ($e <= $s) {
+            return true; // degenerate / inverted — a single point is ≤ one month
+        }
+        // Monthiversary = the start's day-of-month in the next month, clamped to
+        // that month's length so DateTime's +1 month can't overflow (Jan 31 must
+        // map to Feb 28, never to Mar 3).
+        $firstOfNext   = $s->modify('first day of next month');
+        $monthDay      = min((int) $s->format('d'), (int) $firstOfNext->format('t'));
+        $monthiversary = $firstOfNext->modify('+' . ($monthDay - 1) . ' days');
+        return $e < $monthiversary;
     }
 
     /** Normalise a date string to Y-m-d for safe lexical comparison. */
