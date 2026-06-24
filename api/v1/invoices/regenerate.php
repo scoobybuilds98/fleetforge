@@ -87,7 +87,8 @@ if (($invoice['invoice_type'] ?? 'regular') !== 'regular') {
 }
 
 $lease = db_row(
-    "SELECT id, precharge_enabled FROM leases WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, precharge_enabled, start_date, end_date, actual_return_date
+       FROM leases WHERE id = ? AND deleted_at IS NULL",
     [(int) $invoice['lease_id']]
 );
 if (!$lease) {
@@ -108,11 +109,40 @@ if ($submittedUpdatedAt && !optimistic_lock_matches($submittedUpdatedAt, $invoic
         ['fields' => ['updated_at' => 'This invoice was modified by another user. Refresh and try again.']]);
 }
 
+// ── Re-derive the period from the lease's CURRENT dates ───────────────────
+// A lease edit must actually reach the invoice: if the start was moved or the
+// lease was shortened into this invoice's month, the regenerated period follows;
+// extending the lease past this period leaves it unchanged (a month fully inside
+// the lease stays that month). For a full_month invoice we re-derive the NATURAL
+// calendar month from period_start FIRST (not the stored period_end) so a
+// previous shorten-then-reextend recovers cleanly — clamping the already-stored
+// (possibly-shrunk) period would only ever shrink. Dates are ISO Y-m-d so string
+// min/max are correct. Extent mirrors InvoiceGenerator: actual return (closed) →
+// end_date (expected) → else the natural period end (truly open-ended).
+$ts = strtotime((string) $invoice['billing_period_start']);
+if (($invoice['billing_type'] ?? '') === 'full_month' && $ts !== false) {
+    $naturalStart = date('Y-m-01', $ts);   // first day of that calendar month
+    $naturalEnd   = date('Y-m-t',  $ts);   // last day of that calendar month
+} else {
+    $naturalStart = (string) $invoice['billing_period_start'];
+    $naturalEnd   = (string) $invoice['billing_period_end'];
+}
+$leaseExtent = $lease['actual_return_date'] ?: ($lease['end_date'] ?: $naturalEnd);
+$periodStart = max($naturalStart, (string) $lease['start_date']);
+$periodEnd   = min($naturalEnd, (string) $leaseExtent);
+if ($periodStart > $periodEnd) {
+    json_error('PERIOD_OUTSIDE_LEASE',
+        "After your date change the lease ({$lease['start_date']} → {$leaseExtent}) no longer covers this "
+        . "invoice's billing period ({$invoice['billing_period_start']} → {$invoice['billing_period_end']}). "
+        . 'Adjust the lease dates, or void this draft and generate fresh invoices for the new dates.',
+        422);
+}
+
 // ── Regenerate: delete the draft, recreate with the same number ───────────
 $generator = new InvoiceGenerator();
 $number    = (string) $invoice['invoice_number'];
 
-$result = db_transaction(function () use ($id, $invoice, $generator, $number) {
+$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd) {
     // Explicitly remove the billing-period row first (the FK is ON DELETE SET
     // NULL, which would otherwise orphan it with invoice_id = NULL).
     db_execute("DELETE FROM lease_billing_periods WHERE invoice_id = ?", [$id]);
@@ -121,8 +151,8 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number) {
 
     $created = $generator->createFromLease([
         'lease_id'             => (int) $invoice['lease_id'],
-        'period_start'         => $invoice['billing_period_start'],
-        'period_end'           => $invoice['billing_period_end'],
+        'period_start'         => $periodStart,
+        'period_end'           => $periodEnd,
         'billing_type'         => $invoice['billing_type'],
         'invoice_type'         => 'regular',
         'force_invoice_number' => $number,
