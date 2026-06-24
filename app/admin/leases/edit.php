@@ -930,28 +930,57 @@ function FF_EditLease() {
             return payload;
         },
 
-        // S-INVOICE-DRAFT-EDIT (prompt): after a successful lease save, offer to
-        // regenerate the lease's draft invoices so they reflect the edit (the
-        // server returns the regenerable drafts; precharge leases return none).
-        // Best-effort: regenerate each, report partial failures, then continue.
-        async maybeRegenerateDrafts(drafts) {
-            if (!Array.isArray(drafts) || drafts.length === 0) return;
-            const nums = drafts.map((d) => d.invoice_number).join(', ');
-            const n = drafts.length;
-            const msg = n + ' draft invoice' + (n > 1 ? 's' : '') + ' on this lease may be affected by your changes:\n\n'
-                + nums + '\n\nRegenerate ' + (n > 1 ? 'them' : 'it') + ' now from the updated lease? '
-                + '(Already-sent invoices are never changed.)';
-            if (!confirm(msg)) return;
-            let ok = 0, fail = 0;
+        // S-INVOICE-LEASE-EDIT-SYNC: after a successful lease save, bring the lease's
+        // billing in line with the new dates. The server returns three buckets:
+        //   affected_drafts      — existing drafts that overlap the lease → regenerate
+        //   new_billable_months  — billable months with no invoice (e.g. extended) → generate
+        //   orphaned_drafts      — drafts now past the lease end (e.g. shortened) → void
+        // All draft-only; sent invoices are never touched. Precharge leases → all empty.
+        async maybeApplyInvoiceChanges(data) {
+            const drafts    = (data && data.affected_drafts)     || [];
+            const newMonths = (data && data.new_billable_months) || [];
+            const orphaned  = (data && data.orphaned_drafts)     || [];
+            if (drafts.length === 0 && newMonths.length === 0 && orphaned.length === 0) return;
+
+            const lines = [];
+            if (drafts.length)    lines.push('• Regenerate ' + drafts.length + ' existing draft invoice(s): ' + drafts.map((d) => d.invoice_number).join(', '));
+            if (newMonths.length) lines.push('• Generate ' + newMonths.length + ' newly-billable month(s): ' + newMonths.map((m) => m.label).join(', '));
+            if (orphaned.length)  lines.push('• Void ' + orphaned.length + ' draft(s) now outside the lease: ' + orphaned.map((d) => d.invoice_number).join(', '));
+            if (!confirm("Your date change affects this lease's billing:\n\n" + lines.join('\n')
+                + '\n\nApply now? (Already-sent invoices are never changed.)')) return;
+
+            let fail = 0;
+            // Order matters for the holistic running-reconciliation (already_billed
+            // = NET base_rental of the lease's other non-void invoices):
+            // 1. VOID no-longer-billable drafts FIRST so they stop counting.
+            for (const d of orphaned) {
+                try { const r = await FF_Api.post('<?= base_url('api/v1/invoices/void') ?>', { id: d.id, void_reason: 'Lease dates changed — period no longer billable.' }); if (!(r && r.success)) fail++; }
+                catch (e) { fail++; }
+            }
+            // 2. Regenerate the drafts whose period actually changed (the server only
+            //    flags genuinely-changed ones, so unchanged earlier months aren't churned).
             for (const d of drafts) {
+                try { const r = await FF_Api.post('<?= base_url('api/v1/invoices/regenerate') ?>', { id: d.id }); if (!(r && r.success)) fail++; }
+                catch (e) { fail++; }
+            }
+            // 3. Generate the newly-billable months IN ORDER (the generator's in-order
+            //    gate requires the next-due month first; the list is already ordered).
+            for (const m of newMonths) {
                 try {
-                    const rr = await FF_Api.post('<?= base_url('api/v1/invoices/regenerate') ?>', { id: d.id });
-                    if (rr && rr.success) ok++; else fail++;
+                    const r = await FF_Api.post('<?= base_url('api/v1/invoices/create') ?>', {
+                        lease_id: <?= (int)$leaseId ?>,
+                        period_start: m.period_start,
+                        period_end: m.period_end,
+                        billing_type: m.billing_type,
+                        single_segment: true,
+                    });
+                    if (!(r && r.success)) fail++;
                 } catch (e) { fail++; }
             }
             if (fail > 0) {
-                alert('Regenerated ' + ok + ' of ' + drafts.length + ' draft invoice(s). '
-                    + fail + ' could not be regenerated — open them individually to check.');
+                alert('Some invoice updates could not be applied (' + fail + ' of '
+                    + (drafts.length + orphaned.length + newMonths.length) + '). '
+                    + 'Open the lease to review its invoices.');
             }
         },
 
@@ -995,7 +1024,7 @@ function FF_EditLease() {
                     // S-INVOICE-DRAFT-EDIT (prompt): a lease edit does NOT auto-flow
                     // into existing invoices — offer to regenerate the lease's draft
                     // invoices so they reflect the change. Sent invoices never change.
-                    await this.maybeRegenerateDrafts((r.data && r.data.affected_drafts) || []);
+                    await this.maybeApplyInvoiceChanges(r.data || {});
                     window.location.href = '<?= base_url('leases/show') ?>?id=<?= $leaseId ?>';
                 } else if (r.error?.code === 'STALE_DATA') {
                     FF_Validate.banner(f, (r.error.message || '') + ' Reload this page to get the latest version.');

@@ -612,22 +612,95 @@ db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdated
     }
 });
 
-// S-INVOICE-DRAFT-EDIT (prompt): surface this lease's regenerable DRAFT invoices
-// so the edit form can offer to regenerate them after the save (a lease edit does
-// NOT auto-flow into existing invoices). Mirror regenerate.php's eligibility:
-// draft + regular + non-advance; and skip entirely when the lease carries a
-// mileage precharge (regenerate refuses those). The operator decides.
-$affectedDrafts = [];
+// S-INVOICE-LEASE-EDIT-SYNC: a lease edit does NOT auto-flow into invoices, so
+// surface everything the date change implies for billing and let the edit form
+// offer to apply it. Three buckets (skipped entirely for precharge leases, which
+// regenerate refuses):
+//   affected_drafts      — existing draft invoices that OVERLAP the lease → regenerate
+//   new_billable_months  — billable months with no invoice yet (e.g. the lease was
+//                          extended) → generate, in order
+//   orphaned_drafts      — draft invoices now entirely AFTER the lease's billable
+//                          extent (e.g. the lease was shortened) → void
+$affectedDrafts     = [];
+$newBillableMonths  = [];
+$orphanedDrafts     = [];
 $leasePrecharge = (int) (db_row("SELECT precharge_enabled FROM leases WHERE id = ?", [$id])['precharge_enabled'] ?? 0);
 if (!$leasePrecharge) {
-    $affectedDrafts = db_select(
-        "SELECT id, invoice_number FROM invoices
+    // Lease's current billable extent (actual return → expected end → none/open).
+    $extRow = db_row("SELECT COALESCE(actual_return_date, end_date) AS ext FROM leases WHERE id = ?", [$id]);
+    $extent = $extRow['ext'] ?? null;
+
+    $leaseStart = (string) (db_row("SELECT start_date FROM leases WHERE id = ?", [$id])['start_date'] ?? '');
+
+    // Regenerable drafts — overlap the lease AND whose period would actually CHANGE
+    // when re-derived from the current lease dates. A draft whose re-derived period
+    // is identical (e.g. a month fully inside the lease, unaffected by the edit) is
+    // SKIPPED — regenerating it needlessly would (a) be a no-op and (b) churn the
+    // holistic running-reconciliation (regenerating an early invoice while later
+    // ones exist makes sumAlreadyBilled count them). Clamp logic mirrors
+    // regenerate.php exactly (full_month → natural calendar month, then clamp).
+    $affectedDrafts = [];
+    $candidates = db_select(
+        "SELECT id, invoice_number, billing_period_start, billing_period_end, billing_type
+           FROM invoices
           WHERE lease_id = ? AND status = 'draft' AND deleted_at IS NULL
-            AND invoice_type = 'regular'
-            AND COALESCE(generation_source, '') <> 'advance'
-          ORDER BY id ASC",
-        [$id]
+            AND invoice_type = 'regular' AND COALESCE(generation_source, '') <> 'advance'
+            AND (? IS NULL OR billing_period_start <= ?)
+          ORDER BY billing_period_start ASC, id ASC",
+        [$id, $extent, $extent]
     );
+    foreach ($candidates as $d) {
+        $ts = strtotime((string) $d['billing_period_start']);
+        if (($d['billing_type'] ?? '') === 'full_month' && $ts !== false) {
+            $natStart = date('Y-m-01', $ts);
+            $natEnd   = date('Y-m-t',  $ts);
+        } else {
+            $natStart = (string) $d['billing_period_start'];
+            $natEnd   = (string) $d['billing_period_end'];
+        }
+        $ext    = $extent ?: $natEnd;
+        $pStart = max($natStart, $leaseStart);
+        $pEnd   = min($natEnd, (string) $ext);
+        // Only "affected" if the period genuinely moves (and still valid).
+        if ($pStart <= $pEnd
+            && ($pStart !== (string) $d['billing_period_start'] || $pEnd !== (string) $d['billing_period_end'])) {
+            $affectedDrafts[] = ['id' => $d['id'], 'invoice_number' => $d['invoice_number']];
+        }
+    }
+
+    // Orphaned drafts — period starts after the lease now ends (only when bounded).
+    if ($extent) {
+        $orphanedDrafts = db_select(
+            "SELECT id, invoice_number FROM invoices
+              WHERE lease_id = ? AND status = 'draft' AND deleted_at IS NULL
+                AND invoice_type = 'regular' AND COALESCE(generation_source, '') <> 'advance'
+                AND billing_period_start > ?
+              ORDER BY id ASC",
+            [$id, $extent]
+        );
+    }
+
+    // Newly-billable months (un-invoiced segments) — reuse the picker's logic.
+    if (!defined('FF_BILLABLE_MONTHS_INCLUDE')) {
+        define('FF_BILLABLE_MONTHS_INCLUDE', true);
+    }
+    require_once FF_ROOT . '/api/v1/leases/billable_months.php';
+    $bm = ff_billable_months($id);
+    foreach (($bm['months'] ?? []) as $m) {
+        if (($m['status'] ?? '') === 'unbilled') {
+            $newBillableMonths[] = [
+                'period_start' => $m['period_start'],
+                'period_end'   => $m['period_end'],
+                'billing_type' => $m['billing_type'],
+                'label'        => $m['label'] ?? ($m['period_start'] . ' → ' . $m['period_end']),
+            ];
+        }
+    }
 }
 
-json_success(['updated_at' => $newUpdatedAt, 'affected_drafts' => $affectedDrafts]);
+json_success([
+    'updated_at'          => $newUpdatedAt,
+    'affected_drafts'     => $affectedDrafts,
+    'new_billable_months' => $newBillableMonths,
+    'orphaned_drafts'     => $orphanedDrafts,
+]);
