@@ -21,7 +21,11 @@ if (!$invoiceId) {
 }
 
 $inv = db_row(
-    "SELECT i.*, l.contract_number
+    // S-LEASE-CLOSE-ACTUAL-DATE: pull the lease's actual return date + time fields
+    // so the Period row can show the REAL rental end (the customer should see the
+    // actual lease dates; billing_period_end stays the trimmed billed extent).
+    "SELECT i.*, l.contract_number,
+            l.actual_return_date, l.actual_return_time, l.start_time, l.billing_days_removed
      FROM invoices i
      LEFT JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
      WHERE i.id = ? AND i.customer_id = ? AND i.deleted_at IS NULL
@@ -193,7 +197,10 @@ function payOnlineButton(invoiceId, enabled) {
             // Hide the Period row entirely when both dates are missing so
             // non-lease invoices (one-off bills) don't render "— —".
             $_periodStart = $inv['billing_period_start'] ?? null;
-            $_periodEnd   = $inv['billing_period_end']   ?? null;
+            // S-LEASE-CLOSE-ACTUAL-DATE: show the ACTUAL rental end (real return
+            // date) to the customer when the time-of-day rule trimmed the billed
+            // extent — billing_period_end stays the trimmed value for billing math.
+            $_periodEnd   = ff_invoice_display_period_end($inv);
             if ($_periodStart || $_periodEnd):
             ?>
             <li><span class="portal-info-label">Period</span><span class="portal-info-value font-mono"><?= e(format_date($_periodStart)) ?> — <?= e(format_date($_periodEnd)) ?></span></li>

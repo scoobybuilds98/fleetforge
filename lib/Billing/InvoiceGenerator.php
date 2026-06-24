@@ -357,9 +357,41 @@ class InvoiceGenerator
                             . "\u{2192} +\${$engineResult['amount']} this invoice";
                     } else {
                         // Fresh sequential charge — original framing is correct.
-                        $holisticDescription =
-                            "Base rental: {$periodStart} to {$periodEnd} ({$days} days, lease day "
-                            . max(1, $holisticTotalDays - $days + 1) . "-{$holisticTotalDays})";
+                        //
+                        // S-LEASE-CLOSE-ACTUAL-DATE: when the return-day-not-billed
+                        // time-of-day rule trimmed the final day (customer returned
+                        // at/before pickup time + grace), the engine bills through
+                        // actual_return_date − 1, so $periodEnd is one day short of
+                        // the REAL return. The trim is a billing calculation, not a
+                        // shorter rental — the customer should still see the ACTUAL
+                        // lease dates on the invoice. Show start .. actual_return_date
+                        // with a note that the return day wasn't charged; the amount
+                        // and the billed-day count stay the trimmed value. Excludes
+                        // the operator "Remove N days" case (billing_days_removed > 0),
+                        // which intentionally presents the reduced period to the
+                        // customer (S-LEASE-CLOSE-REMOVE-DAYS). billing_period_end on
+                        // the invoice stays the trimmed extent (it drives coverage /
+                        // overshoot math) — only this customer-facing label changes.
+                        $timeRuleTrimmed = !empty($lease['actual_return_date'])
+                            && !empty($lease['actual_return_time'])
+                            && !empty($lease['start_time'])
+                            && (int) ($lease['billing_days_removed'] ?? 0) === 0
+                            && (string) $lease['actual_return_date'] > (string) $periodEnd;
+
+                        if ($timeRuleTrimmed) {
+                            // Unicode punctuation (en-dash / middot / em-dash) built via
+                            // double-quoted "\u{…}" — matches the → used elsewhere in
+                            // this file's descriptions and renders in the invoice/PDF.
+                            $holisticDescription =
+                                'Base rental: ' . $periodStart . " \u{2013} "
+                                . (string) $lease['actual_return_date']
+                                . " \u{00B7} billed " . $days . ' days '
+                                . "(return day not charged \u{2014} returned by pickup time)";
+                        } else {
+                            $holisticDescription =
+                                "Base rental: {$periodStart} to {$periodEnd} ({$days} days, lease day "
+                                . max(1, $holisticTotalDays - $days + 1) . "-{$holisticTotalDays})";
+                        }
                     }
 
                     $holisticLineItem = [

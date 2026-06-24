@@ -327,6 +327,36 @@ function format_date(mixed $val): string
 }
 
 // ============================================================
+// ff_invoice_display_period_end() — S-LEASE-CLOSE-ACTUAL-DATE
+//
+// Customer-facing rental-period END date for an invoice. invoices.
+// billing_period_end is the BILLED extent — when the return-day-not-billed
+// time-of-day rule trimmed the final day (customer returned at/before pickup
+// time + grace), it is one day short of the real return. Surface the ACTUAL
+// return date to the customer while billing_period_end stays the trimmed value
+// for coverage / overshoot math (S-CLOSE-OVERSHOOT). Excludes the operator
+// "Remove N days" case (billing_days_removed > 0), which intentionally presents
+// the reduced period. The $inv row must carry billing_period_end plus the joined
+// lease fields actual_return_date / actual_return_time / start_time /
+// billing_days_removed; falls back to billing_period_end when they're absent.
+// ============================================================
+if (!function_exists('ff_invoice_display_period_end')) {
+function ff_invoice_display_period_end(array $inv): ?string
+{
+    $billed = $inv['billing_period_end'] ?? null;
+    $actual = $inv['actual_return_date'] ?? null;
+    if ($actual === null || $billed === null) {
+        return $billed;
+    }
+    $timeRuleTrimmed = !empty($inv['actual_return_time'])
+        && !empty($inv['start_time'])
+        && (int) ($inv['billing_days_removed'] ?? 0) === 0
+        && (string) $actual > (string) $billed;
+    return $timeRuleTrimmed ? (string) $actual : (string) $billed;
+}
+}
+
+// ============================================================
 // SETTINGS
 // ============================================================
 

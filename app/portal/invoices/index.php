@@ -41,11 +41,15 @@ if (!empty($_GET['ajax'])) {
     $orderCol = $tab === 'outstanding' ? 'i.due_date ASC' : 'i.invoice_date DESC';
 
     $rows = db_select(
+        // S-LEASE-CLOSE-ACTUAL-DATE: join the lease so the period column can show
+        // the ACTUAL rental end when the time-of-day rule trimmed the billed extent.
         "SELECT i.id, i.invoice_number, i.invoice_date, i.due_date,
                 i.billing_period_start, i.billing_period_end,
                 i.generation_source, i.total_amount, i.balance_due, i.status,
-                (i.total_amount - i.balance_due) AS paid_amount
+                (i.total_amount - i.balance_due) AS paid_amount,
+                l.actual_return_date, l.actual_return_time, l.start_time, l.billing_days_removed
          FROM invoices i
+         LEFT JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
          WHERE {$whereSQL}
          ORDER BY {$orderCol}
          LIMIT 100",
@@ -56,7 +60,7 @@ if (!empty($_GET['ajax'])) {
         $r['invoice_date_fmt']       = format_date($r['invoice_date']);
         $r['due_date_fmt']           = format_date($r['due_date']);
         $r['billing_period_fmt']     = format_date($r['billing_period_start'])
-                                     . ' – ' . format_date($r['billing_period_end']);
+                                     . ' – ' . format_date(ff_invoice_display_period_end($r));
         $r['total_amount_fmt'] = format_currency($r['total_amount']);
         $r['balance_due_fmt']  = format_currency($r['balance_due']);
         $r['paid_fmt']         = format_currency($r['paid_amount']);

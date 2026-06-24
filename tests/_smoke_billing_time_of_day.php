@@ -526,6 +526,70 @@ tod_run('J3: generateForLease open-ended lease (no actual_return) → normal bil
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// GROUP K — S-LEASE-CLOSE-ACTUAL-DATE: customer-facing invoice DATES
+// The return-day-not-billed time-of-day trim must NOT hide the real return date
+// from the customer. Mimics close.php EXACTLY: period_end = the TRIMMED billable
+// extent (NOT the actual return date), which is the condition the description
+// relabel keys on. The amount/day-count stay the trimmed value; only the label
+// gains the actual return date + a "return day not charged" note.
+// ════════════════════════════════════════════════════════════════════════════
+echo "\n── Group K: actual-date label on time-trimmed close ─────────────────────\n";
+
+/** base_rental line description for an invoice. */
+function tod_base_desc(int $invoiceId): string {
+    return (string) (db_row(
+        "SELECT description FROM invoice_line_items WHERE invoice_id = ? AND item_type = 'base_rental' LIMIT 1",
+        [$invoiceId]
+    )['description'] ?? '');
+}
+
+/** Close mimicking close.php: pass the TRIMMED extent as period_end. */
+function tod_close_extent(int $leaseId, string $periodStart, string $extentEnd): int {
+    $gen = new InvoiceGenerator();
+    $res = $gen->createFromLease([
+        'lease_id'     => $leaseId,
+        'period_start' => $periodStart,
+        'period_end'   => $extentEnd,   // close.php passes lease_billable_extent here
+        'billing_type' => 'partial_end',
+        'invoice_type' => 'final',
+        'created_by'   => 1,
+    ]);
+    return (int) $res['invoice_id'];
+}
+
+tod_run('K1: morning return (09:00 <= pickup 10:00) → invoice shows ACTUAL return date + note', function () {
+    tod_set_grace(0);
+    $lid    = tod_make_lease('2025-07-18', '10:00', '2025-07-25', '09:00');
+    $extent = HolisticLeaseEngine::effectiveBillableEndDate('2025-07-25', '09:00', '10:00', 0, '2025-07-18');
+    if ($extent !== '2025-07-24') { tod_fail('K1 setup', "extent expected 2025-07-24, got {$extent}"); return; }
+    $desc = tod_base_desc(tod_close_extent($lid, '2025-07-18', $extent));
+    $ok = str_contains($desc, '2025-07-25')              // ACTUAL return date shown
+        && str_contains($desc, 'return day not charged') // explanatory note
+        && str_contains($desc, 'billed 7 days')          // billed (trimmed) day count
+        && !str_contains($desc, 'to 2025-07-24');        // NOT the old trimmed-date framing
+    $ok ? tod_pass("K1: {$desc}") : tod_fail('K1', "desc=[{$desc}]");
+});
+
+tod_run('K2: late return (12:05 > pickup 12:00) → not trimmed → original framing, no note', function () {
+    tod_set_grace(0);
+    $lid    = tod_make_lease('2025-07-18', '12:00', '2025-07-25', '12:05');
+    $extent = HolisticLeaseEngine::effectiveBillableEndDate('2025-07-25', '12:05', '12:00', 0, '2025-07-18');
+    if ($extent !== '2025-07-25') { tod_fail('K2 setup', "extent expected 2025-07-25, got {$extent}"); return; }
+    $desc = tod_base_desc(tod_close_extent($lid, '2025-07-18', $extent));
+    $ok = !str_contains($desc, 'return day not charged') && str_contains($desc, 'to 2025-07-25');
+    $ok ? tod_pass("K2: {$desc}") : tod_fail('K2', "desc=[{$desc}]");
+});
+
+tod_run('K3: operator Remove-N-days close is NOT relabelled (reduced period stays customer-facing)', function () {
+    tod_set_grace(0);
+    $lid = tod_make_lease('2025-07-18', '12:00', '2025-07-25', '12:05');   // late return → no time-trim
+    db_execute("UPDATE leases SET billing_days_removed = 2 WHERE id = ?", [$lid]);
+    $desc = tod_base_desc(tod_close_extent($lid, '2025-07-18', '2025-07-23'));   // Jul25 − 2 removed = Jul23
+    $ok = !str_contains($desc, 'return day not charged');   // billing_days_removed>0 → excluded from relabel
+    $ok ? tod_pass("K3: {$desc}") : tod_fail('K3', "desc=[{$desc}]");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // SUMMARY
 // ════════════════════════════════════════════════════════════════════════════
 $total = $pass + $fail;
