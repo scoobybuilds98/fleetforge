@@ -369,6 +369,39 @@ function ff_invoice_display_period_end(array $inv): ?string
 }
 
 // ============================================================
+// ff_samsara_odometer_likely_stalled() — S-SAMSARA-TRAILER-ODO-STALL-FLAG
+//
+// A TRAILER's Samsara odometer is the gateway-derived gpsOdometerMeters, which
+// is known to FREEZE on some units (e.g. 12TR1303 stuck at 375 km while moving
+// ~690 km/month per GPS). There is no cheap, exact way to know a value is frozen
+// on a unit page (we overwrite samsara_odometer_km each sync and keep no
+// history), so this is a deliberate PLAUSIBILITY heuristic: a trailer whose
+// odometer reads implausibly LOW for an in-service trailer is flagged so the UI
+// can warn "may be stalled — verify via Distance Travelled" (operator 2026-06-25
+// chose flag-only; the real GPS distance lives in the Distance Travelled tool /
+// trailerGpsDistance billing path). Vehicles (OBD odometer) are never flagged.
+// The floor is the tunable setting `samsara.trailer_odometer_min_plausible_km`
+// (default 1000) — no migration needed (default applies when the row is absent).
+// NOTE: catches LOW-frozen values (the reported cases); a trailer frozen at a
+// HIGH value won't trip this — a robust fix would track odometer-change time in
+// the sync (a separate, larger change).
+// ============================================================
+if (!function_exists('ff_samsara_odometer_likely_stalled')) {
+function ff_samsara_odometer_likely_stalled(?string $entityType, mixed $odoKm): bool
+{
+    if (($entityType ?? 'vehicle') !== 'trailer' || $odoKm === null || $odoKm === '') {
+        return false;
+    }
+    $km = (float) $odoKm;
+    if ($km <= 0) {
+        return false; // 0 / no reading is handled as "no data", not "stalled"
+    }
+    $floor = (float) (settings_get('samsara.trailer_odometer_min_plausible_km', '1000') ?? '1000');
+    return $floor > 0 && $km < $floor;
+}
+}
+
+// ============================================================
 // vin_conflict_message() — name the unit blocking a VIN
 //
 // equipment_units.vin is a GLOBAL UNIQUE index spanning soft-deleted rows, so a

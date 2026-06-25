@@ -268,7 +268,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <div class="stat-value font-mono"><?= number_format($milesManual) ?> <span class="text-sm text-secondary">mi</span></div>
         <?php elseif ($samsaraOdoKm !== null && $samsaraOdoKm > 0): ?>
         <div class="stat-value font-mono"><?= number_format($samsaraOdoKm) ?> <span class="text-sm text-secondary">km</span></div>
+        <?php // S-SAMSARA-TRAILER-ODO-STALL-FLAG: warn when a trailer's gateway odometer looks frozen.
+        if (ff_samsara_odometer_likely_stalled($unit['samsara_entity_type'] ?? null, $samsaraOdoKm)): ?>
+        <div class="stat-delta" style="color:var(--color-warning-text);" title="This trailer's Samsara GPS-gateway odometer reads low for an in-service trailer and may be stalled. Use the Distance Travelled tool below for actual GPS distance.">&#9888; odometer may be stalled — see Distance Travelled</div>
+        <?php else: ?>
         <div class="stat-delta text-secondary">from Samsara</div>
+        <?php endif; ?>
         <?php else: ?>
         <div class="stat-value font-mono">0 <span class="text-sm text-secondary">mi</span></div>
         <?php endif; ?>
@@ -467,8 +472,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 <!-- Odometer -->
                                 <div style="padding:14px 16px;border-right:1px solid var(--border-color);">
                                     <div class="text-xs text-secondary" style="text-transform:uppercase;letter-spacing:0.05em;">Odometer</div>
-                                    <div class="font-mono" style="font-size:0.95rem;font-weight:600;margin-top:4px;"
-                                         x-text="unit.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></div>
+                                    <div class="font-mono" style="font-size:0.95rem;font-weight:600;margin-top:4px;">
+                                        <span x-text="unit.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></span>
+                                        <!-- S-SAMSARA-TRAILER-ODO-STALL-FLAG -->
+                                        <span x-show="unit.samsara_odometer_stalled" style="color:var(--color-warning-text);cursor:help;margin-left:3px;"
+                                              title="Samsara GPS-gateway odometer reads low for an in-service trailer and may be stalled — use the Distance Travelled tool below for actual GPS distance.">&#9888;</span>
+                                    </div>
                                 </div>
                                 <!-- Battery -->
                                 <div style="padding:14px 16px;">
@@ -2066,7 +2075,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 </tr>
                                 <tr>
                                     <td class="spec-label">Odometer</td>
-                                    <td class="font-mono" x-text="unit?.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></td>
+                                    <td class="font-mono">
+                                        <span x-text="unit?.samsara_odometer_km ? Number(unit.samsara_odometer_km).toLocaleString() + ' km' : '—'"></span>
+                                        <!-- S-SAMSARA-TRAILER-ODO-STALL-FLAG -->
+                                        <span x-show="unit?.samsara_odometer_stalled" style="color:var(--color-warning-text);cursor:help;margin-left:3px;"
+                                              title="Samsara GPS-gateway odometer reads low for an in-service trailer and may be stalled — use the Distance Travelled tool for actual GPS distance.">&#9888;</span>
+                                    </td>
                                 </tr>
                                 <tr>
                                     <td class="spec-label">Battery</td>

@@ -194,6 +194,10 @@ $payload = ([
     'samsara_last_connected_at'      => $row['samsara_last_connected_at'],
     'samsara_last_synced_at'         => $row['samsara_last_synced_at'],
     'samsara_odometer_km'            => $row['samsara_odometer_km'] !== null ? (float) $row['samsara_odometer_km'] : null,
+    // S-SAMSARA-TRAILER-ODO-STALL-FLAG: true when a trailer's gateway odometer
+    // reads implausibly low (likely frozen) so the UI can warn + point at the
+    // Distance Travelled tool. Display-only; the stored value is unchanged.
+    'samsara_odometer_stalled'       => ff_samsara_odometer_likely_stalled($row['samsara_entity_type'] ?? null, $row['samsara_odometer_km'] ?? null),
     // SAMSARA-2: structured tag array [{name, type:"lender|lessee", customer_id}]
     // populated by the Samsara tags Option-B import. Empty array when unit
     // has no tags or has not been synced yet.
