@@ -348,10 +348,22 @@ function ff_invoice_display_period_end(array $inv): ?string
     if ($actual === null || $billed === null) {
         return $billed;
     }
+    // Swap to the actual return ONLY for the FINAL invoice the time-of-day rule
+    // trimmed — its billed end is EXACTLY one day before the return (the rule
+    // removes a single day: return at/before pickup time → return day not
+    // billed). Keying on the exact 1-day signature (not merely actual > billed)
+    // is what stops an INTERIM invoice that legitimately ends earlier — e.g. an
+    // August monthly invoice on a lease returned Sep 19 — from mis-displaying
+    // the lease's eventual return date as its own period end.
+    try {
+        $billedPlusOne = (new \DateTimeImmutable((string) $billed))->modify('+1 day')->format('Y-m-d');
+    } catch (\Throwable) {
+        return $billed;
+    }
     $timeRuleTrimmed = !empty($inv['actual_return_time'])
         && !empty($inv['start_time'])
         && (int) ($inv['billing_days_removed'] ?? 0) === 0
-        && (string) $actual > (string) $billed;
+        && $billedPlusOne === (string) $actual;
     return $timeRuleTrimmed ? (string) $actual : (string) $billed;
 }
 }

@@ -52,6 +52,22 @@ if (!$invoice) {
     exit;
 }
 
+// S-LEASE-CLOSE-ACTUAL-DATE: merge the lease's pickup/return time fields so
+// ff_invoice_display_period_end() can show the ACTUAL rental end (real return
+// date) in the Billing Period row when the return-day-not-billed time-of-day
+// rule trimmed the final day. billing_period_end stays the trimmed billed
+// extent for all billing math. ($invoice has none of these keys → no clobber.)
+if (!empty($invoice['lease_id'])) {
+    $_leasePeriodFields = db_row(
+        "SELECT actual_return_date, actual_return_time, start_time, billing_days_removed
+           FROM leases WHERE id = ?",
+        [$invoice['lease_id']]
+    );
+    if ($_leasePeriodFields) {
+        $invoice += $_leasePeriodFields;
+    }
+}
+
 /* ─── QBO push mapping + sync log (S-QBO-INVOICE-SHOW-RICH-PANEL) ── */
 // Drives the QuickBooks Sync inline panel that replaced the simple
 // S-QBO-11 header badge. Only loads when the connection is established
@@ -1908,7 +1924,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
         <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 12px 0;">Invoice Details</h3>
         <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:140px 1fr; gap:6px 16px; font-size:13px; margin:0;">
             <dt class="text-secondary">Billing Period</dt>
-            <dd class="font-mono"><?= format_date($invoice['billing_period_start']) ?> → <?= format_date($invoice['billing_period_end']) ?></dd>
+            <dd class="font-mono"><?= format_date($invoice['billing_period_start']) ?> → <?= format_date(ff_invoice_display_period_end($invoice)) ?></dd>
 
             <dt class="text-secondary">Billing Days</dt>
             <dd><?= (int)$invoice['billing_period_days'] ?> days

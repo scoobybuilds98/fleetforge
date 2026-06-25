@@ -62,10 +62,12 @@ if (!$payment) {
 $allocations = db_select(
     "SELECT pa.id, pa.invoice_id, i.invoice_number, i.status AS invoice_status,
             i.billing_period_start, i.billing_period_end,
+            l.actual_return_date, l.actual_return_time, l.start_time, l.billing_days_removed,
             i.total_amount AS invoice_total, i.balance_due AS invoice_balance_due,
             pa.amount, pa.currency, pa.allocation_type, pa.created_at
      FROM payment_allocations pa
      JOIN invoices i ON i.id = pa.invoice_id
+     LEFT JOIN leases l ON l.id = i.lease_id
      WHERE pa.payment_id = ?
      ORDER BY pa.created_at ASC",
     [$id]
@@ -393,7 +395,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                             </td>
                             <td class="font-mono" style="font-size:0.85rem;">
                                 <?= format_date($alloc['billing_period_start']) ?>
-                                – <?= format_date($alloc['billing_period_end']) ?>
+                                – <?= format_date(ff_invoice_display_period_end($alloc)) ?>
                             </td>
                             <td class="font-mono" style="text-align:right;">
                                 <?= format_currency($alloc['invoice_total']) ?>

@@ -37,6 +37,18 @@ if (!$lease) {
     exit;
 }
 
+// S-LEASE-CLOSE-ACTUAL-DATE: helper inputs for ff_invoice_display_period_end() —
+// every invoice rendered on this page belongs to THIS lease, so its pickup/return
+// time fields come straight from $lease. Lets the mileage-history tables show the
+// ACTUAL rental end (real return date) when the time-of-day rule trimmed the
+// billed final day, consistent with the portal invoice list + view.
+$_leasePeriodCtx = [
+    'actual_return_date'   => $lease['actual_return_date']   ?? null,
+    'actual_return_time'   => $lease['actual_return_time']   ?? null,
+    'start_time'           => $lease['start_time']           ?? null,
+    'billing_days_removed' => $lease['billing_days_removed'] ?? 0,
+];
+
 // Invoices for this lease
 // L08: customers must never see draft (internal-only) or void invoices — only
 // invoices disclosed to them. Mirrors the portal draft-hiding invariant applied
@@ -428,7 +440,7 @@ $statusBadge = match($lease['status']) {
                                 <td class="font-mono" style="font-size:0.8125rem;">
                                     <?= e(format_date($row['billing_period_start'])) ?>
                                     <span style="color:var(--text-secondary);">→</span>
-                                    <?= e(format_date($row['billing_period_end'])) ?>
+                                    <?= e(format_date(ff_invoice_display_period_end($row + $_leasePeriodCtx))) ?>
                                 </td>
                                 <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> km</td>
                                 <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
@@ -486,7 +498,7 @@ $statusBadge = match($lease['status']) {
                                 <td class="font-mono" style="font-size:0.8125rem;">
                                     <?= e(format_date($row['billing_period_start'])) ?>
                                     <span style="color:var(--text-secondary);">→</span>
-                                    <?= e(format_date($row['billing_period_end'])) ?>
+                                    <?= e(format_date(ff_invoice_display_period_end($row + $_leasePeriodCtx))) ?>
                                 </td>
                                 <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> km</td>
                                 <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>

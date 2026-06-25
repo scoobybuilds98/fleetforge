@@ -378,7 +378,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <td class="text-sm">
                                     <div x-text="formatDate(inv.billing_period_start)"></div>
                                     <div class="text-secondary"
-                                         x-text="'→ ' + formatDate(inv.billing_period_end)"></div>
+                                         x-text="'→ ' + formatDate(inv.display_period_end || inv.billing_period_end)"></div>
                                 </td>
                                 <td class="text-sm" x-text="formatDate(inv.invoice_date)"></td>
                                 <td class="text-sm">

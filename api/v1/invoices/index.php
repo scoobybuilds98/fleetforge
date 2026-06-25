@@ -141,15 +141,33 @@ $rows = db_select(
         i.balance_due,
         i.auto_generated,
         i.created_at,
-        i.updated_at
+        i.updated_at,
+        l.actual_return_date,
+        l.actual_return_time,
+        l.start_time,
+        l.billing_days_removed
         {$qboSelect}
      FROM invoices i
+     LEFT JOIN leases l ON l.id = i.lease_id
      {$qboJoin}
      WHERE {$whereSQL}
      ORDER BY i.{$sort} {$dir}
      LIMIT {$perPage} OFFSET {$offset}",
     $params
 );
+
+// S-LEASE-CLOSE-ACTUAL-DATE: surface the ACTUAL rental end (real return date)
+// for DISPLAY when the return-day-not-billed time-of-day rule trimmed the final
+// day. billing_period_end stays the trimmed billed extent (coverage / overshoot
+// math, S-CLOSE-OVERSHOOT); display_period_end is what the list + the lease- and
+// customer-detail invoice tables render. The four joined lease fields are helper
+// inputs only — strip them from the payload (Trap 7 spirit: don't leak lease
+// internals on the invoice list).
+foreach ($rows as &$_r) {
+    $_r['display_period_end'] = ff_invoice_display_period_end($_r);
+    unset($_r['actual_return_date'], $_r['actual_return_time'], $_r['start_time'], $_r['billing_days_removed']);
+}
+unset($_r);
 
 // I03: dispatchers (invoices:view, payments:NONE) get the operational list —
 // invoice_number, status, dates, customer/unit — but NOT amounts. config/
