@@ -3393,7 +3393,11 @@ function FF_InvoiceShow() {
                     this.showToast('Invoice deleted', 'success');
                     this.showDeleteModal = false;
                     setTimeout(() => {
-                        window.location.href = '<?= base_url('invoices') ?>';
+                        // Return to where this invoice lives: its lease's Invoices tab
+                        // when it belongs to a lease, else the invoices module home.
+                        window.location.href = '<?= $invoice['lease_id']
+                            ? base_url('leases/show') . '?id=' . (int) $invoice['lease_id'] . '#invoices'
+                            : base_url('invoices') ?>';
                     }, 1200);
                 } else {
                     this.showToast(r.error?.message || 'Failed to delete', 'error');

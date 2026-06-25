@@ -1200,6 +1200,21 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             </select>
         </div>
 
+        <?php if (can('invoices', 'delete')): ?>
+        <!-- Bulk-delete action bar — appears once one or more draft invoices are selected. -->
+        <div x-show="selectedInvoiceIds.length > 0" x-cloak
+             style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--bg-surface-2);border:1px solid var(--border-color);border-radius:6px;padding:8px 12px;margin-bottom:8px;">
+            <span class="text-sm"><strong x-text="selectedInvoiceIds.length"></strong> draft invoice<span x-show="selectedInvoiceIds.length !== 1">s</span> selected</span>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-sm btn-ghost" @click="selectedInvoiceIds = []">Clear</button>
+                <button class="btn btn-sm btn-danger" @click="bulkDeleteInvoices()" :disabled="bulkDeletingInvoices">
+                    <span x-show="!bulkDeletingInvoices" x-text="'Delete ' + selectedInvoiceIds.length + ' selected'"></span>
+                    <span x-show="bulkDeletingInvoices">Deleting…</span>
+                </button>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <div x-show="invoicesLoading" class="card-body" style="text-align:center;padding:32px;">
             <span class="text-secondary">Loading invoices…</span>
         </div>
@@ -1210,6 +1225,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <div x-show="!invoicesLoading && invoices.length > 0" class="tab-table-container">
             <table class="table">
                 <thead><tr>
+                    <?php if (can('invoices', 'delete')): ?>
+                    <th style="width:36px;text-align:center;">
+                        <input type="checkbox" :checked="allDeletableSelected" @change="toggleAllInvoiceSel()"
+                               :disabled="deletableInvoices.length === 0" title="Select all draft invoices">
+                    </th>
+                    <?php endif; ?>
                     <th>Invoice #</th>
                     <th>Date</th>
                     <th>Period</th>
@@ -1220,7 +1241,13 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                 </tr></thead>
                 <tbody>
                     <template x-for="inv in invoices" :key="inv.id">
-                        <tr>
+                        <tr :style="isInvoiceSelected(inv.id) ? 'background:var(--bg-surface-2);' : ''">
+                            <?php if (can('invoices', 'delete')): ?>
+                            <td style="width:36px;text-align:center;">
+                                <input type="checkbox" x-show="inv.status === 'draft'"
+                                       :checked="isInvoiceSelected(inv.id)" @change="toggleInvoiceSel(inv.id)">
+                            </td>
+                            <?php endif; ?>
                             <td class="font-mono" x-text="inv.invoice_number"></td>
                             <td x-text="inv.invoice_date"></td>
                             <td x-text="inv.billing_period_start + ' → ' + inv.billing_period_end"></td>
@@ -1956,6 +1983,8 @@ function FF_LeaseDetail() {
         invoicesTotal:       0,
         invoicesPage:        1,
         invoicesFilters:     { status: '', sort: 'created_at', dir: 'DESC' },
+        selectedInvoiceIds:  [],   // bulk-delete selection (draft invoices only)
+        bulkDeletingInvoices: false,
 
         // Damage Claims tab state
         damageClaims:        [],
@@ -2358,7 +2387,49 @@ function FF_LeaseDetail() {
             this.invoicesLoading = false;
         },
         loadMoreInvoices()    { this.invoicesPage++; this.loadInvoices(true); },
-        applyInvoicesFilters() { this.invoices = []; this.invoicesPage = 1; this.invoicesTotal = 0; this.loadInvoices(); },
+        applyInvoicesFilters() { this.invoices = []; this.invoicesPage = 1; this.invoicesTotal = 0; this.selectedInvoiceIds = []; this.loadInvoices(); },
+
+        // ── Invoice bulk-select / bulk-delete (DRAFT invoices only) ──────────
+        // Only drafts are bulk-deletable; api/v1/invoices/bulk_delete skips the
+        // rest. Checkboxes render only on draft rows so the affordance matches.
+        get deletableInvoices() { return this.invoices.filter(i => i.status === 'draft'); },
+        get allDeletableSelected() {
+            const d = this.deletableInvoices;
+            return d.length > 0 && d.every(i => this.selectedInvoiceIds.includes(i.id));
+        },
+        isInvoiceSelected(id) { return this.selectedInvoiceIds.includes(id); },
+        toggleInvoiceSel(id) {
+            const i = this.selectedInvoiceIds.indexOf(id);
+            if (i === -1) this.selectedInvoiceIds.push(id); else this.selectedInvoiceIds.splice(i, 1);
+        },
+        toggleAllInvoiceSel() {
+            this.selectedInvoiceIds = this.allDeletableSelected ? [] : this.deletableInvoices.map(i => i.id);
+        },
+        async bulkDeleteInvoices() {
+            const ids = [...this.selectedInvoiceIds];
+            if (ids.length === 0 || this.bulkDeletingInvoices) return;
+            const ok = await FF_Confirm.ask('Delete ' + ids.length + ' draft invoice' + (ids.length > 1 ? 's' : '') + '? This cannot be undone.');
+            if (!ok) return;
+            this.bulkDeletingInvoices = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/bulk_delete') ?>', { ids });
+                if (r.success) {
+                    const del = r.data?.deleted ?? ids.length;
+                    const skp = r.data?.skipped ?? 0;
+                    FF_Toast.success(del + ' invoice' + (del !== 1 ? 's' : '') + ' deleted'
+                        + (skp > 0 ? ' · ' + skp + ' skipped' : ''));
+                    this.selectedInvoiceIds = [];
+                    this.invoices = []; this.invoicesPage = 1; this.invoicesTotal = 0;
+                    await this.loadInvoices();
+                    await this.loadLease();   // refresh the Total Invoiced tile
+                } else {
+                    FF_Toast.error(r.error?.message || 'Bulk delete failed');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error');
+            }
+            this.bulkDeletingInvoices = false;
+        },
 
         // ── Damage Claims ─────────────────────────────────────────
         async loadDamageClaims(append = false) {
