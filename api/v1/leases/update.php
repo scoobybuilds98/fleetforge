@@ -155,6 +155,26 @@ if ($rateBlockedHits !== []) {
     );
 }
 
+// S-LEASE-CONTRACT-NUMBER-EDIT: the contract number is editable on pending AND
+// active leases. leases.contract_number carries a GLOBAL UNIQUE index that spans
+// soft-deleted rows, so the duplicate pre-check counts ALL rows (db_exists()'s
+// deleted_at filter would miss a soft-deleted collision and let the UPDATE 1062 →
+// 500, per project_db_exists_softdelete_blindspot). The transaction below also
+// narrowly catches a concurrent-race 1062 on this key. Invoices keep their
+// contract_number_snapshot — a rename only affects the lease going forward.
+if (array_key_exists('contract_number', $body)) {
+    $cn = trim((string) ($body['contract_number'] ?? ''));
+    if ($cn === '') {
+        $fields['contract_number'] = 'Contract number is required.';
+    } elseif (mb_strlen($cn) > 100) {
+        $fields['contract_number'] = 'Contract number cannot exceed 100 characters.';
+    } elseif (db_count("SELECT COUNT(*) FROM leases WHERE contract_number = ? AND id <> ?", [$cn, $id]) > 0) {
+        $fields['contract_number'] = 'That contract number is already in use by another lease.';
+    } else {
+        $data['contract_number'] = $cn;
+    }
+}
+
 if (array_key_exists('end_date', $body))
     $data['end_date'] = clean_date($body['end_date']);
 
@@ -558,6 +578,7 @@ if (isset($data['estimated_mileage_km']) || isset($data['estimated_mileage_miles
 // FIX #20: wrap db_update + audit_log in transaction so both commit or rollback together
 $newUpdatedAt = null;
 
+try {
 db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdatedAt) {
     // S-LEASE-DISTANCE-EDIT-ACTIVE: capture old values of distance fields before
     // the write so the audit trail records old→new for each changed odometer/allowance
@@ -611,6 +632,18 @@ db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdated
         ]);
     }
 });
+} catch (\PDOException $e) {
+    // S-LEASE-CONTRACT-NUMBER-EDIT: narrow race translation — a concurrent rename
+    // can pass the duplicate pre-check above, then collide on the contract_number
+    // UNIQUE index inside the transaction. Translate that specific 1062 into the
+    // same 422; re-throw anything else (FK violations, etc.) for the global handler.
+    if ($e->getCode() === '23000'
+        && array_key_exists('contract_number', $data)
+        && stripos($e->getMessage(), 'contract_number') !== false) {
+        json_validation_error(['contract_number' => 'That contract number is already in use by another lease.']);
+    }
+    throw $e;
+}
 
 // S-INVOICE-LEASE-EDIT-SYNC: a lease edit does NOT auto-flow into invoices, so
 // surface everything the date change implies for billing and let the edit form

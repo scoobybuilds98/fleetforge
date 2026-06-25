@@ -114,11 +114,12 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-body">
                 <div class="form-row-2">
                     <div class="form-group">
-                        <label class="form-label">Contract Number</label>
-                        <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;">
-                            <?= e($lease['contract_number']) ?>
-                        </div>
-                        <div class="form-hint">Contract number cannot be changed after creation.</div>
+                        <label class="form-label" for="contract_number">Contract Number</label>
+                        <input type="text" id="contract_number" class="form-control font-mono"
+                               x-model="form.contract_number" maxlength="100"
+                               :class="errors.contract_number ? 'is-invalid' : ''">
+                        <div class="form-error" x-show="errors.contract_number" x-text="errors.contract_number"></div>
+                        <div class="form-hint">Must be unique. Editing it renames the lease going forward; invoices already issued keep their original number.</div>
                     </div>
                     <div class="form-group">
                         <label class="form-label"<?= $lockMeta ? '' : ' for="po_number"' ?>>PO Number</label>
@@ -732,6 +733,9 @@ function FF_EditLease() {
         form: {
             id:                      <?= $leaseId ?>,
             updated_at:              <?= json_encode($lease['updated_at']) ?>,
+            // S-LEASE-CONTRACT-NUMBER-EDIT: contract number is editable for every
+            // editable status (pending + active); update.php enforces uniqueness.
+            contract_number:         <?= json_encode($lease['contract_number']) ?>,
             // Distance fields — editable regardless of lease status
             mileage_at_start:        <?= json_encode($lease['mileage_at_start'] ?? '') ?>,
             // S-LEASE-HOURLY-BILLING: starting hours is a usage reading, correctable
