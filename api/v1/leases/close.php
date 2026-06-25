@@ -1132,6 +1132,42 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // this stays consistent with the overshoot clamp above and with the
             // period_end the engine uses for the final invoice's amount.
             if ($periodStart > $extentEnd) {
+                // S-LEASE-CLOSE-ONE-INVOICE: the partial_end rental is skipped (the
+                // already-billed invoice — typically the overshoot pass's clamped
+                // regeneration — already covers through the billable extent). Rather
+                // than let the close's mileage/closeout $extraLines spill onto a
+                // SEPARATE adjustment invoice (the old behaviour, which produced a 2nd
+                // invoice on top of the rental), FOLD them onto that existing draft so
+                // the close yields ONE invoice. Draft-only + counter-safe (Path-B
+                // total_invoiced delta, OB untouched on a draft). Only the
+                // mileage/closeout lines are appended — never GPS — so the rental
+                // invoice's own GPS (for the extent) is not double-counted. If no
+                // matching draft is found we fall through and the closeout fallback
+                // (~line 1183) still bills the extra_lines so nothing is dropped.
+                if (!empty($extraLines)) {
+                    $clampedDraft = db_row(
+                        "SELECT id, invoice_number, lease_id, subtotal, total_amount,
+                                gst_exempt_snapshot, pst_exempt_snapshot, tax_exempt_snapshot
+                           FROM invoices
+                          WHERE lease_id = ? AND status = 'draft' AND deleted_at IS NULL
+                            AND billing_period_end = ?
+                            AND billing_type IN ('partial_start', 'partial_end', 'single_period', 'full_month')
+                          ORDER BY id DESC LIMIT 1 FOR UPDATE",
+                        [$id, $extentEnd]
+                    );
+                    if ($clampedDraft) {
+                        $appendAction = legacy_append_mileage_to_full_month_draft(
+                            $clampedDraft, $lease, $extraLines,
+                            $odoPeriodStart, $odoAtClose, $odoSource, $odoFetchedAt
+                        );
+                        $finalInvoiceId = (int) $clampedDraft['id'];
+                        $advanceActions[] = array_merge($appendAction, [
+                            'action' => 'appended_to_clamped_draft',
+                            'reason' => "mileage/closeout charges folded onto the rental draft {$clampedDraft['invoice_number']} (one invoice — no separate adjustment).",
+                        ]);
+                    }
+                }
+
                 db_insert('audit_log', [
                     'user_id'      => current_user_id(),
                     'user_name'    => current_user()['name'] ?? 'system',
@@ -1140,7 +1176,8 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'entity_type'  => 'lease',
                     'entity_id'    => $id,
                     'entity_label' => $lease['contract_number'],
-                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (billing coverage through {$coverageEnd} >= billable extent {$extentEnd}, return {$actualReturnDate}). No partial_end invoice generated.",
+                    'notes'        => "S-FIX-2 Bug #6: lease closed within an already-billed period (billing coverage through {$coverageEnd} >= billable extent {$extentEnd}, return {$actualReturnDate}). No partial_end invoice generated."
+                                    . ($finalInvoiceId !== null ? " Mileage/closeout folded onto the existing draft (one invoice)." : ''),
                     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
                 ]);
                 $advanceActions[] = [

@@ -124,10 +124,12 @@ class InvoiceGenerator
                         c.id                  AS customer_row_id,
                         c.company_name        AS customer_company_name,
                         eu.samsara_vehicle_id   AS samsara_vehicle_id,
-                        eu.samsara_entity_type  AS samsara_entity_type
+                        eu.samsara_entity_type  AS samsara_entity_type,
+                        et.category             AS equipment_category
                  FROM leases l
                  LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
                  LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
+                 LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
                  WHERE l.id = ? AND l.deleted_at IS NULL",
                 [$leaseId]
             );
@@ -181,6 +183,31 @@ class InvoiceGenerator
             $minBillingDays = array_key_exists('minimum_billing_days', $lease)
                 ? (int)($lease['minimum_billing_days'] ?? 0)
                 : (int)(db_row('SELECT minimum_billing_days FROM leases WHERE id = ?', [$leaseId])['minimum_billing_days'] ?? 0);
+
+            // S-LEASE-MIN-DAYS-CATEGORY: the short-lease minimum applies ONLY to the
+            // equipment categories listed in settings 'lease.minimum_billing_days_categories'
+            // (comma-separated, default 'chassis'). When this lease's equipment category
+            // is NOT in that set, force the floor to 0 so the engine's >=2 binding guard
+            // (HolisticLeaseEngine::cumulativeCorrect) makes it a no-op and a normal
+            // actual-days charge is billed. Resolved at BILLING time (not lease create)
+            // so regenerate/reclose AUTO-CORRECTS existing backfilled draft leases that
+            // were created while the minimum still applied to everything. A missing/NULL
+            // category (soft-deleted or unmapped template) is treated as "not in set" —
+            // a chassis-only minimum must never silently apply to unknown equipment.
+            // Empty setting value = the minimum applies to NOTHING (operator opt-out).
+            if ($minBillingDays >= 2) {
+                $minDaysCatsRaw = (string) settings_get('lease.minimum_billing_days_categories', 'chassis');
+                $minDaysCategories = array_filter(
+                    array_map(static fn ($c) => strtolower(trim($c)), explode(',', $minDaysCatsRaw)),
+                    static fn ($c) => $c !== ''
+                );
+                $leaseCategory = isset($lease['equipment_category'])
+                    ? strtolower((string) $lease['equipment_category'])
+                    : '';
+                if ($leaseCategory === '' || !in_array($leaseCategory, $minDaysCategories, true)) {
+                    $minBillingDays = 0;
+                }
+            }
 
             if ($billingType === 'mileage_only' || $billingType === 'adjustment') {
                 // Both engines skip base_rental for mileage_only / adjustment
@@ -341,6 +368,10 @@ class InvoiceGenerator
                         : null;
                     $isReconcileTopUp = $overlapInv !== null
                         && bccomp($holisticAlreadyBilled, '0', 2) > 0;
+                    // Initialised false here so it's defined for ALL line-item branches
+                    // (the holisticLineItem billing_days reads it); set true only on the
+                    // fresh-charge branch below when the short-lease minimum bound.
+                    $minBound = false;
 
                     if ($engineResult['line_item_type'] !== 'base_rental') {
                         // Negative-delta reconciliation credit (unchanged wording).
@@ -378,15 +409,39 @@ class InvoiceGenerator
                             && (int) ($lease['billing_days_removed'] ?? 0) === 0
                             && (string) $lease['actual_return_date'] > (string) $periodEnd;
 
-                        if ($timeRuleTrimmed) {
-                            // Unicode punctuation (en-dash / middot / em-dash) built via
-                            // double-quoted "\u{…}" — matches the → used elsewhere in
-                            // this file's descriptions and renders in the invoice/PDF.
+                        // S-LEASE-MIN-DAYS label: when the short-lease minimum bound,
+                        // the AMOUNT is a flat minDays × daily floor, not {$days} × daily,
+                        // so the line must say "billed {minDays} days ({minDays}-day
+                        // minimum)" instead of the misleading "{$days} days". The engine
+                        // owns the bind decision — tier 'daily_minimum' is the single
+                        // source of truth (HolisticLeaseEngine::cumulativeCorrect); the
+                        // billed count is $minBillingDays (what the engine was handed).
+                        // After S-LEASE-MIN-DAYS-CATEGORY a non-chassis lease gets
+                        // minBillingDays=0 → tier != 'daily_minimum' → $minBound false,
+                        // so these branches correctly no-op for it.
+                        $minBound = (($engineResult['tier'] ?? '') === 'daily_minimum');
+
+                        // Unicode punctuation (en-dash / middot / em-dash) via double-quoted
+                        // "\u{…}" — matches the → used elsewhere in this file's descriptions.
+                        // Combined case FIRST so it wins when both conditions hold.
+                        if ($timeRuleTrimmed && $minBound) {
+                            $holisticDescription =
+                                'Base rental: ' . $periodStart . " \u{2013} "
+                                . (string) $lease['actual_return_date']
+                                . " \u{00B7} billed " . $minBillingDays . ' days ('
+                                . $minBillingDays . "-day minimum; return day not charged "
+                                . "\u{2014} returned by pickup time)";
+                        } elseif ($timeRuleTrimmed) {
                             $holisticDescription =
                                 'Base rental: ' . $periodStart . " \u{2013} "
                                 . (string) $lease['actual_return_date']
                                 . " \u{00B7} billed " . $days . ' days '
                                 . "(return day not charged \u{2014} returned by pickup time)";
+                        } elseif ($minBound) {
+                            $holisticDescription =
+                                'Base rental: ' . $periodStart . ' to ' . $periodEnd
+                                . ' (billed ' . $minBillingDays . " days \u{2014} "
+                                . $minBillingDays . '-day minimum)';
                         } else {
                             $holisticDescription =
                                 "Base rental: {$periodStart} to {$periodEnd} ({$days} days, lease day "
@@ -409,8 +464,12 @@ class InvoiceGenerator
                         'taxable'      => 1,
                         // Suppress the misleading "{N} billing days · {tier} rate"
                         // subtitle on reconciliation top-ups (the days/tier describe
-                        // the cumulative basis, not this $delta line).
-                        'billing_days' => $isReconcileTopUp ? null : $days,
+                        // the cumulative basis, not this $delta line). When the
+                        // short-lease minimum bound, show the BILLED minimum day count
+                        // so the admin "{N} billing days" subtitle agrees with the
+                        // "billed {minDays} days" description (the amount is minDays ×
+                        // daily, not $days × daily).
+                        'billing_days' => $isReconcileTopUp ? null : ($minBound ? $minBillingDays : $days),
                         'rate_method'  => $isReconcileTopUp ? null : $lineRateMethod,
                         'period_start' => $periodStart,
                         'period_end'   => $periodEnd,
@@ -945,7 +1004,10 @@ class InvoiceGenerator
             }
 
             // --- Step 3: Insurance add-on ---
-            if ($billingType !== 'mileage_only'
+            // S-LEASE-CLOSE-ONE-INVOICE: exclude 'adjustment'/'credit_note' too (not
+            // just mileage_only) — a close-out adjustment invoice is base-rental/add-on
+            // free by design; it must never carry a flat insurance/warranty/GPS charge.
+            if (!in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
                 && $lease['insurance_opt_in']
                 && bccomp((string)$lease['insurance_cost'], '0', 2) > 0) {
                 $lineItems[] = [
@@ -961,7 +1023,7 @@ class InvoiceGenerator
             }
 
             // --- Step 3: Warranty add-on ---
-            if ($billingType !== 'mileage_only'
+            if (!in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
                 && $lease['warranty_opt_in']
                 && bccomp((string)$lease['warranty_cost'], '0', 2) > 0) {
                 $lineItems[] = [
@@ -979,8 +1041,11 @@ class InvoiceGenerator
             // --- Step 3: GPS tracking add-on (S-LEASE-GPS-COST) ---
             // Per-day billing — amount = gps_cost × $days. Diverges from
             // insurance/warranty (flat-per-period) because GPS is metered
-            // service. Skipped on mileage_only just like the others.
-            if ($billingType !== 'mileage_only'
+            // service. S-LEASE-CLOSE-ONE-INVOICE: skipped on mileage_only AND
+            // adjustment/credit_note — a close-out adjustment invoice (period =
+            // actual return date) must not bill a per-day GPS charge for the
+            // time-trimmed return day the rental itself doesn't charge.
+            if (!in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
                 && $lease['gps_opt_in']
                 && bccomp((string)$lease['gps_cost'], '0', 2) > 0) {
                 $gpsAmount = bcmul((string)$lease['gps_cost'], (string)$days, 2);

@@ -590,6 +590,103 @@ tod_run('K3: operator Remove-N-days close is NOT relabelled (reduced period stay
 });
 
 // ════════════════════════════════════════════════════════════════════════════
+// GROUP L — S-LEASE-MIN-DAYS-CATEGORY (chassis-only minimum) + min-days label
+// The 3-day minimum must bind ONLY for equipment categories in the setting
+// lease.minimum_billing_days_categories (default 'chassis'); a non-chassis short
+// lease bills actual days. And the base_rental label must show the billed
+// minimum, not the actual extent days, when it binds.
+// ════════════════════════════════════════════════════════════════════════════
+echo "\n── Group L: chassis-only 3-day minimum + label ──────────────────────────\n";
+
+/** Point the lease's equipment-unit template at a category (rolled back with the txn). */
+function tod_set_unit_category(int $leaseId, string $category): void {
+    db_execute(
+        "UPDATE equipment_templates et
+           JOIN equipment_units eu ON eu.template_id = et.id
+           JOIN leases l ON l.equipment_unit_id = eu.id
+            SET et.category = ?
+          WHERE l.id = ?",
+        [$category, $leaseId]
+    );
+}
+
+tod_run('L1: chassis short-lease → 3-day minimum binds ($300) + "minimum" label', function () {
+    tod_set_grace(0);
+    // 1-day lease (return 13:00 > pickup 12:00 → no trim), min_days=3, daily $100.
+    $lid = tod_make_lease('2026-06-01', '12:00', '2026-06-01', '13:00');
+    db_execute("UPDATE leases SET minimum_billing_days = 3 WHERE id = ?", [$lid]);
+    tod_set_unit_category($lid, 'chassis');
+    $inv  = tod_close($lid, '2026-06-01', '2026-06-01');
+    $net  = tod_base_net($inv);
+    $desc = tod_base_desc($inv);
+    bccomp($net, '300.00', 2) === 0 && str_contains($desc, '3-day minimum')
+        ? tod_pass("L1: net={$net} · {$desc}")
+        : tod_fail('L1', "net={$net} (expect 300.00) desc=[{$desc}]");
+});
+
+tod_run('L2: dry_van short-lease → minimum does NOT apply ($100, actual day)', function () {
+    tod_set_grace(0);
+    $lid = tod_make_lease('2026-06-01', '12:00', '2026-06-01', '13:00');
+    db_execute("UPDATE leases SET minimum_billing_days = 3 WHERE id = ?", [$lid]);
+    tod_set_unit_category($lid, 'dry_van');
+    $inv  = tod_close($lid, '2026-06-01', '2026-06-01');
+    $net  = tod_base_net($inv);
+    $desc = tod_base_desc($inv);
+    bccomp($net, '100.00', 2) === 0 && stripos($desc, 'minimum') === false
+        ? tod_pass("L2: net={$net} · {$desc}")
+        : tod_fail('L2', "net={$net} (expect 100.00) desc=[{$desc}]");
+});
+
+tod_run('L3: chassis + time-trim → combined label (minimum + return day not charged)', function () {
+    tod_set_grace(0);
+    // start 12:00, return next day 10:00 (<= pickup) → trim → extent = start day (1 day) → min binds (3 days).
+    $lid = tod_make_lease('2026-06-01', '12:00', '2026-06-02', '10:00');
+    db_execute("UPDATE leases SET minimum_billing_days = 3 WHERE id = ?", [$lid]);
+    tod_set_unit_category($lid, 'chassis');
+    $extent = HolisticLeaseEngine::effectiveBillableEndDate('2026-06-02', '10:00', '12:00', 0, '2026-06-01'); // 2026-06-01
+    $inv  = tod_close_extent($lid, '2026-06-01', $extent);
+    $net  = tod_base_net($inv);
+    $desc = tod_base_desc($inv);
+    $ok = bccomp($net, '300.00', 2) === 0
+        && str_contains($desc, '2026-06-02')             // ACTUAL return date
+        && str_contains($desc, '3-day minimum')          // minimum
+        && str_contains($desc, 'return day not charged');// trim note
+    $ok ? tod_pass("L3: net={$net} · {$desc}")
+        : tod_fail('L3', "net={$net} (expect 300.00) desc=[{$desc}]");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP M — S-LEASE-CLOSE-ONE-INVOICE: GPS/insurance/warranty suppressed on the
+// close-out 'adjustment' invoice (so the time-trimmed return day is not charged
+// a per-day GPS line on a separate invoice).
+// ════════════════════════════════════════════════════════════════════════════
+echo "\n── Group M: no GPS/add-ons on adjustment invoice ────────────────────────\n";
+
+tod_run('M1: adjustment invoice with gps_opt_in carries NO gps line', function () {
+    tod_set_grace(0);
+    $lid = tod_make_lease('2026-06-01', '12:00', '2026-06-02', '12:05', null, [
+        'gps_opt_in' => 1, 'gps_cost' => '1.00',
+        'insurance_opt_in' => 1, 'insurance_cost' => '5.00',
+    ]);
+    $gen = new InvoiceGenerator();
+    $res = $gen->createFromLease([
+        'lease_id' => $lid, 'period_start' => '2026-06-02', 'period_end' => '2026-06-02',
+        'billing_type' => 'adjustment', 'invoice_type' => 'final', 'created_by' => 1,
+        'extra_lines' => [[
+            'item_type' => 'mileage_usage', 'description' => 'Mileage usage: 10.00 km × $0.04/km',
+            'quantity' => '10', 'unit' => 'km', 'unit_price' => '0.04', 'amount' => '0.40',
+            'is_credit' => 0, 'taxable' => 1,
+        ]],
+    ]);
+    $iid = (int) $res['invoice_id'];
+    $gpsN = (int) (db_row("SELECT COUNT(*) c FROM invoice_line_items WHERE invoice_id=? AND item_type IN ('gps','insurance','warranty')", [$iid])['c'] ?? 0);
+    $milN = (int) (db_row("SELECT COUNT(*) c FROM invoice_line_items WHERE invoice_id=? AND item_type='mileage_usage'", [$iid])['c'] ?? 0);
+    $gpsN === 0 && $milN === 1
+        ? tod_pass("M1: adjustment carries mileage only (gps/add-on lines={$gpsN})")
+        : tod_fail('M1', "gps/add-on lines={$gpsN} (expect 0), mileage={$milN} (expect 1)");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
 // SUMMARY
 // ════════════════════════════════════════════════════════════════════════════
 $total = $pass + $fail;
