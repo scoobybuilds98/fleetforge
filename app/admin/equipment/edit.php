@@ -117,7 +117,27 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-group">
                         <label class="form-label" for="vin">VIN</label>
                         <input type="text" id="vin" name="vin" class="form-control font-mono"
-                               x-model="form.vin" maxlength="50">
+                               x-model="form.vin" maxlength="50"
+                               @input.debounce.400ms="checkVin()">
+                        <div class="field-error" data-error-for="vin"></div>
+                        <!-- S-UNIT-VIN-MOVE: live "already in use" note + one-click reassign -->
+                        <template x-if="vinConflict">
+                            <div style="margin-top:6px;font-size:0.85rem;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <span style="color:var(--color-warning-text, #b45309);">
+                                    &#9888; VIN already in use by <span x-show="vinConflict.deleted">deleted </span>unit <strong x-text="vinConflict.unit_number"></strong>.
+                                </span>
+                                <button type="button" class="btn btn-sm btn-outline-warning"
+                                        @click="moveVinHere()" :disabled="vinMoving">
+                                    <span x-show="!vinMoving" x-text="'Move VIN to ' + form.unit_number"></span>
+                                    <span x-show="vinMoving">Moving&hellip;</span>
+                                </button>
+                            </div>
+                        </template>
+                        <template x-if="vinMoved">
+                            <div style="margin-top:6px;font-size:0.85rem;color:var(--color-success-text, #15803d);">
+                                &#10003; VIN moved from <strong x-text="vinMoved"></strong> to this unit (saved).
+                            </div>
+                        </template>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="year">Year</label>
@@ -322,6 +342,49 @@ function FF_EditUnit() {
             internal_notes:      <?= json_encode($unit['internal_notes'] ?? '') ?>,
         },
         submitting:  false,
+        // S-UNIT-VIN-MOVE: live VIN-conflict state for the inline note + move button.
+        vinConflict: null,   // {unit_id, unit_number, deleted} when the typed VIN is on another unit
+        vinChecking: false,
+        vinMoving:   false,
+        vinMoved:    null,   // unit_number the VIN was moved FROM (success note)
+
+        // Live lookup as the operator types — warns BEFORE submit if the VIN is taken.
+        async checkVin() {
+            this.vinMoved = null;
+            const vin = (this.form.vin || '').trim();
+            if (!vin) { this.vinConflict = null; return; }
+            this.vinChecking = true;
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/vin_check') ?>?vin='
+                    + encodeURIComponent(vin) + '&exclude_id=' + this.form.id);
+                this.vinConflict = (r.success && r.data && r.data.taken) ? r.data : null;
+            } catch (e) { this.vinConflict = null; }
+            this.vinChecking = false;
+        },
+
+        // One-click: atomically move the VIN off the other unit onto this one.
+        async moveVinHere() {
+            if (!this.vinConflict || this.vinMoving) return;
+            this.vinMoving = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/equipment/units/move_vin') ?>', {
+                    vin: (this.form.vin || '').trim(),
+                    to_unit_id: this.form.id,
+                });
+                if (r.success) {
+                    this.vinMoved    = r.data?.moved_from_unit_number || null;
+                    this.vinConflict = null;
+                    if (window.FF_Toast) {
+                        FF_Toast.success('VIN moved to this unit' + (this.vinMoved ? ' (from ' + this.vinMoved + ')' : ''));
+                    }
+                } else if (window.FF_Toast) {
+                    FF_Toast.error(r.error?.message || 'Failed to move VIN');
+                }
+            } catch (e) {
+                if (window.FF_Toast) FF_Toast.error('Network error moving VIN');
+            }
+            this.vinMoving = false;
+        },
 
         init() {
             // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper. Exclude id +

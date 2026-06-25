@@ -106,7 +106,16 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="text" id="vin" name="vin" class="form-control font-mono"
                                x-model="form.vin"
                                placeholder="17-char VIN"
-                               maxlength="50">
+                               maxlength="50"
+                               @input.debounce.400ms="checkVin()">
+                        <div class="field-error" data-error-for="vin"></div>
+                        <!-- S-UNIT-VIN-MOVE: live "already in use" note (create has no unit yet
+                             to move into — the operator picks a different VIN or fixes the holder). -->
+                        <template x-if="vinConflict">
+                            <div style="margin-top:6px;font-size:0.85rem;color:var(--color-warning-text, #b45309);">
+                                &#9888; VIN already in use by <span x-show="vinConflict.deleted">deleted </span>unit <strong x-text="vinConflict.unit_number"></strong> — use a different VIN, or free it on that unit first.
+                            </div>
+                        </template>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="year">Year</label>
@@ -404,6 +413,16 @@ function FF_CreateUnit() {
         },
         submitting:         false,
         showSuccessOverlay: false,
+        // S-UNIT-VIN-MOVE: live "VIN already in use" lookup as the operator types.
+        vinConflict:        null,
+        async checkVin() {
+            const vin = (this.form.vin || '').trim();
+            if (!vin) { this.vinConflict = null; return; }
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/vin_check') ?>?vin=' + encodeURIComponent(vin));
+                this.vinConflict = (r.success && r.data && r.data.taken) ? r.data : null;
+            } catch (e) { this.vinConflict = null; }
+        },
 
         init() {
             // S-FORM-DRAFT-ROLLOUT: opt into the shared autosave helper (reused, not modified).

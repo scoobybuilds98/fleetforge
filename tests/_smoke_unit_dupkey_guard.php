@@ -244,6 +244,34 @@ try {
         $fail('SC6/SC7 setup failed: A=' . json_encode($ra) . ' B=' . json_encode($rb));
     }
 
+    echo "\nC8 — SC8: move_vin atomically reassigns a VIN between units (S-UNIT-VIN-MOVE)\n";
+    // Unit J holds a VIN; unit K has none. Move J's VIN onto K → J cleared, K set.
+    [$rj, $idJ] = $createUnit($UTOK . 'J', $VTOK . 'J');
+    [$rk, $idK] = $createUnit($UTOK . 'K', null);
+    if ($idJ > 0 && $idK > 0) {
+        $rm = $post('api/v1/equipment/units/move_vin.php', ['vin' => $VTOK . 'J', 'to_unit_id' => $idK]);
+        // Read vin without coalescing — a cleared vin is genuinely NULL.
+        $jVin = (db_row("SELECT vin FROM equipment_units WHERE id = ?", [$idJ]) ?? ['vin' => '!NOROW'])['vin'];
+        $kVin = (db_row("SELECT vin FROM equipment_units WHERE id = ?", [$idK]) ?? ['vin' => '!NOROW'])['vin'];
+        if (($rm['success'] ?? false)
+            && ($rm['data']['moved_from_unit_number'] ?? '') === $UTOK . 'J'
+            && $jVin === null && $kVin === $VTOK . 'J') {
+            $pass('SC8 move_vin: VIN moved ' . $UTOK . 'J → ' . $UTOK . 'K (old holder cleared, no collision)');
+        } else {
+            $fail('SC8 expected clean move; got resp=' . json_encode($rm) . " J.vin=" . var_export($jVin, true) . " K.vin=" . var_export($kVin, true));
+        }
+        // SC8b: re-running the move is idempotent (VIN already on K → still succeeds, K keeps it).
+        $rm2 = $post('api/v1/equipment/units/move_vin.php', ['vin' => $VTOK . 'J', 'to_unit_id' => $idK]);
+        $kVin2 = db_row("SELECT vin FROM equipment_units WHERE id = ?", [$idK])['vin'] ?? '!';
+        if (($rm2['success'] ?? false) && $kVin2 === $VTOK . 'J') {
+            $pass('SC8b move_vin is idempotent (VIN already on target → still success)');
+        } else {
+            $fail('SC8b expected idempotent success, got: ' . json_encode($rm2) . " K.vin=" . var_export($kVin2, true));
+        }
+    } else {
+        $fail('SC8 setup failed: J=' . json_encode($rj) . ' K=' . json_encode($rk));
+    }
+
 } finally {
     $cleanup();
     @unlink($harnessFile);
