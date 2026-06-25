@@ -269,8 +269,16 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <?php elseif ($samsaraOdoKm !== null && $samsaraOdoKm > 0): ?>
         <div class="stat-value font-mono"><?= number_format($samsaraOdoKm) ?> <span class="text-sm text-secondary">km</span></div>
         <?php // S-SAMSARA-TRAILER-ODO-STALL-FLAG: warn when a trailer's gateway odometer looks frozen.
+        // NOT .stat-delta (it forces nowrap+ellipsis → the message truncates, and its
+        // grey wins). Custom amber that wraps; #b45309 reads cleanly on the always-cream
+        // stat tile in BOTH themes (matching how the tile hardcodes its dark text colors —
+        // the themed --color-warning-text would be bright #facc15 yellow in dark mode).
         if (ff_samsara_odometer_likely_stalled($unit['samsara_entity_type'] ?? null, $samsaraOdoKm)): ?>
-        <div class="stat-delta" style="color:var(--color-warning-text);" title="This trailer's Samsara GPS-gateway odometer reads low for an in-service trailer and may be stalled. Use the Distance Travelled tool below for actual GPS distance.">&#9888; odometer may be stalled — see Distance Travelled</div>
+        <div style="margin-top:5px; display:flex; align-items:flex-start; gap:4px; font-size:0.72rem; line-height:1.25; font-weight:600; color:#b45309; white-space:normal; overflow-wrap:anywhere;"
+             title="This trailer's Samsara GPS-gateway odometer reads low for an in-service trailer and may be stalled. Use the Distance Travelled tool below for the actual GPS distance.">
+            <span aria-hidden="true" style="flex:0 0 auto; line-height:1;">&#9888;</span>
+            <span>Odometer may be stalled</span>
+        </div>
         <?php else: ?>
         <div class="stat-delta text-secondary">from Samsara</div>
         <?php endif; ?>
