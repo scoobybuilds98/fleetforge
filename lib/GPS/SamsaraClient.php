@@ -1263,11 +1263,17 @@ class SamsaraClient
             );
         }
 
-        // Wider-window bounds (D-A: 24h either side)
+        // Wider-window bounds (D-A: 24h either side) — used by the odometer path
+        // for BOOKEND selection (the odometer delta still clamps to the period).
         $widerStart    = $startUtc->modify('-24 hours');
         $widerEnd      = $endUtc->modify('+24 hours');
         $widerStartIso = $widerStart->format('Y-m-d\TH:i:s.000\Z');
         $widerEndIso   = $widerEnd->format('Y-m-d\TH:i:s.000\Z');
+        // EXACT period bounds for the trailer GPS-track fallback: a GPS distance is
+        // a SUM, so it must be bounded to [start, end] (the ±24h wider window would
+        // over-count up to ~48h of extra travel per period).
+        $periodStartIso = $startUtc->format('Y-m-d\TH:i:s.000\Z');
+        $periodEndIso   = $endUtc->format('Y-m-d\TH:i:s.000\Z');
 
         // Pagination loop (D-E: hard cap at 50 iterations)
         // Map: time-string => [type => meters_int]
@@ -1354,8 +1360,18 @@ class SamsaraClient
             }
         }
 
-        // Vehicle not present in any page → unknown to Samsara
+        // Vehicle not present in any page → unknown to Samsara, OR (common for
+        // trailers) it reports GPS but no odometer at all in the window.
         if (!$vehicleSeen) {
+            // S-SAMSARA-TRAILER-GPS-FALLBACK: a trailer absent from the odometer
+            // feed almost always still reports GPS positions — derive distance
+            // from those before declaring it unknown.
+            if ($isTrailer) {
+                $gpsFallback = $this->trailerGpsDistance($samsaraVehicleId, $unit, $periodStartIso, $periodEndIso, $queriedAt);
+                if ($gpsFallback !== null) {
+                    return $gpsFallback;
+                }
+            }
             return $this->distanceFailure(
                 $samsaraVehicleId, $unit, 'unit_not_in_samsara',
                 'Vehicle/trailer ID not found in Samsara stats response.', $queriedAt
@@ -1396,6 +1412,14 @@ class SamsaraClient
         }
 
         if (empty($usedReadings)) {
+            // S-SAMSARA-TRAILER-GPS-FALLBACK: trailer present but no odometer
+            // readings → derive distance from GPS positions.
+            if ($isTrailer) {
+                $gpsFallback = $this->trailerGpsDistance($samsaraVehicleId, $unit, $periodStartIso, $periodEndIso, $queriedAt);
+                if ($gpsFallback !== null) {
+                    return $gpsFallback;
+                }
+            }
             $noReadingTypes = $isTrailer
                 ? 'gpsOdometerMeters'
                 : 'obdOdometerMeters or gpsDistanceMeters';
@@ -1492,6 +1516,25 @@ class SamsaraClient
             $warnings[] = 'large_gap_detected';
         }
 
+        // S-SAMSARA-TRAILER-GPS-FALLBACK: a frozen/stale trailer odometer yields a
+        // 0 or tiny delta even though the trailer moved (the "thousands shown as
+        // hundreds" symptom). When a trailer reported <2 odometer readings INSIDE
+        // the period (frozen/stale/sparse), cross-check the GPS positions and
+        // prefer them ONLY when they show MORE distance than the odometer delta —
+        // so a genuinely-parked trailer (both ~0) is never inflated and a healthy
+        // odometer (≥2 in-period readings) is never second-guessed.
+        if ($isTrailer && count($insideTimes) < 2) {
+            $gpsFallback = $this->trailerGpsDistance($samsaraVehicleId, $unit, $periodStartIso, $periodEndIso, $queriedAt);
+            if ($gpsFallback !== null) {
+                $odoDistance = ($unit === 'km')
+                    ? bcdiv((string) $distanceMeters, '1000',     2)
+                    : bcdiv((string) $distanceMeters, '1609.344', 2);
+                if (bccomp($gpsFallback['distance'], $odoDistance, 2) > 0) {
+                    return $gpsFallback;
+                }
+            }
+        }
+
         // Convert to requested unit via bcmath (D-C — no floats)
         $distanceMetersStr = (string) $distanceMeters;
         $distance = ($unit === 'km')
@@ -1526,6 +1569,152 @@ class SamsaraClient
             'warnings'         => $warnings,
             'queried_at'       => $queriedAt,
         ];
+    }
+
+    /**
+     * S-SAMSARA-TRAILER-GPS-FALLBACK — distance from a trailer's GPS POSITION
+     * history, used when its gpsOdometerMeters is unusable.
+     *
+     * Many trailers stop accumulating gpsOdometerMeters (observed prod 2026-06-25:
+     * 12TR1323 frozen at 145 km since 2025-07-26 — and others) yet keep reporting
+     * GPS positions fine. The odometer path then yields 'unit_not_in_samsara' (no
+     * readings in the window) or a tiny stale delta ("thousands shown as hundreds").
+     * This paginates /fleet/trailers/stats/history?types=gps over the wider window,
+     * sorts the fixes chronologically, and sums the great-circle (haversine)
+     * distance between consecutive points — with a jitter floor (skip <15 m hops:
+     * parked-GPS noise) and an implausible-speed filter (skip segments implying
+     * >160 km/h: GPS teleport glitches).
+     *
+     * Trig (sin/cos/atan2) is inherently float; the sum is rounded to whole metres
+     * before the bcmath unit conversion, so downstream billing math stays exact.
+     *
+     * Returns the SAME success shape as getDistanceForPeriod (source='gps_position')
+     * or NULL when there are <2 points or no real movement — so the caller can fall
+     * through to the normal odometer-failure path (nothing is silently fabricated).
+     */
+    private function trailerGpsDistance(
+        string $trailerId,
+        string $unit,
+        string $startIso,
+        string $endIso,
+        string $queriedAt
+    ): ?array {
+        $points   = []; // unix_ts => [lat, lon]
+        $cursor   = null;
+        $maxPages = 60;
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $url = self::API_BASE . '/fleet/trailers/stats/history'
+                 . '?trailerIds=' . urlencode($trailerId)
+                 . '&types=gps'
+                 . '&startTime=' . urlencode($startIso)
+                 . '&endTime='   . urlencode($endIso)
+                 . ($cursor !== null ? '&after=' . urlencode($cursor) : '');
+
+            $http = $this->httpRequestWithRetry('GET', $url);
+            if ($http['code'] !== 200) {
+                return null; // GPS fallback unavailable → caller reports the odometer failure
+            }
+            $response = json_decode((string) $http['body'], true);
+            if (!is_array($response)) {
+                return null;
+            }
+            foreach ($response['data'] ?? [] as $d) {
+                if ((string) ($d['id'] ?? '') !== $trailerId) {
+                    continue;
+                }
+                foreach ($d['gps'] ?? [] as $g) {
+                    $lat = $g['latitude']  ?? null;
+                    $lon = $g['longitude'] ?? null;
+                    $t   = isset($g['time']) ? strtotime((string) $g['time']) : null;
+                    if ($lat === null || $lon === null || $t === null) {
+                        continue;
+                    }
+                    $points[$t] = [(float) $lat, (float) $lon];
+                }
+            }
+            $hasMore = $response['pagination']['hasNextPage'] ?? false;
+            if (!$hasMore) {
+                break;
+            }
+            $cursor = $response['pagination']['endCursor'] ?? null;
+            if ($cursor === null) {
+                break;
+            }
+        }
+
+        if (count($points) < 2) {
+            return null;
+        }
+
+        ksort($points); // chronological
+        $meters = self::sumGpsTrackMeters($points);
+
+        if ($meters <= 0) {
+            return null;
+        }
+
+        $metersInt = (int) round($meters);
+        $distance  = ($unit === 'km')
+            ? bcdiv((string) $metersInt, '1000',     2)
+            : bcdiv((string) $metersInt, '1609.344', 2);
+
+        $this->log('SAMSARA_TRAILER_GPS_FALLBACK', sprintf(
+            'trailerId=%s distance=%s %s points=%d source=gps(trailer-gps-track-fallback)',
+            $trailerId, $distance, $unit, count($points)
+        ));
+
+        // source MUST stay within the consumers' value set — invoices.odometer_source
+        // is enum('gps','manual','estimated'), and getDistanceForPeriod's 'source'
+        // flows into it (InvoiceGenerator). Use 'gps'; the GPS-track-fallback origin
+        // is recorded in warnings (free text), not in the enum'd source field.
+        return [
+            'distance'         => $distance,
+            'unit'             => $unit,
+            'source'           => 'gps',
+            'first_reading_at' => null,
+            'last_reading_at'  => null,
+            'reading_count'    => count($points),
+            'warnings'         => ['trailer_gps_fallback'],
+            'queried_at'       => $queriedAt,
+        ];
+    }
+
+    /**
+     * Sum a chronological GPS track into total metres travelled, filtering noise.
+     * $points: unix_ts => [lat, lon], assumed already sorted ascending by the caller.
+     *   - jitter floor: segments < 15 m are dropped (parked-GPS wander).
+     *   - speed filter: segments implying > 160 km/h are dropped (GPS teleport
+     *     glitches); a zero/negative time delta is kept (can't judge speed).
+     * Pure + static so the billing-grade distance math is unit-testable.
+     */
+    private static function sumGpsTrackMeters(array $points): float
+    {
+        $prev = null; $prevT = null; $meters = 0.0;
+        foreach ($points as $t => $ll) {
+            if ($prev !== null) {
+                $seg = self::haversineMeters($prev[0], $prev[1], $ll[0], $ll[1]);
+                $dt  = (int) $t - (int) $prevT;
+                if ($seg >= 15.0) {
+                    $kmh = ($dt > 0) ? ($seg / $dt) * 3.6 : 0.0;
+                    if ($dt <= 0 || $kmh <= 160.0) {
+                        $meters += $seg;
+                    }
+                }
+            }
+            $prev = $ll; $prevT = $t;
+        }
+        return $meters;
+    }
+
+    /** Great-circle distance between two lat/lon points, in metres. */
+    private static function haversineMeters(float $lat1, float $lon1, float $lat2, float $lon2): float
+    {
+        $R    = 6371000.0;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLon = deg2rad($lon2 - $lon1);
+        $a    = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLon / 2) ** 2;
+        return $R * 2 * atan2(sqrt($a), sqrt(1 - $a));
     }
 
     /**
