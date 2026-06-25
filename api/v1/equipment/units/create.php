@@ -119,9 +119,11 @@ $vin             = clean_string($body['vin'] ?? null, 50);
 // rows. Skip when blank (clean_string returns null for '' and a unique index
 // permits multiple NULLs). Count ALL rows so a soft-deleted unit's VIN is seen
 // and we return a clean 409 instead of a 1062 → HTTP 500 (FLEETFORGE-M).
-if ($vin !== null && db_count("SELECT COUNT(*) FROM equipment_units WHERE vin = ?", [$vin]) > 0) {
-    json_error('ALREADY_EXISTS', 'VIN already exists.', 409,
-        ['fields' => ['vin' => 'VIN already exists.']]);
+if ($vin !== null && ($vinMsg = vin_conflict_message($vin)) !== null) {
+    // Names the conflicting unit (live or soft-deleted) so the operator can see
+    // WHY — usually a mis-assigned VIN on another unit, not a phantom.
+    json_error('ALREADY_EXISTS', $vinMsg, 409,
+        ['fields' => ['vin' => $vinMsg]]);
 }
 // (year + mileage already validated and stored in $year / $mileageRaw above)
 $gpsDeviceId     = clean_string($body['gps_device_id'] ?? null, 100);
@@ -295,8 +297,9 @@ db_transaction(function () use (
 } catch (\PDOException $e) {
     if ($e->getCode() === '23000') {
         if (stripos($e->getMessage(), 'vin') !== false) {
-            json_error('ALREADY_EXISTS', 'VIN already exists.', 409,
-                ['fields' => ['vin' => 'VIN already exists.']]);
+            $msg = ($vin !== null) ? (vin_conflict_message($vin) ?? 'VIN already exists.') : 'VIN already exists.';
+            json_error('ALREADY_EXISTS', $msg, 409,
+                ['fields' => ['vin' => $msg]]);
         }
         if (stripos($e->getMessage(), 'unit_number') !== false) {
             json_error('ALREADY_EXISTS', 'Unit number already exists.', 409,

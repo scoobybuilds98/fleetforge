@@ -160,6 +160,12 @@ try {
     } else {
         $fail('SC3 expected ALREADY_EXISTS, got: ' . json_encode($r3));
     }
+    // S-UNIT-VIN-CONFLICT-NAME: the error must NAME the live unit holding the vin.
+    if (strpos($r3['error']['message'] ?? '', $UTOK . 'A') !== false) {
+        $pass('SC3b vin-conflict message names the live holder (' . $UTOK . 'A)');
+    } else {
+        $fail('SC3b expected message to name unit ' . $UTOK . 'A, got: ' . ($r3['error']['message'] ?? ''));
+    }
 
     echo "\nC4 — SC4: reuse unit_number held by a SOFT-DELETED unit → 409, not 500\n";
     [$rv4, $victim4] = $createUnit($UTOK . 'D', $VTOK . 'D');
@@ -186,6 +192,12 @@ try {
             $pass('SC5 reuse of soft-deleted vin → ALREADY_EXISTS (no PDO 500)');
         } else {
             $fail('SC5 expected ALREADY_EXISTS, got: ' . json_encode($r5));
+        }
+        // S-UNIT-VIN-CONFLICT-NAME: a soft-deleted holder must be flagged as such.
+        if (stripos($r5['error']['message'] ?? '', 'deleted') !== false) {
+            $pass('SC5b vin-conflict message flags the soft-deleted holder');
+        } else {
+            $fail('SC5b expected message to flag a deleted holder, got: ' . ($r5['error']['message'] ?? ''));
         }
     } else {
         $fail('SC5 setup failed: ' . json_encode($rv5));
@@ -221,6 +233,12 @@ try {
             $pass('SC7 re-vin onto a live vin → 422 field error (no 500)');
         } else {
             $fail('SC7 expected vin 422, got: ' . json_encode($r7));
+        }
+        // S-UNIT-VIN-CONFLICT-NAME: the field error names the live peer.
+        if (strpos($r7['error']['fields']['vin'] ?? '', $UTOK . 'H') !== false) {
+            $pass('SC7b re-vin field error names the live peer (' . $UTOK . 'H)');
+        } else {
+            $fail('SC7b expected vin field error to name unit ' . $UTOK . 'H, got: ' . ($r7['error']['fields']['vin'] ?? ''));
         }
     } else {
         $fail('SC6/SC7 setup failed: A=' . json_encode($ra) . ' B=' . json_encode($rb));

@@ -357,6 +357,41 @@ function ff_invoice_display_period_end(array $inv): ?string
 }
 
 // ============================================================
+// vin_conflict_message() — name the unit blocking a VIN
+//
+// equipment_units.vin is a GLOBAL UNIQUE index spanning soft-deleted rows, so a
+// VIN can be "taken" by a unit the operator can't see (a soft-deleted row) or by
+// a live unit that got the VIN mis-assigned during an import. The old "VIN
+// already exists" error gave no clue which. This returns a message naming the
+// conflicting unit (preferring a LIVE holder, and flagging a soft-deleted one
+// with how to free it), or NULL when the VIN is free. Pass $excludeId to ignore
+// the unit being edited.
+// ============================================================
+if (!function_exists('vin_conflict_message')) {
+function vin_conflict_message(string $vin, ?int $excludeId = null): ?string
+{
+    $sql    = "SELECT unit_number, deleted_at FROM equipment_units WHERE vin = ?";
+    $params = [$vin];
+    if ($excludeId !== null) {
+        $sql     .= " AND id != ?";
+        $params[] = $excludeId;
+    }
+    // Prefer a LIVE holder (deleted_at IS NULL sorts first) so the message points
+    // at the unit the operator can actually act on.
+    $sql .= " ORDER BY (deleted_at IS NULL) DESC LIMIT 1";
+
+    $row = db_row($sql, $params);
+    if (!$row) {
+        return null;
+    }
+    $unit = $row['unit_number'] ?? '(unknown unit)';
+    return $row['deleted_at']
+        ? "VIN already in use by deleted unit {$unit} — restore or hard-delete it to free the VIN."
+        : "VIN already in use by unit {$unit}.";
+}
+}
+
+// ============================================================
 // SETTINGS
 // ============================================================
 

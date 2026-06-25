@@ -97,11 +97,12 @@ if (isset($body['unit_number'])) {
 // returns a clean 422 instead of a 1062 → HTTP 500 (FLEETFORGE-M).
 if (array_key_exists('vin', $body)) {
     $vinVal = clean_string($body['vin'], 50);
-    if ($vinVal !== null && db_count(
-        "SELECT COUNT(*) FROM equipment_units WHERE vin = ? AND id != ?",
-        [$vinVal, $id]
-    ) > 0) {
-        $fields['vin'] = 'VIN already exists.';
+    // Names the conflicting unit so the operator can resolve the real cause
+    // (usually a VIN mis-assigned to another unit during import). NULL vin clears
+    // the field (a unique index permits multiple NULLs) and never conflicts.
+    $vinMsg = ($vinVal !== null) ? vin_conflict_message($vinVal, $id) : null;
+    if ($vinMsg !== null) {
+        $fields['vin'] = $vinMsg;
     } else {
         $updates['vin'] = $vinVal;
     }
@@ -354,7 +355,10 @@ db_transaction(function () use (&$newUpdatedAt, $id, $updates, $userId, $existin
 } catch (\PDOException $e) {
     if ($e->getCode() === '23000') {
         if (stripos($e->getMessage(), 'vin') !== false) {
-            json_validation_error(['vin' => 'VIN already exists.']);
+            $msg = (isset($vinVal) && $vinVal !== null)
+                ? (vin_conflict_message($vinVal, $id) ?? 'VIN already exists.')
+                : 'VIN already exists.';
+            json_validation_error(['vin' => $msg]);
         }
         if (stripos($e->getMessage(), 'unit_number') !== false) {
             json_validation_error(['unit_number' => 'Unit number already exists.']);
