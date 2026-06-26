@@ -2002,7 +2002,14 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-shrink: 0;
+    /* S-HEADER-ACTIONS-WRAP: never clip a header toolbar. flex-wrap lets a long
+       action row (e.g. the invoice page's 11 buttons) flow onto a second line;
+       min-width:0 (replacing flex-shrink:0) lets the actions area shrink so the
+       wrap actually engages instead of overflowing off the right edge. Pages
+       with a few buttons are unaffected — wrapping only kicks in on overflow. */
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
 }
 
 /* Card / Panel */
