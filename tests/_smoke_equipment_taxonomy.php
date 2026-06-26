@@ -215,6 +215,45 @@ try {
             : $fail("7 update change category — got " . json_encode($row) . " resp=" . json_encode($r['error'] ?? $r));
     }
 
+    // ── G: billing-gate resolution (the exact join InvoiceGenerator uses) ──────
+    // Guards that the short-lease-minimum enforce flag resolves correctly via
+    // category_id (preferred) with the slug-mirror fallback for unbackfilled rows.
+    // Hermetic: chassis must enforce, reefer must not for these checks.
+    db_execute("UPDATE equipment_categories SET enforce_minimum_billing_days = 1 WHERE slug = 'chassis' AND deleted_at IS NULL");
+    db_execute("UPDATE equipment_categories SET enforce_minimum_billing_days = 0 WHERE slug = 'reefer'  AND deleted_at IS NULL");
+    $gateEnforce = function (?int $catId, string $mirror) use ($TOKEN): int {
+        // Insert a throwaway template (token-named → cleaned up) then run the gate join.
+        $tid = db_insert('equipment_templates', [
+            'name' => $TOKEN . ' Gate ' . bin2hex(substr($mirror, 0, 6)) . '_' . ($catId ?? 0),
+            'slug' => '__smoke_eqtax_gate_' . ($catId ?? 0) . '_' . substr(md5($mirror . microtime()), 0, 8) . '__',
+            'category' => $mirror, 'category_id' => $catId, 'default_mileage_rate' => '0.0000',
+        ]);
+        $row = db_row(
+            "SELECT ec.enforce_minimum_billing_days AS e
+               FROM equipment_templates et
+               LEFT JOIN equipment_categories ec
+                      ON ec.deleted_at IS NULL
+                     AND (ec.id = et.category_id OR (et.category_id IS NULL AND ec.slug = et.category))
+              WHERE et.id = ?",
+            [$tid]
+        );
+        return (int) ($row['e'] ?? 0);
+    };
+    $chassisId = (int) $chassis['id'];
+    $reeferId  = (int) $reefer['id'];
+    $gateEnforce($chassisId, 'chassis') === 1
+        ? $pass("G1 chassis-category template → gate enforces (1)")
+        : $fail("G1 chassis-category template should enforce");
+    $gateEnforce($reeferId, 'reefer') === 0
+        ? $pass("G2 reefer-category template → gate does NOT enforce (0)")
+        : $fail("G2 reefer-category template should not enforce");
+    $gateEnforce($chassisId, 'combo') === 1
+        ? $pass("G3 combo mirror + category_id=Chassis → INHERITS enforce (1) [the Jete's case]")
+        : $fail("G3 combo-mirror-with-chassis-category should inherit enforce");
+    $gateEnforce(null, 'chassis') === 1
+        ? $pass("G4 unbackfilled (category_id NULL, mirror='chassis') → slug fallback enforces (1)")
+        : $fail("G4 slug-mirror fallback should enforce for an unbackfilled chassis template");
+
 } finally {
     $cleanup();
     @unlink($harnessFile);

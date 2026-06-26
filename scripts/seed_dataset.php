@@ -1245,6 +1245,15 @@ foreach ($counts as $k => $v) {
 }
 echo str_repeat('-', 38) . "\n";
 echo sprintf("  %-30s %5d\n", 'TOTAL', $total);
+
+// S-EQTAX: populate the two-level taxonomy FKs (category_id / subcategory_id)
+// for the freshly-seeded templates so the dev DB matches a backfilled prod.
+// The backfill is idempotent and runs standalone (own process, clean exit).
+if ($apply) {
+    echo "\n[S-EQTAX] running equipment taxonomy backfill…\n";
+    passthru(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__DIR__ . '/backfill_equipment_taxonomy.php'));
+}
+
 echo $apply
     ? "\nApplied. Re-run the AI smoke test or browse the dashboards.\n"
     : "\nDry-run only. Pass --apply to commit. Use --reset --apply to wipe + re-seed.\n";
