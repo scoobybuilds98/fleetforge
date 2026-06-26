@@ -22,6 +22,19 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('equipment', 'view');
 
+// S-EQTAX: the category filter targets the legacy `category` mirror, which holds
+// a category slug for most templates and a sub-category slug for sub-typed ones
+// (e.g. Combo). Build the dropdown from the DISTINCT mirror values actually
+// present so every option returns rows; label from the taxonomy when known.
+$eqMirrorVals = array_column(
+    db_select("SELECT DISTINCT category FROM equipment_templates
+                WHERE deleted_at IS NULL AND category IS NOT NULL AND category <> '' ORDER BY category"),
+    'category'
+);
+$eqSlugLabels = [];
+foreach (db_select("SELECT slug, label FROM equipment_categories WHERE deleted_at IS NULL") as $r) { $eqSlugLabels[$r['slug']] = $r['label']; }
+foreach (db_select("SELECT slug, label FROM equipment_subcategories WHERE deleted_at IS NULL") as $r) { $eqSlugLabels[$r['slug']] = $eqSlugLabels[$r['slug']] ?? $r['label']; }
+
 $pageTitle      = 'Equipment Types';
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
@@ -67,16 +80,9 @@ require_once FF_ROOT . '/includes/header.php';
                     x-model="filters.category"
                     @change="resetPage()">
                 <option value="">All Categories</option>
-                <option value="chassis">Chassis</option>
-                <option value="dry_van">Dry Van</option>
-                <option value="reefer">Reefer</option>
-                <option value="container">Container</option>
-                <option value="flatbed">Flatbed</option>
-                <option value="step_deck">Step Deck</option>
-                <option value="lowboy">Lowboy</option>
-                <option value="tanker">Tanker</option>
-                <option value="dump">Dump</option>
-                <option value="other">Other</option>
+                <?php foreach ($eqMirrorVals as $slug): ?>
+                    <option value="<?= e($slug) ?>"><?= e($eqSlugLabels[$slug] ?? ucwords(str_replace('_', ' ', $slug))) ?></option>
+                <?php endforeach; ?>
             </select>
         </div>
         <div class="table-toolbar-right">

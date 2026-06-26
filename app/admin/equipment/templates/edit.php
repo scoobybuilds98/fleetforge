@@ -32,6 +32,17 @@ if (!$templateId) {
     exit;
 }
 
+// S-EQTAX: two-level taxonomy options for the linked Category → Sub-category
+// selectors (active rows; sub-category filtered client-side by category_id).
+$eqCategories = db_select(
+    "SELECT id, slug, label FROM equipment_categories
+      WHERE is_active = 1 AND deleted_at IS NULL ORDER BY sort_order, label"
+);
+$eqSubcategories = db_select(
+    "SELECT id, category_id, slug, label FROM equipment_subcategories
+      WHERE is_active = 1 AND deleted_at IS NULL ORDER BY sort_order, label"
+);
+
 $pageTitle = 'Edit Equipment Type';
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
@@ -94,35 +105,44 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="card-body">
 
+                    <div class="form-group">
+                        <label class="form-label required" for="name">Equipment Type Name</label>
+                        <input type="text" id="name" name="name" class="form-control"
+                               x-model="form.name"
+                               placeholder="e.g. 53ft Dry Van"
+                               maxlength="100">
+                        <div class="form-hint">Must be unique. Used as the display name everywhere.</div>
+                        <div class="field-error" data-error-for="name"></div>
+                    </div>
+
+                    <!-- S-EQTAX: linked Category → Sub-category selectors. -->
                     <div class="form-row-2">
                         <div class="form-group">
-                            <label class="form-label required" for="name">Equipment Type Name</label>
-                            <input type="text" id="name" name="name" class="form-control"
-                                   x-model="form.name"
-                                   placeholder="e.g. 53ft Dry Van"
-                                   maxlength="100">
-                            <div class="form-hint">Must be unique. Used as the display name everywhere.</div>
-                            <div class="field-error" data-error-for="name"></div>
+                            <label class="form-label required" for="category_id">Category</label>
+                            <select id="category_id" name="category_id" class="form-control form-select"
+                                    x-model="form.category_id" @change="onCategoryChange()">
+                                <option value="">— Select category —</option>
+                                <template x-for="c in categories" :key="c.id">
+                                    <option :value="c.id" x-text="c.label"></option>
+                                </template>
+                            </select>
+                            <div class="form-hint">Top-level type. Billing rules (e.g. the short-lease minimum) attach here.</div>
+                            <div class="field-error" data-error-for="category_id"></div>
                         </div>
 
                         <div class="form-group">
-                            <label class="form-label required" for="category">Category</label>
-                            <select id="category" name="category" class="form-control form-select"
-                                    x-model="form.category">
-                                <option value="">— Select category —</option>
-                                <option value="chassis">Chassis</option>
-                                <option value="dry_van">Dry Van</option>
-                                <option value="reefer">Reefer</option>
-                                <option value="container">Container</option>
-                                <option value="flatbed">Flatbed</option>
-                                <option value="step_deck">Step Deck</option>
-                                <option value="lowboy">Lowboy</option>
-                                <option value="tanker">Tanker</option>
-                                <option value="dump">Dump</option>
-                                <option value="combo">Combo</option>
-                                <option value="other">Other</option>
+                            <label class="form-label" for="subcategory_id">Sub-category</label>
+                            <select id="subcategory_id" name="subcategory_id" class="form-control form-select"
+                                    x-model="form.subcategory_id"
+                                    :disabled="!form.category_id || subcatOptions.length === 0">
+                                <option value="">— None —</option>
+                                <template x-for="s in subcatOptions" :key="s.id">
+                                    <option :value="s.id" x-text="s.label"></option>
+                                </template>
                             </select>
-                            <div class="field-error" data-error-for="category"></div>
+                            <div class="form-hint" x-show="!form.category_id">Pick a category first.</div>
+                            <div class="form-hint" x-show="form.category_id && subcatOptions.length === 0">No sub-types yet for this category — add them under Manage Types.</div>
+                            <div class="field-error" data-error-for="subcategory_id"></div>
                         </div>
                     </div>
 
@@ -367,9 +387,23 @@ function FF_EditTemplate(templateId) {
         updatedAt:  null,   // captured on load for D19 optimistic lock
         showSuccessOverlay: false,
 
+        // S-EQTAX: taxonomy options (server-rendered) for the linked selectors.
+        categories: <?= json_encode(array_map(fn($c) => ['id' => (int)$c['id'], 'label' => $c['label']], $eqCategories), JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+        allSubcats: <?= json_encode(array_map(fn($s) => ['id' => (int)$s['id'], 'category_id' => (int)$s['category_id'], 'label' => $s['label']], $eqSubcategories), JSON_HEX_TAG | JSON_HEX_AMP) ?>,
+        get subcatOptions() {
+            if (!this.form.category_id) return [];
+            return this.allSubcats.filter(s => String(s.category_id) === String(this.form.category_id));
+        },
+        onCategoryChange() {
+            if (!this.subcatOptions.some(s => String(s.id) === String(this.form.subcategory_id))) {
+                this.form.subcategory_id = '';
+            }
+        },
+
         form: {
             name:                               '',
-            category:                           '',
+            category_id:                        '',
+            subcategory_id:                     '',
             description:                        '',
             brand:                              '',
             model:                              '',
@@ -460,8 +494,8 @@ function FF_EditTemplate(templateId) {
                 FF_Validate.field(form, 'name', 'Equipment type name is required.');
                 ok = false;
             }
-            if (!this.form.category) {
-                FF_Validate.field(form, 'category', 'Please select a category.');
+            if (!this.form.category_id) {
+                FF_Validate.field(form, 'category_id', 'Please select a category.');
                 ok = false;
             }
 
@@ -551,11 +585,18 @@ function FF_EditTemplate(templateId) {
                 if (v !== '' && v !== null && v !== undefined) payload[k] = v;
             });
             // Coerce integer fields
-            ['default_weight_capacity_lbs', 'default_axle_count',
+            ['category_id', 'subcategory_id',
+             'default_weight_capacity_lbs', 'default_axle_count',
              'default_cvi_interval_days', 'default_mvi_interval_days',
              'default_registration_interval_days', 'default_insurance_interval_days'].forEach(f => {
                 if (payload[f] !== undefined) payload[f] = parseInt(payload[f], 10);
             });
+            // S-EQTAX: when the operator clears the sub-category, send an explicit
+            // empty so update.php sets subcategory_id = NULL (omitting it would also
+            // clear it, but being explicit keeps intent obvious).
+            if (this.form.category_id && (this.form.subcategory_id === '' || this.form.subcategory_id === null)) {
+                payload.subcategory_id = '';
+            }
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/update.php') ?>', payload);

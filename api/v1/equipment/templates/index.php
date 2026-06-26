@@ -39,10 +39,20 @@ $sort     = clean_string($_GET['sort'] ?? 'name');
 $page     = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
 $perPage  = min(100, max(1, clean_int($_GET['per_page'] ?? 25) ?? 25));
 
-// ── Validate enum filters ──────────────────────────────────────
-$validCategories = ['chassis','dry_van','reefer','container','flatbed',
-                    'step_deck','lowboy','tanker','dump','combo','other'];
-if ($category !== null && !in_array($category, $validCategories, true)) {
+// ── Validate the category filter ───────────────────────────────
+// S-EQTAX: the filter targets the legacy `category` mirror, which is now an
+// operator-managed slug (category or sub-category), not a fixed enum. Validate
+// against the slugs actually present so an unknown value falls back to "all"
+// (preserving prior behaviour) while operator-added types filter immediately.
+if ($category !== null && $category !== '') {
+    $known = array_column(
+        db_select("SELECT DISTINCT category FROM equipment_templates WHERE deleted_at IS NULL"),
+        'category'
+    );
+    if (!in_array($category, $known, true)) {
+        $category = null;
+    }
+} else {
     $category = null;
 }
 
