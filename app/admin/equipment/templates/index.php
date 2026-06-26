@@ -52,6 +52,9 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <div class="page-header-actions">
         <?= help_button('equipment') ?>
+        <a href="<?= base_url('equipment/categories') ?>" class="btn btn-secondary btn-sm">
+            Manage Categories
+        </a>
         <?php if (can('equipment', 'create')): ?>
         <a href="<?= base_url('equipment/templates/create') ?>" class="btn btn-primary btn-sm">
             + Add new equipment type
