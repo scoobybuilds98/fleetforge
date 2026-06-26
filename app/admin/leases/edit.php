@@ -483,9 +483,10 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (only when billed hourly).
-                     Start editable; end is set at close (read-only on active leases). -->
-                <div class="form-row-2" x-show="parseFloat(_hourlyRate) > 0">
+                <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (shown once an hourly
+                     rate is set — reacts to the editable rate above). Start editable;
+                     end is set at close (read-only on active leases). -->
+                <div class="form-row-2" x-show="parseFloat(form.hourly_rate) > 0">
                     <div class="form-group">
                         <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
                         <input type="number" id="engine_hours_at_start" class="form-control font-mono"
@@ -643,14 +644,15 @@ require_once FF_ROOT . '/includes/header.php';
                             </span>
                         </div>
                     </div>
-                    <div class="form-group" x-show="form.hourly_rate && parseFloat(form.hourly_rate) > 0">
-                        <label class="form-label">Hourly Rate</label>
-                        <div style="margin-top:4px;">
-                            <span class="text-secondary" style="font-size:0.8125rem;">
-                                $<span class="font-mono" x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr
-                                <span style="color:var(--text-muted);">(rate card rate)</span>
-                            </span>
+                    <div class="form-group">
+                        <label class="form-label" for="hourly_rate">Hourly Rate</label>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number" id="hourly_rate" class="form-control font-mono"
+                                   x-model="form.hourly_rate" step="0.0001" min="0" placeholder="0.0000">
+                            <span class="input-group-suffix">/hr</span>
                         </div>
+                        <div class="form-hint" style="margin-top:4px;">Manual engine/reefer-hours rate, billed at close. Set a rate to enable hours billing on this lease; clear it to disable. The other rates are fixed at creation.</div>
                     </div>
                 </div>
 
@@ -797,9 +799,6 @@ function FF_EditLease() {
 
         // S-LEASE-UNITS: primary unit fixed at creation — read-only on edit.
         _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
-        // S-LEASE-HOURLY-BILLING: read-only gate for the engine-hours section so
-        // it shows on active leases too (form.hourly_rate is pending-only / not posted).
-        _hourlyRate:         <?= json_encode($lease['hourly_rate'] ?? 0) ?>,
         factor_section_open: false,
 
         // S-LEASE-MILEAGE-MODE: 3-position mileage-source selector.

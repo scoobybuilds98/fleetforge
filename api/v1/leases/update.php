@@ -222,6 +222,24 @@ if (array_key_exists('mileage_at_end', $body)) {
     }
 }
 
+// S-LEASE-HOURLY-BILLING: the hourly add-on rate is operator-editable here (unlike
+// the auto-billed daily/weekly/monthly tiers, which are frozen at creation) — it's
+// a manual engine/reefer-hours charge applied at close, so the operator can add or
+// adjust it on an existing lease. >= 0; blank/0 clears hourly billing.
+if (array_key_exists('hourly_rate', $body)) {
+    $raw = $body['hourly_rate'];
+    if ($raw === null || $raw === '') {
+        $data['hourly_rate'] = null;
+    } else {
+        $d = clean_decimal($raw);
+        if ($d === null || bccomp($d, '0', 4) < 0) {
+            $fields['hourly_rate'] = 'Hourly rate cannot be negative.';
+        } else {
+            $data['hourly_rate'] = $d;
+        }
+    }
+}
+
 // S-LEASE-HOURLY-BILLING: manual engine-hours readings (decimal, >= 0; clearable).
 if (array_key_exists('engine_hours_at_start', $body)) {
     $raw = $body['engine_hours_at_start'];
