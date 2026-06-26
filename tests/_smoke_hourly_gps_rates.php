@@ -80,6 +80,10 @@ function run_lookup(string $php, string $self, int $custId, int $tmplId): array 
 // Seed IDs — cleaned up in finally regardless of outcome.
 // ───────────────────────────────────────────────────────────────────────
 $TAG = '__SMOKE_HOURLY_GPS__';
+// S-EQTAX: synthetic dry_van slug so the T2 global-card test isn't outranked by a
+// seeded is_default 'dry_van' rate card on a shared dev DB (lookup matches
+// template.category against rate_card_items.equipment_type — keep them in sync).
+$VAN = '__hg_van__';
 
 $custA = $custB = 0;
 $tmplReefer = $tmplDryVan = $tmplNoDefaults = $tmplWithHourly = 0;
@@ -106,7 +110,7 @@ try {
     $tmplDryVan = db_insert('equipment_templates', [
         'name'         => "SMOKE DryVan {$TAG}",
         'slug'         => '__smoke_hg_dryvn__',
-        'category'     => 'dry_van',
+        'category'     => $VAN,
         'is_active'    => 1,
         'sort_order'   => 999,
     ]);
@@ -157,7 +161,7 @@ try {
     ]);
     db_insert('rate_card_items', [
         'rate_card_id'  => $cardGlobal,
-        'equipment_type'=> 'dry_van',
+        'equipment_type'=> $VAN,
         'daily_rate'    => '120.00',
         'weekly_rate'   => '700.00',
         'monthly_rate'  => '2500.00',

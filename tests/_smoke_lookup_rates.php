@@ -60,6 +60,16 @@ $self = __FILE__;
 $php  = PHP_BINARY;
 $TAG  = '__SMOKE_LOOKUP_RATES__';
 
+// S-EQTAX: use SYNTHETIC equipment-type slugs (not the real 'dry_van'/'chassis')
+// so this test's global-card-path assertions (T2/T7) can't be outranked by a
+// seeded is_default rate card of the same real type on a shared dev DB. The
+// lookup matches template.category against rate_card_items.equipment_type, so as
+// long as the fixture template + its cards share the slug, every tier still
+// resolves — and no production/seed card competes. (`category` is VARCHAR post
+// S-EQTAX-1, so a synthetic slug is valid.)
+$VAN = '__lr_van__';
+$CHS = '__lr_chs__';
+
 // IDs to clean up regardless of outcome.
 $custWith = $custWithout = 0;
 $cardCust = $cardGlobal = 0;
@@ -93,7 +103,7 @@ try {
 
     // Templates: a dry_van (no defaults → forces card tiers) + two 'other'.
     $tmplDryVan = db_insert('equipment_templates', [
-        'name' => "SMOKE DryVan {$TAG}", 'slug' => '__smoke_lr_dryvan__', 'category' => 'dry_van',
+        'name' => "SMOKE DryVan {$TAG}", 'slug' => '__smoke_lr_dryvan__', 'category' => $VAN,
         'is_active' => 1, 'sort_order' => 999,
     ]);
     $tmplDefaults = db_insert('equipment_templates', [
@@ -113,7 +123,7 @@ try {
         'effective_from' => $from, 'effective_to' => null, 'created_by' => null,
     ]);
     db_insert('rate_card_items', [
-        'rate_card_id' => $cardGlobal, 'equipment_type' => 'dry_van',
+        'rate_card_id' => $cardGlobal, 'equipment_type' => $VAN,
         'daily_rate' => '120.00', 'mileage_rate' => '0.0500', 'mileage_unit' => 'km', 'currency' => 'CAD',
     ]);
 
@@ -123,7 +133,7 @@ try {
         'effective_from' => $from, 'effective_to' => null, 'created_by' => null,
     ]);
     db_insert('rate_card_items', [
-        'rate_card_id' => $cardCust, 'equipment_type' => 'dry_van',
+        'rate_card_id' => $cardCust, 'equipment_type' => $VAN,
         'daily_rate' => '150.00', 'mileage_rate' => '0.1800', 'mileage_unit' => 'km', 'currency' => 'CAD',
     ]);
 
@@ -134,18 +144,18 @@ try {
     //   NOT set it per card), a global card CAN carry a value, and a per-card
     //   value is only needed to OVERRIDE the default.
     $tmplChassis = db_insert('equipment_templates', [
-        'name' => "SMOKE Chassis {$TAG}", 'slug' => '__smoke_lr_chassis__', 'category' => 'chassis',
+        'name' => "SMOKE Chassis {$TAG}", 'slug' => '__smoke_lr_chassis__', 'category' => $CHS,
         'is_active' => 1, 'sort_order' => 999,
     ]);
     // Global chassis item carries an explicit, distinctive minimum_days=7.
     db_insert('rate_card_items', [
-        'rate_card_id' => $cardGlobal, 'equipment_type' => 'chassis',
+        'rate_card_id' => $cardGlobal, 'equipment_type' => $CHS,
         'daily_rate' => '90.00', 'currency' => 'CAD', 'minimum_days' => 7,
     ]);
     // Customer chassis item is BLANK (minimum_days omitted → NULL): the
     // "I didn't set Min days on my customer's card" case.
     db_insert('rate_card_items', [
-        'rate_card_id' => $cardCust, 'equipment_type' => 'chassis',
+        'rate_card_id' => $cardCust, 'equipment_type' => $CHS,
         'daily_rate' => '100.00', 'currency' => 'CAD',
     ]);
     // A third customer whose own chassis card EXPLICITLY overrides to 5 days.
@@ -155,7 +165,7 @@ try {
         'effective_from' => $from, 'effective_to' => null, 'created_by' => null,
     ]);
     db_insert('rate_card_items', [
-        'rate_card_id' => $cardOverride, 'equipment_type' => 'chassis',
+        'rate_card_id' => $cardOverride, 'equipment_type' => $CHS,
         'daily_rate' => '100.00', 'currency' => 'CAD', 'minimum_days' => 5,
     ]);
 
