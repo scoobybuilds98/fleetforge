@@ -50,7 +50,8 @@ if ($fields) {
 
 // ── Fetch existing record ──────────────────────────────────────
 $existing = db_row(
-    "SELECT id, name, updated_at FROM equipment_templates WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, name, updated_at, category, category_id, subcategory_id
+       FROM equipment_templates WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
 if (!$existing) {
@@ -105,14 +106,50 @@ if (isset($body['name'])) {
     }
 }
 
-if (isset($body['category'])) {
-    $validCategories = ['chassis','dry_van','reefer','container','flatbed',
-                        'step_deck','lowboy','tanker','dump','combo','other'];
-    $cat = clean_string($body['category']);
-    if (!in_array($cat, $validCategories, true)) {
-        $fields['category'] = 'Please select a valid category.';
-    } else {
-        $updates['category'] = $cat;
+// ── S-EQTAX: two-level taxonomy on edit. Accept category_id (+ optional
+// subcategory_id) from the new form; fall back to the legacy `category` slug for
+// back-compat callers. The legacy `category` mirror is only RECOMPUTED when the
+// classification actually changes, so an unrelated edit never shifts an existing
+// template's report line or rate-card matching.
+$catTouched = array_key_exists('category_id', $body)
+           || array_key_exists('subcategory_id', $body)
+           || array_key_exists('category', $body);
+if ($catTouched) {
+    $categoryId    = clean_int($body['category_id'] ?? null);
+    $subcategoryId = clean_int($body['subcategory_id'] ?? null);
+    $legacyCatSlug = array_key_exists('category', $body) ? clean_string($body['category'], 50) : null;
+
+    $categoryRow = null;
+    if ($categoryId) {
+        $categoryRow = db_row("SELECT id, slug FROM equipment_categories WHERE id = ? AND deleted_at IS NULL", [$categoryId]);
+        if (!$categoryRow) { $fields['category_id'] = 'Please select a valid category.'; }
+    } elseif ($legacyCatSlug !== null && $legacyCatSlug !== '') {
+        $categoryRow = db_row("SELECT id, slug FROM equipment_categories WHERE slug = ? AND deleted_at IS NULL", [$legacyCatSlug]);
+        if (!$categoryRow) { $fields['category'] = 'Please select a valid category.'; }
+    } elseif ($existing['category_id']) {
+        // Only a subcategory change was sent — keep the current category.
+        $categoryRow = db_row("SELECT id, slug FROM equipment_categories WHERE id = ?", [(int) $existing['category_id']]);
+    }
+
+    $subcategoryRow = null;
+    if ($subcategoryId && $categoryRow) {
+        $subcategoryRow = db_row(
+            "SELECT id, slug FROM equipment_subcategories WHERE id = ? AND category_id = ? AND deleted_at IS NULL",
+            [$subcategoryId, (int) $categoryRow['id']]
+        );
+        if (!$subcategoryRow) { $fields['subcategory_id'] = 'Please select a valid sub-category for this category.'; }
+    }
+
+    if ($categoryRow && !isset($fields['category_id']) && !isset($fields['category']) && !isset($fields['subcategory_id'])) {
+        $newCatId = (int) $categoryRow['id'];
+        $newSubId = $subcategoryRow ? (int) $subcategoryRow['id'] : null;
+        $updates['category_id']    = $newCatId;
+        $updates['subcategory_id'] = $newSubId;
+        $oldCatId = $existing['category_id'] !== null ? (int) $existing['category_id'] : null;
+        $oldSubId = $existing['subcategory_id'] !== null ? (int) $existing['subcategory_id'] : null;
+        if ($newCatId !== $oldCatId || $newSubId !== $oldSubId) {
+            $updates['category'] = (string) ($subcategoryRow['slug'] ?? $categoryRow['slug']);
+        }
     }
 }
 

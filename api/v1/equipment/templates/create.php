@@ -44,14 +44,40 @@ if (!$name) {
     $fields['name'] = 'Template name is required.';
 }
 
-$validCategories = ['chassis','dry_van','reefer','container','flatbed',
-                    'step_deck','lowboy','tanker','dump','combo','other'];
-$category = clean_string($body['category'] ?? null);
-if (!$category) {
-    $fields['category'] = 'Please select a category.';
-} elseif (!in_array($category, $validCategories, true)) {
-    $fields['category'] = 'Please select a valid category.';
+// ── S-EQTAX: two-level taxonomy. Accept category_id (+ optional subcategory_id)
+// from the new form; fall back to resolving the legacy `category` slug for
+// back-compat callers (AI write path / older clients). The legacy `category`
+// column is RETAINED as a denormalized "type slug" mirror: it is the
+// sub-category slug when one is chosen, else the category slug — so reports,
+// rate-matching, and display keep working off a single string.
+$categoryId    = clean_int($body['category_id'] ?? null);
+$subcategoryId = clean_int($body['subcategory_id'] ?? null);
+$legacyCatSlug = clean_string($body['category'] ?? null, 50);
+
+$categoryRow = null;
+if ($categoryId) {
+    $categoryRow = db_row("SELECT id, slug FROM equipment_categories WHERE id = ? AND deleted_at IS NULL", [$categoryId]);
+    if (!$categoryRow) { $fields['category_id'] = 'Please select a valid category.'; }
+} elseif ($legacyCatSlug !== null && $legacyCatSlug !== '') {
+    $categoryRow = db_row("SELECT id, slug FROM equipment_categories WHERE slug = ? AND deleted_at IS NULL", [$legacyCatSlug]);
+    if (!$categoryRow) { $fields['category'] = 'Please select a valid category.'; }
+} else {
+    $fields['category_id'] = 'Please select a category.';
 }
+
+$subcategoryRow = null;
+if ($subcategoryId && $categoryRow) {
+    $subcategoryRow = db_row(
+        "SELECT id, slug FROM equipment_subcategories WHERE id = ? AND category_id = ? AND deleted_at IS NULL",
+        [$subcategoryId, (int) $categoryRow['id']]
+    );
+    if (!$subcategoryRow) { $fields['subcategory_id'] = 'Please select a valid sub-category for this category.'; }
+}
+
+// Mirror = sub-category slug when chosen, else category slug.
+$category              = $categoryRow ? (string) ($subcategoryRow['slug'] ?? $categoryRow['slug']) : null;
+$resolvedCategoryId    = $categoryRow    ? (int) $categoryRow['id']    : null;
+$resolvedSubcategoryId = $subcategoryRow ? (int) $subcategoryRow['id'] : null;
 
 // Helper: check decimal >= 0 with specific message
 $checkNonNegDecimal = function ($raw, string $fieldName, string $label) use (&$fields) {
@@ -216,7 +242,7 @@ $newId = null;
 try {
 db_transaction(function () use (
     &$newId, $userId,
-    $name, $slug, $description, $category, $brand, $model,
+    $name, $slug, $description, $category, $resolvedCategoryId, $resolvedSubcategoryId, $brand, $model,
     $lengthFt, $heightFt, $widthFt, $weightCap, $wheelSize, $tireSize, $axleCount,
     $ownershipType, $yardLocation, $trackingProvider,
     $cviInterval, $mviInterval, $regInterval, $insInterval,
@@ -228,6 +254,8 @@ db_transaction(function () use (
         'slug'                               => $slug,
         'description'                        => $description,
         'category'                           => $category,
+        'category_id'                        => $resolvedCategoryId,
+        'subcategory_id'                     => $resolvedSubcategoryId,
         'brand'                              => $brand,
         'model'                              => $model,
         'default_length_ft'                  => $lengthFt,
@@ -265,7 +293,7 @@ db_transaction(function () use (
         'entity_type'  => 'equipment_template',
         'entity_id'    => $newId,
         'entity_label' => $name,
-        'new_values'   => json_encode(['name' => $name, 'category' => $category]),
+        'new_values'   => json_encode(['name' => $name, 'category' => $category, 'category_id' => $resolvedCategoryId, 'subcategory_id' => $resolvedSubcategoryId]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 });
