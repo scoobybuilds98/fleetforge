@@ -403,7 +403,14 @@ class WriteRegistry
      */
     private static function validateCategory(array $entry, array $record, string $newValue, string $label, string $column): array
     {
-        $validCats = ['chassis', 'dry_van', 'reefer', 'container', 'flatbed', 'step_deck', 'lowboy', 'tanker', 'dump', 'combo', 'other'];
+        // S-EQTAX: valid category values come from the operator-managed taxonomy
+        // (category slugs + sub-category slugs, so a sub-type like "combo" is
+        // accepted), not a dead hardcoded enum. Reassignment matches the unit's
+        // template by the legacy `category` mirror, which holds one of these slugs.
+        $validCats = array_values(array_unique(array_merge(
+            array_column(db_select("SELECT slug FROM equipment_categories WHERE deleted_at IS NULL AND is_active = 1"), 'slug'),
+            array_column(db_select("SELECT slug FROM equipment_subcategories WHERE deleted_at IS NULL AND is_active = 1"), 'slug')
+        )));
         $cat = strtolower($newValue);
         if (!in_array($cat, $validCats, true)) {
             return ['error' => "\"{$newValue}\" isn't a valid category. Valid: " . implode(', ', $validCats) . '.'];
