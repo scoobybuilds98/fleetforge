@@ -30,26 +30,20 @@ foreach (db_select(
       WHERE deleted_at IS NULL AND category_id IS NOT NULL GROUP BY category_id"
 ) as $r) { $catCounts[(int) $r['category_id']] = (int) $r['n']; }
 
-$subCounts = [];
+// S-EQTAX (two-level): the equipment types (templates) filed under each category,
+// so the manage screen shows the full Category → Equipment Type structure.
+$typesByCat = [];
 foreach (db_select(
-    "SELECT subcategory_id, COUNT(*) n FROM equipment_templates
-      WHERE deleted_at IS NULL AND subcategory_id IS NOT NULL GROUP BY subcategory_id"
-) as $r) { $subCounts[(int) $r['subcategory_id']] = (int) $r['n']; }
-
-$subsByCat = [];
-foreach (db_select(
-    "SELECT id, category_id, slug, label, is_active, sort_order
-       FROM equipment_subcategories WHERE deleted_at IS NULL
-      ORDER BY sort_order, label"
-) as $s) {
-    $cid = (int) $s['category_id'];
-    $subsByCat[$cid][] = [
-        'id'             => (int) $s['id'],
-        'slug'           => $s['slug'],
-        'label'          => $s['label'],
-        'is_active'      => (int) $s['is_active'],
-        'sort_order'     => (int) $s['sort_order'],
-        'template_count' => $subCounts[(int) $s['id']] ?? 0,
+    "SELECT id, category_id, name, is_active
+       FROM equipment_templates
+      WHERE deleted_at IS NULL AND category_id IS NOT NULL
+      ORDER BY name"
+) as $t) {
+    $cid = (int) $t['category_id'];
+    $typesByCat[$cid][] = [
+        'id'        => (int) $t['id'],
+        'name'      => $t['name'],
+        'is_active' => (int) $t['is_active'],
     ];
 }
 
@@ -68,7 +62,7 @@ foreach (db_select(
         'is_active'                    => (int) $c['is_active'],
         'sort_order'                   => (int) $c['sort_order'],
         'template_count'               => $catCounts[$cid] ?? 0,
-        'subcategories'                => $subsByCat[$cid] ?? [],
+        'equipment_types'              => $typesByCat[$cid] ?? [],
     ];
 }
 

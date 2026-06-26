@@ -32,14 +32,9 @@ if (!$templateId) {
     exit;
 }
 
-// S-EQTAX: two-level taxonomy options for the linked Category → Sub-category
-// selectors (active rows; sub-category filtered client-side by category_id).
+// S-EQTAX (two-level): the categories an equipment type can be filed under.
 $eqCategories = db_select(
     "SELECT id, slug, label FROM equipment_categories
-      WHERE is_active = 1 AND deleted_at IS NULL ORDER BY sort_order, label"
-);
-$eqSubcategories = db_select(
-    "SELECT id, category_id, slug, label FROM equipment_subcategories
       WHERE is_active = 1 AND deleted_at IS NULL ORDER BY sort_order, label"
 );
 
@@ -115,50 +110,18 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" data-error-for="name"></div>
                     </div>
 
-                    <!-- S-EQTAX: linked Category → Sub-category selectors. -->
-                    <div class="form-row-2">
-                        <div class="form-group">
-                            <label class="form-label required" for="category_id">Category</label>
-                            <select id="category_id" name="category_id" class="form-control form-select"
-                                    x-model="form.category_id" @change="onCategoryChange()">
-                                <option value="">— Select category —</option>
-                                <template x-for="c in categories" :key="c.id">
-                                    <option :value="c.id" x-text="c.label"></option>
-                                </template>
-                            </select>
-                            <div class="form-hint">Top-level type. Billing rules (e.g. the short-lease minimum) attach here.</div>
-                            <div class="field-error" data-error-for="category_id"></div>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="form-label" for="subcategory_id">Sub-category</label>
-                            <div style="display:flex;gap:.5rem;align-items:stretch;">
-                                <select id="subcategory_id" name="subcategory_id" class="form-control form-select" style="flex:1;"
-                                        x-model="form.subcategory_id"
-                                        :disabled="!form.category_id || addingSub">
-                                    <option value="">— None —</option>
-                                    <template x-for="s in subcatOptions" :key="s.id">
-                                        <option :value="s.id" x-text="s.label"></option>
-                                    </template>
-                                </select>
-                                <button type="button" class="btn btn-secondary" x-show="!addingSub"
-                                        @click="startAddSub()" :disabled="!form.category_id"
-                                        title="Create a new sub-category under the selected category — without leaving this page">+ New</button>
-                            </div>
-                            <!-- S-EQTAX-SUBCAT-QUICKADD: create a sub-category inline -->
-                            <div x-show="addingSub" x-transition style="display:flex;gap:.5rem;margin-top:.5rem;">
-                                <input type="text" class="form-control" style="flex:1;" maxlength="100"
-                                       x-ref="newSubInput" x-model="newSubLabel"
-                                       placeholder="New sub-category name (e.g. 40' Tridem)…"
-                                       @keydown.enter.prevent="createSub()" @keydown.escape="cancelAddSub()">
-                                <button type="button" class="btn btn-primary" @click="createSub()" :disabled="!newSubLabel.trim() || savingSub">Add</button>
-                                <button type="button" class="btn btn-ghost" @click="cancelAddSub()">Cancel</button>
-                            </div>
-                            <div class="form-hint" x-show="!form.category_id">Pick a category first.</div>
-                            <div class="form-hint" x-show="form.category_id && !addingSub && subcatOptions.length === 0">No sub-types yet — click <strong>+ New</strong> to add one under this category.</div>
-                            <div class="form-hint" x-show="form.category_id && !addingSub && subcatOptions.length > 0">Not listed? Click <strong>+ New</strong> to add a sub-category without leaving this page.</div>
-                            <div class="field-error" data-error-for="subcategory_id"></div>
-                        </div>
+                    <!-- S-EQTAX (two-level): an equipment type is filed directly under a category. -->
+                    <div class="form-group">
+                        <label class="form-label required" for="category_id">Category</label>
+                        <select id="category_id" name="category_id" class="form-control form-select"
+                                x-model="form.category_id">
+                            <option value="">— Select category —</option>
+                            <template x-for="c in categories" :key="c.id">
+                                <option :value="c.id" x-text="c.label"></option>
+                            </template>
+                        </select>
+                        <div class="form-hint">The broad class this equipment belongs to. Billing rules like the short-lease minimum apply per category. Add or edit categories under <a href="<?= base_url('equipment/categories') ?>">Manage Categories</a>.</div>
+                        <div class="field-error" data-error-for="category_id"></div>
                     </div>
 
                     <div class="form-row-2">
@@ -402,52 +365,12 @@ function FF_EditTemplate(templateId) {
         updatedAt:  null,   // captured on load for D19 optimistic lock
         showSuccessOverlay: false,
 
-        // S-EQTAX: taxonomy options (server-rendered) for the linked selectors.
+        // S-EQTAX (two-level): the categories an equipment type can be filed under.
         categories: <?= json_encode(array_map(fn($c) => ['id' => (int)$c['id'], 'label' => $c['label']], $eqCategories), JSON_HEX_TAG | JSON_HEX_AMP) ?>,
-        allSubcats: <?= json_encode(array_map(fn($s) => ['id' => (int)$s['id'], 'category_id' => (int)$s['category_id'], 'label' => $s['label']], $eqSubcategories), JSON_HEX_TAG | JSON_HEX_AMP) ?>,
-        get subcatOptions() {
-            if (!this.form.category_id) return [];
-            return this.allSubcats.filter(s => String(s.category_id) === String(this.form.category_id));
-        },
-        onCategoryChange() {
-            if (!this.subcatOptions.some(s => String(s.id) === String(this.form.subcategory_id))) {
-                this.form.subcategory_id = '';
-            }
-            if (this.addingSub) this.cancelAddSub();
-        },
-        // S-EQTAX-SUBCAT-QUICKADD: create a sub-category inline under the chosen category.
-        addingSub:   false,
-        newSubLabel: '',
-        savingSub:   false,
-        startAddSub() {
-            if (!this.form.category_id) return;
-            this.addingSub = true;
-            this.newSubLabel = '';
-            this.$nextTick(() => this.$refs.newSubInput?.focus());
-        },
-        cancelAddSub() { this.addingSub = false; this.newSubLabel = ''; },
-        async createSub() {
-            const label = (this.newSubLabel || '').trim();
-            if (!label || !this.form.category_id || this.savingSub) return;
-            this.savingSub = true;
-            try {
-                const r = await FF_Api.post('<?= base_url('api/v1/equipment/subcategories/create') ?>',
-                    { category_id: parseInt(this.form.category_id, 10), label });
-                if (r.success && r.data) {
-                    this.allSubcats.push({ id: r.data.id, category_id: r.data.category_id, label: r.data.label });
-                    this.form.subcategory_id = r.data.id;
-                    this.addingSub = false; this.newSubLabel = '';
-                    FF_Toast.success('Sub-category added.');
-                } else {
-                    FF_Toast.error(r.error?.message || r.error?.fields?.label || 'Could not add sub-category.');
-                }
-            } finally { this.savingSub = false; }
-        },
 
         form: {
             name:                               '',
             category_id:                        '',
-            subcategory_id:                     '',
             description:                        '',
             brand:                              '',
             model:                              '',
@@ -629,18 +552,12 @@ function FF_EditTemplate(templateId) {
                 if (v !== '' && v !== null && v !== undefined) payload[k] = v;
             });
             // Coerce integer fields
-            ['category_id', 'subcategory_id',
+            ['category_id',
              'default_weight_capacity_lbs', 'default_axle_count',
              'default_cvi_interval_days', 'default_mvi_interval_days',
              'default_registration_interval_days', 'default_insurance_interval_days'].forEach(f => {
                 if (payload[f] !== undefined) payload[f] = parseInt(payload[f], 10);
             });
-            // S-EQTAX: when the operator clears the sub-category, send an explicit
-            // empty so update.php sets subcategory_id = NULL (omitting it would also
-            // clear it, but being explicit keeps intent obvious).
-            if (this.form.category_id && (this.form.subcategory_id === '' || this.form.subcategory_id === null)) {
-                payload.subcategory_id = '';
-            }
 
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/update.php') ?>', payload);

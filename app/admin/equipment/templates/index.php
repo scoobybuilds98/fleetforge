@@ -22,18 +22,12 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('equipment', 'view');
 
-// S-EQTAX: the category filter targets the legacy `category` mirror, which holds
-// a category slug for most templates and a sub-category slug for sub-typed ones
-// (e.g. Combo). Build the dropdown from the DISTINCT mirror values actually
-// present so every option returns rows; label from the taxonomy when known.
-$eqMirrorVals = array_column(
-    db_select("SELECT DISTINCT category FROM equipment_templates
-                WHERE deleted_at IS NULL AND category IS NOT NULL AND category <> '' ORDER BY category"),
-    'category'
+// S-EQTAX (two-level): filter equipment types by their category. Options are the
+// active categories; the filter sends category_id to the API.
+$eqCategories = db_select(
+    "SELECT id, label FROM equipment_categories
+      WHERE is_active = 1 AND deleted_at IS NULL ORDER BY sort_order, label"
 );
-$eqSlugLabels = [];
-foreach (db_select("SELECT slug, label FROM equipment_categories WHERE deleted_at IS NULL") as $r) { $eqSlugLabels[$r['slug']] = $r['label']; }
-foreach (db_select("SELECT slug, label FROM equipment_subcategories WHERE deleted_at IS NULL") as $r) { $eqSlugLabels[$r['slug']] = $eqSlugLabels[$r['slug']] ?? $r['label']; }
 
 $pageTitle      = 'Equipment Types';
 $helpModuleSlug = 'equipment';
@@ -80,11 +74,11 @@ require_once FF_ROOT . '/includes/header.php';
                    style="min-width:220px;"
                    aria-label="Search equipment types">
             <select class="form-select form-control-sm"
-                    x-model="filters.category"
+                    x-model="filters.category_id"
                     @change="resetPage()">
                 <option value="">All Categories</option>
-                <?php foreach ($eqMirrorVals as $slug): ?>
-                    <option value="<?= e($slug) ?>"><?= e($eqSlugLabels[$slug] ?? ucwords(str_replace('_', ' ', $slug))) ?></option>
+                <?php foreach ($eqCategories as $cat): ?>
+                    <option value="<?= (int) $cat['id'] ?>"><?= e($cat['label']) ?></option>
                 <?php endforeach; ?>
             </select>
         </div>
@@ -152,7 +146,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 </td>
                                 <td>
                                     <span class="badge badge-info badge-no-dot"
-                                          x-text="tpl.category.replace(/_/g,' ')"
+                                          x-text="tpl.category_label || (tpl.category || '').replace(/_/g,' ')"
                                           style="text-transform:capitalize;">
                                     </span>
                                 </td>
@@ -231,7 +225,7 @@ function FF_Templates() {
         loading:   true,
         loadError: null,
         pagination:{},
-        filters: { search: '', category: '' },
+        filters: { search: '', category_id: '' },
         currentPage: 1,
 
         async init() { await this.load(); },
@@ -240,8 +234,8 @@ function FF_Templates() {
             this.loading   = true;
             this.loadError = null;
             const params = new URLSearchParams();
-            if (this.filters.search)   params.set('search',   this.filters.search);
-            if (this.filters.category) params.set('category', this.filters.category);
+            if (this.filters.search)      params.set('search',      this.filters.search);
+            if (this.filters.category_id) params.set('category_id', this.filters.category_id);
             params.set('page',     this.currentPage);
             params.set('per_page', 50);
             try {

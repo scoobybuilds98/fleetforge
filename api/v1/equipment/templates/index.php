@@ -33,33 +33,18 @@ require_permission('equipment', 'view');
 
 // ── Input ──────────────────────────────────────────────────────
 $search   = clean_string($_GET['search'] ?? null, 255);
-$category = clean_string($_GET['category'] ?? null);
-$active   = isset($_GET['active']) ? (int) $_GET['active'] : null;
-$sort     = clean_string($_GET['sort'] ?? 'name');
-$page     = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
-$perPage  = min(100, max(1, clean_int($_GET['per_page'] ?? 25) ?? 25));
-
-// ── Validate the category filter ───────────────────────────────
-// S-EQTAX: the filter targets the legacy `category` mirror, which is now an
-// operator-managed slug (category or sub-category), not a fixed enum. Validate
-// against the slugs actually present so an unknown value falls back to "all"
-// (preserving prior behaviour) while operator-added types filter immediately.
-if ($category !== null && $category !== '') {
-    $known = array_column(
-        db_select("SELECT DISTINCT category FROM equipment_templates WHERE deleted_at IS NULL"),
-        'category'
-    );
-    if (!in_array($category, $known, true)) {
-        $category = null;
-    }
-} else {
-    $category = null;
-}
+// S-EQTAX (two-level): filter by the real category via category_id (the
+// authoritative classification), not the legacy `category` mirror string.
+$categoryId = clean_int($_GET['category_id'] ?? null);
+$active     = isset($_GET['active']) ? (int) $_GET['active'] : null;
+$sort       = clean_string($_GET['sort'] ?? 'name');
+$page       = max(1, clean_int($_GET['page'] ?? 1) ?? 1);
+$perPage    = min(100, max(1, clean_int($_GET['per_page'] ?? 25) ?? 25));
 
 // ── Sort allowlist ─────────────────────────────────────────────
 $sortMap = [
     'name'       => 't.name ASC',
-    'category'   => 't.category ASC, t.name ASC',
+    'category'   => 't.category_id ASC, t.name ASC',
     'created_at' => 't.created_at DESC',
 ];
 $orderBy = $sortMap[$sort] ?? 't.name ASC';
@@ -73,9 +58,9 @@ if ($search !== null && $search !== '') {
     $params[]     = '%' . $search . '%';
 }
 
-if ($category !== null) {
-    $conditions[] = 't.category = ?';
-    $params[]     = $category;
+if ($categoryId) {
+    $conditions[] = 't.category_id = ?';
+    $params[]     = $categoryId;
 }
 
 // WHY: allow filtering to only active templates (e.g. for unit-creation dropdowns)
@@ -99,6 +84,7 @@ $rows = db_select(
         t.name,
         t.slug,
         t.category,
+        ec.label AS category_label,
         t.brand,
         t.model,
         t.default_length_ft,
@@ -116,6 +102,7 @@ $rows = db_select(
        FROM equipment_templates t
        LEFT JOIN equipment_units u
               ON u.template_id = t.id AND u.deleted_at IS NULL
+       LEFT JOIN equipment_categories ec ON ec.id = t.category_id
       {$whereSQL}
       GROUP BY t.id
       ORDER BY {$orderBy}
@@ -131,6 +118,7 @@ foreach ($rows as $row) {
         'name'                => $row['name'],
         'slug'                => $row['slug'],
         'category'            => $row['category'],
+        'category_label'      => $row['category_label'] ?? null,
         'brand'               => $row['brand'],
         'model'               => $row['model'],
         'default_length_ft'   => $row['default_length_ft'],
