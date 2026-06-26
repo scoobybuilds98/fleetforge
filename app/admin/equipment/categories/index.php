@@ -85,6 +85,18 @@ require_once FF_ROOT . '/includes/header.php';
                     <button class="btn btn-outline-danger btn-sm" @click="deleteCategory(cat)">Delete</button>
                 </div>
 
+                <!-- S-EQTAX: demote this category into a sub-category of another. -->
+                <div x-show="categories.length > 1" style="display:flex;gap:0.5rem;align-items:center;margin-top:0.6rem;">
+                    <span class="text-secondary text-sm">Make this a sub-type of:</span>
+                    <select class="form-control form-control-sm" style="max-width:200px;" x-model="cat._moveTo">
+                        <option value="">— choose a parent —</option>
+                        <template x-for="p in categories.filter(p => p.id !== cat.id)" :key="p.id">
+                            <option :value="p.id" x-text="p.label"></option>
+                        </template>
+                    </select>
+                    <button class="btn btn-ghost btn-sm" @click="convertToSub(cat)" :disabled="!cat._moveTo || busy">Move under</button>
+                </div>
+
                 <!-- Sub-categories -->
                 <div style="margin-top:0.85rem;padding-left:1rem;border-left:2px solid var(--border-color, #e5e7eb);">
                     <template x-for="sub in cat.subcategories" :key="sub.id">
@@ -129,7 +141,7 @@ function FF_EquipmentTaxonomy() {
             this.loading = true;
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/equipment/categories') ?>');
-                this.categories = (r.success && r.data) ? r.data.categories.map(c => ({ ...c, _newSub: '' })) : [];
+                this.categories = (r.success && r.data) ? r.data.categories.map(c => ({ ...c, _newSub: '', _moveTo: '' })) : [];
             } catch (e) {
                 FF_Toast.error('Could not load categories.');
             } finally {
@@ -171,6 +183,24 @@ function FF_EquipmentTaxonomy() {
             const r = await FF_Api.post('<?= base_url('api/v1/equipment/categories/delete') ?>', { id: cat.id });
             if (r.success) { FF_Toast.success('Category deleted.'); this.load(); }
             else FF_Toast.error(r.error?.message || 'Could not delete category.');
+        },
+
+        async convertToSub(cat) {
+            const parent = this.categories.find(p => String(p.id) === String(cat._moveTo));
+            if (!parent) return;
+            const ruleNote = parent.enforce_minimum_billing_days === 1
+                ? parent.label + ' applies the short-lease minimum, so this equipment will too.'
+                : parent.label + ' does NOT apply the short-lease minimum, so this equipment will follow that.';
+            if (!(await FF_Confirm.ask(
+                'Make "' + cat.label + '" a sub-type under "' + parent.label + '"? Its equipment types move under '
+                + parent.label + ' and "' + cat.label + '" stops being a top-level category. ' + ruleNote))) return;
+            this.busy = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/equipment/categories/convert_to_subcategory') ?>',
+                    { id: cat.id, parent_category_id: parent.id });
+                if (r.success) { FF_Toast.success('"' + cat.label + '" is now a sub-type of "' + parent.label + '" (' + (r.data?.moved_templates ?? 0) + ' type(s) moved).'); await this.load(); }
+                else FF_Toast.error(r.error?.message || 'Could not convert category.');
+            } finally { this.busy = false; }
         },
 
         async addSub(cat) {
