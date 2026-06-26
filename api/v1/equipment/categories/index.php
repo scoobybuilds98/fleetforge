@@ -31,19 +31,23 @@ foreach (db_select(
 ) as $r) { $catCounts[(int) $r['category_id']] = (int) $r['n']; }
 
 // S-EQTAX (two-level): the equipment types (templates) filed under each category,
-// so the manage screen shows the full Category → Equipment Type structure.
+// so the manage screen shows the full Category → Equipment Type structure. unit_count
+// drives the delete guard (a type with units can't be removed).
 $typesByCat = [];
 foreach (db_select(
-    "SELECT id, category_id, name, is_active
-       FROM equipment_templates
-      WHERE deleted_at IS NULL AND category_id IS NOT NULL
-      ORDER BY name"
+    "SELECT t.id, t.category_id, t.name, t.is_active, COUNT(u.id) AS unit_count
+       FROM equipment_templates t
+       LEFT JOIN equipment_units u ON u.template_id = t.id AND u.deleted_at IS NULL
+      WHERE t.deleted_at IS NULL AND t.category_id IS NOT NULL
+      GROUP BY t.id
+      ORDER BY t.name"
 ) as $t) {
     $cid = (int) $t['category_id'];
     $typesByCat[$cid][] = [
-        'id'        => (int) $t['id'],
-        'name'      => $t['name'],
-        'is_active' => (int) $t['is_active'],
+        'id'         => (int) $t['id'],
+        'name'       => $t['name'],
+        'is_active'  => (int) $t['is_active'],
+        'unit_count' => (int) $t['unit_count'],
     ];
 }
 

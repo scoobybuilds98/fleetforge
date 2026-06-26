@@ -46,11 +46,13 @@ require_once FF_ROOT . '/includes/header.php';
 .eqtax-switch input:checked ~ .knob{transform:translateX(18px);}
 .eqtax-switch input:disabled ~ .track{opacity:.5;}
 .eqtax-section-label{font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary,#64748b);font-weight:700;margin:.4rem 0 .3rem;}
-.eqtax-types{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;}
-.eqtax-type-chip{display:inline-flex;align-items:center;gap:.3rem;font-size:.82rem;padding:.25rem .55rem;border-radius:var(--radius-sm);background:var(--bg-surface,var(--bg-card));border:1px solid var(--border-color);color:var(--text-primary,inherit);text-decoration:none;}
-.eqtax-type-chip:hover{border-color:var(--color-primary);}
-.eqtax-type-chip.is-inactive{opacity:.55;}
-.eqtax-add-type{display:inline-flex;align-items:center;gap:.25rem;font-size:.82rem;padding:.25rem .55rem;border-radius:var(--radius-sm);border:1px dashed var(--border-color);color:var(--color-primary-text,var(--color-primary));text-decoration:none;}
+.eqtax-type-row{display:flex;align-items:center;gap:.6rem;padding:.45rem .15rem;border-bottom:1px solid var(--border-color);}
+.eqtax-type-row:last-of-type{border-bottom:none;}
+.eqtax-type-row.is-inactive{opacity:.55;}
+.eqtax-type-name{font-weight:500;color:var(--text-primary,inherit);text-decoration:none;}
+.eqtax-type-name:hover{color:var(--color-primary);text-decoration:underline;}
+.eqtax-type-meta{font-size:.78rem;color:var(--text-secondary,#64748b);}
+.eqtax-add-type{display:inline-flex;align-items:center;gap:.25rem;font-size:.82rem;margin-top:.6rem;padding:.3rem .6rem;border-radius:var(--radius-sm);border:1px dashed var(--border-color);color:var(--color-primary-text,var(--color-primary));text-decoration:none;}
 .eqtax-add-type:hover{border-color:var(--color-primary);}
 .eqtax-actions{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;}
 </style>
@@ -197,18 +199,20 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <!-- Equipment types in this category -->
                 <div class="eqtax-section-label">Equipment types in this category</div>
-                <div class="eqtax-types">
-                    <template x-for="t in cat.equipment_types" :key="t.id">
-                        <a class="eqtax-type-chip" :class="{ 'is-inactive': t.is_active !== 1 }"
-                           :href="'<?= base_url('equipment/templates/edit') ?>?id=' + t.id"
-                           :title="'Edit ' + t.name">
-                            <span x-text="t.name"></span>
-                            <span x-show="t.is_active !== 1" class="text-secondary" style="font-size:.7rem;">(inactive)</span>
-                        </a>
-                    </template>
-                    <span x-show="cat.equipment_types.length === 0" class="text-secondary text-sm" style="font-style:italic;">No equipment types yet.</span>
-                    <a class="eqtax-add-type" :href="'<?= base_url('equipment/templates/create') ?>?category_id=' + cat.id" title="Add a new equipment type filed under this category">+ Add equipment type</a>
-                </div>
+                <template x-for="t in cat.equipment_types" :key="t.id">
+                    <div class="eqtax-type-row" :class="{ 'is-inactive': t.is_active !== 1 }">
+                        <a class="eqtax-type-name" :href="'<?= base_url('equipment/templates/edit') ?>?id=' + t.id" x-text="t.name" :title="'Edit ' + t.name"></a>
+                        <span class="eqtax-type-meta" x-text="t.unit_count + ' unit' + (t.unit_count === 1 ? '' : 's')"></span>
+                        <span class="badge badge-gray badge-sm" x-show="t.is_active !== 1">inactive</span>
+                        <span style="flex:1;"></span>
+                        <a class="btn btn-ghost btn-sm" :href="'<?= base_url('equipment/templates/edit') ?>?id=' + t.id"><?= heroicon('pencil-square', 'btn-icon') ?> Edit</a>
+                        <button class="btn btn-ghost btn-sm" style="color:var(--color-danger-text);"
+                                @click="deleteType(cat, t)" :disabled="t.unit_count > 0"
+                                :title="t.unit_count > 0 ? ('Cannot delete — ' + t.unit_count + ' unit(s) use this type; reassign or remove them first') : 'Delete equipment type'"><?= heroicon('trash', 'btn-icon') ?></button>
+                    </div>
+                </template>
+                <div x-show="cat.equipment_types.length === 0" class="text-secondary text-sm" style="font-style:italic;padding:.45rem .15rem;">No equipment types yet.</div>
+                <a class="eqtax-add-type" :href="'<?= base_url('equipment/templates/create') ?>?category_id=' + cat.id" title="Add a new equipment type filed under this category">+ Add equipment type</a>
 
             </div>
         </div>
@@ -293,6 +297,19 @@ function FF_EquipmentCategories() {
             const r = await FF_Api.post('<?= base_url('api/v1/equipment/categories/delete') ?>', { id: cat.id });
             if (r.success) { FF_Toast.success('Category deleted.'); this.load(); }
             else FF_Toast.error(r.error?.message || 'Could not delete category.');
+        },
+
+        // S-EQTAX: remove an equipment type (template) straight from the category card.
+        // Server blocks deletion when units still reference it.
+        async deleteType(cat, t) {
+            if (t.unit_count > 0) {
+                FF_Toast.error(t.unit_count + ' unit(s) use "' + t.name + '" — reassign or remove them first.');
+                return;
+            }
+            if (!(await FF_Confirm.ask('Delete equipment type "' + t.name + '"? This cannot be undone.'))) return;
+            const r = await FF_Api.post('<?= base_url('api/v1/equipment/templates/delete') ?>', { id: t.id });
+            if (r.success) { FF_Toast.success('Equipment type deleted.'); this.load(); }
+            else FF_Toast.error(r.error?.message || 'Could not delete equipment type.');
         },
     };
 }
