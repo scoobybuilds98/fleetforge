@@ -645,18 +645,16 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Hourly Rate</label>
-                        <div style="margin-top:4px;">
-                            <template x-if="form.hourly_rate && parseFloat(form.hourly_rate) > 0">
-                                <span class="text-secondary" style="font-size:0.8125rem;">
-                                    $<span x-text="parseFloat(form.hourly_rate).toFixed(4)"></span>/hr
-                                    <span style="color:var(--text-muted);">(from rate card)</span>
-                                </span>
-                            </template>
-                            <template x-if="!form.hourly_rate || parseFloat(form.hourly_rate) <= 0">
-                                <span class="text-secondary" style="font-size:0.8125rem;">No hourly rate on this rate card</span>
-                            </template>
+                        <label class="form-label" for="hourly_rate">Hourly Rate</label>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number" id="hourly_rate" class="form-control font-mono"
+                                   x-model="form.hourly_rate" step="0.0001" min="0" placeholder="0.0000"
+                                   :readonly="ratesLocked"
+                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
+                            <span class="input-group-suffix">/hr</span>
                         </div>
+                        <div class="form-hint" style="margin-top:4px;">Optional — set a rate to bill engine/reefer hours. Pre-filled from the rate card; override if needed. The Starting Engine Hours field appears once a rate is entered.</div>
                     </div>
                 </div>
 
@@ -1459,6 +1457,15 @@ function FF_CreateLease() {
                 // prior GPS fetch is downgraded so it can't be treated as live.
                 this.odometerBanner = null;
                 if (this.form.odometer_start_km !== '' && this.form.odometer_start_km !== null) {
+                    this.odometerSource                 = 'manual';
+                    this.form.odometer_start_source     = 'manual';
+                    this.form.odometer_start_fetched_at = null;
+                } else {
+                    // S-LEASE-ODO-DEFAULT-ZERO: operators start each lease at
+                    // odometer 0, so pre-fill 0 for Manual mode instead of making
+                    // them type it every time. Samsara mode is untouched — it
+                    // fetches the real reading (a 0 there would overbill distance).
+                    this.form.odometer_start_km         = '0';
                     this.odometerSource                 = 'manual';
                     this.form.odometer_start_source     = 'manual';
                     this.form.odometer_start_fetched_at = null;
