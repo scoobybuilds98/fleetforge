@@ -598,15 +598,27 @@ tod_run('K3: operator Remove-N-days close is NOT relabelled (reduced period stay
 // ════════════════════════════════════════════════════════════════════════════
 echo "\n── Group L: chassis-only 3-day minimum + label ──────────────────────────\n";
 
-/** Point the lease's equipment-unit template at a category (rolled back with the txn). */
+/**
+ * Point the lease's equipment-unit template at a category (rolled back with the
+ * txn). S-EQTAX: the minimum is now gated by the category's
+ * enforce_minimum_billing_days flag resolved via category_id, so set the FK too
+ * and force the canonical enforce value (chassis enforces; everything else does
+ * not) — keeps each scenario hermetic regardless of dev-DB drift.
+ */
 function tod_set_unit_category(int $leaseId, string $category): void {
+    $enforce = ($category === 'chassis') ? 1 : 0;
+    db_execute(
+        "UPDATE equipment_categories SET enforce_minimum_billing_days = ? WHERE slug = ? AND deleted_at IS NULL",
+        [$enforce, $category]
+    );
     db_execute(
         "UPDATE equipment_templates et
            JOIN equipment_units eu ON eu.template_id = et.id
            JOIN leases l ON l.equipment_unit_id = eu.id
-            SET et.category = ?
+           JOIN equipment_categories ec ON ec.slug = ? AND ec.deleted_at IS NULL
+            SET et.category = ?, et.category_id = ec.id, et.subcategory_id = NULL
           WHERE l.id = ?",
-        [$category, $leaseId]
+        [$category, $category, $leaseId]
     );
 }
 
@@ -653,6 +665,41 @@ tod_run('L3: chassis + time-trim → combined label (minimum + return day not ch
         && str_contains($desc, 'return day not charged');// trim note
     $ok ? tod_pass("L3: net={$net} · {$desc}")
         : tod_fail('L3', "net={$net} (expect 300.00) desc=[{$desc}]");
+});
+
+tod_run('L4: combo sub-type INHERITS the Chassis minimum (S-EQTAX — the Jete\'s fix)', function () {
+    tod_set_grace(0);
+    // The real prod scenario: a "Combo" template whose legacy mirror is still
+    // 'combo' but whose category_id now points at Chassis. Billing reads the
+    // category flag via category_id, so the chassis minimum must inherit even
+    // though the mirror slug is not 'chassis'.
+    $lid = tod_make_lease('2026-06-01', '12:00', '2026-06-01', '13:00');
+    db_execute("UPDATE leases SET minimum_billing_days = 3 WHERE id = ?", [$lid]);
+    db_execute("UPDATE equipment_categories SET enforce_minimum_billing_days = 1 WHERE slug = 'chassis' AND deleted_at IS NULL");
+    // Ensure a Combo sub-category under Chassis, then point the template at it
+    // while leaving the mirror = 'combo'.
+    $chassisId = (int) db_row("SELECT id FROM equipment_categories WHERE slug = 'chassis' AND deleted_at IS NULL")['id'];
+    db_execute(
+        "INSERT INTO equipment_subcategories (category_id, slug, label)
+         VALUES (?, 'combo', 'Combo')
+         ON DUPLICATE KEY UPDATE label = VALUES(label)",
+        [$chassisId]
+    );
+    $comboSubId = (int) db_row("SELECT id FROM equipment_subcategories WHERE category_id = ? AND slug = 'combo'", [$chassisId])['id'];
+    db_execute(
+        "UPDATE equipment_templates et
+           JOIN equipment_units eu ON eu.template_id = et.id
+           JOIN leases l ON l.equipment_unit_id = eu.id
+            SET et.category = 'combo', et.category_id = ?, et.subcategory_id = ?
+          WHERE l.id = ?",
+        [$chassisId, $comboSubId, $lid]
+    );
+    $inv  = tod_close($lid, '2026-06-01', '2026-06-01');
+    $net  = tod_base_net($inv);
+    $desc = tod_base_desc($inv);
+    bccomp($net, '300.00', 2) === 0 && str_contains($desc, '3-day minimum')
+        ? tod_pass("L4: net={$net} · combo inherits chassis minimum · {$desc}")
+        : tod_fail('L4', "net={$net} (expect 300.00 — combo should inherit) desc=[{$desc}]");
 });
 
 // ════════════════════════════════════════════════════════════════════════════

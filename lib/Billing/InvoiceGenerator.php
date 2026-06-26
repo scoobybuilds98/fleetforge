@@ -125,11 +125,21 @@ class InvoiceGenerator
                         c.company_name        AS customer_company_name,
                         eu.samsara_vehicle_id   AS samsara_vehicle_id,
                         eu.samsara_entity_type  AS samsara_entity_type,
-                        et.category             AS equipment_category
+                        et.category             AS equipment_category,
+                        ec.enforce_minimum_billing_days AS category_enforce_min_days
                  FROM leases l
                  LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
                  LEFT JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
                  LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+                 -- S-EQTAX: resolve the equipment CATEGORY row that owns billing
+                 -- rules. Prefer the authoritative category_id FK; fall back to
+                 -- matching the legacy `category` slug mirror for rows not yet
+                 -- backfilled. The OR's second arm is gated on category_id IS NULL
+                 -- so at most one category row ever matches.
+                 LEFT JOIN equipment_categories ec
+                        ON ec.deleted_at IS NULL
+                       AND (ec.id = et.category_id
+                            OR (et.category_id IS NULL AND ec.slug = et.category))
                  WHERE l.id = ? AND l.deleted_at IS NULL",
                 [$leaseId]
             );
@@ -184,27 +194,28 @@ class InvoiceGenerator
                 ? (int)($lease['minimum_billing_days'] ?? 0)
                 : (int)(db_row('SELECT minimum_billing_days FROM leases WHERE id = ?', [$leaseId])['minimum_billing_days'] ?? 0);
 
-            // S-LEASE-MIN-DAYS-CATEGORY: the short-lease minimum applies ONLY to the
-            // equipment categories listed in settings 'lease.minimum_billing_days_categories'
-            // (comma-separated, default 'chassis'). When this lease's equipment category
-            // is NOT in that set, force the floor to 0 so the engine's >=2 binding guard
-            // (HolisticLeaseEngine::cumulativeCorrect) makes it a no-op and a normal
-            // actual-days charge is billed. Resolved at BILLING time (not lease create)
-            // so regenerate/reclose AUTO-CORRECTS existing backfilled draft leases that
-            // were created while the minimum still applied to everything. A missing/NULL
-            // category (soft-deleted or unmapped template) is treated as "not in set" —
-            // a chassis-only minimum must never silently apply to unknown equipment.
-            // Empty setting value = the minimum applies to NOTHING (operator opt-out).
+            // S-LEASE-MIN-DAYS-CATEGORY (S-EQTAX): the short-lease minimum applies
+            // ONLY to equipment categories that opt in via the per-category flag
+            // equipment_categories.enforce_minimum_billing_days. This replaces the
+            // old comma-separated 'lease.minimum_billing_days_categories' setting
+            // (left vestigial for one release for clean rollback) with a row-level
+            // flag the operator toggles from the taxonomy manage screen — and lets
+            // a sub-type INHERIT its category's rule (Combo, now a Chassis
+            // sub-category, gets the chassis minimum automatically). When this
+            // lease's category does not opt in, force the floor to 0 so the
+            // engine's >=2 binding guard (HolisticLeaseEngine::cumulativeCorrect)
+            // makes it a no-op and a normal actual-days charge is billed. Resolved
+            // at BILLING time so regenerate/reclose AUTO-CORRECTS existing draft
+            // leases. A missing/NULL category (soft-deleted/unmapped template, or a
+            // not-yet-backfilled row whose slug matches no category) is treated as
+            // "do not enforce" — the floor must never silently apply to unknown
+            // equipment. The N itself still comes from the frozen
+            // leases.minimum_billing_days column (resolved above), unchanged.
             if ($minBillingDays >= 2) {
-                $minDaysCatsRaw = (string) settings_get('lease.minimum_billing_days_categories', 'chassis');
-                $minDaysCategories = array_filter(
-                    array_map(static fn ($c) => strtolower(trim($c)), explode(',', $minDaysCatsRaw)),
-                    static fn ($c) => $c !== ''
-                );
-                $leaseCategory = isset($lease['equipment_category'])
-                    ? strtolower((string) $lease['equipment_category'])
-                    : '';
-                if ($leaseCategory === '' || !in_array($leaseCategory, $minDaysCategories, true)) {
+                $enforceMinDays = array_key_exists('category_enforce_min_days', $lease)
+                    ? (int) ($lease['category_enforce_min_days'] ?? 0)
+                    : 0;
+                if ($enforceMinDays !== 1) {
                     $minBillingDays = 0;
                 }
             }

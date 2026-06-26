@@ -106,19 +106,22 @@ function md_lease(array $overrides = []): int {
         'gps_opt_in'     => 0,
         'status'         => 'active',
     ], $overrides));
-    // S-LEASE-MIN-DAYS-CATEGORY: the minimum-billing-days floor is now gated to the
-    // equipment categories in settings 'lease.minimum_billing_days_categories'
-    // (default 'chassis'). Fixtures::createLease attaches the first equipment unit
-    // (a dry_van in dev seed), which would gate the floor OFF and defeat this smoke.
-    // This smoke tests the FLOOR MATH in isolation (the category gate is covered by
-    // _smoke_billing_time_of_day Group L), so pin the lease's equipment template to a
-    // minimum-eligible category ('chassis') so the floor under test actually binds.
-    // Reverts with the scenario's DbState::inTransaction ROLLBACK.
+    // S-LEASE-MIN-DAYS-CATEGORY (S-EQTAX): the minimum-billing-days floor is now
+    // gated by the per-category flag equipment_categories.enforce_minimum_billing_days,
+    // resolved via the template's category_id FK. Fixtures::createLease attaches the
+    // first equipment unit (a dry_van in dev seed, enforce=0), which would gate the
+    // floor OFF and defeat this smoke. This smoke tests the FLOOR MATH in isolation
+    // (the category gate itself is covered by _smoke_billing_time_of_day Group L), so
+    // pin the lease's template to the Chassis category AND force that category's
+    // enforce flag on, hermetically, so the floor under test actually binds. All
+    // reverts with the scenario's DbState::inTransaction ROLLBACK.
+    db_execute("UPDATE equipment_categories SET enforce_minimum_billing_days = 1 WHERE slug = 'chassis' AND deleted_at IS NULL");
     db_execute(
         "UPDATE equipment_templates et
            JOIN equipment_units eu ON eu.template_id = et.id
            JOIN leases l ON l.equipment_unit_id = eu.id
-            SET et.category = 'chassis'
+           JOIN equipment_categories ec ON ec.slug = 'chassis' AND ec.deleted_at IS NULL
+            SET et.category = 'chassis', et.category_id = ec.id, et.subcategory_id = NULL
           WHERE l.id = ?",
         [$lid]
     );
