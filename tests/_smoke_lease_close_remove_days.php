@@ -122,7 +122,7 @@ function mbcron_bump_counter(): void {
 /** Make a holistic lease at RD rates with optional floor/removal + overrides. */
 function rd_lease(array $overrides = []): int {
     $cust = Fixtures::createCustomer(['province' => 'BC']);
-    return Fixtures::createLease($cust, array_merge([
+    $lid  = Fixtures::createLease($cust, array_merge([
         'engine_version' => 'holistic',
         'billing_cycle'  => 'monthly',
         'daily_rate'     => RD_DAILY,
@@ -131,6 +131,25 @@ function rd_lease(array $overrides = []): int {
         'gps_opt_in'     => 0,
         'status'         => 'active',
     ], $overrides));
+    // S-LEASE-MIN-DAYS-CATEGORY (S-EQTAX): the minimum_billing_days floor (T3/T4)
+    // is gated by equipment_categories.enforce_minimum_billing_days, resolved via
+    // the template's category_id FK. Fixtures::createLease attaches a dry_van
+    // (enforce=0), which would gate the floor OFF and break T3/T4. Pin this lease's
+    // template to the Chassis category AND force its enforce flag on so the floor
+    // binds — harmless for the no-floor cases (the floor only applies when the
+    // lease ALSO sets minimum_billing_days>=2). Reverts with the scenario's
+    // DbState::inTransaction ROLLBACK. Mirrors _smoke_lease_minimum_days::md_lease.
+    db_execute("UPDATE equipment_categories SET enforce_minimum_billing_days = 1 WHERE slug = 'chassis' AND deleted_at IS NULL");
+    db_execute(
+        "UPDATE equipment_templates et
+           JOIN equipment_units eu ON eu.template_id = et.id
+           JOIN leases l ON l.equipment_unit_id = eu.id
+           JOIN equipment_categories ec ON ec.slug = 'chassis' AND ec.deleted_at IS NULL
+            SET et.category = 'chassis', et.category_id = ec.id, et.subcategory_id = NULL
+          WHERE l.id = ?",
+        [$lid]
+    );
+    return $lid;
 }
 
 /** base_rental NET (base_rental minus reconciliation credit) for an invoice. */

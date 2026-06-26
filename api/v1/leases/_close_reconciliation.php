@@ -165,8 +165,18 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
  *         spawn a replacement (functionally identical to in-place edit, gives us tested
  *         math without duplicating ProRateCalculator/TaxCalculator logic).
  * Sent/paid → issue a credit_note for the prorated unused amount.
+ *
+ * S-LEASE-HOURLY-RECON: $hoursPeriodStart/$hoursPeriodEnd carry the engine-hours
+ * readings for the reissued (draft) invoice. For an advance-billing lease the
+ * D-H final partial_end invoice is dropped, so this clamped reissue IS the final
+ * rental invoice and must bill engine/reefer hours (start→close) — exactly like
+ * the non-advance final invoice in close.php. The reissue's billing_type is the
+ * normal partial_start/partial_end, so the engine emits the hourly_usage line
+ * (it suppresses hours only for mileage_only/adjustment/credit_note). Passed
+ * through only on the draft branch; null on either ⇒ no hourly line (lease has no
+ * hourly_rate or no close reading), matching the engine's own gate.
  */
-function adv_partial_refund_containing(array $inv, array $lease, string $returnDate, string $reason): array
+function adv_partial_refund_containing(array $inv, array $lease, string $returnDate, string $reason, ?string $hoursPeriodStart = null, ?string $hoursPeriodEnd = null): array
 {
     $start = $inv['billing_period_start'];
     $end   = $inv['billing_period_end'];
@@ -194,7 +204,7 @@ function adv_partial_refund_containing(array $inv, array $lease, string $returnD
         $generator   = new \FleetForge\Billing\InvoiceGenerator();
         $billingType = ((new \DateTimeImmutable($start))->format('Y-m-01') === $start)
             ? 'partial_end' : 'partial_start';
-        $replacement = $generator->createFromLease([
+        $genParams = [
             'lease_id'          => (int) $lease['id'],
             'period_start'      => $start,
             'period_end'        => $returnDate,
@@ -204,7 +214,15 @@ function adv_partial_refund_containing(array $inv, array $lease, string $returnD
             'created_by'        => current_user_id(),
             'auto_generated'    => 1,
             'generation_source' => 'lease_close',
-        ]);
+        ];
+        // S-LEASE-HOURLY-RECON: this clamped reissue is the advance lease's FINAL
+        // rental invoice (D-H drops the partial_end), so it must carry the engine
+        // hours — otherwise the close silently loses the hourly_usage charge.
+        if ($hoursPeriodStart !== null && $hoursPeriodEnd !== null) {
+            $genParams['engine_hours_at_period_start'] = $hoursPeriodStart;
+            $genParams['engine_hours_at_period_end']   = $hoursPeriodEnd;
+        }
+        $replacement = $generator->createFromLease($genParams);
 
         // Replacement invoice link recorded as a follow-up audit entry; the
         // void itself was already audited inside adv_void_invoice().
@@ -382,9 +400,20 @@ function adv_create_credit_note(array $inv, array $lease, string $amount, string
  * @param bool   $clampFullMonthStraddle  clamp a full_month straddling the extent
  *                          HERE (true, bulk_close) vs defer to the caller's
  *                          legacy_handle_existing_full_month_draft (false, close.php).
+ * @param ?string $hoursPeriodStart  S-LEASE-HOURLY-RECON: engine hours at the start
+ *                          of the straddle reissue's period (null ⇒ no hourly line).
+ * @param ?string $hoursPeriodEnd    engine hours at close. The straddle invoice is
+ *                          clamped to $extentEnd (the lease's final billable day), so
+ *                          it becomes the final rental invoice and the caller's
+ *                          partial_end is then skipped (coverage reaches the extent) —
+ *                          billing hours here is the ONLY place they land, and cannot
+ *                          double-bill (the skipped partial_end would have billed
+ *                          them otherwise). Only ONE invoice can contain the extent,
+ *                          and advance invoices are excluded below, so this never
+ *                          collides with the advance containing-invoice reissue.
  * @return array            list of per-invoice action descriptors for the API response
  */
-function reconcile_overshoot_invoices(int $leaseId, array $lease, string $extentEnd, string $reason, bool $clampFullMonthStraddle = false): array
+function reconcile_overshoot_invoices(int $leaseId, array $lease, string $extentEnd, string $reason, bool $clampFullMonthStraddle = false, ?string $hoursPeriodStart = null, ?string $hoursPeriodEnd = null): array
 {
     $overshoot = db_select(
         "SELECT id, invoice_number, status, billing_type,
@@ -438,7 +467,10 @@ function reconcile_overshoot_invoices(int $leaseId, array $lease, string $extent
             // Shorten (draft) or prorated credit (sent/paid). Pass $extentEnd (not
             // the raw return date) so the regenerated invoice's period_end honours
             // the same time-of-day rule the engine uses for the amount.
-            $act = adv_partial_refund_containing($inv, $lease, $extentEnd, $reason);
+            // S-LEASE-HOURLY-RECON: forward the engine-hours window so the clamped
+            // reissue (now the final rental invoice — the caller skips partial_end)
+            // bills the lease's engine hours instead of silently dropping them.
+            $act = adv_partial_refund_containing($inv, $lease, $extentEnd, $reason, $hoursPeriodStart, $hoursPeriodEnd);
             $act['overshoot'] = 'straddles';
         }
         $act['old_period_end'] = $inv['billing_period_end'];

@@ -58,7 +58,10 @@ $invoice = db_row(
     "SELECT id, lease_id, invoice_number, status, generation_source, invoice_type,
             updated_at, created_at, created_by,
             billing_period_start, billing_period_end, billing_type,
-            po_number, notes, internal_notes, total_amount
+            po_number, notes, internal_notes, total_amount,
+            engine_hours_at_period_start, engine_hours_at_period_end,
+            odometer_at_period_start_km, odometer_at_period_end_km,
+            odometer_source, odometer_fetched_at
        FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -163,6 +166,17 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
         'internal_notes'       => $invoice['internal_notes'],
         'generation_source'    => $invoice['generation_source'] ?: 'manual',
         'created_by'           => current_user_id(),
+        // S-LEASE-HOURLY-RECON: regenerate re-runs the engine for the SAME period,
+        // so carry the invoice's own usage snapshots forward — otherwise the
+        // hourly_usage line (and the mileage usage line) silently vanishes on
+        // regenerate, the same class of drop as the close-reconciliation bug. The
+        // engine only emits hours/mileage when these readings are supplied.
+        'engine_hours_at_period_start' => $invoice['engine_hours_at_period_start'],
+        'engine_hours_at_period_end'   => $invoice['engine_hours_at_period_end'],
+        'odometer_at_period_start_km'  => $invoice['odometer_at_period_start_km'],
+        'odometer_at_period_end_km'    => $invoice['odometer_at_period_end_km'],
+        'odometer_source'              => $invoice['odometer_source'],
+        'odometer_fetched_at'          => $invoice['odometer_fetched_at'],
     ]);
 
     $newId = (int) $created['invoice_id'];

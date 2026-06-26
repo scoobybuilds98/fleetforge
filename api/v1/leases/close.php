@@ -1008,9 +1008,17 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // month-end on a lease returned mid-month). Runs BEFORE the advance /
     // legacy-full_month / partial_end logic below so the coverage anchor those
     // paths read (MAX billing_period_end) already reflects the clamped periods.
+    // S-LEASE-HOURLY-RECON: forward the engine-hours window (derived above) so a
+    // straddle invoice clamped here — which becomes the final rental invoice when
+    // the partial_end below is skipped — bills the lease's engine hours. This is
+    // the path that silently dropped hours on advance-style manual invoices that
+    // overshot the return (e.g. INV-2026-00466). $hoursPeriodStart/$hoursAtClose
+    // are the same readings the partial_end final invoice uses (lines ~1231).
     $overshootActions = reconcile_overshoot_invoices(
         $id, $lease, $extentEnd,
-        $closeNotes ?: "Lease closed {$actualReturnDate} — billing period shortened to lease extent {$extentEnd}."
+        $closeNotes ?: "Lease closed {$actualReturnDate} — billing period shortened to lease extent {$extentEnd}.",
+        false,
+        $hoursPeriodStart, $hoursAtClose
     );
 
     if ($isAdvanceClose) {
@@ -1037,10 +1045,16 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             }
 
             // Containing invoice: partial refund for unused days.
+            // S-LEASE-HOURLY-RECON: pass the engine-hours window so the reissued
+            // (clamped) invoice — which is THIS advance lease's final rental
+            // invoice — bills hours, just like the non-advance final invoice.
+            // $hoursPeriodStart/$hoursAtClose are the same readings the legacy
+            // path feeds its final invoice (derived above at S-LEASE-HOURLY-BILLING).
             if ($containingInv) {
                 $advanceActions[] = adv_partial_refund_containing(
                     $containingInv, $lease, $actualReturnDate,
-                    $closeNotes ?: 'Lease closed mid-period — refunding unused days.'
+                    $closeNotes ?: 'Lease closed mid-period — refunding unused days.',
+                    $hoursPeriodStart, $hoursAtClose
                 );
             }
         }
