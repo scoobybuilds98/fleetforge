@@ -377,7 +377,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <div class="form-row-3">
+                <div class="form-row-4">
                     <div class="form-group">
                         <label class="form-label" for="daily_rate">Daily Rate</label>
                         <div class="input-group">
@@ -407,6 +407,18 @@ require_once FF_ROOT . '/includes/header.php';
                                    :readonly="ratesLocked"
                                    :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
                         </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="hourly_rate">Hourly Rate</label>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number" id="hourly_rate" class="form-control font-mono"
+                                   x-model="form.hourly_rate" step="0.0001" min="0" placeholder="0.0000"
+                                   :readonly="ratesLocked"
+                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
+                            <span class="input-group-suffix">/hr</span>
+                        </div>
+                        <div class="form-hint">Optional — engine/reefer hours. Pre-filled from the rate card; reveals Starting Engine Hours when set.</div>
                     </div>
                 </div>
 
@@ -625,7 +637,8 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-GPS-RATE-CARD: GPS opt-in toggle; rate comes from the rate card, not entered manually -->
+                <!-- S-GPS-RATE-CARD: GPS opt-in toggle; rate comes from the rate card, not entered manually.
+                     (Hourly Rate moved to the Rental Rates section — S-LEASE-HOURLY-IN-RATES.) -->
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;">
@@ -643,18 +656,6 @@ require_once FF_ROOT . '/includes/header.php';
                                 <span class="text-secondary" style="font-size:0.8125rem;">No GPS rate on this rate card</span>
                             </template>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="hourly_rate">Hourly Rate</label>
-                        <div class="input-group">
-                            <span class="input-group-prefix">$</span>
-                            <input type="number" id="hourly_rate" class="form-control font-mono"
-                                   x-model="form.hourly_rate" step="0.0001" min="0" placeholder="0.0000"
-                                   :readonly="ratesLocked"
-                                   :style="ratesLocked ? 'background:var(--bg-muted,.f1f5f9);cursor:not-allowed;' : ''">
-                            <span class="input-group-suffix">/hr</span>
-                        </div>
-                        <div class="form-hint" style="margin-top:4px;">Optional — set a rate to bill engine/reefer hours. Pre-filled from the rate card; override if needed. The Starting Engine Hours field appears once a rate is entered.</div>
                     </div>
                 </div>
 

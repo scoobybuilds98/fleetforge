@@ -201,7 +201,7 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
             <div class="card-body">
-                <div class="form-row-3">
+                <div class="form-row-4">
                     <div class="form-group">
                         <label class="form-label">Daily Rate</label>
                         <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;">
@@ -219,6 +219,17 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;">
                             $<?= e(number_format((float)$lease['monthly_rate'], 2)) ?>
                         </div>
+                    </div>
+                    <!-- S-LEASE-HOURLY-IN-RATES: hourly add-on rate (editable; the tiers above are frozen at creation). -->
+                    <div class="form-group">
+                        <label class="form-label" for="hourly_rate">Hourly Rate</label>
+                        <div class="input-group">
+                            <span class="input-group-prefix">$</span>
+                            <input type="number" id="hourly_rate" class="form-control font-mono"
+                                   x-model="form.hourly_rate" step="0.0001" min="0" placeholder="0.0000">
+                            <span class="input-group-suffix">/hr</span>
+                        </div>
+                        <div class="form-hint">Editable add-on, billed at close. Set to enable hours billing; clear to disable.</div>
                     </div>
                 </div>
                 <div class="form-row-2">
@@ -630,7 +641,8 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-GPS-RATE-CARD: GPS opt-in toggle; rate is frozen from rate card at creation -->
+                <!-- S-GPS-RATE-CARD: GPS opt-in toggle; rate is frozen from rate card at creation.
+                     (Hourly Rate moved to the Rental Rates section — S-LEASE-HOURLY-IN-RATES.) -->
                 <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" style="display:flex;align-items:center;gap:0.5rem;">
@@ -643,16 +655,6 @@ require_once FF_ROOT . '/includes/header.php';
                                 <span style="color:var(--text-muted);">(rate card rate)</span>
                             </span>
                         </div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="hourly_rate">Hourly Rate</label>
-                        <div class="input-group">
-                            <span class="input-group-prefix">$</span>
-                            <input type="number" id="hourly_rate" class="form-control font-mono"
-                                   x-model="form.hourly_rate" step="0.0001" min="0" placeholder="0.0000">
-                            <span class="input-group-suffix">/hr</span>
-                        </div>
-                        <div class="form-hint" style="margin-top:4px;">Manual engine/reefer-hours rate, billed at close. Set a rate to enable hours billing on this lease; clear it to disable. The other rates are fixed at creation.</div>
                     </div>
                 </div>
 
