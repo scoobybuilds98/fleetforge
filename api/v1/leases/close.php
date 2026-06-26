@@ -529,6 +529,27 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             "Cannot close lease {$lease['contract_number']}: current status is '{$lease['status']}'. Only active leases can be closed.", 409);
     }
 
+    // ── S-LEASE-DATE-SANITY: implausible start_date → graceful error ──
+    // A backfill typo like start_date '0001-03-02' (year 1) makes the billable
+    // span ~739k days, which overflows invoices.billing_period_days (smallint
+    // unsigned, max 65535) → SQLSTATE 22003/1264 → a cryptic "unexpected error".
+    // Fail clearly here and point the operator at the lease dates instead.
+    // (create.php now blocks this at entry; this catches rows created before the
+    // guard. MTTS286 prod incident, 2026-06-26.)
+    $startYear = (int) substr((string) ($lease['start_date'] ?? ''), 0, 4);
+    if ($startYear > 0 && $startYear < 2000) {
+        json_error(
+            'INVALID_LEASE_DATES',
+            sprintf(
+                'Lease %s has an invalid start date (%s) — it looks like a data-entry error. Edit the lease and correct the start date before closing.',
+                $lease['contract_number'],
+                $lease['start_date']
+            ),
+            422,
+            ['fields' => ['start_date' => 'Start date looks invalid; correct it before closing.']]
+        );
+    }
+
     // ── L11: actual return date must not precede the lease start ──
     // A mistyped/early return date makes the overshoot reconciliation treat
     // EVERY invoice as billed past the (clamped-to-start) billable extent and

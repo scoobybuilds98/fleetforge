@@ -85,6 +85,19 @@ if (!$unitId)      $fields['equipment_unit_id']  = 'Please select an equipment u
 if (!$startDate)   $fields['start_date']         = 'Start date is required.';
 if (!$startTime)   $fields['start_time']         = 'Lease start time is required.';
 
+// S-LEASE-DATE-SANITY: reject an implausible start_date YEAR. clean_date() accepts
+// any valid calendar date, so a backfill typo like 0001-03-02 passes — then at
+// close the ~739k-day span overflows invoices.billing_period_days (smallint
+// unsigned, max 65535) → SQLSTATE 22003/1264 → a cryptic "unexpected error".
+// Allow historical backfill but block absurd past/future. (MTTS286 prod, 2026-06-26.)
+if ($startDate && !isset($fields['start_date'])) {
+    $startYear = (int) substr($startDate, 0, 4);
+    $maxYear   = (int) date('Y') + 2;
+    if ($startYear < 2000 || $startYear > $maxYear) {
+        $fields['start_date'] = "Start date {$startDate} looks invalid — the year must be between 2000 and {$maxYear}.";
+    }
+}
+
 // ── Rate fields — at least one must be > 0; negatives rejected ─
 // VALID-2: use clean_decimal() so we can detect negatives — the
 // old code used clean_non_negative_decimal() which silently
