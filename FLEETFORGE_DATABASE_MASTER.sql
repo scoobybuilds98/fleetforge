@@ -2651,12 +2651,45 @@ CREATE TABLE `equipment_status_log` (
   CONSTRAINT `equipment_status_log_ibfk_3` FOREIGN KEY (`reservation_id`) REFERENCES `reservations` (`id`) ON DELETE SET NULL,
   CONSTRAINT `equipment_status_log_ibfk_4` FOREIGN KEY (`changed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `equipment_categories` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `slug` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Stable identifier; mirrored into equipment_templates.category. Never edited after create.',
+  `label` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Operator-editable display name.',
+  `enforce_minimum_billing_days` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'S-LEASE-MIN-DAYS-CATEGORY: when 1, leases on this category honour the short-lease minimum-billing-days floor. Sub-types inherit.',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_eqcat_slug` (`slug`),
+  KEY `idx_eqcat_active` (`is_active`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `equipment_subcategories` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `category_id` int unsigned NOT NULL,
+  `slug` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Stable identifier; mirrored into equipment_templates.category when chosen. Unique within its category.',
+  `label` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_eqsubcat_cat_slug` (`category_id`,`slug`),
+  KEY `idx_eqsubcat_cat` (`category_id`),
+  CONSTRAINT `eqsubcat_ibfk_cat` FOREIGN KEY (`category_id`) REFERENCES `equipment_categories` (`id`) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `equipment_templates` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `slug` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `description` text COLLATE utf8mb4_unicode_ci,
-  `category` enum('chassis','dry_van','reefer','container','flatbed','step_deck','lowboy','tanker','dump','combo','other') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `category_id` int unsigned DEFAULT NULL,
+  `subcategory_id` int unsigned DEFAULT NULL,
   `brand` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `model` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `default_length_ft` decimal(6,2) DEFAULT NULL,
@@ -2691,7 +2724,11 @@ CREATE TABLE `equipment_templates` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `slug` (`slug`),
   KEY `created_by` (`created_by`),
-  CONSTRAINT `equipment_templates_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  KEY `idx_et_category_id` (`category_id`),
+  KEY `idx_et_subcategory_id` (`subcategory_id`),
+  CONSTRAINT `equipment_templates_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `et_ibfk_cat` FOREIGN KEY (`category_id`) REFERENCES `equipment_categories` (`id`) ON DELETE RESTRICT,
+  CONSTRAINT `et_ibfk_subcat` FOREIGN KEY (`subcategory_id`) REFERENCES `equipment_subcategories` (`id`) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `equipment_units` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
