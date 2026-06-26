@@ -41,19 +41,13 @@ if ($preCustomerId) {
     }
 }
 
-// Friendly label map for category slugs
-$categoryLabels = [
-    'chassis'   => 'Chassis',
-    'dry_van'   => 'Dry Van',
-    'reefer'    => 'Reefer',
-    'container' => 'Container',
-    'flatbed'   => 'Flatbed',
-    'step_deck' => 'Step Deck',
-    'lowboy'    => 'Lowboy',
-    'tanker'    => 'Tanker',
-    'dump'      => 'Dump',
-    'other'     => 'Other',
-];
+// S-EQTAX: friendly slug → label map sourced from the operator-managed taxonomy
+// (categories + sub-categories), so a rate row targeting any type slug (incl.
+// Combo / operator-added types) shows its proper label. Unknown slugs fall back
+// to a humanized form downstream. Category labels win over a same-slug sub.
+$categoryLabels = [];
+foreach (db_select("SELECT slug, label FROM equipment_subcategories WHERE deleted_at IS NULL") as $r) { $categoryLabels[$r['slug']] = $r['label']; }
+foreach (db_select("SELECT slug, label FROM equipment_categories WHERE deleted_at IS NULL") as $r) { $categoryLabels[$r['slug']] = $r['label']; }
 
 $pageTitle      = 'New Rate Card';
 $helpModuleSlug = 'rates';
@@ -404,12 +398,8 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
-// Category slug → display label (mirrors PHP $categoryLabels)
-const CATEGORY_LABELS_CREATE = {
-    chassis: 'Chassis', dry_van: 'Dry Van', reefer: 'Reefer',
-    container: 'Container', flatbed: 'Flatbed', step_deck: 'Step Deck',
-    lowboy: 'Lowboy', tanker: 'Tanker', dump: 'Dump', other: 'Other',
-};
+// S-EQTAX: slug → display label, sourced from the taxonomy (mirrors PHP $categoryLabels).
+const CATEGORY_LABELS_CREATE = <?= json_encode($categoryLabels, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 
 function FF_RateCardCreate() {
     return {

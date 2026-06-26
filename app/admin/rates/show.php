@@ -62,18 +62,12 @@ $categories = db_select(
      ORDER BY category ASC"
 );
 
-$categoryLabels = [
-    'chassis'   => 'Chassis',
-    'dry_van'   => 'Dry Van',
-    'reefer'    => 'Reefer',
-    'container' => 'Container',
-    'flatbed'   => 'Flatbed',
-    'step_deck' => 'Step Deck',
-    'lowboy'    => 'Lowboy',
-    'tanker'    => 'Tanker',
-    'dump'      => 'Dump',
-    'other'     => 'Other',
-];
+// S-EQTAX: slug → label sourced from the operator-managed taxonomy (categories +
+// sub-categories). Category labels win over a same-slug sub; unknown slugs are
+// humanized downstream.
+$categoryLabels = [];
+foreach (db_select("SELECT slug, label FROM equipment_subcategories WHERE deleted_at IS NULL") as $r) { $categoryLabels[$r['slug']] = $r['label']; }
+foreach (db_select("SELECT slug, label FROM equipment_categories WHERE deleted_at IS NULL") as $r) { $categoryLabels[$r['slug']] = $r['label']; }
 
 $today    = date('Y-m-d');
 $isActive = ($card['effective_from'] <= $today &&
@@ -558,12 +552,8 @@ function FF_RateCardShow() {
         '_templateOpen'    => false,
     ]), $items)) ?>;
 
-    // Category slug → display label
-    const CATEGORY_LABELS = {
-        chassis: 'Chassis', dry_van: 'Dry Van', reefer: 'Reefer',
-        container: 'Container', flatbed: 'Flatbed', step_deck: 'Step Deck',
-        lowboy: 'Lowboy', tanker: 'Tanker', dump: 'Dump', other: 'Other',
-    };
+    // S-EQTAX: slug → display label, sourced from the taxonomy (mirrors PHP $categoryLabels).
+    const CATEGORY_LABELS = <?= json_encode($categoryLabels, JSON_HEX_TAG | JSON_HEX_AMP) ?>;
 
     return {
         form:          { ...initial },
