@@ -181,6 +181,60 @@ if (array_key_exists('end_date', $body))
 if (array_key_exists('minimum_end_date', $body))
     $data['minimum_end_date'] = clean_date($body['minimum_end_date']);
 
+// S-LEASE-EDIT-DATES: start_date + start_time are editable ONLY while the lease
+// is pending. Once activated, the activation invoice + billing periods + the
+// derived next_billing_date all key off them (activate.php recomputes
+// next_billing_date FROM start_date at activation), so they're frozen afterward —
+// correct a wrong pickup date/time BEFORE activating. end_time is expected-return
+// metadata, editable like end_date (the actual return time is captured at close).
+if (array_key_exists('start_date', $body)) {
+    if ($existing['status'] !== 'pending') {
+        $fields['start_date'] = 'Start date can only be changed before the lease is activated.';
+    } else {
+        $sd = clean_date($body['start_date']);
+        if ($sd === null) {
+            $fields['start_date'] = 'Start date is required.';
+        } else {
+            // S-LEASE-DATE-SANITY: keep the year in a sane window (blocks 0001 typos
+            // + absurd futures that overflow billing_period_days at close).
+            $yr = (int) substr($sd, 0, 4);
+            $maxYr = (int) date('Y') + 2;
+            if ($yr < 2000 || $yr > $maxYr) {
+                $fields['start_date'] = "Start date {$sd} looks invalid — the year must be between 2000 and {$maxYr}.";
+            } else {
+                $data['start_date'] = $sd;
+            }
+        }
+    }
+}
+
+if (array_key_exists('start_time', $body)) {
+    if ($existing['status'] !== 'pending') {
+        $fields['start_time'] = 'Start time can only be changed before the lease is activated.';
+    } else {
+        $st = clean_time($body['start_time'] ?? null);
+        if ($st === null) {
+            $fields['start_time'] = 'Lease start time is required.';
+        } else {
+            $data['start_time'] = $st;
+        }
+    }
+}
+
+if (array_key_exists('end_time', $body)) {
+    $rawEndTime = $body['end_time'];
+    if ($rawEndTime === '' || $rawEndTime === null) {
+        $data['end_time'] = null;                 // blank clears the expected return time
+    } else {
+        $et = clean_time($rawEndTime);
+        if ($et === null) {
+            $fields['end_time'] = 'Expected return time is invalid.';
+        } else {
+            $data['end_time'] = $et;
+        }
+    }
+}
+
 if (array_key_exists('rate_notes', $body))
     $data['rate_notes'] = clean_string($body['rate_notes'], 5000);
 
@@ -552,15 +606,18 @@ if (array_key_exists('advance_billing_periods', $body)) {
 
 // Validate end_date and mileage cross-field rules
 $currentLease = db_row("SELECT start_date, mileage_at_start FROM leases WHERE id = ?", [$id]);
+// S-LEASE-EDIT-DATES: compare against the NEW start_date when it's being changed
+// in this same request (pending leases), else the stored one.
+$effectiveStart = $data['start_date'] ?? $currentLease['start_date'];
 
 if (isset($data['end_date']) && $data['end_date']) {
-    if ($data['end_date'] < $currentLease['start_date']) {
+    if ($data['end_date'] < $effectiveStart) {
         $fields['end_date'] = 'End date must be after start date.';
     }
 }
 
 if (array_key_exists('minimum_end_date', $data) && $data['minimum_end_date']) {
-    if ($data['minimum_end_date'] < $currentLease['start_date']) {
+    if ($data['minimum_end_date'] < $effectiveStart) {
         $fields['minimum_end_date'] = 'Minimum end date must be on or after start date.';
     }
 }

@@ -61,6 +61,10 @@ if (!$lease) {
 $isActive  = $lease['status'] === 'active';
 $lockMeta  = false;
 $lockClose = $isActive;
+// S-LEASE-EDIT-DATES: the pickup date + time are editable ONLY before activation
+// (billing/invoices key off them once active). end_time / end_date are metadata
+// and stay editable for every editable status.
+$isPending = $lease['status'] === 'pending';
 
 $pageTitle = 'Edit ' . $lease['contract_number'];
 $helpModuleSlug = 'leases';
@@ -153,36 +157,89 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header"><div class="card-title">Dates</div></div>
             <div class="card-body">
                 <div class="form-row-3">
+                    <!-- S-LEASE-EDIT-DATES: pickup date — editable only before activation -->
                     <div class="form-group">
-                        <label class="form-label">Start Date</label>
-                        <div class="form-control" style="background:var(--bg-muted);cursor:default;">
-                            <?= e($lease['start_date']) ?>
-                        </div>
-                        <div class="form-hint">Start date cannot be changed.</div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label"<?= $lockMeta ? '' : ' for="end_date"' ?>>End Date</label>
-                        <?php if ($lockMeta): ?>
-                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['end_date'] ?? '—') ?></div>
+                        <label class="form-label<?= $isPending ? ' required' : '' ?>"<?= $isPending ? ' for="start_date"' : '' ?>>Start Date</label>
+                        <?php if ($isPending): ?>
+                        <input type="date" id="start_date" class="form-control"
+                               x-model="form.start_date"
+                               :class="errors.start_date ? 'is-invalid' : ''">
+                        <div class="form-error" x-show="errors.start_date" x-text="errors.start_date"></div>
+                        <div class="form-hint">Pickup date — editable until the lease is activated.</div>
                         <?php else: ?>
-                        <?php // [UI-AUDIT-1:M18] :min prevents picking a date before lease start. ?>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['start_date']) ?></div>
+                        <div class="form-hint">Locked — the lease is <?= e($lease['status']) ?> (the pickup date freezes at activation).</div>
+                        <?php endif; ?>
+                    </div>
+                    <!-- End Date (+ expected return time) -->
+                    <div class="form-group">
+                        <label class="form-label" for="end_date">End Date</label>
+                        <?php // [UI-AUDIT-1:M18] :min prevents an end before the (possibly-just-edited) start. ?>
                         <input type="date" id="end_date" class="form-control"
                                x-model="form.end_date"
-                               min="<?= e($lease['start_date']) ?>"
+                               :min="form.start_date || '<?= e($lease['start_date']) ?>'"
                                :class="errors.end_date ? 'is-invalid' : ''">
+                        <div class="form-hint">Leave blank for open-ended.</div>
                         <div class="form-error" x-show="errors.end_date" x-text="errors.end_date"></div>
+                        <div style="margin-top:6px;" x-show="form.end_date" x-cloak>
+                            <label class="form-label" for="end_time_h" style="font-size:0.8125rem;margin-bottom:3px;">Expected Return Time <span style="font-weight:normal;color:var(--text-secondary);">(optional)</span></label>
+                            <div class="d-flex align-items-center" style="gap:6px;">
+                                <select id="end_time_h" class="form-control" style="width:72px;"
+                                        @change="form.end_time = $event.target.value ? ($event.target.value + ':' + ((form.end_time||'').slice(3,5)||'00')) : ''">
+                                    <option value="">HH</option>
+                                    <template x-for="h in Array.from({length:24},(_,i)=>i)" :key="h">
+                                        <option :value="String(h).padStart(2,'0')" :selected="String(h).padStart(2,'0') === (form.end_time||'').slice(0,2)" x-text="String(h).padStart(2,'0')"></option>
+                                    </template>
+                                </select>
+                                <span style="font-weight:600">:</span>
+                                <select id="end_time_m" class="form-control" style="width:72px;"
+                                        @change="form.end_time = ((form.end_time||'').slice(0,2)||'00') + ':' + $event.target.value">
+                                    <option value="">MM</option>
+                                    <template x-for="m in Array.from({length:60},(_,i)=>i)" :key="m">
+                                        <option :value="String(m).padStart(2,'0')" :selected="String(m).padStart(2,'0') === (form.end_time||'').slice(3,5)" x-text="String(m).padStart(2,'0')"></option>
+                                    </template>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Lease Start Time — editable only before activation -->
+                    <div class="form-group">
+                        <label class="form-label<?= $isPending ? ' required' : '' ?>"<?= $isPending ? ' for="start_time_h"' : '' ?>>Lease Start Time</label>
+                        <?php if ($isPending): ?>
+                        <div class="d-flex align-items-center" style="gap:6px;">
+                            <select id="start_time_h" class="form-control" style="width:72px;"
+                                    :class="errors.start_time ? 'is-invalid' : ''"
+                                    @change="form.start_time = $event.target.value ? ($event.target.value + ':' + ((form.start_time||'').slice(3,5)||'00')) : ''">
+                                <option value="">HH</option>
+                                <template x-for="h in Array.from({length:24},(_,i)=>i)" :key="h">
+                                    <option :value="String(h).padStart(2,'0')" :selected="String(h).padStart(2,'0') === (form.start_time||'').slice(0,2)" x-text="String(h).padStart(2,'0')"></option>
+                                </template>
+                            </select>
+                            <span style="font-weight:600">:</span>
+                            <select id="start_time_m" class="form-control" style="width:72px;"
+                                    :class="errors.start_time ? 'is-invalid' : ''"
+                                    @change="form.start_time = ((form.start_time||'00:00').slice(0,2)||'00') + ':' + $event.target.value">
+                                <option value="">MM</option>
+                                <template x-for="m in Array.from({length:60},(_,i)=>i)" :key="m">
+                                    <option :value="String(m).padStart(2,'0')" :selected="String(m).padStart(2,'0') === (form.start_time||'').slice(3,5)" x-text="String(m).padStart(2,'0')"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="form-error" x-show="errors.start_time" x-text="errors.start_time"></div>
+                        <div class="form-hint">Billing cut-off for same-day returns.</div>
+                        <?php else: ?>
+                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e(substr((string)($lease['start_time'] ?? ''), 0, 5) ?: '—') ?></div>
+                        <div class="form-hint">Locked once activated.</div>
                         <?php endif; ?>
                     </div>
+                </div>
+                <div class="form-row-3">
                     <div class="form-group">
-                        <label class="form-label"<?= $lockMeta ? '' : ' for="minimum_end_date"' ?>>Minimum End Date</label>
-                        <?php if ($lockMeta): ?>
-                        <div class="form-control" style="background:var(--bg-muted);cursor:default;"><?= e($lease['minimum_end_date'] ?? '—') ?></div>
-                        <?php else: ?>
-                        <?php // [UI-AUDIT-1:M18] Same constraint on minimum_end_date. ?>
+                        <label class="form-label" for="minimum_end_date">Minimum End Date</label>
                         <input type="date" id="minimum_end_date" class="form-control"
                                x-model="form.minimum_end_date"
-                               min="<?= e($lease['start_date']) ?>">
-                        <?php endif; ?>
+                               :min="form.start_date || '<?= e($lease['start_date']) ?>'">
+                        <div class="form-hint">Earliest the lease may end (optional).</div>
                     </div>
                 </div>
             </div>
@@ -756,6 +813,14 @@ function FF_EditLease() {
             // the current mode AND a change is actually sent (S-LEASE-REOPEN-UI: needed
             // to flip a reopened lease Off→Manual before re-closing).
             mileage_tracking_mode:   <?= json_encode($lease['mileage_tracking_mode'] ?? 'off') ?>,
+            // S-LEASE-EDIT-DATES: pickup date/time + expected return time. Always in
+            // the model so dirty-tracking posts them when changed; the inputs render
+            // only while pending (update.php also gates start_* to pending). Times are
+            // normalised to HH:MM so the split-picker output matches the baseline (a
+            // stored "11:30:00" vs picker "11:30" would otherwise read as always-dirty).
+            start_date:              <?= json_encode($lease['start_date'] ?? '') ?>,
+            start_time:              <?= json_encode(substr((string)($lease['start_time'] ?? ''), 0, 5)) ?>,
+            end_time:                <?= json_encode(substr((string)($lease['end_time'] ?? ''), 0, 5)) ?>,
             <?php if (!$lockMeta): ?>
             // S-LEASE-EDIT-ACTIVE-UNLOCK: editable for every status now (was pending-only).
             // Fields with no input on active leases (ending mileage / engine hours) stay
@@ -885,8 +950,20 @@ function FF_EditLease() {
             });
 
             <?php if (!$lockMeta): ?>
-            // S-LEASE-EDIT-ACTIVE-UNLOCK: validated for every status now (was pending-only)
-            const startDate = <?= json_encode($lease['start_date']) ?>;
+            // S-LEASE-EDIT-DATES: compare against the (possibly-just-edited) start
+            // date on pending leases, else the frozen one. Also require start_date /
+            // start_time when they're editable (pending).
+            const startDate = this.form.start_date || <?= json_encode($lease['start_date']) ?>;
+            <?php if ($isPending): ?>
+            if (!this.form.start_date) {
+                this.errors.start_date = 'Start date is required.';
+                ok = false;
+            }
+            if (!this.form.start_time || !/^\d{2}:\d{2}/.test(this.form.start_time)) {
+                this.errors.start_time = 'Lease start time is required.';
+                ok = false;
+            }
+            <?php endif; ?>
             if (this.form.end_date && this.form.end_date < startDate) {
                 FF_Validate.field(f, 'end_date', 'End date must be after start date.');
                 this.errors.end_date = 'End date must be after start date.';
