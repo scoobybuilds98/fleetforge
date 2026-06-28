@@ -108,6 +108,14 @@ if (!$template) {
 $equipmentType = $template['category'];
 $today         = date('Y-m-d');
 
+// S-RATE-CARD-LABEL-EQTYPE: the selected equipment's name, surfaced in the rate
+// banner so it's clear WHICH line item of a card was used. Customer cards bundle
+// several equipment types under one card named after the customer's main product
+// (e.g. a "53' T/A Dry HWY" card that also carries a Combo line item). Showing
+// just the card name made a correct Combo rate look like it came from "dry van";
+// prefixing the matched equipment type ("Combo rate · card …") removes that.
+$typeLabel = (string) $template['name'];
+
 // -----------------------------------------------------------------------
 // 2. Priority 1 — active rate_cards with a matching item.
 //    S-RATE-CARD-TEMPLATE-ITEM: a row can be template-specific
@@ -145,8 +153,8 @@ if ($rateCardItem) {
     json_success([
         'source'       => $isCustomerCard ? 'customer' : 'rate_card',
         'source_label' => $isCustomerCard
-            ? 'Custom rate card: ' . $rateCardItem['card_name']
-            : 'Rate card: ' . $rateCardItem['card_name'],
+            ? $typeLabel . ' rate · custom card "' . $rateCardItem['card_name'] . '"'
+            : $typeLabel . ' rate · card "' . $rateCardItem['card_name'] . '"',
         'daily_rate'   => $rateCardItem['daily_rate'],
         'weekly_rate'  => $rateCardItem['weekly_rate'],
         'monthly_rate' => $rateCardItem['monthly_rate'],
@@ -174,7 +182,7 @@ $hasTemplateRates = (
 if ($hasTemplateRates) {
     json_success([
         'source'       => 'template',
-        'source_label' => 'Default rates from template',
+        'source_label' => $typeLabel . ' rate · template default',
         'daily_rate'   => $template['default_daily_rate'],
         'weekly_rate'  => $template['default_weekly_rate'],
         'monthly_rate' => $template['default_monthly_rate'],
@@ -196,7 +204,7 @@ if ($hasTemplateRates) {
 // -----------------------------------------------------------------------
 json_success([
     'source'       => 'none',
-    'source_label' => 'No rates configured for this equipment type',
+    'source_label' => 'No rates configured for ' . $typeLabel,
     'daily_rate'   => null,
     'weekly_rate'  => null,
     'monthly_rate' => null,

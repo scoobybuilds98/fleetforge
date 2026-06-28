@@ -174,12 +174,22 @@ try {
     $report('T1 customer-specific card',
         ($r['data']['source'] ?? null) === 'customer' && (string)($r['data']['mileage_rate'] ?? '') === '0.1800',
         sprintf('source=%s mileage=%s', $r['data']['source'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
+    // S-RATE-CARD-LABEL-EQTYPE: the banner names the matched EQUIPMENT TYPE, then
+    // the card it came from — so a correct rate from a card named after a different
+    // product (e.g. a Combo rate inside a "53' T/A Dry HWY" card) isn't mistaken
+    // for that product's rate. The label prefix is the selected template name.
+    $report('T1b label = "<type> rate · custom card <name>"',
+        (string)($r['data']['source_label'] ?? '') === "SMOKE DryVan {$TAG} rate · custom card \"SMOKE Custom {$TAG}\"",
+        'label=' . ($r['data']['source_label'] ?? '?'));
 
     // ── T2 — global card (customer has no custom card) ─────────────────────
     $r = $run($custWithout, $tmplDryVan);
     $report('T2 global card fallback',
         ($r['data']['source'] ?? null) === 'rate_card' && (string)($r['data']['mileage_rate'] ?? '') === '0.0500',
         sprintf('source=%s mileage=%s', $r['data']['source'] ?? '?', $r['data']['mileage_rate'] ?? '?'));
+    $report('T2b label = "<type> rate · card <name>"',
+        (string)($r['data']['source_label'] ?? '') === "SMOKE DryVan {$TAG} rate · card \"SMOKE Global {$TAG}\"",
+        'label=' . ($r['data']['source_label'] ?? '?'));
 
     // ── T3 — template defaults (no card for category 'other') ──────────────
     $r = $run($custWithout, $tmplDefaults);
