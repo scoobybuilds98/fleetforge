@@ -263,6 +263,45 @@ try {
     okTrue('R.5b regenerated invoice STILL has the hourly_usage line', $ln2 !== null);
     ok('R.5c regenerated hourly_usage amount unchanged ($46.50)', $EXPECT_AMT, (string) ($ln2['amount'] ?? 'none'));
 
+    // ════════════════════════════════════════════════════════════════════════
+    // S group — the INV-2026-00650 shape: NO overshoot (the activation invoice
+    // already ends exactly on the return date), so the close skips the hours-
+    // bearing partial_end. The S-LEASE-HOURLY-RECON guarantee must FOLD the hours
+    // onto the existing activation draft instead of dropping them.
+    // ════════════════════════════════════════════════════════════════════════
+    $monthEnd = date('Y-m-t', strtotime($refMonthStart));
+    [$leaseS, $invS, $meS] = make_hourly_lease_with_invoice1(
+        $customerId, $unitId, $unitNumber, $prefix, 'S', $day(5), $RATE, '22530.00'
+    );
+    ok('S.0 activation invoice ends on month-end (= the eventual return date)',
+        $monthEnd, (string) db_row("SELECT billing_period_end FROM invoices WHERE id=?", [$invS])['billing_period_end']);
+    okTrue('S.0b activation invoice has NO hourly line yet', hourly_line($invS) === null);
+
+    $respS = http_post("$baseUrl/api/v1/leases/close", [
+        'id' => $leaseS, 'actual_return_date' => $meS,   // return ON the activation's end → no overshoot
+        'engine_hours_at_close' => '22532.00',           // 22530 → 22532 = 2.00 hrs × $1.50 = $3.00
+        'close_notes' => 'hourly recon smoke — partial_end-skip path',
+    ], $sessId, $csrf);
+    ok('S.1 close returned 200', 200, $respS['http_code']);
+    if ($respS['http_code'] !== 200) { echo "    body: {$respS['body']}\n"; throw new RuntimeException('close S failed'); }
+    $dataS = $respS['json']['data'] ?? $respS['json'];
+
+    ok('S.2 no overshoot reissue (activation already ends at the extent)', 0, count($dataS['overshoot_actions'] ?? []));
+    ok('S.3 original activation invoice is NOT voided (folded in place)', 'draft',
+        (string) db_row("SELECT status FROM invoices WHERE id=?", [$invS])['status']);
+
+    // The bug pre-guarantee: hours were lost here entirely. Now they must be folded.
+    $lnS = hourly_line($invS);
+    okTrue('S.4 hours FOLDED onto the activation draft (partial_end-skip path)', $lnS !== null);
+    ok('S.5 folded hours amount = 2.00 hrs × $1.50 = $3.00', '3.00', (string) ($lnS['amount'] ?? 'none'));
+    $foldAction = false;
+    foreach (($dataS['advance_actions'] ?? []) as $a) { if (($a['action'] ?? '') === 'hours_folded_onto_final') $foldAction = true; }
+    okTrue('S.6 close response reports the hours_folded_onto_final action', $foldAction);
+    ok('S.7 activation invoice snapshots the hours window',
+        '22530.00|22532.00',
+        (string) db_row("SELECT engine_hours_at_period_start e1, engine_hours_at_period_end e2 FROM invoices WHERE id=?", [$invS])['e1']
+        . '|' . (string) db_row("SELECT engine_hours_at_period_end e2 FROM invoices WHERE id=?", [$invS])['e2']);
+
 } catch (\Throwable $e) {
     echo "\nEXCEPTION: {$e->getMessage()}\n{$e->getTraceAsString()}\n";
     $FAILURES++;
