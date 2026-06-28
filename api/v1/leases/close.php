@@ -185,15 +185,18 @@ $svcDec = function ($v): ?string {
     $d = clean_decimal($v);
     return ($d !== null && bccomp($d, '0', 2) > 0) ? $d : null;
 };
+// FLEETFORGE-15: every closeout line carries an explicit is_credit (these are
+// charges, never credits) so the append/recompute path never reads an undefined
+// key (legacy_append_mileage_to_full_month_draft hardened too).
 $sweepAmt = $svcDec($body['sweep_amount'] ?? null);
 if ($sweepAmt !== null) {
     $closeoutLines[] = ['item_type' => 'sweep', 'description' => 'Sweep out',
-        'quantity' => '1.0000', 'unit_price' => $sweepAmt, 'amount' => $sweepAmt, 'taxable' => 1];
+        'quantity' => '1.0000', 'unit_price' => $sweepAmt, 'amount' => $sweepAmt, 'is_credit' => 0, 'taxable' => 1];
 }
 $washAmt = $svcDec($body['wash_amount'] ?? null);
 if ($washAmt !== null) {
     $closeoutLines[] = ['item_type' => 'wash', 'description' => 'Wash out',
-        'quantity' => '1.0000', 'unit_price' => $washAmt, 'amount' => $washAmt, 'taxable' => 1];
+        'quantity' => '1.0000', 'unit_price' => $washAmt, 'amount' => $washAmt, 'is_credit' => 0, 'taxable' => 1];
 }
 $fuelGallons = $svcDec($body['fuel_gallons'] ?? null);
 if ($fuelGallons !== null) {
@@ -204,7 +207,7 @@ if ($fuelGallons !== null) {
         $closeoutLines[] = ['item_type' => 'fuel',
             'description' => 'Fuel charge: ' . rtrim(rtrim($fuelGallons, '0'), '.') . ' gal × $' . $fuelRate . '/gal',
             'quantity' => $fuelGallons, 'unit' => 'gallons', 'unit_price' => $fuelRate,
-            'amount' => $fuelAmount, 'taxable' => 1];
+            'amount' => $fuelAmount, 'is_credit' => 0, 'taxable' => 1];
     }
 }
 
@@ -370,8 +373,12 @@ function legacy_append_mileage_to_full_month_draft(
     // Insert each appended line item AND accumulate the subtotal delta.
     $addToSubtotal = '0.00';
     foreach ($extraLines as $line) {
+        // FLEETFORGE-15: read is_credit ONCE defensively — a caller line may omit it
+        // (closeout lines historically did), and the old direct `$line['is_credit']`
+        // read on the taxable branch warned "Undefined array key" on every such close.
+        $isCredit     = !empty($line['is_credit']);
         $signedAmount = (string) ($line['amount'] ?? '0.00');
-        if (!empty($line['is_credit'])) {
+        if ($isCredit) {
             $signedAmount = bcmul($signedAmount, '-1', 2);
         }
         $addToSubtotal = bcadd($addToSubtotal, $signedAmount, 2);
@@ -379,7 +386,7 @@ function legacy_append_mileage_to_full_month_draft(
         $lineTax = ['gst' => '0.00', 'pst' => '0.00', 'hst' => '0.00'];
         if (!empty($line['taxable'])) {
             $lineTax = $taxCalc->calculate(
-                $line['is_credit'] ? bcsub('0', (string) $line['amount'], 2) : (string) $line['amount'],
+                $isCredit ? bcsub('0', (string) ($line['amount'] ?? '0.00'), 2) : (string) ($line['amount'] ?? '0.00'),
                 $province, $gstExempt, $pstExempt
             );
         }
