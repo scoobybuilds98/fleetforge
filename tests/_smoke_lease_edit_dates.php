@@ -141,6 +141,18 @@ try {
         ? $pass("T6 pending: end_date before new start_date → 422 (cross-field)")
         : $fail("T6 — expected 422, resp=" . json_encode($r['error'] ?? $r));
 
+    // T7 (adversarial F3): a LONE start_date edit must re-validate against the
+    // STORED end_date — pushing start past an existing end_date (with NO end_date in
+    // the payload, the dirty-tracked single-field case) must 422, not silently invert.
+    db_execute("UPDATE leases SET start_date='2026-05-01', end_date='2026-06-01', minimum_end_date=NULL WHERE id=?", [$pendId]);
+    $beforeS = (string) $col($pendId, 'start_date');
+    $r = $post(['id' => $pendId, 'updated_at' => $lockTok($pendId), 'start_date' => '2026-07-15']); // no end_date sent
+    ($r['error']['code'] ?? '') === 'VALIDATION_ERROR'
+        && ($r['error']['fields']['start_date'] ?? '') !== ''
+        && (string) $col($pendId, 'start_date') === $beforeS
+        ? $pass("T7 pending: lone start_date past STORED end_date → 422 on start_date, unchanged")
+        : $fail("T7 — got start=" . json_encode($col($pendId, 'start_date')) . " resp=" . json_encode($r['error'] ?? $r));
+
 } finally {
     $cleanup();
     @unlink($harnessFile);

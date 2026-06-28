@@ -302,6 +302,47 @@ try {
         (string) db_row("SELECT engine_hours_at_period_start e1, engine_hours_at_period_end e2 FROM invoices WHERE id=?", [$invS])['e1']
         . '|' . (string) db_row("SELECT engine_hours_at_period_end e2 FROM invoices WHERE id=?", [$invS])['e2']);
 
+    // ════════════════════════════════════════════════════════════════════════
+    // M group (adversarial F2) — MULTI-PERIOD: an earlier SENT invoice already
+    // carries an hourly line, and the covering draft does NOT. The guarantee must
+    // still fold the FINAL segment's hours onto the covering draft — a lease-wide
+    // "any hourly line exists?" guard would wrongly skip it (silent under-billing).
+    // ════════════════════════════════════════════════════════════════════════
+    [$leaseM, $covInv, $meM] = make_hourly_lease_with_invoice1(
+        $customerId, $unitId, $unitNumber, $prefix, 'M', $day(5), $RATE, '100.00'
+    ); // $covInv = activation partial_start day5→month-end, NO hours, engine_hours_at_start=100
+    // An earlier interim invoice WITH hours (100→120 = 20 hrs), then mark it sent so
+    // it counts in any lease-wide check but is NOT the editable draft target.
+    $genM = new InvoiceGenerator();
+    $interim = $genM->createFromLease([
+        'lease_id' => $leaseM, 'period_start' => $day(5), 'period_end' => $day(8),
+        'billing_type' => 'partial_start', 'invoice_type' => 'regular', 'created_by' => 1,
+        'generation_source' => 'manual',
+        'engine_hours_at_period_start' => '100.00', 'engine_hours_at_period_end' => '120.00',
+    ]);
+    $interimId = (int) $interim['invoice_id'];
+    db_execute("UPDATE invoices SET status='sent' WHERE id=?", [$interimId]);
+    ok('M.0 interim invoice carries a 20-hr hourly line (and is sent)',
+        '30.00', (string) (hourly_line($interimId)['amount'] ?? 'none')); // 20 × 1.50 = 30.00
+
+    $respM = http_post("$baseUrl/api/v1/leases/close", [
+        'id' => $leaseM, 'actual_return_date' => $meM,
+        'engine_hours_at_close' => '150.00',   // 120 → 150 = 30 hrs final segment unbilled
+        'close_notes' => 'hourly recon smoke — multi-period F2',
+    ], $sessId, $csrf);
+    ok('M.1 close returned 200', 200, $respM['http_code']);
+    if ($respM['http_code'] !== 200) { echo "    body: {$respM['body']}\n"; throw new RuntimeException('close M failed'); }
+
+    // The covering draft must now carry the FINAL segment's hours (NOT skipped).
+    $lnCov = hourly_line($covInv);
+    okTrue('M.2 final-segment hours FOLDED onto the covering draft (not skipped by a lease-wide guard)', $lnCov !== null);
+    ok('M.3 folded final-segment hours = 30 hrs × $1.50 = $45.00', '45.00', (string) ($lnCov['amount'] ?? 'none'));
+    // The interim's own line is untouched → exactly TWO hourly lines on the lease, no double-bill.
+    $totalHrLines = (int) (db_row(
+        "SELECT COUNT(*) c FROM invoices i JOIN invoice_line_items li ON li.invoice_id=i.id AND li.item_type='hourly_usage'
+          WHERE i.lease_id=? AND i.deleted_at IS NULL AND i.status<>'void'", [$leaseM])['c'] ?? 0);
+    ok('M.4 exactly TWO hourly lines on the lease (interim 20h + final 30h, no double-bill)', 2, $totalHrLines);
+
 } catch (\Throwable $e) {
     echo "\nEXCEPTION: {$e->getMessage()}\n{$e->getTraceAsString()}\n";
     $FAILURES++;

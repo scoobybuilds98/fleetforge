@@ -1258,59 +1258,69 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // paths — it can never double-bill.
     if ($hoursAtClose !== null && $hoursPeriodStart !== null
         && bccomp((string) ($lease['hourly_rate'] ?? '0'), '0', 4) > 0) {
+        // $hrsDue is the FINAL still-unbilled segment: hoursAtClose minus the latest
+        // prior invoice's period-end hours (derived above). It is > 0 only when no
+        // prior invoice billed up to the close reading — so a reopen/reclose (where
+        // the earlier fold set engine_hours_at_period_end = hoursAtClose) yields 0
+        // and skips here without any lease-wide guard.
         $hrsDue = bcsub((string) $hoursAtClose, (string) $hoursPeriodStart, 2);
         if (bccomp($hrsDue, '0', 2) > 0) {
-            $alreadyHrs = (int) (db_row(
-                "SELECT COUNT(*) c FROM invoices i
-                   JOIN invoice_line_items li ON li.invoice_id = i.id AND li.item_type = 'hourly_usage'
-                  WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'",
+            // The covering invoice: the latest editable DRAFT with a NORMAL billing
+            // type. Restricting to partial_start/partial_end/single_period/full_month
+            // (a) keeps hours off mileage_only/adjustment/credit_note invoices — the
+            // engine suppresses hours there by design, so folding would mis-type the
+            // line (advance close creates a mileage_only invoice before this runs);
+            // and (b) `target_has_hours` scopes the idempotency check to THIS covering
+            // invoice — NOT a lease-wide count — so a multi-period lease whose earlier
+            // interim invoice already carries hours still bills the final segment here
+            // (a lease-wide count would wrongly skip it → silent under-billing).
+            $hrsTarget = db_row(
+                "SELECT id, invoice_number, subtotal, total_amount,
+                        gst_exempt_snapshot, pst_exempt_snapshot, tax_exempt_snapshot,
+                        (SELECT COUNT(*) FROM invoice_line_items li
+                          WHERE li.invoice_id = invoices.id AND li.item_type = 'hourly_usage') AS target_has_hours
+                   FROM invoices
+                  WHERE lease_id = ? AND deleted_at IS NULL AND status = 'draft'
+                    AND billing_type IN ('partial_start', 'partial_end', 'single_period', 'full_month')
+                  ORDER BY billing_period_end DESC, id DESC LIMIT 1",
                 [$id]
-            )['c'] ?? 0);
-            if ($alreadyHrs === 0) {
-                // The covering invoice: the live editable DRAFT with the latest
-                // period_end (the rental/activation invoice through the extent).
-                $hrsTarget = db_row(
-                    "SELECT id, invoice_number, subtotal, total_amount,
-                            gst_exempt_snapshot, pst_exempt_snapshot, tax_exempt_snapshot
-                       FROM invoices
-                      WHERE lease_id = ? AND deleted_at IS NULL AND status = 'draft'
-                        AND billing_type NOT IN ('credit_note')
-                      ORDER BY billing_period_end DESC, id DESC LIMIT 1",
-                    [$id]
-                );
-                if ($hrsTarget) {
-                    $rateHr  = (string) $lease['hourly_rate'];
-                    $hrsLine = [
-                        'item_type'   => 'hourly_usage',
-                        'description' => 'Engine hours: ' . number_format((float) $hrsDue, 2) . ' hrs × $' . $rateHr . '/hr',
-                        'quantity'    => $hrsDue,
-                        'unit'        => 'hours',
-                        'unit_price'  => $rateHr,
-                        'amount'      => bcround(bcmul($hrsDue, $rateHr, 6), 2),
-                        'is_credit'   => 0,
-                        'taxable'     => 1,
-                    ];
-                    legacy_append_mileage_to_full_month_draft($hrsTarget, $lease, [$hrsLine], null, null, null, null);
-                    // Snapshot the hours window (parity with the engine path; lets a
-                    // later regenerate preserve the line).
-                    db_update('invoices', [
-                        'engine_hours_at_period_start' => $hoursPeriodStart,
-                        'engine_hours_at_period_end'   => $hoursAtClose,
-                        'period_engine_hours'          => $hrsDue,
-                    ], 'id = ?', [(int) $hrsTarget['id']]);
-                    $advanceActions[] = [
-                        'action' => 'hours_folded_onto_final',
-                        'reason' => "engine hours ({$hrsDue} hrs) folded onto {$hrsTarget['invoice_number']} — the final invoice covering the return date (the partial_end that normally bills hours was skipped).",
-                    ];
-                } else {
-                    // No editable draft to carry the hours (all covering invoices
-                    // sent/paid) — surface it rather than drop it silently.
-                    $advanceActions[] = [
-                        'action' => 'hours_unbilled_no_draft',
-                        'reason' => "engine hours ({$hrsDue} hrs × \${$lease['hourly_rate']}/hr) are due but no editable draft invoice covers the return — bill them manually (Create Invoice or a line on the final invoice).",
-                    ];
-                }
+            );
+            if ($hrsTarget && (int) $hrsTarget['target_has_hours'] === 0) {
+                $rateHr  = (string) $lease['hourly_rate'];
+                $hrsLine = [
+                    'item_type'   => 'hourly_usage',
+                    'description' => 'Engine hours: ' . number_format((float) $hrsDue, 2) . ' hrs × $' . $rateHr . '/hr',
+                    'quantity'    => $hrsDue,
+                    'unit'        => 'hours',
+                    'unit_price'  => $rateHr,
+                    'amount'      => bcround(bcmul($hrsDue, $rateHr, 6), 2),
+                    'is_credit'   => 0,
+                    'taxable'     => 1,
+                ];
+                legacy_append_mileage_to_full_month_draft($hrsTarget, $lease, [$hrsLine], null, null, null, null);
+                // Snapshot the hours window (parity with the engine path; lets a
+                // later regenerate preserve the line + makes a reclose compute 0).
+                db_update('invoices', [
+                    'engine_hours_at_period_start' => $hoursPeriodStart,
+                    'engine_hours_at_period_end'   => $hoursAtClose,
+                    'period_engine_hours'          => $hrsDue,
+                ], 'id = ?', [(int) $hrsTarget['id']]);
+                $advanceActions[] = [
+                    'action' => 'hours_folded_onto_final',
+                    'reason' => "engine hours ({$hrsDue} hrs) folded onto {$hrsTarget['invoice_number']} — the final invoice covering the return date (the partial_end that normally bills hours was skipped).",
+                ];
+            } elseif (!$hrsTarget) {
+                // No editable normal-type draft to carry the hours (the covering
+                // invoice is sent/paid, or the only draft is a mileage_only/adjustment
+                // invoice the engine won't put hours on) — surface it, never silently
+                // drop or mis-type it.
+                $advanceActions[] = [
+                    'action' => 'hours_unbilled_no_draft',
+                    'reason' => "engine hours ({$hrsDue} hrs × \${$lease['hourly_rate']}/hr) are due but no editable rental draft covers the return — bill them manually (Create Invoice or a line on the final invoice).",
+                ];
             }
+            // else: the covering draft already carries an hourly line for this close
+            // (partial_end / overshoot-reissue path billed it, or a reclose) → nothing.
         }
     }
 

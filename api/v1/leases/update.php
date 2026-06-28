@@ -605,20 +605,33 @@ if (array_key_exists('advance_billing_periods', $body)) {
 }
 
 // Validate end_date and mileage cross-field rules
-$currentLease = db_row("SELECT start_date, mileage_at_start FROM leases WHERE id = ?", [$id]);
-// S-LEASE-EDIT-DATES: compare against the NEW start_date when it's being changed
-// in this same request (pending leases), else the stored one.
-$effectiveStart = $data['start_date'] ?? $currentLease['start_date'];
+$currentLease = db_row("SELECT start_date, end_date, minimum_end_date, mileage_at_start FROM leases WHERE id = ?", [$id]);
+// S-LEASE-EDIT-DATES: compare against the EFFECTIVE dates — the request value when
+// a field is being changed in THIS request, else the stored value. Loading the
+// stored end_date / minimum_end_date is what closes the gap where a LONE start_date
+// edit (the only field in a dirty-tracked payload) was never re-checked against the
+// already-stored end_date and could be pushed PAST it (inverted pending lease).
+$effectiveStart  = $data['start_date'] ?? $currentLease['start_date'];
+$startInReq      = array_key_exists('start_date', $data);
+$endInReq        = array_key_exists('end_date', $data);
+$minInReq        = array_key_exists('minimum_end_date', $data);
+$effectiveEnd    = $endInReq ? $data['end_date'] : ($currentLease['end_date'] ?? null);
+$effectiveMinEnd = $minInReq ? $data['minimum_end_date'] : ($currentLease['minimum_end_date'] ?? null);
 
-if (isset($data['end_date']) && $data['end_date']) {
-    if ($data['end_date'] < $effectiveStart) {
+if ($effectiveEnd && $effectiveEnd < $effectiveStart) {
+    // Attribute the error to whichever date the caller is actually setting.
+    if ($endInReq) {
         $fields['end_date'] = 'End date must be after start date.';
+    } else {
+        $fields['start_date'] = "Start date can't be after the lease end date ({$effectiveEnd}).";
     }
 }
 
-if (array_key_exists('minimum_end_date', $data) && $data['minimum_end_date']) {
-    if ($data['minimum_end_date'] < $effectiveStart) {
+if ($effectiveMinEnd && $effectiveMinEnd < $effectiveStart) {
+    if ($minInReq) {
         $fields['minimum_end_date'] = 'Minimum end date must be on or after start date.';
+    } elseif ($startInReq) {
+        $fields['start_date'] = "Start date can't be after the minimum end date ({$effectiveMinEnd}).";
     }
 }
 
