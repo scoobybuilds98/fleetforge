@@ -343,6 +343,45 @@ try {
           WHERE i.lease_id=? AND i.deleted_at IS NULL AND i.status<>'void'", [$leaseM])['c'] ?? 0);
     ok('M.4 exactly TWO hourly lines on the lease (interim 20h + final 30h, no double-bill)', 2, $totalHrLines);
 
+    // ════════════════════════════════════════════════════════════════════════
+    // RC group (F43) — reopen→reclose must NOT duplicate the folded closeout
+    // lines. A close with a fuel charge folds it onto the clamped reissue draft;
+    // a reopen + reclose previously appended it AGAIN (prod double-bill on
+    // INV-2026-00657, MTTS206). The fold is now delete-and-replace (idempotent).
+    // ════════════════════════════════════════════════════════════════════════
+    [$leaseRC, $invRC, $meRC] = make_hourly_lease_with_invoice1(
+        $customerId, $unitId, $unitNumber, $prefix, 'RC', $day(5), $RATE, '300.00'
+    );
+    $returnRC = $day(15); // mid-month → activation overshoots → reissue clamped → fold runs
+    $fuelLines = fn () => (int) (db_row(
+        "SELECT COUNT(*) c FROM invoices i JOIN invoice_line_items li ON li.invoice_id=i.id AND li.item_type='fuel'
+          WHERE i.lease_id=? AND i.deleted_at IS NULL AND i.status<>'void'", [$leaseRC])['c'] ?? 0);
+
+    $rc1 = http_post("$baseUrl/api/v1/leases/close", [
+        'id' => $leaseRC, 'actual_return_date' => $returnRC,
+        'engine_hours_at_close' => '305.00', 'fuel_gallons' => '10', 'close_notes' => 'F43 close #1',
+    ], $sessId, $csrf);
+    ok('RC.1 first close returned 200', 200, $rc1['http_code']);
+    if ($rc1['http_code'] !== 200) { echo "    body: {$rc1['body']}\n"; throw new RuntimeException('close RC#1 failed'); }
+    ok('RC.2 first close folded exactly ONE fuel line', 1, $fuelLines());
+    $liveRC1 = live_invoices($leaseRC);
+    $totalAfter1 = (string) ($liveRC1[0]['total_amount'] ?? '0');
+
+    // reopen + reclose with the SAME close data (the prod repro: a date-change reopen)
+    $rcReopen = http_post("$baseUrl/api/v1/leases/reopen", ['id' => $leaseRC, 'reopen_reason' => 'F43 reclose idempotency'], $sessId, $csrf);
+    ok('RC.3 reopen returned 200', 200, $rcReopen['http_code']);
+    $rc2 = http_post("$baseUrl/api/v1/leases/close", [
+        'id' => $leaseRC, 'actual_return_date' => $returnRC,
+        'engine_hours_at_close' => '305.00', 'fuel_gallons' => '10', 'close_notes' => 'F43 reclose',
+    ], $sessId, $csrf);
+    ok('RC.4 reclose returned 200', 200, $rc2['http_code']);
+    if ($rc2['http_code'] !== 200) { echo "    body: {$rc2['body']}\n"; throw new RuntimeException('reclose RC failed'); }
+    ok('RC.5 reclose did NOT duplicate the fuel line (still ONE, was 2 pre-fix)', 1, $fuelLines());
+    $liveRC2 = live_invoices($leaseRC);
+    $totalAfter2 = (string) ($liveRC2[0]['total_amount'] ?? '0');
+    okTrue("RC.6 invoice total unchanged across reclose ({$totalAfter1} == {$totalAfter2})",
+        bccomp($totalAfter1, $totalAfter2, 2) === 0);
+
 } catch (\Throwable $e) {
     echo "\nEXCEPTION: {$e->getMessage()}\n{$e->getTraceAsString()}\n";
     $FAILURES++;

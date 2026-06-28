@@ -363,6 +363,35 @@ function legacy_append_mileage_to_full_month_draft(
 
     $oldTotal = (string) $invoice['total_amount'];
 
+    // S-CLOSE-RECLOSE-IDEMPOTENT (F43): a reopen→reclose re-runs this fold. Without
+    // this guard it APPENDED the mileage/closeout lines again, DUPLICATING them on
+    // the same draft (real prod double-bill: INV-2026-00657 had fuel + mileage ×2).
+    // Before (re)appending, remove any existing line whose item_type is one we are
+    // about to add — these reconciliation/closeout types ('mileage' overage +
+    // sweep/wash/fuel) are fold-OWNED; the engine's per-period 'mileage_usage' line
+    // is a DIFFERENT type and is left intact. Back the removed lines' signed amount
+    // out of the working subtotal so the re-add below is a REPLACE, not a duplicate.
+    // First close = no matching rows = a no-op (identical totals to the old path).
+    $reTypes = array_values(array_unique(array_map(
+        static fn ($l) => $l['item_type'] ?? 'mileage', $extraLines
+    )));
+    $baseSubtotal = (string) $invoice['subtotal'];
+    if ($reTypes) {
+        $placeholders = implode(',', array_fill(0, count($reTypes), '?'));
+        $priorRows = db_select(
+            "SELECT id, amount, is_credit FROM invoice_line_items
+              WHERE invoice_id = ? AND item_type IN ({$placeholders})",
+            array_merge([(int) $invoice['id']], $reTypes)
+        );
+        foreach ($priorRows as $pr) {
+            $signed = !empty($pr['is_credit'])
+                ? bcmul((string) $pr['amount'], '-1', 2)
+                : (string) $pr['amount'];
+            $baseSubtotal = bcsub($baseSubtotal, $signed, 2);
+            db_execute("DELETE FROM invoice_line_items WHERE id = ?", [(int) $pr['id']]);
+        }
+    }
+
     // Find the highest sort_order so appended lines come after the existing rental.
     $maxSortRow = db_row(
         "SELECT COALESCE(MAX(sort_order), -1) AS max_sort FROM invoice_line_items WHERE invoice_id = ?",
@@ -411,7 +440,9 @@ function legacy_append_mileage_to_full_month_draft(
     // Recompute totals using the current discount on the lease (snapshotted into
     // the original draft as discount_amount; we re-run the formula on the new
     // subtotal so the discount stays proportional for percentage discounts).
-    $newSubtotal   = bcadd((string) $invoice['subtotal'], $addToSubtotal, 2);
+    // $baseSubtotal is $invoice['subtotal'] with any re-added (deleted-above) lines
+    // already backed out, so reclose replaces rather than double-counts.
+    $newSubtotal   = bcadd($baseSubtotal, $addToSubtotal, 2);
     $discountType  = $lease['discount_type']  ?? 'none';
     $discountValue = (string) ($lease['discount_value'] ?? '0.0000');
     $discountAmt   = '0.00';
