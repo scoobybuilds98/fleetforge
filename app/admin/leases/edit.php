@@ -382,41 +382,41 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- ── Allowance (editable) ── -->
+                <!-- ── Allowance (editable, single field + km/miles input toggle) ── -->
+                <?php /* S-MILEAGE-EST-UNIT-TOGGLE: one allowance field with an inline km/miles
+                         toggle (mirrors the create form). The lease's PRIMARY unit is fixed
+                         (indicator above); this toggle only chooses which unit you ENTER the
+                         allowance in — both estimated_mileage_km + _miles are stored, kept in
+                         sync via onAllowanceInput(). $estPrimary seeds the default to the
+                         lease's contracted unit. */ ?>
                 <div class="ff-dual-label">Allowance per lease</div>
-                <div class="ff-dual-grid">
-                    <div :class="{ 'ff-field-secondary': _mileageUnit !== 'km' }">
-                        <div class="input-group">
-                            <input type="number"
-                                   class="form-control font-mono"
-                                   step="0.001"
-                                   min="0"
-                                   name="estimated_mileage_km"
-                                   x-model="form.estimated_mileage_km"
-                                   @input.debounce.150ms="onAllowanceKmInput($event.target.value)"
-                                   aria-label="Allowance in kilometers"
-                                   placeholder="0">
-                            <span class="input-group-suffix">km</span>
-                        </div>
-                        <div class="form-error" x-show="errors.estimated_mileage_km" x-text="errors.estimated_mileage_km"></div>
+                <div class="form-group" style="max-width:320px;margin:0 auto;">
+                    <div class="input-group">
+                        <input type="number"
+                               class="form-control font-mono"
+                               step="0.001"
+                               min="0"
+                               :value="_estUnit === 'km' ? form.estimated_mileage_km : form.estimated_mileage_miles"
+                               @input.debounce.150ms="onAllowanceInput($event.target.value)"
+                               aria-label="Estimated mileage allowance"
+                               placeholder="0">
+                        <?php /* Alpine's string :style REPLACES the whole style attribute, so the
+                                 structural styles must live INSIDE the binding (not only in the static
+                                 style=, which is just a no-Alpine fallback) or padding/flex/weight are lost. */ ?>
+                        <span class="input-group-suffix" style="padding:0;display:inline-flex;align-items:stretch;align-self:stretch;overflow:hidden;" role="group" aria-label="Allowance entry unit">
+                            <span role="button" tabindex="0" :aria-pressed="_estUnit === 'km'"
+                                  @click="_estUnit = 'km'" @keydown.enter.prevent="_estUnit = 'km'" @keydown.space.prevent="_estUnit = 'km'"
+                                  style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;"
+                                  :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;' + (_estUnit === 'km' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);')">km</span>
+                            <span role="button" tabindex="0" :aria-pressed="_estUnit === 'miles'"
+                                  @click="_estUnit = 'miles'" @keydown.enter.prevent="_estUnit = 'miles'" @keydown.space.prevent="_estUnit = 'miles'"
+                                  style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;border-left:1px solid var(--border-color);"
+                                  :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;border-left:1px solid var(--border-color);' + (_estUnit === 'miles' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);')">miles</span>
+                        </span>
                     </div>
-                    <div :class="{ 'ff-field-secondary': _mileageUnit !== 'miles' }">
-                        <div class="input-group">
-                            <input type="number"
-                                   class="form-control font-mono"
-                                   step="0.001"
-                                   min="0"
-                                   name="estimated_mileage_miles"
-                                   x-model="form.estimated_mileage_miles"
-                                   @input.debounce.150ms="onAllowanceMilesInput($event.target.value)"
-                                   aria-label="Allowance in miles"
-                                   placeholder="0">
-                            <span class="input-group-suffix">miles</span>
-                        </div>
-                        <div class="form-error" x-show="errors.estimated_mileage_miles" x-text="errors.estimated_mileage_miles"></div>
-                    </div>
+                    <div class="form-error" x-show="errors.estimated_mileage_km || errors.estimated_mileage_miles" x-text="errors.estimated_mileage_km || errors.estimated_mileage_miles"></div>
                 </div>
-                <div class="form-hint" style="margin-top:-12px;margin-bottom:24px;">Total km included in the lease. Set 0 with a per-km rate to bill every km from 0. Leave 0 with no rate to disable mileage billing.</div>
+                <div class="form-hint" style="text-align:center;margin-top:6px;margin-bottom:24px;">Total distance included in the lease — enter in km or miles (both are stored). Set 0 with a rate to bill every unit from 0.</div>
 
                 <!-- ── Collapsible conversion factor section ── -->
                 <div style="margin-bottom:24px;">
@@ -866,6 +866,9 @@ function FF_EditLease() {
 
         // S-LEASE-UNITS: primary unit fixed at creation — read-only on edit.
         _mileageUnit:        <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
+        // S-MILEAGE-EST-UNIT-TOGGLE: which unit the single allowance field is entered in
+        // (defaults to the lease's primary unit; only switches the input, both columns persist).
+        _estUnit:            <?= json_encode($lease['mileage_unit'] ?? 'km') ?>,
         factor_section_open: false,
 
         // S-LEASE-MILEAGE-MODE: 3-position mileage-source selector.
@@ -902,6 +905,19 @@ function FF_EditLease() {
         },
 
         // Allowance handlers (3-decimal precision, DECIMAL(12,3)).
+        // S-MILEAGE-EST-UNIT-TOGGLE: single-field entry. Write the active unit's
+        // column, then reuse the existing handler to derive the counterpart so BOTH
+        // estimated_mileage_km + _miles stay populated (the dual-field design relied
+        // on x-model for the active column; the single field has none).
+        onAllowanceInput(value) {
+            if (this._estUnit === 'km') {
+                this.form.estimated_mileage_km = value;
+                this.onAllowanceKmInput(value);
+            } else {
+                this.form.estimated_mileage_miles = value;
+                this.onAllowanceMilesInput(value);
+            }
+        },
         onAllowanceKmInput(value) {
             const km = parseFloat(value);
             if (isNaN(km) || km < 0) { this.form.estimated_mileage_miles = ''; return; }

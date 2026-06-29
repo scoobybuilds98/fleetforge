@@ -524,19 +524,22 @@ require_once FF_ROOT . '/includes/header.php';
                             <?php /* S-MILEAGE-EST-UNIT-TOGGLE: per-field km/miles toggle. Sets the SHARED
                                      lease mileage_unit (same togglePrimaryUnit the top control uses), so the
                                      estimated mileage + the rate always share one unit; disabled with ratesLocked. */ ?>
-                            <span class="input-group-suffix" style="padding:0;display:inline-flex;align-self:stretch;overflow:hidden;" role="group" aria-label="Estimated mileage unit">
+                            <span class="input-group-suffix" style="padding:0;display:inline-flex;align-items:stretch;align-self:stretch;overflow:hidden;" role="group" aria-label="Estimated mileage unit">
+                                <?php /* Alpine's string :style REPLACES the whole style attribute, so the
+                                         structural styles must live INSIDE the binding (not only in the static
+                                         style=, which is just a no-Alpine fallback) or padding/flex/weight are lost. */ ?>
                                 <span role="button" tabindex="0" :aria-pressed="form.mileage_unit === 'km'"
                                       @click="!ratesLocked && togglePrimaryUnit('km')"
                                       @keydown.enter.prevent="!ratesLocked && togglePrimaryUnit('km')"
                                       @keydown.space.prevent="!ratesLocked && togglePrimaryUnit('km')"
                                       style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;"
-                                      :style="(form.mileage_unit === 'km' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);') + (ratesLocked ? 'cursor:not-allowed;opacity:0.6;' : 'cursor:pointer;')">km</span>
+                                      :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;' + (form.mileage_unit === 'km' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);') + (ratesLocked ? 'cursor:not-allowed;opacity:0.6;' : 'cursor:pointer;')">km</span>
                                 <span role="button" tabindex="0" :aria-pressed="form.mileage_unit === 'miles'"
                                       @click="!ratesLocked && togglePrimaryUnit('miles')"
                                       @keydown.enter.prevent="!ratesLocked && togglePrimaryUnit('miles')"
                                       @keydown.space.prevent="!ratesLocked && togglePrimaryUnit('miles')"
                                       style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;border-left:1px solid var(--border-color);"
-                                      :style="(form.mileage_unit === 'miles' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);') + (ratesLocked ? 'cursor:not-allowed;opacity:0.6;' : 'cursor:pointer;')">miles</span>
+                                      :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;border-left:1px solid var(--border-color);' + (form.mileage_unit === 'miles' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);') + (ratesLocked ? 'cursor:not-allowed;opacity:0.6;' : 'cursor:pointer;')">miles</span>
                             </span>
                         </div>
                         <div class="form-hint" style="margin-top:4px;">Total distance included in the lease (same unit as the rate). Leave at 0 with a rate to bill every unit from 0.</div>
