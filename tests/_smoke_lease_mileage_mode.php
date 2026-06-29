@@ -219,13 +219,16 @@ try {
     $h5 = ff_close_manual_mileage_bridge_line($hbase, 175, null, true);                        // prior mileage billed
     $h6 = ff_close_manual_mileage_bridge_line(['mileage_unit' => 'miles'] + $hbase, 175, null, false); // miles → km
     check('T6', 'manual mileage bridge gating + unit conversion',
+        // S-MILEAGE-RATE-CONVERT-FIX: a miles lease now bills the per-mile-canonical
+        // amount (175 mi × $0.0966/mi = $16.91), which is qty×price-consistent on the
+        // line (the QBO invariant), vs the old km-canonical 281.65 km × $0.06 = $16.90.
         $h1 !== null && $h1['amount'] === '10.50' && $h1['item_type'] === 'mileage_usage'
         && $h2 === null && $h3 === null && $h4 === null && $h5 === null
-        && $h6 !== null && $h6['amount'] === '16.90',
+        && $h6 !== null && $h6['amount'] === '16.91' && ($h6['unit'] ?? '') === 'miles',
         "manual/175=" . ($h1['amount'] ?? 'null') . " off=" . ($h2 === null ? 'null' : 'LEAK')
         . " odo=" . ($h3 === null ? 'null' : 'LEAK') . " legacy=" . ($h4 === null ? 'null' : 'LEAK')
-        . " prior=" . ($h5 === null ? 'null' : 'LEAK') . " miles=" . ($h6['amount'] ?? 'null')
-        . " (expect 10.50/null/null/null/null/16.90)");
+        . " prior=" . ($h5 === null ? 'null' : 'LEAK') . " miles=" . ($h6['amount'] ?? 'null') . "/" . ($h6['unit'] ?? '?')
+        . " (expect 10.50/null/null/null/null/16.91/miles)");
 
     // ── T7: bridged line bills through createFromLease (the carrier) ──
     // close.php appends the helper's line to $extraLines on an 'adjustment'

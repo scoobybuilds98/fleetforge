@@ -582,17 +582,20 @@ function ff_close_manual_mileage_bridge_line(
     }
 
     $rateKm = (string) $lease['mileage_rate_km'];
-    $charge = bcround(bcmul($distanceKm, $rateKm, 6), 2);
+    // S-MILEAGE-RATE-CONVERT-FIX: bill + label in the lease's unit; computing the
+    // charge from the display values keeps quantity × unit_price == amount.
+    $mDisp  = ff_mileage_line_display($lease, $distanceKm, $rateKm);
+    $charge = bcround(bcmul((string) $mDisp['distance'], (string) $mDisp['rate'], 6), 2);
     if (bccomp($charge, '0', 2) <= 0) {
         return null;
     }
 
     return [
         'item_type'   => 'mileage_usage',
-        'description' => 'Mileage usage: ' . number_format((float) $distanceKm, 2) . ' km × $' . $rateKm . '/km',
-        'quantity'    => $distanceKm,
-        'unit'        => 'km',
-        'unit_price'  => $rateKm,
+        'description' => 'Mileage usage: ' . number_format((float) $mDisp['distance'], 2) . ' ' . $mDisp['unit'] . ' × $' . $mDisp['rate'] . '/' . $mDisp['rate_unit'],
+        'quantity'    => $mDisp['distance'],
+        'unit'        => $mDisp['unit'],
+        'unit_price'  => $mDisp['rate'],
         'amount'      => $charge,
         'is_credit'   => 0,
         'taxable'     => 1,

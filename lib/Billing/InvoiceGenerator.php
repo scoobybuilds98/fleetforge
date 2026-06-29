@@ -915,7 +915,14 @@ class InvoiceGenerator
             $drawdownAuditMeta = null;
             if ($drawdownGate) {
                 $rateKm        = (string) $lease['mileage_rate_km'];
-                $periodCharge  = bcround(bcmul((string) $periodDistanceKm, $rateKm, 6), 2);
+                // S-MILEAGE-RATE-CONVERT-FIX: bill + label in the lease's unit.
+                // Computing the charge from the DISPLAY values (miles × $/mile for a
+                // miles lease) keeps quantity × unit_price == amount on the line (the
+                // QBO line invariant) and is the per-mile-canonical amount the
+                // customer expects; for a km lease it is identical to km × rate_km.
+                // The precharge drawdown below draws this same charge.
+                $mDisp         = ff_mileage_line_display($lease, (string) $periodDistanceKm, $rateKm);
+                $periodCharge  = bcround(bcmul((string) $mDisp['distance'], (string) $mDisp['rate'], 6), 2);
 
                 // FOR UPDATE re-read of the lease's precharge_balance per D20.
                 // The outer transaction already holds the row implicitly through
@@ -930,20 +937,22 @@ class InvoiceGenerator
                     ? (string) $leaseLocked['precharge_balance']
                     : '0.00';
 
-                // mileage_usage line (Branch A and B both emit this).
+                // mileage_usage line (Branch A and B both emit this). $mDisp +
+                // $periodCharge were resolved above in the lease's unit so that
+                // quantity × unit_price == amount.
                 $lineItems[] = [
                     'sort_order'       => $sortOrder++,
                     'item_type'        => 'mileage_usage',
-                    'description'      => "Mileage usage: " . number_format((float) $periodDistanceKm, 2) . " km × \$" . $rateKm . "/km",
-                    'quantity'         => sprintf('%s', $periodDistanceKm),
-                    'unit'             => 'km',
-                    'unit_price'       => $rateKm,
+                    'description'      => "Mileage usage: " . number_format((float) $mDisp['distance'], 2) . " {$mDisp['unit']} × \$" . $mDisp['rate'] . "/{$mDisp['rate_unit']}",
+                    'quantity'         => sprintf('%s', $mDisp['distance']),
+                    'unit'             => $mDisp['unit'],
+                    'unit_price'       => $mDisp['rate'],
                     'amount'           => $periodCharge,
                     'is_credit'        => 0,
                     'taxable'          => 1,
-                    'mileage_distance' => (string) $periodDistanceKm,
-                    'mileage_rate'     => $rateKm,
-                    'mileage_unit'     => 'km',
+                    'mileage_distance' => (string) $mDisp['distance'],
+                    'mileage_rate'     => $mDisp['rate'],
+                    'mileage_unit'     => $mDisp['unit'],
                     'period_start'     => $periodStart,
                     'period_end'       => $periodEnd,
                 ];

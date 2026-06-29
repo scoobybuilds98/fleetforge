@@ -232,6 +232,58 @@ function clean_time(?string $val): ?string
 }
 }
 
+// ff_mileage_line_display() — S-MILEAGE-RATE-CONVERT-FIX
+// The billing engine computes mileage canonically in KM (distanceKm ×
+// mileage_rate_km). For a MILES lease the customer-facing line should read
+// "{miles} miles × ${per-mile}/mile", not km. This renders the display tuple in
+// the lease's unit; the dollar AMOUNT is the caller's (unit-agnostic — after the
+// rate fix, km×rate_km == miles×rate_mile within rounding), so this only relabels.
+// Returns ['distance','rate','unit','rate_unit'] where unit is 'km'|'miles' (the
+// quantity label) and rate_unit is the singular 'km'|'mile' (for the "/unit" suffix).
+if (!function_exists('ff_mileage_line_display')) {
+function ff_mileage_line_display(array $lease, string $distanceKm, string $rateKm): array
+{
+    $isMiles = (($lease['mileage_unit'] ?? 'km') === 'miles');
+    if (!$isMiles) {
+        return ['distance' => $distanceKm, 'rate' => $rateKm, 'unit' => 'km', 'rate_unit' => 'km'];
+    }
+    // km → miles for the distance (a distance scales directly).
+    $kmToMiles = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
+    if (bccomp($kmToMiles, '0', 6) <= 0) $kmToMiles = '0.621371';
+    $distanceMiles = bcround(bcmul($distanceKm, $kmToMiles, 8), 2);
+    // Per-mile rate: the stored primary mileage_rate IS per-mile for a miles lease
+    // (exact); fall back to deriving it from rate_km if absent/zero.
+    $rateMile = (isset($lease['mileage_rate']) && $lease['mileage_rate'] !== null
+                 && bccomp((string) $lease['mileage_rate'], '0', 4) > 0)
+        ? (string) $lease['mileage_rate']
+        : bcround(bcmul($rateKm, (string) ($lease['miles_to_km_conversion'] ?? '1.609344'), 8), 4);
+    return ['distance' => $distanceMiles, 'rate' => $rateMile, 'unit' => 'miles', 'rate_unit' => 'mile'];
+}
+}
+
+// ff_mileage_unit_label() — the lease's mileage unit for display ('km' | 'miles'),
+// and the singular '/unit' suffix label ('km' | 'mile'). S-MILEAGE-RATE-CONVERT-FIX.
+if (!function_exists('ff_mileage_unit_label')) {
+function ff_mileage_unit_label(array $lease, bool $singular = false): string
+{
+    $miles = (($lease['mileage_unit'] ?? 'km') === 'miles');
+    return $miles ? ($singular ? 'mile' : 'miles') : 'km';
+}
+}
+
+// ff_km_to_lease_unit() — convert a km-canonical distance to the lease's display
+// unit (miles for a miles lease, else unchanged). For relabeling km-canonical audit
+// values (period_distance_km etc.) on customer/admin surfaces. S-MILEAGE-RATE-CONVERT-FIX.
+if (!function_exists('ff_km_to_lease_unit')) {
+function ff_km_to_lease_unit(array $lease, $km): string
+{
+    if (($lease['mileage_unit'] ?? 'km') !== 'miles') return (string) $km;
+    $f = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
+    if (bccomp($f, '0', 6) <= 0) $f = '0.621371';
+    return bcround(bcmul((string) $km, $f, 8), 2);
+}
+}
+
 // clean_date() — return a validated Y-m-d date string, or null
 // Rejects invalid calendar dates (e.g. Feb 30).
 if (!function_exists('clean_date')) {

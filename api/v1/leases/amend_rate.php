@@ -166,6 +166,30 @@ if ($fields !== []) {
     json_error('INVALID_RATE', 'One or more rate fields failed validation.', 422, ['fields' => $fields]);
 }
 
+// S-MILEAGE-RATE-CONVERT-FIX: the mileage rate spans THREE columns that must stay a
+// consistent triple — the primary `mileage_rate` (in the lease's unit; the legacy
+// close-overage path + the per-mile display read it) plus the derived
+// mileage_rate_km / mileage_rate_miles. The amend UI exposes $/km and $/mile as
+// separate fields; take the one in the LEASE'S unit as authoritative, then derive the
+// counterpart + the primary, so an amendment can't leave a stale primary (silently
+// billing the old rate) or a mismatched km/mile pair (re-opening the inverted-pair
+// hole create.php now closes). Rate scales with the INVERSE factor of a distance.
+if (isset($provided['mileage_rate_km']) || isset($provided['mileage_rate_miles'])) {
+    $mlu = db_row("SELECT mileage_unit, km_to_miles_conversion, miles_to_km_conversion FROM leases WHERE id = ?", [$leaseId]);
+    $k2m = (string) ($mlu['km_to_miles_conversion'] ?? '0.621371'); if (bccomp($k2m, '0', 6) <= 0) $k2m = '0.621371';
+    $m2k = (string) ($mlu['miles_to_km_conversion'] ?? '1.609344'); if (bccomp($m2k, '0', 6) <= 0) $m2k = '1.609344';
+    if (($mlu['mileage_unit'] ?? 'km') === 'miles') {
+        $authRate = $provided['mileage_rate_miles'] ?? bcround(bcmul($provided['mileage_rate_km'], $m2k, 8), 4);
+        $provided['mileage_rate_miles'] = bcround($authRate, 4);
+        $provided['mileage_rate_km']    = bcround(bcmul($authRate, $k2m, 8), 4); // $/km = $/mile × kmToMiles
+    } else {
+        $authRate = $provided['mileage_rate_km'] ?? bcround(bcmul($provided['mileage_rate_miles'], $k2m, 8), 4);
+        $provided['mileage_rate_km']    = bcround($authRate, 4);
+        $provided['mileage_rate_miles'] = bcround(bcmul($authRate, $m2k, 8), 4); // $/mile = $/km × milesToKm
+    }
+    $provided['mileage_rate'] = bcround($authRate, 4); // primary, in the lease's unit
+}
+
 if ($provided === []) {
     json_error('NO_RATE_PROVIDED',
         'At least one of new_daily_rate, new_weekly_rate, new_monthly_rate, '

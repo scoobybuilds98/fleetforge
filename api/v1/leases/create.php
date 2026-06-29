@@ -494,13 +494,22 @@ if ($fields) {
 
 // ── Derive dual-unit values from single rate + global factor ──────────────
 // (S-MILEAGE-UNIT-SIMPLIFY) Form sends mileage_rate in the selected unit.
-// Counterpart columns are derived here and snapshots the global factors.
+// Counterpart columns are derived here and snapshot the global factors.
+//
+// S-MILEAGE-RATE-CONVERT-FIX: a RATE ($/unit) converts with the INVERSE factor of
+// a distance — a km is SHORTER than a mile, so $/km is LOWER than $/mile. So:
+//   $/km   = $/mile × (miles-per-km = kmToMiles 0.621371)
+//   $/mile = $/km   × (km-per-mile  = milesToKm 1.609344)
+// Both lines previously used the DISTANCE factor (the wrong direction), which left
+// mileage_rate_km inflated by milesToKm² ≈ 2.59× on every miles lease — the modern
+// `mileage_usage` billing path (km_distance × mileage_rate_km) then over-charged by
+// that factor. Distances below still scale directly (correct, unchanged).
 if ($mileageUnit === 'km') {
     $rateKmFinal    = bcround($mileageRate, 4);
-    $rateMilesFinal = bcround(bcmul($mileageRate, $kmToMilesFinal, 8), 4);
+    $rateMilesFinal = bcround(bcmul($mileageRate, $milesToKmFinal, 8), 4); // $/mile = $/km × milesToKm
 } else {
     $rateMilesFinal = bcround($mileageRate, 4);
-    $rateKmFinal    = bcround(bcmul($mileageRate, $milesToKmFinal, 8), 4);
+    $rateKmFinal    = bcround(bcmul($mileageRate, $kmToMilesFinal, 8), 4); // $/km = $/mile × kmToMiles
 }
 
 if ($mileageUnit === 'km') {

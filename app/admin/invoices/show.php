@@ -2053,8 +2053,17 @@ if ($hasOdometer):
     // Fetch only immutable fields (start_date, odometer_start_km) from the lease.
     // mileage_rate_km is intentionally excluded — use $frozenMileageRateKm instead.
     $leaseOdoContext = $invoice['lease_id']
-        ? db_row("SELECT start_date, odometer_start_km FROM leases WHERE id = ? AND deleted_at IS NULL", [$invoice['lease_id']])
+        ? db_row("SELECT start_date, odometer_start_km, mileage_unit, km_to_miles_conversion, miles_to_km_conversion FROM leases WHERE id = ? AND deleted_at IS NULL", [$invoice['lease_id']])
         : null;
+    // S-MILEAGE-RATE-CONVERT-FIX: render this usage panel in the lease's unit so it
+    // doesn't contradict the (now unit-correct) mileage line below. $mDispLease is a
+    // lease-shaped array for the ff_mileage_* helpers; the per-unit rate is the frozen
+    // per-km rate scaled to miles when needed.
+    $mDispLease   = $leaseOdoContext ?: ['mileage_unit' => 'km'];
+    $mDispUnit    = ff_mileage_unit_label($mDispLease);
+    $mDispRate    = ($mDispUnit === 'miles' && $frozenMileageRateKm !== null)
+        ? bcround(bcmul((string) $frozenMileageRateKm, (string) ($leaseOdoContext['miles_to_km_conversion'] ?? '1.609344'), 8), 4)
+        : $frozenMileageRateKm;
 
     // Compute period charge for display: distance × rate (per Model B)
     $periodCharge = null;
@@ -2088,7 +2097,7 @@ if ($hasOdometer):
         <?php if ($invoice['period_distance_km'] !== null): ?>
         <dt class="text-secondary">Period Distance</dt>
         <dd>
-            <span class="font-mono" style="font-weight:600;"><?= number_format((float)$invoice['period_distance_km'], 2) ?> km</span>
+            <span class="font-mono" style="font-weight:600;"><?= number_format((float) ff_km_to_lease_unit($mDispLease, $invoice['period_distance_km']), 2) ?> <?= e($mDispUnit) ?></span>
             <span class="badge badge-no-dot <?= $odoSourceBadge[0] ?>" style="font-size:10px; margin-left:6px;"><?= $odoSourceBadge[1] ?></span>
         </dd>
         <?php endif; ?>
@@ -2097,14 +2106,14 @@ if ($hasOdometer):
         <dt class="text-secondary">Period Charge</dt>
         <dd class="font-mono">
             $<?= number_format((float) $periodCharge, 2) ?>
-            <span class="text-secondary text-sm">(<?= number_format((float)$invoice['period_distance_km'], 2) ?> km × $<?= e($frozenMileageRateKm) ?>/km)</span>
+            <span class="text-secondary text-sm">(<?= number_format((float) ff_km_to_lease_unit($mDispLease, $invoice['period_distance_km']), 2) ?> <?= e($mDispUnit) ?> × $<?= e($mDispRate) ?>/<?= e(ff_mileage_unit_label($mDispLease, true)) ?>)</span>
         </dd>
         <?php endif; ?>
 
         <?php if ($invoice['cumulative_distance_km'] !== null): ?>
         <dt class="text-secondary">Lease-to-Date Distance</dt>
         <dd class="font-mono">
-            <?= number_format((float)$invoice['cumulative_distance_km'], 2) ?> km
+            <?= number_format((float) ff_km_to_lease_unit($mDispLease, $invoice['cumulative_distance_km']), 2) ?> <?= e($mDispUnit) ?>
             <?php if ($leaseOdoContext && $leaseOdoContext['start_date']): ?>
             <span class="text-secondary text-sm" style="margin-left:4px;">since lease start on <?= format_date($leaseOdoContext['start_date']) ?></span>
             <?php endif; ?>
@@ -2154,7 +2163,7 @@ if ($hasOdometer):
 <?php
 $usageLine = !empty($invoice['lease_id'])
     ? db_row(
-        "SELECT id, amount, mileage_distance, mileage_rate
+        "SELECT id, amount, mileage_distance, mileage_rate, mileage_unit
            FROM invoice_line_items
           WHERE invoice_id = ? AND item_type = 'mileage_usage' LIMIT 1",
         [(int) $invoice['id']]
@@ -2173,7 +2182,7 @@ if ($usageLine):
 
     <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:200px 1fr; gap:6px 16px; font-size:13px; margin:0;">
         <dt class="text-secondary">Period Distance</dt>
-        <dd class="font-mono"><?= number_format((float) $usageLine['mileage_distance'], 2) ?> km</dd>
+        <dd class="font-mono"><?= number_format((float) $usageLine['mileage_distance'], 2) ?> <?= e($usageLine['mileage_unit'] ?? 'km') ?></dd>
 
         <dt class="text-secondary">Period Charge</dt>
         <dd class="font-mono">$<?= number_format((float) $usageLine['amount'], 2) ?></dd>

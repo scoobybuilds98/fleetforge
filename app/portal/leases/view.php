@@ -290,7 +290,7 @@ $statusBadge = match($lease['status']) {
             </li>
             <li>
                 <span class="portal-info-label">Mileage Rate</span>
-                <span class="portal-info-value font-mono"><?= e(format_currency($lease['mileage_rate'] ?? '0.00')) ?>/km</span>
+                <span class="portal-info-value font-mono"><?= e(format_currency($lease['mileage_rate'] ?? '0.00')) ?>/<?= e(ff_mileage_unit_label($lease, true)) ?></span>
             </li>
             <li>
                 <span class="portal-info-label">Mileage Allowance</span>
@@ -442,7 +442,7 @@ $statusBadge = match($lease['status']) {
                                     <span style="color:var(--text-secondary);">→</span>
                                     <?= e(format_date(ff_invoice_display_period_end($row + $_leasePeriodCtx))) ?>
                                 </td>
-                                <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> km</td>
+                                <td class="text-right font-mono"><?= e(number_format((float) ff_km_to_lease_unit($lease, $row['km']), 2)) ?> <?= e(ff_mileage_unit_label($lease)) ?></td>
                                 <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
                                 <td class="text-right font-mono" style="color:#0369a1;">
                                     <?= $row['credit_amount'] !== null ? e(format_currency($row['credit_amount'])) : '—' ?>
@@ -472,7 +472,7 @@ $statusBadge = match($lease['status']) {
             <div>
                 <div class="portal-info-label" style="font-size:0.75rem; text-transform:uppercase;">Rate</div>
                 <div class="font-mono" style="font-size:1.125rem;">
-                    <?= e(format_currency($mileageRateKm)) ?>/km
+                    <?= e(format_currency($lease['mileage_rate'] ?? $mileageRateKm)) ?>/<?= e(ff_mileage_unit_label($lease, true)) ?>
                 </div>
             </div>
         </div>
@@ -500,7 +500,7 @@ $statusBadge = match($lease['status']) {
                                     <span style="color:var(--text-secondary);">→</span>
                                     <?= e(format_date(ff_invoice_display_period_end($row + $_leasePeriodCtx))) ?>
                                 </td>
-                                <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> km</td>
+                                <td class="text-right font-mono"><?= e(number_format((float) ff_km_to_lease_unit($lease, $row['km']), 2)) ?> <?= e(ff_mileage_unit_label($lease)) ?></td>
                                 <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
                             </tr>
                             <?php endforeach; ?>

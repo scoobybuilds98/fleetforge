@@ -878,11 +878,17 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         if (bccomp($overageMileage, '0', 4) > 0) {
             $mileageCharge = bcround(bcmul($overageMileage, (string)$lease['mileage_rate'], 6), 2);
             if (bccomp($mileageCharge, '0', 2) > 0) {
+                // S-MILEAGE-RATE-CONVERT-FIX: $overageMileage is ALREADY in the
+                // lease's unit (this legacy path bills mileage_rate × native reading,
+                // which is why its charge was always correct) — only the description
+                // hardcoded "km". Label it in the lease's unit.
+                $mOverUnit     = ($lease['mileage_unit'] ?? 'km') === 'miles' ? 'miles' : 'km';
+                $mOverRateUnit = $mOverUnit === 'miles' ? 'mile' : 'km';
                 $extraLines[] = [
                     'item_type'   => 'mileage',
-                    'description' => "Mileage overage: {$overageMileage} km × \${$lease['mileage_rate']}/km",
+                    'description' => "Mileage overage: {$overageMileage} {$mOverUnit} × \${$lease['mileage_rate']}/{$mOverRateUnit}",
                     'quantity'    => $overageMileage,
-                    'unit'        => $lease['mileage_unit'] ?? 'km',
+                    'unit'        => $mOverUnit,
                     'unit_price'  => (string)$lease['mileage_rate'],
                     'amount'      => $mileageCharge,
                     'is_credit'   => 0,
