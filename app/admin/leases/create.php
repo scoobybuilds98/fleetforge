@@ -508,11 +508,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-error" x-show="errors.mileage_rate" x-text="errors.mileage_rate"></div>
                     </div>
 
-                    <!-- ── Single allowance input ── -->
+                    <!-- ── Single allowance input (with inline km/miles toggle) ── -->
                     <div class="form-group" style="max-width:320px;margin-bottom:1.25rem;">
-                        <label class="form-label" for="estimated_mileage">
-                            Estimated mileage (<span x-text="form.mileage_unit === 'km' ? 'km' : 'miles'"></span>)
-                        </label>
+                        <label class="form-label" for="estimated_mileage">Estimated mileage</label>
                         <div class="input-group">
                             <input type="number"
                                    id="estimated_mileage"
@@ -523,9 +521,25 @@ require_once FF_ROOT . '/includes/header.php';
                                    x-model="form.estimated_mileage"
                                    aria-label="Estimated mileage allowance"
                                    placeholder="0">
-                            <span class="input-group-suffix" x-text="form.mileage_unit === 'km' ? 'km' : 'miles'"></span>
+                            <?php /* S-MILEAGE-EST-UNIT-TOGGLE: per-field km/miles toggle. Sets the SHARED
+                                     lease mileage_unit (same togglePrimaryUnit the top control uses), so the
+                                     estimated mileage + the rate always share one unit; disabled with ratesLocked. */ ?>
+                            <span class="input-group-suffix" style="padding:0;display:inline-flex;align-self:stretch;overflow:hidden;" role="group" aria-label="Estimated mileage unit">
+                                <span role="button" tabindex="0" :aria-pressed="form.mileage_unit === 'km'"
+                                      @click="!ratesLocked && togglePrimaryUnit('km')"
+                                      @keydown.enter.prevent="!ratesLocked && togglePrimaryUnit('km')"
+                                      @keydown.space.prevent="!ratesLocked && togglePrimaryUnit('km')"
+                                      style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;"
+                                      :style="(form.mileage_unit === 'km' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);') + (ratesLocked ? 'cursor:not-allowed;opacity:0.6;' : 'cursor:pointer;')">km</span>
+                                <span role="button" tabindex="0" :aria-pressed="form.mileage_unit === 'miles'"
+                                      @click="!ratesLocked && togglePrimaryUnit('miles')"
+                                      @keydown.enter.prevent="!ratesLocked && togglePrimaryUnit('miles')"
+                                      @keydown.space.prevent="!ratesLocked && togglePrimaryUnit('miles')"
+                                      style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;border-left:1px solid var(--border-color);"
+                                      :style="(form.mileage_unit === 'miles' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);') + (ratesLocked ? 'cursor:not-allowed;opacity:0.6;' : 'cursor:pointer;')">miles</span>
+                            </span>
                         </div>
-                        <div class="form-hint" style="margin-top:4px;">Total distance included in the lease. Leave at 0 with a rate to bill every unit from 0.</div>
+                        <div class="form-hint" style="margin-top:4px;">Total distance included in the lease (same unit as the rate). Leave at 0 with a rate to bill every unit from 0.</div>
                         <div class="form-error" x-show="errors.estimated_mileage" x-text="errors.estimated_mileage"></div>
                     </div>
 
