@@ -99,7 +99,7 @@ $ITEM_TYPES = [
     'insurance', 'warranty', 'late_fee', 'early_return_credit', 'manual_adjustment',
     'damage', 'discount', 'account_credit_applied', 'other', 'gps', 'mileage_usage',
     'mileage_drawdown_credit', 'base_rental_reconciliation_credit', 'mileage',
-    'hourly_usage', 'cartage', 'sweep', 'wash', 'fuel',
+    'hourly_usage', 'cartage', 'sweep', 'wash', 'fuel', 'mileage_estimate',
 ];
 
 $rawLines = $body['lines'] ?? null;

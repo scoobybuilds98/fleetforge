@@ -248,9 +248,9 @@ class DisclosureService
             $policyLines[] = "Operating lease rentals are recognized on a straight-line basis "
                 . "over the lease term, in accordance with ASPE 3065.";
         }
-        if (array_intersect(['mileage_usage', 'mileage_overage', 'mileage_adjustment'], $types)) {
-            $policyLines[] = "Mileage overage revenue is recognized as a contingent rental "
-                . "in the period the amount becomes determinable.";
+        if (array_intersect(['mileage_usage', 'mileage_overage', 'mileage_adjustment', 'mileage_estimate', 'mileage_credit'], $types)) {
+            $policyLines[] = "Mileage revenue is recognized as a contingent rental, billed as a "
+                . "per-day estimate and trued up against actual distance driven as it becomes determinable.";
         }
         if (in_array('mileage_precharge', $types, true)) {
             $policyLines[] = "Mileage precharges collected at lease inception are recognized "
@@ -619,12 +619,12 @@ class DisclosureService
 
         // Contingent rentals (mileage overage) recognized in the period
         $contingent = \db_row(
-            "SELECT COALESCE(SUM(li.amount), 0) AS total
+            "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.amount ELSE li.amount END), 0) AS total
                FROM invoice_line_items li
                JOIN invoices i ON i.id = li.invoice_id
               WHERE i.invoice_date BETWEEN ? AND ?
                 AND i.status NOT IN ('void','draft')
-                AND li.item_type IN ('mileage_usage','mileage_adjustment')",
+                AND li.item_type IN ('mileage_usage','mileage_estimate','mileage_adjustment','mileage_credit')",
             [$fyStart, $fyEnd]
         );
         $contingentAmt = (string) ($contingent['total'] ?? '0.00');

@@ -508,6 +508,31 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-error" x-show="errors.mileage_rate" x-text="errors.mileage_rate"></div>
                     </div>
 
+                    <!-- ── Estimated mileage per day (S-MILEAGE-EST-DAILY) ── -->
+                    <div class="form-group" style="max-width:320px;margin-bottom:1.25rem;">
+                        <label class="form-label" for="estimated_mileage_per_day">
+                            Estimated mileage per day (<span x-text="form.mileage_unit === 'km' ? 'km' : 'miles'"></span>/day)
+                        </label>
+                        <div class="input-group">
+                            <input type="number"
+                                   id="estimated_mileage_per_day"
+                                   class="form-control font-mono"
+                                   step="1"
+                                   min="0"
+                                   name="estimated_mileage_per_day"
+                                   x-model="form.estimated_mileage_per_day"
+                                   aria-label="Estimated mileage per day"
+                                   placeholder="0">
+                            <span class="input-group-suffix" x-text="(form.mileage_unit === 'km' ? 'km' : 'miles') + '/day'"></span>
+                        </div>
+                        <div class="form-hint" style="margin-top:4px;">
+                            Each invoice bills an <strong>estimate</strong> (days &times; this &times; rate), then trues up against the
+                            <strong>actual</strong> distance driven &mdash; adding a charge or credit for the difference. Rate comes from the
+                            customer rate card. Leave at 0 to bill only actual mileage.
+                        </div>
+                        <div class="form-error" x-show="errors.estimated_mileage_per_day" x-text="errors.estimated_mileage_per_day"></div>
+                    </div>
+
                     <!-- ── Single allowance input (with inline km/miles toggle) ── -->
                     <div class="form-group" style="max-width:320px;margin-bottom:1.25rem;">
                         <label class="form-label" for="estimated_mileage">Estimated mileage</label>
@@ -1129,6 +1154,7 @@ function FF_CreateLease() {
             // S-MILEAGE-UNIT-SIMPLIFY: single rate + allowance; API derives counterpart columns
             mileage_rate:             '',
             estimated_mileage:        '',
+            estimated_mileage_per_day: '', // S-MILEAGE-EST-DAILY: per-day estimate (estimate + true-up billing)
             // SAMSARA-3: mileage_at_start removed — derived from odometer_start_km on the server
             rate_notes:         '',
             discount_type:      'none',
@@ -1590,6 +1616,7 @@ function FF_CreateLease() {
                 ['monthly_rate',      'Monthly rate',      'Monthly rate cannot be negative.'],
                 ['mileage_rate',      'Mileage rate',      'Mileage rate cannot be negative.'],
                 ['estimated_mileage', 'Estimated mileage', 'Estimated mileage cannot be negative.'],
+                ['estimated_mileage_per_day', 'Estimated mileage per day', 'Estimated mileage per day cannot be negative.'],
                 ['discount_value',    'Discount',          'Discount value cannot be negative.'],
                 ['insurance_cost',    'Insurance cost',    'Insurance cost cannot be negative.'],
                 ['warranty_cost',     'Warranty cost',     'Warranty cost cannot be negative.'],

@@ -418,6 +418,26 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="form-hint" style="text-align:center;margin-top:6px;margin-bottom:24px;">Total distance included in the lease — enter in km or miles (both are stored). Set 0 with a rate to bill every unit from 0.</div>
 
+                <!-- ── Estimated mileage per day (S-MILEAGE-EST-DAILY) ── -->
+                <?php /* Entered in the lease's fixed primary unit; the API derives the km/miles
+                         mirrors. Each invoice bills days × per-day × rate as an estimate, then
+                         trues up against actual distance. */ ?>
+                <div class="ff-dual-label">Estimated mileage per day</div>
+                <div class="form-group" style="max-width:320px;margin:0 auto;">
+                    <div class="input-group">
+                        <input type="number"
+                               class="form-control font-mono"
+                               step="1"
+                               min="0"
+                               x-model="form.estimated_mileage_per_day"
+                               aria-label="Estimated mileage per day"
+                               placeholder="0">
+                        <span class="input-group-suffix" x-text="(_mileageUnit === 'km' ? 'km' : 'miles') + '/day'"></span>
+                    </div>
+                    <div class="form-error" x-show="errors.estimated_mileage_per_day" x-text="errors.estimated_mileage_per_day"></div>
+                </div>
+                <div class="form-hint" style="text-align:center;margin-top:6px;margin-bottom:24px;">Each invoice bills an estimate (days &times; this &times; rate), then trues up against the actual distance driven — adding a charge or credit. 0 = bill only actual mileage.</div>
+
                 <!-- ── Collapsible conversion factor section ── -->
                 <div style="margin-bottom:24px;">
                     <button type="button"
@@ -804,6 +824,8 @@ function FF_EditLease() {
             engine_hours_at_start:   <?= json_encode($lease['engine_hours_at_start'] ?? '') ?>,
             estimated_mileage_km:    <?= json_encode($lease['estimated_mileage_km'] ?? $lease['estimated_mileage'] ?? '') ?>,
             estimated_mileage_miles: <?= json_encode($lease['estimated_mileage_miles'] ?? '') ?>,
+            // S-MILEAGE-EST-DAILY: per-day estimate in the lease's primary unit (API derives mirrors).
+            estimated_mileage_per_day: <?= json_encode(rtrim(rtrim((string)($lease['estimated_mileage_per_day'] ?? ''), '0'), '.')) ?>,
             km_to_miles_conversion:  <?= (float)($lease['km_to_miles_conversion'] ?? 0.621371) ?>,
             miles_to_km_conversion:  <?= (float)($lease['miles_to_km_conversion'] ?? 1.609344) ?>,
             // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
@@ -956,6 +978,7 @@ function FF_EditLease() {
                 ['mileage_at_start',        'Starting mileage cannot be negative.'],
                 ['estimated_mileage_km',    'KM allowance cannot be negative.'],
                 ['estimated_mileage_miles', 'Mile allowance cannot be negative.'],
+                ['estimated_mileage_per_day', 'Estimated mileage per day cannot be negative.'],
             ];
             distanceChecks.forEach(([k, msg]) => {
                 const v = this.form[k];

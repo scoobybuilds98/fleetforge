@@ -126,7 +126,7 @@ try {
             -- Group by FF category for stable presentation
             CASE
               WHEN ff_item_type IN ('base_rental','base_rental_reconciliation_credit','gps',
-                                    'mileage_precharge','mileage_adjustment','mileage_credit',
+                                    'mileage_precharge','mileage_estimate','mileage_adjustment','mileage_credit',
                                     'mileage_usage','mileage_drawdown_credit') THEN 1
               WHEN ff_item_type IN ('late_fee','manual_adjustment') THEN 2
               WHEN ff_item_type IN ('damage','insurance','warranty') THEN 3

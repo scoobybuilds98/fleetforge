@@ -350,6 +350,16 @@ if (array_key_exists('estimated_mileage', $body)) {
     $data['estimated_mileage'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
 }
 
+// S-MILEAGE-EST-DAILY: per-day estimate (primary, in the lease's mileage_unit).
+// Dual-unit _km / _miles mirrors are derived in the re-sync block below.
+if (array_key_exists('estimated_mileage_per_day', $body)) {
+    $d = clean_decimal($body['estimated_mileage_per_day']);
+    if ($d !== null && bccomp($d, '0', 4) < 0) {
+        $fields['estimated_mileage_per_day'] = 'Estimated mileage per day cannot be negative.';
+    }
+    $data['estimated_mileage_per_day'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? bcround($d, 2) : '0.00';
+}
+
 if (array_key_exists('insurance_opt_in', $body))
     $data['insurance_opt_in'] = (bool) $body['insurance_opt_in'] ? 1 : 0;
 
@@ -663,6 +673,29 @@ if (isset($data['estimated_mileage_km']) || isset($data['estimated_mileage_miles
     $data['estimated_mileage'] = ($primaryUnit === 'miles') ? $resolvedMiles : $resolvedKm;
 }
 
+// S-MILEAGE-EST-DAILY: when the per-day estimate is edited, derive its km/miles
+// mirrors from the lease's unit + conversion factors (a distance scales directly).
+// km-canonical drives the estimate math, so keep it authoritative.
+if (isset($data['estimated_mileage_per_day'])) {
+    $pdRow = db_row(
+        "SELECT mileage_unit, km_to_miles_conversion, miles_to_km_conversion FROM leases WHERE id = ?",
+        [$id]
+    );
+    $pdUnit    = $pdRow['mileage_unit'] ?? 'km';
+    $kmToMiles = (string) ($pdRow['km_to_miles_conversion'] ?? '0.621371');
+    $milesToKm = (string) ($pdRow['miles_to_km_conversion'] ?? '1.609344');
+    if (bccomp($kmToMiles, '0', 6) <= 0) $kmToMiles = '0.621371';
+    if (bccomp($milesToKm, '0', 6) <= 0) $milesToKm = '1.609344';
+    $pd = (string) $data['estimated_mileage_per_day'];
+    if ($pdUnit === 'miles') {
+        $data['estimated_mileage_per_day_miles'] = bcround($pd, 4);
+        $data['estimated_mileage_per_day_km']    = bcround(bcmul($pd, $milesToKm, 8), 4);
+    } else {
+        $data['estimated_mileage_per_day_km']    = bcround($pd, 4);
+        $data['estimated_mileage_per_day_miles'] = bcround(bcmul($pd, $kmToMiles, 8), 4);
+    }
+}
+
 // FIX #20: wrap db_update + audit_log in transaction so both commit or rollback together
 $newUpdatedAt = null;
 
@@ -674,13 +707,17 @@ db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdated
     $distanceCols = [
         'mileage_at_start', 'estimated_mileage', 'estimated_mileage_km',
         'estimated_mileage_miles', 'km_to_miles_conversion', 'miles_to_km_conversion',
+        'estimated_mileage_per_day', 'estimated_mileage_per_day_km',
+        'estimated_mileage_per_day_miles',
     ];
     $changedDistCols = array_intersect(array_keys($data), $distanceCols);
     $oldDistValues   = null;
     if ($changedDistCols !== []) {
         $oldRow = db_row(
             "SELECT mileage_at_start, estimated_mileage, estimated_mileage_km,
-                    estimated_mileage_miles, km_to_miles_conversion, miles_to_km_conversion
+                    estimated_mileage_miles, km_to_miles_conversion, miles_to_km_conversion,
+                    estimated_mileage_per_day, estimated_mileage_per_day_km,
+                    estimated_mileage_per_day_miles
                FROM leases WHERE id = ?",
             [$id]
         );

@@ -486,7 +486,7 @@ $canDelete = ($isDraft || $isSuperAdmin) && can('invoices', 'delete');
 // mileage_precharge lines existed.
 $creditLineCount = 0;
 $mileageLineCount = 0;
-$mileageItemTypes = ['mileage_precharge', 'mileage_adjustment', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit'];
+$mileageItemTypes = ['mileage_precharge', 'mileage_estimate', 'mileage_adjustment', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit'];
 foreach ($lineItems as $li) {
     if ($li['is_credit']) $creditLineCount++;
     if (in_array($li['item_type'], $mileageItemTypes, true)) $mileageLineCount++;
@@ -2356,7 +2356,7 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         // (mileage_precharge / mileage_adjustment / mileage_credit)
                         // rather than the stale mileage_charge / mileage_overage
                         // which are not in invoice_line_items.item_type.
-                        $isMileage = in_array($item['item_type'], ['mileage_precharge', 'mileage_adjustment', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit'], true);
+                        $isMileage = in_array($item['item_type'], ['mileage_precharge', 'mileage_estimate', 'mileage_adjustment', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit'], true);
 
                         // WHY: Calculate per-line tax total for display
                         $lineTaxTotal = bcadd(
@@ -2393,6 +2393,7 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         $itemTypeBadge = match($item['item_type']) {
                             'base_rental'             => 'badge-info',
                             'mileage_precharge'       => 'badge-info',
+                            'mileage_estimate'        => 'badge-info',
                             'mileage_adjustment'      => 'badge-warning',
                             'mileage_credit'          => 'badge-success',
                             'mileage_usage'           => 'badge-info',

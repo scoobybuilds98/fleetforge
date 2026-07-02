@@ -295,6 +295,16 @@ if ($estimatedMileageIn !== null && bccomp($estimatedMileageIn, '0', 4) < 0) {
 }
 $estimatedMileage = ($estimatedMileageIn !== null && bccomp($estimatedMileageIn, '0', 4) >= 0) ? $estimatedMileageIn : '0.00';
 
+// S-MILEAGE-EST-DAILY: estimated distance driven PER DAY (lease mileage_unit).
+// Drives the recurring mileage estimate line (days x per-day x rate) + running
+// true-up in InvoiceGenerator. Dual-unit counterparts derived below alongside
+// the allowance columns. Independent of the estimated_mileage allowance/precharge.
+$estimatedPerDayIn = clean_decimal($body['estimated_mileage_per_day'] ?? null);
+if ($estimatedPerDayIn !== null && bccomp($estimatedPerDayIn, '0', 4) < 0) {
+    $fields['estimated_mileage_per_day'] = 'Estimated mileage per day cannot be negative.';
+}
+$estimatedPerDay = ($estimatedPerDayIn !== null && bccomp($estimatedPerDayIn, '0', 4) >= 0) ? $estimatedPerDayIn : '0.00';
+
 $mileageAtStartRaw = $body['mileage_at_start'] ?? null;
 if ($mileageAtStartRaw !== null && $mileageAtStartRaw !== '') {
     $mileageAtStartInt = clean_int($mileageAtStartRaw);
@@ -470,12 +480,16 @@ if ($prechargeEnabled === 0 && $prechargeAmount !== null) {
 // class S-MILEAGE-RATE-ZERO-FIX backfilled. See FLEETFORGE_PROGRESS.md
 // D133 row + REFERENCE.md §13.8 mileage tier extension.
 // ════════════════════════════════════════════════════════════════════════
-$anyAllowancePositive = bccomp($estimatedMileage, '0', 4) > 0;
+// S-MILEAGE-EST-DAILY: an estimated_mileage_per_day > 0 is the strongest intent
+// signal of all — the lease will bill an estimated mileage line every period, so
+// a rate is mandatory. Folded into the same completeness gate.
+$anyAllowancePositive = bccomp($estimatedMileage, '0', 4) > 0
+    || bccomp($estimatedPerDay, '0', 4) > 0;
 $intentSignalPresent  = $anyAllowancePositive || ($prechargeEnabled === 1);
 
 if ($intentSignalPresent && !$anyMileageRate) {
     if (!isset($fields['mileage_rate'])) {
-        $fields['mileage_rate'] = 'Mileage rate must be > 0 when an estimated mileage allowance or precharge is configured. Set a rate or clear the allowance/precharge.';
+        $fields['mileage_rate'] = 'Mileage rate must be > 0 when an estimated mileage (per-day or allowance) or precharge is configured. Set a rate or clear the estimate.';
     }
 }
 
@@ -518,6 +532,16 @@ if ($mileageUnit === 'km') {
 } else {
     $allowMilesFinal = bcround($estimatedMileage, 3);
     $allowKmFinal    = bcround(bcmul($estimatedMileage, $milesToKmFinal, 8), 3);
+}
+
+// S-MILEAGE-EST-DAILY: per-day estimate distances scale directly (a distance,
+// not a rate) — km-canonical drives the billing math, miles is informational.
+if ($mileageUnit === 'km') {
+    $perDayKmFinal    = bcround($estimatedPerDay, 4);
+    $perDayMilesFinal = bcround(bcmul($estimatedPerDay, $kmToMilesFinal, 8), 4);
+} else {
+    $perDayMilesFinal = bcround($estimatedPerDay, 4);
+    $perDayKmFinal    = bcround(bcmul($estimatedPerDay, $milesToKmFinal, 8), 4);
 }
 
 // ── Fetch customer (for snapshot + tax defaults) ───────────────
@@ -620,6 +644,10 @@ $createLease = function () use (
     $odometerStartKm, $odometerStartSource, $odometerStartFetchedAt,
     $advancePeriods,
     $rateKmFinal, $rateMilesFinal, $allowKmFinal, $allowMilesFinal,
+    // S-MILEAGE-EST-DAILY: per-day estimate + its dual-unit mirrors. These are in
+    // the db_insert array below — omit from use() and they resolve to NULL
+    // (project_lease_create_closure_use_trap). per_day is NOT NULL DEFAULT 0.00.
+    $estimatedPerDay, $perDayKmFinal, $perDayMilesFinal,
     $kmToMilesFinal, $milesToKmFinal,
     $prechargeEnabled, $prechargeAmount,
     $minimumBillingDays,
@@ -738,6 +766,11 @@ $createLease = function () use (
         'estimated_mileage'        => $estimatedMileage,
         'estimated_mileage_km'     => $allowKmFinal,
         'estimated_mileage_miles'  => $allowMilesFinal,
+        // S-MILEAGE-EST-DAILY: per-day estimate (drives the mileage estimate line
+        // + true-up). km-canonical mirror is authoritative for the billing math.
+        'estimated_mileage_per_day'       => $estimatedPerDay,
+        'estimated_mileage_per_day_km'    => $perDayKmFinal,
+        'estimated_mileage_per_day_miles' => $perDayMilesFinal,
         'km_to_miles_conversion'   => $kmToMilesFinal,
         'miles_to_km_conversion'   => $milesToKmFinal,
         'mileage_at_start'         => $mileageAtStart,
@@ -810,6 +843,8 @@ $createLease = function () use (
             'mileage_rate_miles'    => $rateMilesFinal,
             'estimated_mileage_km'  => $allowKmFinal,
             'estimated_mileage_miles' => $allowMilesFinal,
+            'estimated_mileage_per_day'    => $estimatedPerDay,
+            'estimated_mileage_per_day_km' => $perDayKmFinal,
             'km_to_miles_conversion'  => $kmToMilesFinal,
             'miles_to_km_conversion'  => $milesToKmFinal,
             'precharge_enabled'     => $prechargeEnabled,

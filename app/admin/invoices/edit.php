@@ -61,6 +61,7 @@ $lines = db_select(
 // operator-meaningful ones for a hand-edited invoice).
 $lineTypes = [
     'base_rental'       => 'Base rental',
+    'mileage_estimate'  => 'Estimated mileage',
     'mileage_usage'     => 'Mileage',
     'hourly_usage'      => 'Engine/reefer hours',
     'insurance'         => 'Insurance',

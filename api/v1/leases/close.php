@@ -543,7 +543,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 l.mileage_tracking_mode,
                 l.hourly_rate, l.engine_hours_at_start,
                 l.estimated_mileage_km, l.estimated_mileage_miles,
+                l.estimated_mileage_per_day, l.estimated_mileage_per_day_km,
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,
+                l.miles_to_km_conversion,
                 l.advance_billing_periods, l.currency,
                 l.discount_type, l.discount_value,
                 l.precharge_enabled, l.precharge_amount, l.precharge_balance,
@@ -863,12 +865,41 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // to subtract). $closeAdjustment removed wholesale with D-G
     // lease_close_adjustments DROP.
 
+    // S-MILEAGE-EST-DAILY: does this lease bill via the estimated-daily model?
+    // When it does, the generator's running true-up owns ALL mileage
+    // reconciliation at close — the legacy overage line + manual bridge below
+    // are suppressed (they would double-bill against the estimate lines already
+    // on prior invoices), and the actual closing distance is instead fed to the
+    // true-up via the cumulative_actual_km param on every generator call.
+    $usesEstimateMileage = bccomp((string) ($lease['estimated_mileage_per_day_km'] ?? '0'), '0', 4) > 0;
+
+    // Cumulative actual distance (km) to hand the generator's true-up. When a
+    // closing odometer was supplied, the generator derives cumulative from
+    // odoEnd − lease-start odometer itself (no override needed). Otherwise, for a
+    // manual estimate lease, the operator-entered actual mileage (mileage_at_end,
+    // in the lease unit) IS the lifetime distance driven — convert it to km.
+    $cumulativeActualKmOverride = null;
+    if ($usesEstimateMileage && $odoAtClose === null
+        && $mileageAtEnd !== null && $mileageAtEnd > 0) {
+        $unit = (string) ($lease['mileage_unit'] ?? 'km');
+        if ($unit === 'miles') {
+            $conv = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
+            if (bccomp($conv, '0', 6) <= 0) $conv = '0.621371';
+            // miles ÷ (miles per km) = km
+            $cumulativeActualKmOverride = bcdiv((string) $mileageAtEnd, $conv, 4);
+        } else {
+            $cumulativeActualKmOverride = (string) $mileageAtEnd;
+        }
+    }
+
     // Legacy mileage overage final-invoice line item (pre-odometer
     // leases). Preserved for backwards compat; no priorExcessKm
-    // subtraction (D-F retired).
+    // subtraction (D-F retired). Suppressed for estimate-model leases
+    // (true-up owns reconciliation — see $usesEstimateMileage above).
     $extraLines     = [];
     $hasMileageLine = false;
-    if ($mileageAtEnd !== null && $lease['mileage_at_start'] !== null
+    if (!$usesEstimateMileage
+        && $mileageAtEnd !== null && $lease['mileage_at_start'] !== null
         && bccomp((string)$lease['mileage_rate'], '0', 4) > 0)
     {
         $actualMileage    = (string)($mileageAtEnd - (int)$lease['mileage_at_start']);
@@ -908,7 +939,10 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // carrier as the closeout charges. The helper returns NULL unless this is
     // genuinely the manual-distance case and cannot overlap the legacy overage or
     // modern odometer paths (see ff_close_manual_mileage_bridge_line's guards).
-    if (!$hasMileageLine) {
+    // Suppressed for estimate-model leases: the true-up bills mileage_at_end via
+    // cumulative_actual_km inside the generator, so a standalone bridge line here
+    // would double-bill on top of the estimate lines.
+    if (!$hasMileageLine && !$usesEstimateMileage) {
         $priorMileageBilled = (bool) db_row(
             "SELECT 1 FROM invoice_line_items li
                JOIN invoices i ON i.id = li.invoice_id
@@ -1104,9 +1138,15 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         }
         // else mode='no_refund': leave every advance invoice as-is.
 
-        // Mileage overage: when present, always create a mileage_only adjustment invoice
-        // (D-H drops the partial_end final invoice, so mileage needs its own home).
-        if ($hasMileageLine) {
+        // Mileage overage / true-up: create a mileage_only carrier invoice when
+        // there's a legacy mileage line to bill, OR — for an estimate-model lease —
+        // whenever a closing reading exists (odometer or operator mileage_at_end),
+        // so the generator's running true-up reconciles actual distance against the
+        // estimates already charged on the prepaid advance invoices. D-H drops the
+        // partial_end final invoice, so mileage needs its own home here.
+        $needsEstimateTrueUp = $usesEstimateMileage
+            && ($cumulativeActualKmOverride !== null || $odoAtClose !== null);
+        if ($hasMileageLine || $needsEstimateTrueUp) {
             $finalInv = $generator->createFromLease([
                 'lease_id'          => $id,
                 'period_start'      => $actualReturnDate,
@@ -1122,6 +1162,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 'odometer_at_period_end_km'   => $odoAtClose,
                 'odometer_source'             => $odoSource,
                 'odometer_fetched_at'         => $odoFetchedAt,
+                'cumulative_actual_km'        => $cumulativeActualKmOverride,
             ]);
             $finalInvoiceId = $finalInv['invoice_id'] ?? null;
         }
@@ -1279,6 +1320,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'odometer_at_period_end_km'   => $odoAtClose,
                     'odometer_source'             => $odoSource,
                     'odometer_fetched_at'         => $odoFetchedAt,
+                    'cumulative_actual_km'        => $cumulativeActualKmOverride,
                     // S-LEASE-HOURLY-BILLING: bill the closing period's engine hours.
                     'engine_hours_at_period_start' => $hoursPeriodStart,
                     'engine_hours_at_period_end'   => $hoursAtClose,

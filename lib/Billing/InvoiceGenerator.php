@@ -773,68 +773,92 @@ class InvoiceGenerator
             }
 
             // ════════════════════════════════════════════════════════════════
-            // S-MILEAGE-2B C3 — Model B drawdown emit
+            // S-MILEAGE-EST-DAILY — estimated daily mileage + running true-up.
             //
-            // Gate (locked D-B + K-16 clarification — precharge_invoiced_at
-            // discriminator + Model B Lite passthrough via precharge_enabled=0):
-            //   period_distance_km > 0
-            //   AND mileage_rate_km > 0 (D135 intent signal)
-            //   AND billing_type NOT IN (mileage_only, adjustment, credit_note)
-            //   AND (precharge_invoiced_at IS NOT NULL OR precharge_enabled = 0)
-            //       — Model B (full) Invoice 1: blocked (precharge emit owns it)
-            //       — Model B (full) Invoice 2+: drawdown emits (post-stamp)
-            //       — Model B Lite (precharge_enabled=0): drawdown emits (no
-            //         precharge concept; balance=NULL → falls to second branch,
-            //         emits only mileage_usage)
+            // Replaces the former per-period "bill actual usage" model (the
+            // mileage_usage drawdown emit) with a two-part scheme on every
+            // normal invoice:
+            //   (1) mileage_estimate = billable days × estimated_mileage_per_day
+            //       × rate — predictable, accrues day-by-day; emitted whenever the
+            //       lease carries a per-day estimate.
+            //   (2) running true-up = reconcile CUMULATIVE actual distance × rate
+            //       against EVERYTHING billed for mileage so far (estimates + prior
+            //       true-ups + legacy usage lines). Posts a mileage_adjustment
+            //       (charge) or mileage_credit (credit) for the delta, but only
+            //       when an actual reading is available for this period.
             //
-            // K-16 spec clarification vs locked D-B wording:
-            //   - D-B's "negative amount" emit shape collides with
-            //     InvoiceGenerator's signed-aggregator convention at
-            //     lines ~357-362 (POSITIVE amount + is_credit=1 → bcsub).
-            //   - Resolution: emit mileage_drawdown_credit with POSITIVE
-            //     amount + is_credit=1. The aggregator subtracts; per-line
-            //     tax negates internally (line ~856). Financial result is
-            //     identical to D-B's stated intent; matches existing convention
-            //     (mileage_credit, early_return_credit, account_credit_applied).
-            //   - TaxCalculator handles negatives via bcmul sign-propagation
-            //     (lines 67/72/78); D-D spike confirmed no TaxCalculator
-            //     change needed.
+            // Cumulative actual (km) is authoritative from the odometer when a
+            // closing reading is supplied (odoEnd − lease.odometer_start_km —
+            // manual close / any mid-lease reading); otherwise the sum of prior
+            // recorded period distances plus this period (Samsara per-period).
+            // When neither is available (manual interim, no reading) only the
+            // estimate bills and the true-up defers to a later invoice — naturally
+            // the close invoice, which trues the whole lease up to actual. Net
+            // lifetime mileage revenue therefore equals total actual × rate; the
+            // estimate is a cash-flow smoother the true-up always corrects.
             //
-            // Math (bcmath only per D16):
-            //   period_charge    = bcround(bcmul(distance, rate, 6), 2)
-            //   drawdown_amount  = min(period_charge, precharge_balance)
-            //                     (computed via bccomp + ternary)
-            //   remaining_charge = bcsub(period_charge, drawdown_amount, 2)
+            // Cutover: a legacy lease with per_day = 0 emits no estimate line, so
+            // the true-up alone reconciles cumulative-actual vs its prior
+            // mileage_usage lines → it keeps billing actual, just via adjustment
+            // lines. No double-bill (mileage_usage is no longer emitted).
             //
-            // Emission:
-            //   Branch A — precharge_balance > 0:
-            //     mileage_usage line, amount = period_charge, is_credit = 0
-            //     mileage_drawdown_credit line, amount = drawdown_amount
-            //                                  (positive), is_credit = 1
-            //     UPDATE leases.precharge_balance -= drawdown_amount inside
-            //       this transaction; D20 FOR UPDATE on lease row;
-            //       audit_log entity_type='lease_precharge_balance_drawdown'
-            //   Branch B — precharge_balance == 0 or NULL:
-            //     mileage_usage line only; no balance update
-            //
-            // Engine markers — replaces the S-LEASE-MILEAGE per-period excess
-            // block at lib/Billing/InvoiceGenerator.php:559-713 (DELETED below)
-            // + the duplicate odometer setup at 515-557 (DELETED below).
+            // Precharge (Model B, opt-in) is preserved orthogonally below: after
+            // the estimate + true-up lines, any positive NET mileage charge on this
+            // invoice draws down precharge_balance (mileage_drawdown_credit),
+            // exactly as the old usage line did. is_credit=1 + positive amount →
+            // the aggregator subtracts (K-16 signed-aggregator convention).
             // ════════════════════════════════════════════════════════════════
-            $drawdownGate = (
-                $periodDistanceKm !== null
-                // S-LEASE-MILEAGE-MODE: an 'off' lease never emits a mileage line.
-                // (Redundant with the null odometer above, but explicit so a future
-                // caller passing distance under 'off' still can't sneak a line in.)
+            $mileageRateKm = (string) ($lease['mileage_rate_km'] ?? '0');
+            $perDayKm      = (string) ($lease['estimated_mileage_per_day_km'] ?? '0');
+            $rateActive    = bccomp($mileageRateKm, '0', 4) > 0;
+            // The recurring ESTIMATE line only rides regular rental invoices.
+            $estimateEmitAllowed = (
+                $rateActive
                 && $mileageMode !== 'off'
-                && bccomp((string) $periodDistanceKm, '0', 2) > 0
-                && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
                 && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
-                && (
-                    ($lease['precharge_invoiced_at'] ?? null) !== null
-                    || (int) ($lease['precharge_enabled'] ?? 0) === 0
-                )
             );
+            // The TRUE-UP (and precharge drawdown) additionally runs on the
+            // close-time `mileage_only` carrier invoice — that is precisely where an
+            // advance-billed lease reconciles actual distance against the estimates
+            // already charged on its prepaid rental invoices. Only pure adjustment /
+            // credit_note utility invoices are excluded.
+            $trueUpAllowed = (
+                $rateActive
+                && $mileageMode !== 'off'
+                && !in_array($billingType, ['adjustment', 'credit_note'], true)
+            );
+
+            // D-B HARD guard (per-day arm): a per-day estimate with no rate is a
+            // data hole — we cannot price the estimate line. Fires independent of
+            // distance (the estimate bills even with no reading). create.php's
+            // rate-completeness gate is the primary guard; this is the billing-time
+            // net covering close.php / manual-create / cron paths.
+            if ($billingType !== 'mileage_only'
+                && bccomp($perDayKm, '0', 4) > 0
+                && !$rateActive
+            ) {
+                throw new BillingRateException(
+                    sprintf(
+                        'InvoiceGenerator refused to bill estimated mileage: lease_id=%d, period=%s..%s (%d days), '
+                        . 'estimated_mileage_per_day_km=%s configured but mileage_rate_km=%s. '
+                        . 'Set a mileage rate at lease create (rate-tier completeness — see api/v1/leases/create.php).',
+                        $leaseId, $periodStart, $periodEnd, $days,
+                        $perDayKm, $mileageRateKm
+                    ),
+                    'mileage_excess', $days,
+                    (string) ($lease['daily_rate']   ?? '0'),
+                    (string) ($lease['weekly_rate']  ?? '0'),
+                    (string) ($lease['monthly_rate'] ?? '0'),
+                    [
+                        'lease_id'                    => $leaseId,
+                        'period_start'                => $periodStart,
+                        'period_end'                  => $periodEnd,
+                        'estimated_mileage_per_day_km'=> $perDayKm,
+                        'mileage_rate_km'             => $mileageRateKm,
+                        'billing_type'                => $billingType,
+                    ]
+                );
+            }
 
             // D-B HARD throw (D133 preserved from Model C era) — rate-zero
             // with allowance-intent. Fires regardless of drawdown gate since
@@ -911,35 +935,226 @@ class InvoiceGenerator
                 ]);
             }
 
-            // Drawdown emit (Branch A or B per D-B math).
-            $drawdownAuditMeta = null;
-            if ($drawdownGate) {
-                $rateKm        = (string) $lease['mileage_rate_km'];
-                // S-MILEAGE-RATE-CONVERT-FIX: bill + label in the lease's unit.
-                // Computing the charge from the DISPLAY values (miles × $/mile for a
-                // miles lease) keeps quantity × unit_price == amount on the line (the
-                // QBO line invariant) and is the per-mile-canonical amount the
-                // customer expects; for a km lease it is identical to km × rate_km.
-                // The precharge drawdown below draws this same charge.
-                $mDisp         = ff_mileage_line_display($lease, (string) $periodDistanceKm, $rateKm);
-                $periodCharge  = bcround(bcmul((string) $mDisp['distance'], (string) $mDisp['rate'], 6), 2);
+            // Precharge Invoice-1 discriminator (unchanged from the Model B gate):
+            // on Invoice 1 of a precharge lease the upfront precharge line owns the
+            // mileage charge, so BOTH the estimate/true-up path and the legacy
+            // usage path stand down until precharge_invoiced_at is stamped (send).
+            $prechargeGatePasses = (
+                ($lease['precharge_invoiced_at'] ?? null) !== null
+                || (int) ($lease['precharge_enabled'] ?? 0) === 0
+            );
 
-                // FOR UPDATE re-read of the lease's precharge_balance per D20.
-                // The outer transaction already holds the row implicitly through
-                // its updates, but an explicit FOR UPDATE here makes the
-                // serialization point obvious and survives future refactors.
+            // Two mutually-exclusive mileage models, selected per lease:
+            //   • per-day estimate > 0  → estimate + running true-up (S-MILEAGE-EST-DAILY)
+            //   • per-day estimate == 0 → legacy actual-usage line (distance × rate),
+            //                             preserving the pre-estimate behavior + its
+            //                             readable "N unit × $rate/unit" line + drawdown.
+            $drawdownAuditMeta = null;
+            if ($trueUpAllowed && $prechargeGatePasses && bccomp($perDayKm, '0', 4) > 0) {
+                $rateKm = $mileageRateKm;
+
+                // ── (1) Estimate line: billable days × per-day × rate ─────────
+                // Computed from DISPLAY values (miles × $/mile for a miles lease,
+                // km × $/km for a km lease) so quantity × unit_price == amount (the
+                // QBO line invariant). $estAmount feeds the net-charge / drawdown
+                // math below and the running true-up target. Skipped on the
+                // `mileage_only` carrier (estimate already billed on rental invoices).
+                $estAmount = '0.00';
+                if ($estimateEmitAllowed && bccomp($perDayKm, '0', 4) > 0 && $days > 0) {
+                    $estDistanceKm = bcmul($perDayKm, (string) $days, 4);
+                    $eDisp     = ff_mileage_line_display($lease, $estDistanceKm, $rateKm);
+                    $estAmount = bcround(bcmul((string) $eDisp['distance'], (string) $eDisp['rate'], 6), 2);
+                    if (bccomp($estAmount, '0', 2) > 0) {
+                        // Per-day value in the display unit (exact: total ÷ days).
+                        $perDayDisp = bcdiv((string) $eDisp['distance'], (string) $days, 2);
+                        $lineItems[] = [
+                            'sort_order'       => $sortOrder++,
+                            'item_type'        => 'mileage_estimate',
+                            'description'      => "Estimated mileage: {$days} days × " . rtrim(rtrim($perDayDisp, '0'), '.') . " {$eDisp['unit']}/day × \$" . $eDisp['rate'] . "/{$eDisp['rate_unit']}",
+                            'quantity'         => sprintf('%s', $eDisp['distance']),
+                            'unit'             => $eDisp['unit'],
+                            'unit_price'       => $eDisp['rate'],
+                            'amount'           => $estAmount,
+                            'is_credit'        => 0,
+                            'taxable'          => 1,
+                            'mileage_distance' => (string) $eDisp['distance'],
+                            'mileage_rate'     => $eDisp['rate'],
+                            'mileage_unit'     => $eDisp['unit'],
+                            'period_start'     => $periodStart,
+                            'period_end'       => $periodEnd,
+                        ];
+                    } else {
+                        $estAmount = '0.00';
+                    }
+                }
+
+                // ── (2) Running cumulative true-up against actual ─────────────
+                // Cumulative actual distance (km) through this period end:
+                //   • odometer-authoritative when a closing reading is present
+                //     ($cumulativeDistanceKm = odoEnd − lease.odometer_start_km,
+                //     computed in the odometer block above), else
+                //   • sum of prior recorded period distances + this period
+                //     (Samsara/operator per-period), else
+                //   • null → no reading yet; only the estimate bills this period.
+                $cumActualKm = null;
+                if (isset($params['cumulative_actual_km'])
+                    && $params['cumulative_actual_km'] !== ''
+                    && $params['cumulative_actual_km'] !== null) {
+                    // Caller-supplied lifetime distance (close.php: a manual estimate
+                    // lease's mileage_at_end, converted to km). Top priority — it is
+                    // the operator's authoritative closing reading.
+                    $ovr = (string) $params['cumulative_actual_km'];
+                    $cumActualKm = bccomp($ovr, '0', 4) >= 0 ? $ovr : '0';
+                } elseif ($cumulativeDistanceKm !== null) {
+                    $cumActualKm = (string) $cumulativeDistanceKm;
+                } elseif ($periodDistanceKm !== null) {
+                    $priorDist = db_row(
+                        "SELECT COALESCE(SUM(period_distance_km), 0) AS s
+                           FROM invoices
+                          WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
+                            AND period_distance_km IS NOT NULL",
+                        [$leaseId]
+                    );
+                    $cumActualKm = bcadd((string) ($priorDist['s'] ?? '0'), (string) $periodDistanceKm, 4);
+                }
+
+                // Net signed mileage charge on THIS invoice (estimate ± true-up).
+                // Drives the precharge drawdown below.
+                $netMileageCharge = $estAmount;
+
+                if ($cumActualKm !== null) {
+                    // Everything billed for mileage so far (prior non-void invoices),
+                    // signed: credits subtract. Legacy mileage_usage / mileage lines
+                    // are included so an in-flight lease trues up continuously across
+                    // the cutover. Precharge/drawdown are excluded — a prepayment, not
+                    // mileage revenue being reconciled to actual.
+                    $billedRow = db_row(
+                        "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.amount ELSE li.amount END), 0) AS billed
+                           FROM invoice_line_items li
+                           JOIN invoices i ON i.id = li.invoice_id
+                          WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+                            AND li.item_type IN ('mileage_estimate','mileage_adjustment','mileage_credit','mileage_usage','mileage')",
+                        [$leaseId]
+                    );
+                    // Include this invoice's estimate line (not yet persisted).
+                    $billedToDate = bcadd((string) ($billedRow['billed'] ?? '0'), $estAmount, 2);
+
+                    // Target = cumulative actual × rate, in the lease's unit.
+                    $aDisp           = ff_mileage_line_display($lease, $cumActualKm, $rateKm);
+                    $cumActualCharge = bcround(bcmul((string) $aDisp['distance'], (string) $aDisp['rate'], 6), 2);
+                    $trueUp          = bcsub($cumActualCharge, $billedToDate, 2);
+
+                    if (bccomp($trueUp, '0', 2) > 0) {
+                        // Under-billed vs actual → additional charge.
+                        $lineItems[] = [
+                            'sort_order'   => $sortOrder++,
+                            'item_type'    => 'mileage_adjustment',
+                            'description'  => 'Mileage true-up: ' . number_format((float) $aDisp['distance'], 2) . " {$aDisp['unit']} actual to date × \$" . $aDisp['rate'] . "/{$aDisp['rate_unit']} — additional charge vs estimated",
+                            'quantity'     => '1.0000',
+                            'unit'         => 'adjustment',
+                            'unit_price'   => $trueUp,
+                            'amount'       => $trueUp,
+                            'is_credit'    => 0,
+                            'taxable'      => 1,
+                            'period_start' => $periodStart,
+                            'period_end'   => $periodEnd,
+                        ];
+                        $netMileageCharge = bcadd($netMileageCharge, $trueUp, 2);
+                    } elseif (bccomp($trueUp, '0', 2) < 0) {
+                        // Over-billed vs actual → credit back the difference.
+                        $creditAmt = bcsub('0', $trueUp, 2);
+                        $lineItems[] = [
+                            'sort_order'   => $sortOrder++,
+                            'item_type'    => 'mileage_credit',
+                            'description'  => 'Mileage true-up credit: ' . number_format((float) $aDisp['distance'], 2) . " {$aDisp['unit']} actual to date — refund of over-estimated mileage",
+                            'quantity'     => '1.0000',
+                            'unit'         => 'adjustment',
+                            'unit_price'   => $creditAmt,
+                            'amount'       => $creditAmt,
+                            'is_credit'    => 1,  // POSITIVE amount + is_credit=1 → aggregator subtracts
+                            'taxable'      => 1,
+                            'period_start' => $periodStart,
+                            'period_end'   => $periodEnd,
+                        ];
+                        $netMileageCharge = bcsub($netMileageCharge, $creditAmt, 2);
+                    }
+                }
+
+                // ── (3) Precharge drawdown (Model B, opt-in) ──────────────────
+                // Any positive NET mileage charge on this invoice draws down the
+                // prepaid precharge_balance. Gated to invoice 2+ (precharge_invoiced_at
+                // set at Invoice 1 send) so the upfront precharge line owns Invoice 1.
+                if (bccomp($netMileageCharge, '0', 2) > 0
+                    && (int) ($lease['precharge_enabled'] ?? 0) === 1
+                    && ($lease['precharge_invoiced_at'] ?? null) !== null
+                ) {
+                    // FOR UPDATE re-read of precharge_balance per D20.
+                    $leaseLocked = db_row(
+                        "SELECT id, precharge_balance
+                           FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                        [$leaseId]
+                    );
+                    $preBalance = $leaseLocked['precharge_balance'] !== null
+                        ? (string) $leaseLocked['precharge_balance']
+                        : '0.00';
+
+                    if (bccomp($preBalance, '0', 2) > 0) {
+                        $drawdownAmt = bccomp($netMileageCharge, $preBalance, 2) <= 0
+                            ? $netMileageCharge
+                            : $preBalance;
+                        $postBalance = bcsub($preBalance, $drawdownAmt, 2);
+
+                        $lineItems[] = [
+                            'sort_order'  => $sortOrder++,
+                            'item_type'   => 'mileage_drawdown_credit',
+                            'description' => "Precharge credit applied: drawdown of \${$drawdownAmt} from precharge balance",
+                            'quantity'    => '1.0000',
+                            'unit'        => 'drawdown',
+                            'unit_price'  => $drawdownAmt,
+                            'amount'      => $drawdownAmt,
+                            'is_credit'   => 1,
+                            'taxable'     => 1,
+                        ];
+
+                        db_execute(
+                            "UPDATE leases SET precharge_balance = ?, updated_at = NOW(), updated_by = ?
+                               WHERE id = ?",
+                            [$postBalance, $params['created_by'] ?? null, $leaseId]
+                        );
+
+                        $drawdownAuditMeta = [
+                            'pre_balance'        => $preBalance,
+                            'drawdown_amount'    => $drawdownAmt,
+                            'post_balance'       => $postBalance,
+                            'net_mileage_charge' => $netMileageCharge,
+                            'period_distance_km' => $periodDistanceKm !== null ? (string) $periodDistanceKm : null,
+                            'mileage_rate_km'    => $rateKm,
+                        ];
+                    }
+                }
+            } elseif ($estimateEmitAllowed && $prechargeGatePasses
+                && $periodDistanceKm !== null
+                && bccomp((string) $periodDistanceKm, '0', 2) > 0
+            ) {
+                // ═══ Legacy actual per-period usage (per-day estimate == 0) ═══
+                // Restores the pre-S-MILEAGE-EST-DAILY behavior for leases that
+                // bill raw actual distance each period: one mileage_usage line
+                // (distance × rate, fully readable) + precharge drawdown against it.
+                // This is the unchanged path for every lease that hasn't opted into
+                // the estimated-daily model. Never runs on the mileage_only carrier
+                // (excluded by $estimateEmitAllowed) — that close path bills via the
+                // legacy overage / bridge extra-lines instead.
+                $rateKm = $mileageRateKm;
+                $mDisp  = ff_mileage_line_display($lease, (string) $periodDistanceKm, $rateKm);
+                $periodCharge = bcround(bcmul((string) $mDisp['distance'], (string) $mDisp['rate'], 6), 2);
+
                 $leaseLocked = db_row(
-                    "SELECT id, precharge_balance, precharge_enabled
-                       FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                    "SELECT id, precharge_balance FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
                     [$leaseId]
                 );
                 $preBalance = $leaseLocked['precharge_balance'] !== null
-                    ? (string) $leaseLocked['precharge_balance']
-                    : '0.00';
+                    ? (string) $leaseLocked['precharge_balance'] : '0.00';
 
-                // mileage_usage line (Branch A and B both emit this). $mDisp +
-                // $periodCharge were resolved above in the lease's unit so that
-                // quantity × unit_price == amount.
                 $lineItems[] = [
                     'sort_order'       => $sortOrder++,
                     'item_type'        => 'mileage_usage',
@@ -958,12 +1173,8 @@ class InvoiceGenerator
                 ];
 
                 if (bccomp($preBalance, '0', 2) > 0) {
-                    // Branch A — precharge_balance > 0: emit drawdown credit + decrement.
-                    $drawdownAmt = bccomp($periodCharge, $preBalance, 2) <= 0
-                        ? $periodCharge
-                        : $preBalance;
+                    $drawdownAmt = bccomp($periodCharge, $preBalance, 2) <= 0 ? $periodCharge : $preBalance;
                     $postBalance = bcsub($preBalance, $drawdownAmt, 2);
-
                     $lineItems[] = [
                         'sort_order'  => $sortOrder++,
                         'item_type'   => 'mileage_drawdown_credit',
@@ -972,27 +1183,22 @@ class InvoiceGenerator
                         'unit'        => 'drawdown',
                         'unit_price'  => $drawdownAmt,
                         'amount'      => $drawdownAmt,
-                        'is_credit'   => 1,  // POSITIVE amount + is_credit=1 → aggregator subtracts (K-16 convention)
+                        'is_credit'   => 1,
                         'taxable'     => 1,
                     ];
-
                     db_execute(
-                        "UPDATE leases SET precharge_balance = ?, updated_at = NOW(), updated_by = ?
-                           WHERE id = ?",
+                        "UPDATE leases SET precharge_balance = ?, updated_at = NOW(), updated_by = ? WHERE id = ?",
                         [$postBalance, $params['created_by'] ?? null, $leaseId]
                     );
-
                     $drawdownAuditMeta = [
-                        'pre_balance'    => $preBalance,
-                        'drawdown_amount'=> $drawdownAmt,
-                        'post_balance'   => $postBalance,
-                        'period_charge'  => $periodCharge,
+                        'pre_balance'        => $preBalance,
+                        'drawdown_amount'    => $drawdownAmt,
+                        'post_balance'       => $postBalance,
+                        'net_mileage_charge' => $periodCharge,
                         'period_distance_km' => (string) $periodDistanceKm,
                         'mileage_rate_km'    => $rateKm,
                     ];
                 }
-                // Branch B — precharge_balance == 0 or NULL: no credit line,
-                // no balance update. mileage_usage line above stands alone.
             }
 
             // --- Step 2b: Engine/reefer-hours usage (S-LEASE-HOURLY-BILLING) ---
@@ -1500,13 +1706,13 @@ class InvoiceGenerator
                     'entity_id'    => $leaseId,
                     'entity_label' => $lease['contract_number'] ?? null,
                     'notes'        => sprintf(
-                        'Precharge balance drawdown on invoice %s: pre=$%s, drawdown=$%s, post=$%s (period_charge=$%s on %s km × $%s/km)',
+                        'Precharge balance drawdown on invoice %s: pre=$%s, drawdown=$%s, post=$%s (net_mileage_charge=$%s, period_distance=%s km, rate=$%s/km)',
                         $invoiceNumber,
                         $drawdownAuditMeta['pre_balance'],
                         $drawdownAuditMeta['drawdown_amount'],
                         $drawdownAuditMeta['post_balance'],
-                        $drawdownAuditMeta['period_charge'],
-                        $drawdownAuditMeta['period_distance_km'],
+                        $drawdownAuditMeta['net_mileage_charge'],
+                        $drawdownAuditMeta['period_distance_km'] ?? 'n/a',
                         $drawdownAuditMeta['mileage_rate_km']
                     ),
                     'old_values'   => json_encode([
@@ -1515,7 +1721,7 @@ class InvoiceGenerator
                     'new_values'   => json_encode([
                         'precharge_balance'  => $drawdownAuditMeta['post_balance'],
                         'drawdown_amount'    => $drawdownAuditMeta['drawdown_amount'],
-                        'period_charge'      => $drawdownAuditMeta['period_charge'],
+                        'net_mileage_charge' => $drawdownAuditMeta['net_mileage_charge'],
                         'period_distance_km' => $drawdownAuditMeta['period_distance_km'],
                         'mileage_rate_km'    => $drawdownAuditMeta['mileage_rate_km'],
                         'invoice_id'         => $invoiceId,

@@ -139,7 +139,7 @@ if ($mileageRateKm > 0) {
           WHERE i.lease_id = ?
             AND i.deleted_at IS NULL
             AND i.status IN ('sent','partially_paid','paid','overdue')
-            AND ili.item_type = 'mileage_usage'
+            AND ili.item_type IN ('mileage_usage','mileage_estimate','mileage_adjustment')
           ORDER BY i.billing_period_end DESC, i.id DESC
           LIMIT 5",
         [$leaseId]

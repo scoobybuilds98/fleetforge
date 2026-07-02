@@ -111,7 +111,7 @@ class UnitProfitabilityService
             }
             $bucket = match ((string) $line['item_type']) {
                 'base_rental', 'base_rental_reconciliation_credit' => 'base_rental',
-                'mileage_precharge', 'mileage_usage', 'mileage_adjustment',
+                'mileage_precharge', 'mileage_usage', 'mileage_estimate', 'mileage_adjustment',
                 'mileage_credit', 'mileage_drawdown_credit'        => 'mileage',
                 'gps'                                              => 'gps',
                 'insurance'                                        => 'insurance',
