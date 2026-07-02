@@ -300,7 +300,7 @@ function payOnlineButton(invoiceId, enabled) {
                     <?php foreach ($lineItems as $li): ?>
                     <tr>
                         <td><?= e($li['description']) ?></td>
-                        <td class="text-right font-mono"><?= e(rtrim(rtrim($li['quantity'], '0'), '.')) ?></td>
+                        <td class="text-right font-mono"><?= e(rtrim(rtrim($li['quantity'], '0'), '.')) ?><?= !empty($li['unit']) ? ' <span class="text-secondary" style="font-size:11px;">' . e($li['unit']) . '</span>' : '' ?></td>
                         <td class="text-right font-mono"><?= e(format_currency($li['unit_price'])) ?></td>
                         <?php
                         // [C4-FIX] invoice_line_items column is `amount`, not
