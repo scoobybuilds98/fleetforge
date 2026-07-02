@@ -20,7 +20,7 @@ $units = db_select(
             eu.cvi_expiry, eu.registration_expiry, eu.mvi_expiry, eu.insurance_expiry,
             et.brand, et.model, et.category, eu.year,
             l.id AS lease_id, l.contract_number, l.start_date,
-            l.estimated_mileage, l.mileage_at_start,
+            l.estimated_mileage, l.mileage_at_start, l.mileage_unit,
             eu.yard_location
      FROM equipment_units eu
      JOIN leases l ON eu.id = l.equipment_unit_id
@@ -118,9 +118,10 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <!-- Mileage Progress -->
             <?php if ($u['estimated_mileage'] && (float)$u['estimated_mileage'] > 0): ?>
             <div class="portal-mileage-bar">
+                <?php $uUnit = ($u['mileage_unit'] ?? 'km') === 'miles' ? 'miles' : 'km'; ?>
                 <div class="portal-mileage-header">
-                    <span>Mileage: <?= e(number_format($mileageUsed)) ?> km used</span>
-                    <span><?= e(number_format((float)$u['estimated_mileage'])) ?> km allowed</span>
+                    <span>Mileage: <?= e(number_format($mileageUsed)) ?> <?= e($uUnit) ?> used</span>
+                    <span><?= e(number_format((float)$u['estimated_mileage'])) ?> <?= e($uUnit) ?> allowed</span>
                 </div>
                 <div class="portal-mileage-track">
                     <div class="portal-mileage-fill <?= e($mileageClass) ?>" style="width:<?= e(number_format($mileagePct, 1)) ?>%"></div>

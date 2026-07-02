@@ -139,7 +139,11 @@ if ($mileageRateKm > 0) {
           WHERE i.lease_id = ?
             AND i.deleted_at IS NULL
             AND i.status IN ('sent','partially_paid','paid','overdue')
-            AND ili.item_type IN ('mileage_usage','mileage_estimate','mileage_adjustment')
+            -- Distance-bearing lines only: quantity holds the distance IN THE LEASE
+            -- UNIT for mileage_usage + mileage_estimate. mileage_adjustment/credit
+            -- true-ups carry quantity=1 (a flat dollar delta, not a distance) so they
+            -- are excluded from this Distance table (they still show on the invoice).
+            AND ili.item_type IN ('mileage_usage','mileage_estimate')
           ORDER BY i.billing_period_end DESC, i.id DESC
           LIMIT 5",
         [$leaseId]
@@ -294,7 +298,7 @@ $statusBadge = match($lease['status']) {
             </li>
             <li>
                 <span class="portal-info-label">Mileage Allowance</span>
-                <span class="portal-info-value font-mono"><?= $lease['estimated_mileage'] ? e(number_format((float)$lease['estimated_mileage'])) . ' km' : 'Unlimited' ?></span>
+                <span class="portal-info-value font-mono"><?= $lease['estimated_mileage'] ? e(number_format((float)$lease['estimated_mileage'])) . ' ' . e(ff_mileage_unit_label($lease)) : 'Unlimited' ?></span>
             </li>
             <li>
                 <span class="portal-info-label">Currency</span>
@@ -442,7 +446,9 @@ $statusBadge = match($lease['status']) {
                                     <span style="color:var(--text-secondary);">→</span>
                                     <?= e(format_date(ff_invoice_display_period_end($row + $_leasePeriodCtx))) ?>
                                 </td>
-                                <td class="text-right font-mono"><?= e(number_format((float) ff_km_to_lease_unit($lease, $row['km']), 2)) ?> <?= e(ff_mileage_unit_label($lease)) ?></td>
+                                <?php /* ili.quantity is ALREADY stored in the lease's display unit (the engine
+                                         renders mileage lines via ff_mileage_line_display) — do NOT re-convert. */ ?>
+                                <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> <?= e(ff_mileage_unit_label($lease)) ?></td>
                                 <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
                                 <td class="text-right font-mono" style="color:#0369a1;">
                                     <?= $row['credit_amount'] !== null ? e(format_currency($row['credit_amount'])) : '—' ?>
@@ -500,7 +506,9 @@ $statusBadge = match($lease['status']) {
                                     <span style="color:var(--text-secondary);">→</span>
                                     <?= e(format_date(ff_invoice_display_period_end($row + $_leasePeriodCtx))) ?>
                                 </td>
-                                <td class="text-right font-mono"><?= e(number_format((float) ff_km_to_lease_unit($lease, $row['km']), 2)) ?> <?= e(ff_mileage_unit_label($lease)) ?></td>
+                                <?php /* ili.quantity is ALREADY stored in the lease's display unit (the engine
+                                         renders mileage lines via ff_mileage_line_display) — do NOT re-convert. */ ?>
+                                <td class="text-right font-mono"><?= e(number_format((float) $row['km'], 2)) ?> <?= e(ff_mileage_unit_label($lease)) ?></td>
                                 <td class="text-right font-mono"><?= e(format_currency($row['usage_amount'])) ?></td>
                             </tr>
                             <?php endforeach; ?>

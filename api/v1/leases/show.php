@@ -63,6 +63,9 @@ $lease = db_row(
         l.estimated_mileage,
         l.estimated_mileage_km,
         l.estimated_mileage_miles,
+        l.estimated_mileage_per_day,
+        l.estimated_mileage_per_day_km,
+        l.estimated_mileage_per_day_miles,
         l.km_to_miles_conversion,
         l.miles_to_km_conversion,
         l.actual_mileage,
@@ -183,6 +186,10 @@ $lease['odometer_end_km']             = $lease['odometer_end_km']             !=
 $lease['total_distance_km']           = $lease['total_distance_km']           !== null ? (float) $lease['total_distance_km']           : null;
 $lease['estimated_mileage_km']        = $lease['estimated_mileage_km']        !== null ? (float) $lease['estimated_mileage_km']        : null;
 $lease['estimated_mileage_miles']     = $lease['estimated_mileage_miles']     !== null ? (float) $lease['estimated_mileage_miles']     : null;
+// S-MILEAGE-EST-DAILY: per-day estimate (drives the mileage_estimate billing line).
+$lease['estimated_mileage_per_day']       = $lease['estimated_mileage_per_day']       !== null ? (float) $lease['estimated_mileage_per_day']       : null;
+$lease['estimated_mileage_per_day_km']    = $lease['estimated_mileage_per_day_km']    !== null ? (float) $lease['estimated_mileage_per_day_km']    : null;
+$lease['estimated_mileage_per_day_miles'] = $lease['estimated_mileage_per_day_miles'] !== null ? (float) $lease['estimated_mileage_per_day_miles'] : null;
 $lease['mileage_rate_km']             = $lease['mileage_rate_km']             !== null ? (float) $lease['mileage_rate_km']             : null;
 // S-LEASE-MIN-DAYS: cast the TINYINT short-lease floor so the Alpine UI gets a
 // typed int (not a numeric string); null stays null when no per-lease minimum.

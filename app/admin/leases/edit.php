@@ -360,22 +360,39 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
 
                 <!-- ── Per-unit rate (read-only) ── -->
+                <?php
+                // S-MILEAGE-UNITS: render BOTH the $/km and $/mile cell robustly. When
+                // a dual-unit mirror is NULL (older lease), derive it from the primary
+                // mileage_rate + the lease unit, using the INVERSE-factor rate rule
+                // ($/km = $/mile x kmToMiles; $/mile = $/km x milesToKm). Prevents a
+                // miles lease from mislabeling $/mile as $/km (369) or showing $0 (378).
+                $eMUnit     = $lease['mileage_unit'] ?? 'km';
+                $eKmToMiles = (float) ($lease['km_to_miles_conversion'] ?? 0.621371) ?: 0.621371;
+                $eMilesToKm = (float) ($lease['miles_to_km_conversion'] ?? 1.609344) ?: 1.609344;
+                $ePrimary   = (float) ($lease['mileage_rate'] ?? 0);
+                $eRateKm    = $lease['mileage_rate_km'] !== null && $lease['mileage_rate_km'] !== ''
+                    ? (float) $lease['mileage_rate_km']
+                    : ($eMUnit === 'km' ? $ePrimary : $ePrimary * $eKmToMiles);
+                $eRateMiles = $lease['mileage_rate_miles'] !== null && $lease['mileage_rate_miles'] !== ''
+                    ? (float) $lease['mileage_rate_miles']
+                    : ($eMUnit === 'miles' ? $ePrimary : $ePrimary * $eMilesToKm);
+                ?>
                 <div class="ff-dual-label">Per-unit rate <span style="font-weight:400;color:var(--text-muted);">— read-only</span></div>
                 <div class="ff-dual-grid">
-                    <div<?= ($lease['mileage_unit'] ?? 'km') !== 'km' ? ' class="ff-field-secondary"' : '' ?>>
+                    <div<?= $eMUnit !== 'km' ? ' class="ff-field-secondary"' : '' ?>>
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
                             <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;border-radius:0;">
-                                <?= e(number_format((float)($lease['mileage_rate_km'] ?? $lease['mileage_rate'] ?? 0), 4)) ?>
+                                <?= e(number_format($eRateKm, 4)) ?>
                             </div>
                             <span class="input-group-suffix">/ km</span>
                         </div>
                     </div>
-                    <div<?= ($lease['mileage_unit'] ?? 'km') !== 'miles' ? ' class="ff-field-secondary"' : '' ?>>
+                    <div<?= $eMUnit !== 'miles' ? ' class="ff-field-secondary"' : '' ?>>
                         <div class="input-group">
                             <span class="input-group-prefix">$</span>
                             <div class="form-control font-mono" style="background:var(--bg-muted);cursor:default;border-radius:0;">
-                                <?= e(number_format((float)($lease['mileage_rate_miles'] ?? 0), 4)) ?>
+                                <?= e(number_format($eRateMiles, 4)) ?>
                             </div>
                             <span class="input-group-suffix">/ mile</span>
                         </div>

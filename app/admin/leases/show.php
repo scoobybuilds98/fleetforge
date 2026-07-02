@@ -456,7 +456,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                     </div>
                                     <div class="ff-show-caption" style="margin-top:0;">
                                         <template x-if="lease.odometer_start_km != null && lease.odometer_end_km != null">
-                                            <span x-text="'Odometer ' + Number(lease.odometer_start_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' → ' + Number(lease.odometer_end_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'"></span>
+                                            <span x-text="'Odometer ' + km2u(lease.odometer_start_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' → ' + km2u(lease.odometer_end_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' ' + distUnit()"></span>
                                         </template>
                                         <template x-if="!(lease.odometer_start_km != null && lease.odometer_end_km != null)">
                                             <span x-text="lease.mileage_tracking_mode === 'manual' ? 'Manual reading' : 'Recorded at close'"></span>
@@ -465,7 +465,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 </div>
 
                                 <!-- S-LEASE-UNITS: dual-unit mileage rate + allowance -->
-                                <div class="ff-rate-block" x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0">
+                                <div class="ff-rate-block" x-show="parseFloat(lease.mileage_rate_km || lease.mileage_rate) > 0 || parseFloat(lease.mileage_rate_miles) > 0 || parseFloat(lease.estimated_mileage_km || lease.estimated_mileage) > 0 || parseFloat(lease.estimated_mileage_miles) > 0 || parseFloat(lease.estimated_mileage_per_day_km || lease.estimated_mileage_per_day) > 0">
                                     <div class="ff-rate-label" style="margin-bottom:10px;">Mileage &amp; allowance</div>
                                     <div class="ff-rate-pair">
                                         <!-- Per-unit rate -->
@@ -505,6 +505,26 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                                          x-text="parseFloat(lease.estimated_mileage_miles || lease.estimated_mileage || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
                                                     <div class="ff-show-secondary" style="white-space:nowrap;"
                                                          x-text="'≈ ' + parseFloat(lease.estimated_mileage_km || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                        <!-- S-MILEAGE-EST-DAILY: per-day estimate (drives the mileage_estimate billing line) -->
+                                        <div x-show="parseFloat(lease.estimated_mileage_per_day_km || lease.estimated_mileage_per_day || 0) > 0">
+                                            <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;letter-spacing:-0.005em;">Est. per day</div>
+                                            <template x-if="lease.mileage_unit === 'km'">
+                                                <div>
+                                                    <div class="ff-show-primary" style="white-space:nowrap;"
+                                                         x-text="parseFloat(lease.estimated_mileage_per_day_km || lease.estimated_mileage_per_day || 0).toLocaleString('en-CA', {maximumFractionDigits:2}) + ' km/day'"></div>
+                                                    <div class="ff-show-secondary" style="white-space:nowrap;"
+                                                         x-text="'≈ ' + parseFloat(lease.estimated_mileage_per_day_miles || 0).toLocaleString('en-CA', {maximumFractionDigits:2}) + ' mi/day'"></div>
+                                                </div>
+                                            </template>
+                                            <template x-if="lease.mileage_unit !== 'km'">
+                                                <div>
+                                                    <div class="ff-show-primary" style="white-space:nowrap;"
+                                                         x-text="parseFloat(lease.estimated_mileage_per_day_miles || lease.estimated_mileage_per_day || 0).toLocaleString('en-CA', {maximumFractionDigits:2}) + ' mi/day'"></div>
+                                                    <div class="ff-show-secondary" style="white-space:nowrap;"
+                                                         x-text="'≈ ' + parseFloat(lease.estimated_mileage_per_day_km || 0).toLocaleString('en-CA', {maximumFractionDigits:2}) + ' km/day'"></div>
                                                 </div>
                                             </template>
                                         </div>
@@ -667,7 +687,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                             <div>
                                                 <div class="stat-label">Starting Odometer</div>
                                                 <div class="stat-value font-mono"
-                                                     x-text="Number(lease.odometer_start_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></div>
+                                                     x-text="km2u(lease.odometer_start_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ' + distUnit()"></div>
                                                 <div class="text-xs text-secondary" style="margin-top:2px;">
                                                     <template x-if="lease.odometer_start_source === 'gps'">
                                                         <span>captured via GPS
@@ -685,7 +705,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                                 <div class="stat-label">Latest Recorded</div>
                                                 <div class="stat-value font-mono"
                                                      x-text="lease.latest_invoice_odometer_km !== null && lease.latest_invoice_odometer_km !== undefined
-                                                        ? Number(lease.latest_invoice_odometer_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'
+                                                        ? km2u(lease.latest_invoice_odometer_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ' + distUnit()
                                                         : '—'"></div>
                                                 <template x-if="lease.latest_invoice_number_for_odo">
                                                     <div class="text-xs text-secondary" style="margin-top:2px;">
@@ -697,10 +717,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                                 </template>
                                             </div>
                                             <div>
-                                                <div class="stat-label">Total KM Driven</div>
+                                                <div class="stat-label" x-text="'Total ' + (mi() ? 'Miles' : 'KM') + ' Driven'"></div>
                                                 <div class="stat-value font-mono"
                                                      x-text="lease.latest_invoice_cumulative_km !== null && lease.latest_invoice_cumulative_km !== undefined
-                                                        ? Number(lease.latest_invoice_cumulative_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'
+                                                        ? km2u(lease.latest_invoice_cumulative_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' ' + distUnit()
                                                         : '—'"></div>
                                                 <div class="text-xs text-secondary" style="margin-top:2px;">since lease start</div>
                                             </div>
@@ -718,12 +738,15 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                         <!-- Capture form (only enabled for non-closed leases) -->
                                         <template x-if="lease.status === 'active' || lease.status === 'pending'">
                                             <div style="display:flex;gap:0.5rem;align-items:flex-start;flex-wrap:wrap;">
+                                                <div style="flex:1 1 180px;max-width:240px;">
+                                                <label class="form-label" style="font-size:0.75rem;">Starting Odometer (km)</label>
                                                 <input type="number"
                                                        class="form-control font-mono"
                                                        x-model="retroOdo.value"
                                                        step="0.01" min="0"
-                                                       placeholder="e.g. 1234.56"
-                                                       style="flex:1 1 180px;max-width:240px;">
+                                                       placeholder="e.g. 1234.56 (km)"
+                                                       style="width:100%;">
+                                                </div>
                                                 <button type="button" class="btn btn-secondary"
                                                         x-show="lease.samsara_vehicle_id"
                                                         @click="fetchRetroOdometer()"
@@ -791,7 +814,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                         <div class="stat-label">Odometer</div>
                                         <div class="stat-value font-mono"
                                              x-text="lease.samsara_odometer_km !== null
-                                                ? lease.samsara_odometer_km.toLocaleString('en-CA',{maximumFractionDigits:0}) + ' km'
+                                                ? km2u(lease.samsara_odometer_km).toLocaleString('en-CA',{maximumFractionDigits:0}) + ' ' + distUnit()
                                                 : '—'"></div>
                                     </div>
                                     <div>
@@ -2681,6 +2704,25 @@ function FF_LeaseDetail() {
         // miles when the lease is a miles unit). Returns null when nothing usable —
         // the "Total distance driven" callout only renders for completed leases when
         // this is non-null.
+        // S-MILEAGE-UNITS-SHOW: lease-unit display helpers for km-canonical values
+        // (odometer_*_km, cumulative_distance_km, samsara_odometer_km, etc.). Odometer
+        // and distance are stored in km; a miles-unit lease must see miles.
+        mi() { return !!(this.lease && (this.lease.mileage_unit || 'km') === 'miles'); },
+        km2u(km) {
+            if (km === null || km === undefined || km === '') return null;
+            const v = parseFloat(km);
+            if (isNaN(v)) return null;
+            return this.mi() ? v * (Number(this.lease.km_to_miles_conversion) || 0.621371) : v;
+        },
+        // Inverse: a value the user TYPED in the lease's unit → km-canonical for storage.
+        u2km(val) {
+            if (val === null || val === undefined || val === '') return null;
+            const v = parseFloat(val);
+            if (isNaN(v)) return null;
+            return this.mi() ? v * (Number(this.lease.miles_to_km_conversion) || 1.609344) : v;
+        },
+        distUnit() { return this.mi() ? 'mi' : 'km'; },
+
         drivenKm() {
             const l = this.lease;
             if (!l) return null;

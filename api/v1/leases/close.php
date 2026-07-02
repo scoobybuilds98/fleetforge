@@ -1013,10 +1013,13 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         && !$hasMileageLine
         && !$modernMileageWillBill
     ) {
+        // S-MILEAGE-UNITS: label the rate in the lease's unit ($/mile for a miles lease).
+        $warnDisp = ff_mileage_line_display($lease, '0', (string) ($lease['mileage_rate_km'] ?? '0'));
         $mileageWarning = sprintf(
-            'Lease %s tracks mileage manually and has a $%s/km rate, but no closing odometer or actual mileage was entered — $0 mileage billed on this close.',
+            'Lease %s tracks mileage manually and has a $%s/%s rate, but no closing odometer or actual mileage was entered — $0 mileage billed on this close.',
             (string) ($lease['contract_number'] ?? ''),
-            (string) $lease['mileage_rate_km']
+            (string) $warnDisp['rate'],
+            (string) $warnDisp['rate_unit']
         );
         db_insert('audit_log', [
             'user_id'      => current_user_id(),

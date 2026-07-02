@@ -2086,12 +2086,12 @@ if ($hasOdometer):
     <dl class="invoice-meta-dl" style="display:grid; grid-template-columns:200px 1fr; gap:8px 16px; font-size:13px; margin:0;">
         <?php if ($invoice['odometer_at_period_start_km'] !== null): ?>
         <dt class="text-secondary">Period Start</dt>
-        <dd class="font-mono"><?= number_format((float)$invoice['odometer_at_period_start_km'], 2) ?> km</dd>
+        <dd class="font-mono"><?= number_format((float) ff_km_to_lease_unit($mDispLease, $invoice['odometer_at_period_start_km']), 2) ?> <?= e($mDispUnit) ?></dd>
         <?php endif; ?>
 
         <?php if ($invoice['odometer_at_period_end_km'] !== null): ?>
         <dt class="text-secondary">Period End</dt>
-        <dd class="font-mono"><?= number_format((float)$invoice['odometer_at_period_end_km'], 2) ?> km</dd>
+        <dd class="font-mono"><?= number_format((float) ff_km_to_lease_unit($mDispLease, $invoice['odometer_at_period_end_km']), 2) ?> <?= e($mDispUnit) ?></dd>
         <?php endif; ?>
 
         <?php if ($invoice['period_distance_km'] !== null): ?>

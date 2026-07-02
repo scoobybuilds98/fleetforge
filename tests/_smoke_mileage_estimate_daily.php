@@ -174,6 +174,27 @@ try {
         "estimate \$" . ($estE['amount'] ?? '?') . " draws down \$" . ($drawE['amount'] ?? 'none') . " (min of charge, \$500 balance)");
     ck('E2', bccomp($balE, '0.00', 2) === 0, "precharge_balance decremented to \$$balE (expect 0.00)");
 
+    // ── MILES — the estimate bills in MILES at the per-mile rate ──────────
+    // (The portal/show surfaces print the line quantity directly, so the
+    // quantity MUST already be in the lease's unit — this locks that.)
+    $lM = $makeLease([
+        'mileage_unit' => 'miles', 'mileage_rate' => '1.0000',
+        'mileage_rate_km' => '0.6214', 'mileage_rate_miles' => '1.0000',
+        'estimated_mileage_per_day' => '50.00', 'estimated_mileage_per_day_km' => '80.4672',
+        'estimated_mileage_per_day_miles' => '50.0000',
+    ]);
+    $ivM = $gen->createFromLease([
+        'lease_id' => $lM, 'period_start' => '2026-05-01', 'period_end' => '2026-05-31',
+        'billing_type' => 'full_month', 'invoice_type' => 'regular', 'created_by' => $user,
+    ]);
+    $estM = $line($ivM['invoice_id'], 'mileage_estimate');
+    $expM = 31 * 50 * 1.0; // 31 days × 50 mi/day × $1.00/mi = $1550
+    ck('MILES', $estM !== null && $estM['unit'] === 'miles'
+            && bccomp((string) $estM['unit_price'], '1.0000', 4) === 0
+            && abs((float) $estM['amount'] - $expM) < 0.10
+            && bccomp(bcround(bcmul((string) $estM['quantity'], (string) $estM['unit_price'], 6), 2), (string) $estM['amount'], 2) === 0,
+        "miles lease: 31 × 50 mi/day × \$1.00/mi = \$" . ($estM['amount'] ?? 'none') . ", qty=" . ($estM['quantity'] ?? '?') . " " . ($estM['unit'] ?? '?') . " (expect ~1550 miles, qty×price==amount)");
+
     db_execute("ROLLBACK");
 } catch (\Throwable $e) {
     db_execute("ROLLBACK");
