@@ -393,13 +393,13 @@ $perTemplate = [
     'Freightliner Cascadia Sleeper' => 5,
     'Kenworth T680 Day Cab'         => 4,
     'Volvo VNL 760 Sleeper'         => 4,
-    "Wabash DuraPlate 53' Dry Van"  => 6,
+    "Wabash DuraPlate 53' Dry Van"  => 7,
     "Great Dane Champion 53' Dry Van"=> 5,
     "Utility 3000R 53' Reefer"      => 5,
     "Great Dane Everest 53' Reefer" => 4,
-    "Doonan 48' Step Deck"          => 3,
-    "Manac 53' Flatbed"             => 3,
-    "Cheetah 40' Container Chassis" => 4,
+    "Doonan 48' Step Deck"          => 4,
+    "Manac 53' Flatbed"             => 5,
+    "Cheetah 40' Container Chassis" => 6,
 ];
 
 $unitsByCat = [];   // category => [ {id, unit_number, samsara_vehicle_id, samsara_entity_type, samsara_odometer_km, template...} ]
@@ -511,7 +511,7 @@ foreach ($rateCardDefs as $rc) {
         'name'           => $name,
         'description'    => $desc . ' ' . tagNote('rate card'),
         'is_default'     => $isDefault,
-        'effective_from' => daysAgo(300),
+        'effective_from' => daysAgo(1150),
         'created_by'     => DEMO_USER_ID,
     ];
     if ($boundCustomer && isset($customerIds[$boundCustomer])) {
@@ -616,7 +616,30 @@ $leaseDefs = [
     ['customer' => 'Cross-Border Logistics USA Inc.','cat' => 'reefer','status' => 'active', 'startAgo' => 100, 'len' => 365, 'currency' => 'USD', 'mileageMode' => 'samsara', 'mileage' => true, 'gps' => true, 'insurance' => '160.00', 'warranty' => '95.00', 'odoStart' => 22100.0, 'kmPerMonth' => 3800],
     ['customer' => 'Evergreen Transport Group',   'cat' => 'other',   'status' => 'active', 'startAgo' => 55,  'len' => 365, 'currency' => 'USD', 'mileageMode' => 'off', 'gps' => true],
 
-    // ── Completed (closed history → paid invoices, trend depth) ──
+    // ── Long-running actives (multi-year contracts → deep monthly invoice history) ──
+    ['customer' => 'Gateway Intermodal LLC',      'cat' => 'other',   'status' => 'active', 'startAgo' => 780, 'len' => 1095, 'currency' => 'USD', 'mileageMode' => 'samsara', 'mileage' => true, 'gps' => true, 'odoStart' => 195000.0, 'kmPerMonth' => 9800,
+     'notes' => '3-year power-unit contract — renewed 2024, anchor USD account.'],
+    ['customer' => 'Northgate Logistics Inc.',    'cat' => 'dry_van', 'status' => 'active', 'startAgo' => 690, 'len' => 1095, 'mileageMode' => 'off', 'gps' => true,
+     'notes' => 'Multi-year dedicated dry van — auto-renewing annual term.'],
+    ['customer' => 'Cross-Border Logistics USA Inc.','cat' => 'reefer','status' => 'active', 'startAgo' => 560, 'len' => 730, 'currency' => 'USD', 'mileageMode' => 'samsara', 'mileage' => true, 'gps' => true, 'insurance' => '150.00', 'odoStart' => 12800.0, 'kmPerMonth' => 4100,
+     'notes' => '2-year reefer program — pharma cold chain, insured.'],
+    ['customer' => 'Summit Carriers Ltd.',        'cat' => 'flatbed', 'status' => 'active', 'startAgo' => 450, 'len' => 730, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 8200.0, 'kmPerMonth' => 2900,
+     'notes' => '2-year open-deck commitment — lumber contract volume.'],
+
+    // ── Delinquent active (credit-hold customer → aged AR / collections story) ──
+    ['customer' => 'Interior Bulk Transport',     'cat' => 'chassis', 'status' => 'active', 'startAgo' => 200, 'len' => 365, 'mileageMode' => 'off', 'delinquent' => true,
+     'notes' => 'ACCOUNT ON CREDIT HOLD — invoices unpaid since spring, collections engaged.'],
+
+    // ── Completed (closed history → paid invoices, multi-year trend depth) ──
+    ['customer' => 'Northgate Logistics Inc.',    'cat' => 'dry_van', 'status' => 'completed', 'startAgo' => 1080, 'len' => 190, 'mileageMode' => 'off'],
+    ['customer' => 'Harbour City Cartage',        'cat' => 'dry_van', 'status' => 'completed', 'startAgo' => 1000, 'len' => 150, 'mileageMode' => 'off'],
+    ['customer' => 'Cascade Freight Lines',       'cat' => 'reefer',  'status' => 'completed', 'startAgo' => 980, 'len' => 240, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 33000.0, 'kmPerMonth' => 4600],
+    ['customer' => 'Pacific Haul Transport Ltd.', 'cat' => 'other',   'status' => 'completed', 'startAgo' => 900, 'len' => 200, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 350000.0, 'kmPerMonth' => 10200],
+    ['customer' => 'Fraser Valley Distribution',  'cat' => 'dry_van', 'status' => 'completed', 'startAgo' => 800, 'len' => 160, 'mileageMode' => 'off'],
+    ['customer' => 'Prairie Line Haulers Inc.',   'cat' => 'reefer',  'status' => 'completed', 'startAgo' => 660, 'len' => 210, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 18500.0, 'kmPerMonth' => 3900],
+    ['customer' => 'Rocky Mountain Freight Co.',  'cat' => 'other',   'status' => 'completed', 'startAgo' => 520, 'len' => 150, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 260000.0, 'kmPerMonth' => 8800],
+    ['customer' => 'Summit Carriers Ltd.',        'cat' => 'step_deck','status' => 'completed', 'startAgo' => 430, 'len' => 120, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 11200.0, 'kmPerMonth' => 2400],
+    ['customer' => 'Coastal Container Services',  'cat' => 'chassis', 'status' => 'completed', 'startAgo' => 370, 'len' => 90,  'mileageMode' => 'off'],
     ['customer' => 'Cascade Freight Lines',       'cat' => 'reefer',  'status' => 'completed', 'startAgo' => 300, 'len' => 120, 'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 41000.0, 'kmPerMonth' => 4800],
     ['customer' => 'Fraser Valley Distribution',  'cat' => 'dry_van', 'status' => 'completed', 'startAgo' => 270, 'len' => 90,  'mileageMode' => 'off'],
     ['customer' => 'Rocky Mountain Freight Co.',  'cat' => 'flatbed', 'status' => 'completed', 'startAgo' => 220, 'len' => 75,  'mileageMode' => 'manual', 'mileage' => true, 'odoStart' => 15600.0, 'kmPerMonth' => 3000],
@@ -655,7 +678,7 @@ foreach ($leaseDefs as $def) {
     if ($mileageRate === '0.0000' && !empty($def['mileage'])) $mileageRate = '0.1800';  // ensure heroes bill mileage
 
     $row = [
-        'contract_number'        => 'CN-DEMO-' . code6() . '-' . date('Y'),
+        'contract_number'        => 'CN-DEMO-' . code6() . '-' . substr($startDate, 0, 4),
         'customer_id'            => $custId,
         'equipment_unit_id'      => $unit['id'],
         'customer_name_snapshot' => $custRow['contact_name'] ?? null,
@@ -732,6 +755,11 @@ foreach ($leaseDefs as $def) {
 
     $leaseId = db_insert('leases', $row);
 
+    // Backdate created_at to just before the lease start so list views read as a
+    // multi-year operating history rather than a bulk import (S-DEMO-MULTIYEAR).
+    $createdTs = date('Y-m-d H:i:s', strtotime($startDate . ' -' . random_int(2, 12) . ' days 10:30'));
+    db_execute("UPDATE leases SET created_at = ?, updated_at = ? WHERE id = ?", [$createdTs, $createdTs, $leaseId]);
+
     // Unit status sync.
     $unitStatus = match ($status) {
         'active'    => 'on_lease',
@@ -759,7 +787,7 @@ foreach ($leaseDefs as $def) {
         'kmPerMonth' => $def['kmPerMonth'] ?? null, 'startDate' => $startDate, 'endDate' => $endDate,
         'actualReturn' => $actualReturn, 'status' => $status, 'billingCycle' => $billingCycle,
         'terms' => $custRow['payment_terms'] ?? 'Net 30', 'customerId' => $custId,
-        'hero' => $def['hero'] ?? null,
+        'hero' => $def['hero'] ?? null, 'delinquent' => !empty($def['delinquent']),
         'hourlyRate' => $row['hourly_rate'] ?? null,
         'engineHoursStart' => $row['engine_hours_at_start'] ?? null,
     ];
@@ -776,8 +804,10 @@ line("\n[Phase 5/8] Invoices via InvoiceGenerator engine…");
 $gen = new \FleetForge\Billing\InvoiceGenerator();
 $invoiceRecords = [];   // id, leaseId, customerId, currency, periodEnd, total, status(target), hero
 
-/** Build calendar-monthly billing periods from $start to $end (inclusive). */
-function buildPeriods(string $start, string $end, bool $completed, int $cap = 8): array {
+/** Build calendar-monthly billing periods from $start to $end (inclusive).
+ *  Cap 40 (raised from 8, S-DEMO-MULTIYEAR) so leases running 2-3 years emit
+ *  their full monthly invoice history for the multi-year presentation dataset. */
+function buildPeriods(string $start, string $end, bool $completed, int $cap = 40): array {
     $periods = [];
     $cursor  = new DateTime($start);
     $endDt   = new DateTime($end);
@@ -864,6 +894,7 @@ foreach ($leaseRecords as $lr) {
             'currency' => $lr['currency'], 'periodEnd' => $pEnd, 'dueDate' => $dueDate,
             'total' => (float) $res['total_amount'], 'leaseStatus' => $lr['status'], 'hero' => $lr['hero'],
             'invoiceNumber' => $res['invoice_number'] ?? null,
+            'delinquent' => $lr['delinquent'] ?? false,
         ];
     }
 }
@@ -883,7 +914,11 @@ foreach ($invoiceRecords as &$inv) {
     if ($total <= 0) { $statusTally['draft']++; $inv['finalStatus'] = 'draft'; continue; }
 
     // Decide payment behaviour by age + lease status.
-    if ($inv['leaseStatus'] === 'completed' || $ageDays > 55) {
+    if (!empty($inv['delinquent'])) {
+        // Credit-hold customer: everything newer than ~5 months sits unpaid →
+        // real 30/60/90+ AR-aging buckets + a collections story (S-DEMO-MULTIYEAR).
+        $mode = $ageDays > 150 ? 'paid' : 'overdue';
+    } elseif ($inv['leaseStatus'] === 'completed' || $ageDays > 55) {
         $mode = 'paid';
     } elseif ($ageDays > 30) {
         $mode = (random_int(0, 9) < 3) ? 'overdue' : 'partial';   // some slip to overdue
@@ -904,7 +939,7 @@ foreach ($invoiceRecords as &$inv) {
         $paymentSeq++;
         try {
             $pid = db_insert('payments', [
-                'payment_number'       => 'PMT-DEMO-' . date('Y') . '-' . str_pad((string) $paymentSeq, 5, '0', STR_PAD_LEFT),
+                'payment_number'       => 'PMT-DEMO-' . substr($payDate, 0, 4) . '-' . str_pad((string) $paymentSeq, 5, '0', STR_PAD_LEFT),
                 'customer_id'          => $inv['customerId'],
                 'amount'               => $amount,
                 'currency'             => $inv['currency'],

@@ -77,7 +77,7 @@ echo "Seeding payoff showcase data…\n\n";
 // ══════════════════════════════════════════════════════════════════════════════
 $unitId1 = 1; // T5301
 
-if (!isset($seeded['SEED-DRY-VAN-001'])) db_transaction(function () use ($unitId1, $mo, $moLast, $year, $today) {
+if (!isset($seeded['SEED-DRY-VAN-001'])) db_transaction(function () use ($unitId1, $mo, $moLast, $year, $today, $mintInvoiceNumber) {
 
     // ── Fixed asset ───────────────────────────────────────────────────────────
     $acqDate1 = $mo(22, '15');
@@ -151,6 +151,7 @@ if (!isset($seeded['SEED-DRY-VAN-001'])) db_transaction(function () use ($unitId
             'billing_period_days'  => 30,
             'billing_type'         => 'full_month',
             'subtotal'             => $base,
+            'subtotal_after_discount' => $base,
             'tax_gst_amount'       => $gst,
             'tax_pst_amount'       => '0.00',
             'total_amount'         => $total,
@@ -201,6 +202,7 @@ if (!isset($seeded['SEED-DRY-VAN-001'])) db_transaction(function () use ($unitId
             'billing_period_days'  => 30,
             'billing_type'         => 'full_month',
             'subtotal'             => $base,
+            'subtotal_after_discount' => $base,
             'tax_gst_amount'       => $gst,
             'tax_pst_amount'       => '0.00',
             'total_amount'         => $total,
@@ -249,6 +251,7 @@ if (!isset($seeded['SEED-DRY-VAN-001'])) db_transaction(function () use ($unitId
         'billing_period_days'  => 30,
         'billing_type'         => 'full_month',
         'subtotal'             => $base,
+            'subtotal_after_discount' => $base,
         'tax_gst_amount'       => $gst,
         'tax_pst_amount'       => '0.00',
         'total_amount'         => $total,
@@ -350,7 +353,7 @@ echo "\n";
 // ══════════════════════════════════════════════════════════════════════════════
 $unitId2 = 2; // T5302
 
-if (!isset($seeded['SEED-REEFER-001'])) db_transaction(function () use ($unitId2, $mo, $moLast, $year, $today) {
+if (!isset($seeded['SEED-REEFER-001'])) db_transaction(function () use ($unitId2, $mo, $moLast, $year, $today, $mintInvoiceNumber) {
 
     $acqDate2 = $mo(16, '01');
     $assetId2  = db_insert('acc_fixed_assets', [
@@ -416,6 +419,7 @@ if (!isset($seeded['SEED-REEFER-001'])) db_transaction(function () use ($unitId2
             'billing_period_days'  => 30,
             'billing_type'         => 'full_month',
             'subtotal'             => $sub,
+            'subtotal_after_discount' => $sub,
             'tax_gst_amount'       => $gst,
             'tax_pst_amount'       => '0.00',
             'total_amount'         => $total,
@@ -467,6 +471,7 @@ if (!isset($seeded['SEED-REEFER-001'])) db_transaction(function () use ($unitId2
             'billing_period_days'  => 30,
             'billing_type'         => 'full_month',
             'subtotal'             => $base,
+            'subtotal_after_discount' => $base,
             'tax_gst_amount'       => $gst,
             'tax_pst_amount'       => '0.00',
             'total_amount'         => $total,
@@ -568,7 +573,7 @@ echo "\n";
 // ══════════════════════════════════════════════════════════════════════════════
 $unitId3 = 3; // T5303
 
-if (!isset($seeded['SEED-FLATBED-001'])) db_transaction(function () use ($unitId3, $mo, $moLast, $year, $today) {
+if (!isset($seeded['SEED-FLATBED-001'])) db_transaction(function () use ($unitId3, $mo, $moLast, $year, $today, $mintInvoiceNumber) {
 
     $acqDate3 = $mo(9, '01');
     $assetId3  = db_insert('acc_fixed_assets', [
@@ -634,6 +639,7 @@ if (!isset($seeded['SEED-FLATBED-001'])) db_transaction(function () use ($unitId
             'billing_period_days'  => 30,
             'billing_type'         => 'full_month',
             'subtotal'             => $base,
+            'subtotal_after_discount' => $base,
             'tax_gst_amount'       => $gst,
             'tax_pst_amount'       => '0.00',
             'total_amount'         => $total,

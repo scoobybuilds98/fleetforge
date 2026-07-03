@@ -108,12 +108,15 @@ function nextEntryNumber(int $periodId): string {
     $entrySeq[$periodId] = ($entrySeq[$periodId] ?? 0) + 1;
     return sprintf('JE-%d-%05d', date('Y'), count($entrySeq) + 0 + ($entrySeq[$periodId] - 1) + array_sum(array_slice($entrySeq, 0, array_search($periodId, array_keys($entrySeq)))) - $entrySeq[$periodId] + 1);
 }
-// Simpler: use a global counter
-$globalEntryCounter = 0;
-function nextJeNumber(): string {
-    global $globalEntryCounter;
-    $globalEntryCounter++;
-    return sprintf('JE-%d-%05d', date('Y'), $globalEntryCounter);
+// Simpler: per-year counters keyed off the ENTRY date, so a 2023 entry is
+// numbered JE-2023-xxxxx (multi-year dataset, S-DEMO-MULTIYEAR) instead of
+// every historical entry masquerading as current-year.
+$yearEntryCounters = [];
+function nextJeNumber(string $entryDate = ''): string {
+    global $yearEntryCounters;
+    $y = $entryDate !== '' ? (int) substr($entryDate, 0, 4) : (int) date('Y');
+    $yearEntryCounters[$y] = ($yearEntryCounters[$y] ?? 0) + 1;
+    return sprintf('JE-%d-%05d', $y, $yearEntryCounters[$y]);
 }
 
 // Insert a balanced journal entry (header + lines)
@@ -131,7 +134,7 @@ function postJE(array $header, array $lines): int {
     }
 
     $jeId = db_insert('acc_journal_entries', [
-        'entry_number'  => nextJeNumber(),
+        'entry_number'  => nextJeNumber($header['entry_date']),
         'period_id'     => $periodId,
         'entry_date'    => $header['entry_date'],
         'entry_type'    => $header['entry_type'] ?? 'system',
@@ -365,6 +368,44 @@ $billDefs = [
     ['vendor' => 'Freightliner Service Center', 'date_offset' => -6,  'amount' => '650.00',   'description' => 'Tire + wheel balance — CHS-002', 'gl_account' => '6070', 'equipment_key' => 'v2', 'status' => 'approved'],
 ];
 
+// Multi-year AP history (S-DEMO-MULTIYEAR): layer generated historical bills
+// under the hand-written recent ones so the P&L carries expenses back to 2023
+// alongside the multi-year revenue. All historical bills are paid.
+$histBills = [];
+$qtrCursor = new DateTimeImmutable('2023-01-15');
+$nowTs = new DateTimeImmutable('today');
+$qtrSeq = 0;
+while ($qtrCursor < $nowTs->modify('-70 days')) {
+    $qtrSeq++;
+    // Insurance premium grows with the fleet (~5% per quarter).
+    $premium = round(5200 * pow(1.05, $qtrSeq) / 25) * 25;
+    $histBills[] = ['vendor' => 'ICBC Commercial Insurance', 'date' => $qtrCursor->format('Y-m-d'),
+        'amount' => number_format((float) $premium, 2, '.', ''), 'description' => 'Quarterly commercial fleet insurance premium', 'status' => 'paid'];
+    // Two maintenance/parts bills per quarter.
+    foreach ([['Freightliner Service Center', 28, 800, 3400, 'Scheduled fleet service batch'],
+              ['Bridgestone Tire Canada',     58, 600, 3000, 'Tire replacement + rotation batch']] as [$vn, $off, $lo, $hi, $desc]) {
+        $histBills[] = ['vendor' => $vn, 'date' => $qtrCursor->modify("+{$off} days")->format('Y-m-d'),
+            'amount' => number_format((float) random_int($lo, $hi), 2, '.', ''), 'description' => $desc, 'status' => 'paid'];
+    }
+    // Annual extras in Q2: CVI batch + one towing callout.
+    if ((int) $qtrCursor->format('n') === 4) {
+        $histBills[] = ['vendor' => 'Desmond CVI Inspections', 'date' => $qtrCursor->modify('+40 days')->format('Y-m-d'),
+            'amount' => number_format((float) random_int(9, 16) * 120, 2, '.', ''), 'description' => 'Annual CVI batch — fleet trailers', 'status' => 'paid'];
+        $histBills[] = ['vendor' => 'Acme Heavy Tow', 'date' => $qtrCursor->modify('+55 days')->format('Y-m-d'),
+            'amount' => number_format((float) random_int(900, 1600), 2, '.', ''), 'description' => 'Emergency towing callout', 'status' => 'paid'];
+    }
+    $qtrCursor = $qtrCursor->modify('+3 months');
+}
+// Convert to the date_offset shape the loop consumes, oldest first.
+foreach ($histBills as $hb) {
+    $hb['date_offset'] = -(int) ((new DateTimeImmutable($hb['date']))->diff($nowTs)->days);
+    $hb['gl_account'] = '6070'; $hb['equipment_key'] = null;
+    unset($hb['date']);
+    array_unshift($billDefs, $hb);
+}
+usort($billDefs, fn($x, $y) => $x['date_offset'] <=> $y['date_offset']);
+echo '  (+' . count($histBills) . " historical bills generated back to 2023)\n";
+
 // Figure out maintenance expense account (Fleet Maintenance & Repairs)
 $maintAcct = db_row("SELECT id FROM acc_accounts WHERE code = '6070' OR name LIKE '%Maintenance%' OR name LIKE '%Repair%' ORDER BY code LIMIT 1", []);
 $insuranceAcct = db_row("SELECT id FROM acc_accounts WHERE name LIKE '%Insurance%' AND account_type IN ('operating_expense','cost_of_revenue') ORDER BY code LIMIT 1", []);
@@ -393,7 +434,7 @@ foreach ($billDefs as $b) {
     $balanceDue  = $status === 'paid' ? '0.00' : number_format($total, 2, '.', '');
 
     $billId = db_insert('acc_bills', [
-        'bill_number'         => sprintf('BILL-%d-%05d', date('Y'), ++$billCount),
+        'bill_number'         => sprintf('BILL-%d-%05d', (int) substr($billDate, 0, 4), ++$billCount),
         'vendor_id'           => $vendorId,
         'vendor_bill_number'  => 'V-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 6)),
         'bill_date'           => $billDate,
@@ -486,7 +527,7 @@ foreach ($billDefs as $b) {
             [
                 'entry_date'  => $paymentDate,
                 'description' => "AP payment — {$b['vendor']}",
-                'reference'   => sprintf('APAY-%d-%05d', date('Y'), ++$apPaymentCount),
+                'reference'   => sprintf('APAY-%d-%05d', (int) substr($paymentDate, 0, 4), ++$apPaymentCount),
                 'source_type' => 'ap_payment',
                 // source_id is wired below once the acc_ap_payments row exists
                 'source_id'   => null,
@@ -513,7 +554,7 @@ foreach ($billDefs as $b) {
         // + journal_entry_id all resolve; status='cleared' to mirror the
         // live create.php default.
         $apPaymentId = db_insert('acc_ap_payments', [
-            'payment_number'   => sprintf('APAY-%d-%05d', date('Y'), $apPaymentCount),
+            'payment_number'   => sprintf('APAY-%d-%05d', (int) substr($paymentDate, 0, 4), $apPaymentCount),
             'vendor_id'        => $vendorId,
             'bank_account_id'  => $cadBank,
             'payment_date'     => $paymentDate,
@@ -546,7 +587,7 @@ foreach ($billDefs as $b) {
             'bank_account_id'  => $cadBank,
             'transaction_date' => $paymentDate,
             'description'      => "AP payment — {$b['vendor']}",
-            'reference'        => sprintf('APAY-%d-%05d', date('Y'), $apPaymentCount),
+            'reference'        => sprintf('APAY-%d-%05d', (int) substr($paymentDate, 0, 4), $apPaymentCount),
             'amount'           => number_format(-$total, 2, '.', ''),
             'transaction_type' => 'withdrawal',
             'source'           => 'system',
@@ -561,12 +602,18 @@ foreach ($billDefs as $b) {
 echo "  Created $billCount vendor bills + JEs\n";
 
 // ────────────────────────────────────────────────────────────
-// Step 5 — Monthly depreciation runs for 2026 YTD
+// Step 5 — Monthly depreciation runs, multi-year (S-DEMO-MULTIYEAR)
+//
+// Runs from 2023-01 (earliest seeded acc_period year with GL activity)
+// through the current month. Each month only includes assets already in
+// service (depreciation_start_date <= month end) that are not yet fully
+// depreciated. Pre-2023 depreciation is treated as an opening balance
+// (months from depreciation_start to 2022-12 × straight-line monthly).
+// After all runs post, the asset register (accumulated_depreciation /
+// net_book_value / last_depreciation_date) is reconciled to opening + runs
+// so the register, the run history, and the GL agree exactly.
 // ────────────────────────────────────────────────────────────
-echo "\nStep 5 — Creating monthly depreciation runs...\n";
-
-$currentYear  = (int) date('Y');
-$currentMonth = (int) date('n');
+echo "\nStep 5 — Creating monthly depreciation runs (multi-year)...\n";
 
 $assets = db_select(
     "SELECT id, asset_number, name, acquisition_cost, salvage_value, depreciable_cost,
@@ -578,41 +625,64 @@ $assets = db_select(
     []
 );
 
-$runCount = 0;
-for ($month = 1; $month <= $currentMonth; $month++) {
-    $runDate = sprintf('%d-%02d-%02d 18:00:00', $currentYear, $month, min(28, (int) date('t', strtotime(sprintf('%d-%02d-01', $currentYear, $month)))));
-    $periodId = periodForDate(substr($runDate, 0, 10));
-
-    // Create the run header
-    $totalDepr = 0.0;
-    $lineRows = [];
-    foreach ($assets as $a) {
-        $monthlyDepr = round((float) $a['depreciable_cost'] / ((float) $a['useful_life_years'] * 12), 2);
-        $lineRows[] = [
-            'asset'  => $a,
-            'depr'   => $monthlyDepr,
-        ];
-        $totalDepr += $monthlyDepr;
+// Per-asset state: straight-line monthly amount + opening accum as of 2023-01.
+$runStart = new DateTimeImmutable('2023-01-01');
+$assetState = [];
+foreach ($assets as $a) {
+    $monthly = round((float) $a['depreciable_cost'] / max(1.0, (float) $a['useful_life_years'] * 12), 2);
+    $ds = new DateTimeImmutable($a['depreciation_start_date']);
+    $preMonths = 0;
+    if ($ds < $runStart) {
+        $d = $ds->diff($runStart);
+        $preMonths = $d->y * 12 + $d->m;
     }
+    $assetState[(int) $a['id']] = [
+        'asset'   => $a,
+        'monthly' => $monthly,
+        'accum'   => min((float) $a['depreciable_cost'], round($monthly * $preMonths, 2)),
+    ];
+}
+
+$runCount = 0;
+$cursor = $runStart;
+$endOfNow = new DateTimeImmutable(date('Y-m-01'));
+while ($cursor <= $endOfNow) {
+    $monthEnd = $cursor->modify('last day of this month')->format('Y-m-d');
+    $runDate  = $monthEnd . ' 18:00:00';
+    $periodId = periodForDate($monthEnd);
+
+    // Assets in service this month with depreciable cost remaining.
+    $lineRows = [];
+    $totalDepr = 0.0;
+    foreach ($assetState as $aid => &$st) {
+        if ($st['asset']['depreciation_start_date'] > $monthEnd) continue;
+        $remaining = (float) $st['asset']['depreciable_cost'] - $st['accum'];
+        if ($remaining <= 0.005) continue;
+        $depr = min($st['monthly'], round($remaining, 2));
+        $lineRows[] = ['aid' => $aid, 'depr' => $depr, 'opening_accum' => $st['accum']];
+        $st['accum'] = round($st['accum'] + $depr, 2);
+        $totalDepr += $depr;
+    }
+    unset($st);
+
+    if (!$lineRows) { $cursor = $cursor->modify('+1 month'); continue; }
 
     $runId = db_insert('acc_depreciation_runs', [
         'period_id'         => $periodId,
         'run_date'          => $runDate,
         'status'            => 'posted',
         'total_depreciation'=> number_format($totalDepr, 2, '.', ''),
-        'asset_count'       => count($assets),
+        'asset_count'       => count($lineRows),
         'run_by'            => $userId,
-        'notes'             => "Monthly straight-line depreciation — " . date('F Y', strtotime(substr($runDate, 0, 10))),
+        'notes'             => "Monthly straight-line depreciation — " . date('F Y', strtotime($monthEnd)),
     ]);
 
-    // Insert run lines + build aggregated JE
-    $runJeLines = [];
     $exprAcctTotal = [];  // account_id => debit
     $accumAcctTotal = []; // account_id => credit
     foreach ($lineRows as $lr) {
-        $a = $lr['asset'];
+        $a = $assetState[$lr['aid']]['asset'];
         $depr = $lr['depr'];
-        $openingNbv = (float) $a['net_book_value'] - ($depr * ($currentMonth - $month));
+        $openingNbv = (float) $a['acquisition_cost'] - $lr['opening_accum'];
         $closingNbv = $openingNbv - $depr;
 
         db_insert('acc_depreciation_run_lines', [
@@ -660,8 +730,27 @@ for ($month = 1; $month <= $currentMonth; $month++) {
     );
     db_execute("UPDATE acc_depreciation_runs SET journal_entry_id = ? WHERE id = ?", [$jeId, $runId]);
     $runCount++;
+    $cursor = $cursor->modify('+1 month');
 }
-echo "  Created $runCount monthly depreciation runs\n";
+
+// Reconcile the register to opening + posted runs (register == run history == GL).
+$reconciled = 0;
+$lastRunDate = date('Y-m-t', strtotime(date('Y-m-01')));
+foreach ($assetState as $aid => $st) {
+    $accum = min((float) $st['asset']['depreciable_cost'], $st['accum']);
+    $nbv   = (float) $st['asset']['acquisition_cost'] - $accum;
+    $fully = abs($accum - (float) $st['asset']['depreciable_cost']) < 0.01;
+    db_execute(
+        "UPDATE acc_fixed_assets
+            SET accumulated_depreciation = ?, net_book_value = ?, last_depreciation_date = ?,
+                status = ?, fully_depreciated_date = ?
+          WHERE id = ?",
+        [number_format($accum, 2, '.', ''), number_format($nbv, 2, '.', ''), $lastRunDate,
+         $fully ? 'fully_depreciated' : 'active', $fully ? $lastRunDate : null, $aid]
+    );
+    $reconciled++;
+}
+echo "  Created $runCount monthly depreciation runs (2023-01 → now), reconciled $reconciled assets\n";
 
 // ────────────────────────────────────────────────────────────
 // Step 6 — CapEx requests
@@ -682,7 +771,7 @@ $capexDefs = [
     ],
     [
         'title'          => 'Reefer fleet expansion — 2 Utility 48ft units',
-        'description'    => 'Growing demand from produce customers (Tonny Bhinder + Avi). Adding 2 reefer units to meet summer season bookings.',
+        'description'    => 'Growing demand from produce customers (Cascade Freight, Prairie Line). Adding 2 reefer units to meet summer season bookings.',
         'asset_class'    => 'fleet_equipment',
         'budget_amount'  => '190000.00',
         'actual_amount'  => null,

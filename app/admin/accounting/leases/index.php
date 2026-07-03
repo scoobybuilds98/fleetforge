@@ -35,7 +35,7 @@ $capitalLeases = db_select(
         c.company_name, c.contact_name,
         u.unit_number,
         t.brand, t.model,
-        signer.full_name AS signoff_name,
+        signer.name AS signoff_name,
         l.classification_signed_off_at
      FROM leases l
      LEFT JOIN customers          c      ON c.id      = l.customer_id          AND c.deleted_at IS NULL
