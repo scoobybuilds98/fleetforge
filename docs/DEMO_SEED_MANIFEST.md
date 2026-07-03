@@ -116,3 +116,44 @@ php scripts/seed_presentation_extras.php --phase=ops       # ops layer + realism
 AR aging + collections (Interior Bulk Transport is the delinquent account),
 AP bills + aging, bank transactions/reconciliation, capex, budget vs actual,
 year-end checklist, CCA schedule.
+
+---
+
+## Customer portal accounts — 2026-07-03 (S-DEMO-MULTIYEAR)
+
+`scripts/seed_portal_accounts.php` adds customer-facing PORTAL logins on top of
+the demo customers (who already carry years of leases/invoices/units).
+
+| Metric | Count |
+|--------|-------|
+| Portal users | 16 (15 active · 1 invited) |
+| Credit applications | 14 — full lifecycle |
+| Portal service requests | 24 (all types + statuses) |
+
+**Login:** `http://fleetforge.test/fleetforge/portal/auth/login`
+**Password for every active account:** `Portal123!`
+
+**Sample logins** (all share the password above):
+
+| Email | Company | Highlights |
+|-------|---------|-----------|
+| `dispatch@northgatelogistics.ca` | Northgate Logistics | anchor account · 2 approved credit apps · ~100 invoices |
+| `ar@cascadefreight.ca` | Cascade Freight Lines | credit app **submitted / awaiting review** |
+| `gary@interiorbulk.ca` | Interior Bulk Transport | **credit hold** · credit app **declined** · overdue invoices |
+| `ops@prairieline.ca` | Prairie Line Haulers | credit app **needs more info** |
+| `billing@coastalcontainer.ca` | Coastal Container | credit app **opened, not submitted** |
+| `ap@evergreentg.com` | Evergreen Transport | credit app **sent (invite)** |
+
+Two accounts have a **second contact** login (Northgate, Cascade, Summit) to show
+multi-user portals; Harbour City Cartage is seeded **invited** (not yet activated).
+
+**Credit-application lifecycle covered:** sent → opened → submitted → reviewed
+(approved ×7 / declined ×1 / needs_info ×1). Submitted + reviewed apps carry a real
+`form_data` snapshot + `rendered_html` (built by the canonical `cca_render_html()`),
+so both the portal detail view and the admin snapshot render like a live submission.
+
+**Portal pages populated:** dashboard, leases, invoices (+ AJAX list), equipment,
+credit applications (list + detail), service requests, payments, documents, account.
+
+**Rebuild:** `php scripts/seed_portal_accounts.php` (idempotent — clears the 3
+portal-owned tables first).
