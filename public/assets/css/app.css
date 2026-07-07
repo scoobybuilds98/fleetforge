@@ -3144,6 +3144,38 @@ textarea.form-input {
     gap: 4px;
 }
 
+/* "Jump to page" control (Page [__] of N) — center group of the bar. */
+.pagination-jump {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pagination-jump .pagination-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+}
+
+.pagination-input {
+    width: 4em;
+    height: 32px;
+    padding: 0 6px;
+    text-align: center;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    -moz-appearance: textfield;
+}
+/* Keep the native number spinners (up/down arrows) — they aid quick stepping. */
+.pagination-input:focus {
+    outline: none;
+    border-color: var(--color-primary);
+}
+
 .page-btn {
     display: inline-flex;
     align-items: center;

@@ -227,23 +227,8 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── TABLE CARD ────────────────────────────────────────────── -->
     <div class="card">
 
-        <!-- Top pagination — mirrors the bottom bar so Prev/Next + page count
-             are reachable without scrolling past a full page of rows -->
-        <template x-if="!loading && pagination.total_pages > 1">
-            <div class="pagination pagination-top">
-                <span class="pagination-info"
-                      x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
-                </span>
-                <div class="pagination-controls">
-                    <button class="page-btn"
-                            :disabled="pagination.page <= 1"
-                            @click="goToPage(pagination.page - 1)">← Prev</button>
-                    <button class="page-btn"
-                            :disabled="!pagination.has_more"
-                            @click="goToPage(pagination.page + 1)">Next →</button>
-                </div>
-            </div>
-        </template>
+        <!-- Top pagination — reachable without scrolling past a page of rows -->
+        <?php $position = 'top'; require FF_ROOT . '/includes/partials/pagination-bar.php'; ?>
 
         <!-- Loading skeleton -->
         <template x-if="loading">
@@ -418,22 +403,8 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
-        <!-- Pagination — every tab paginates server-side (20 per page) -->
-        <template x-if="!loading && pagination.total_pages > 1">
-            <div class="pagination">
-                <span class="pagination-info"
-                      x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
-                </span>
-                <div class="pagination-controls">
-                    <button class="page-btn"
-                            :disabled="pagination.page <= 1"
-                            @click="goToPage(pagination.page - 1)">← Prev</button>
-                    <button class="page-btn"
-                            :disabled="!pagination.has_more"
-                            @click="goToPage(pagination.page + 1)">Next →</button>
-                </div>
-            </div>
-        </template>
+        <!-- Bottom pagination — every tab paginates server-side (20 per page) -->
+        <?php $position = 'bottom'; require FF_ROOT . '/includes/partials/pagination-bar.php'; ?>
 
     </div>
 
@@ -561,7 +532,27 @@ function FF_Leases() {
         },
 
         resetPage() { this.currentPage = 1; this.load(); },
-        goToPage(p) { this.currentPage = p; this.load(); },
+
+        // Clamp p to [1, total_pages] so First/Last/Prev/Next and the jump input
+        // can never request an out-of-range page. No-op (no refetch) if already there.
+        goToPage(p) {
+            const tp = parseInt(this.pagination.total_pages, 10) || 1;
+            p = Math.max(1, Math.min(tp, parseInt(p, 10) || 1));
+            if (p === this.currentPage) return;
+            this.currentPage = p;
+            this.load();
+        },
+
+        // "Jump to page" number input: clamp the typed value, snap the field back
+        // to the clamped value (so a bogus 9999 visibly corrects), then navigate.
+        jumpToPage(ev) {
+            const tp = parseInt(this.pagination.total_pages, 10) || 1;
+            let p = parseInt(ev.target.value, 10);
+            if (isNaN(p)) p = parseInt(this.pagination.page, 10) || 1;
+            p = Math.max(1, Math.min(tp, p));
+            ev.target.value = p;
+            this.goToPage(p);
+        },
 
         // Toggle sort direction when clicking the same column; default DESC for new column.
         setSort(col) {
