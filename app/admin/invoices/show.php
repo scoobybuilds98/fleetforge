@@ -57,13 +57,19 @@ if (!$invoice) {
 // date) in the Billing Period row when the return-day-not-billed time-of-day
 // rule trimmed the final day. billing_period_end stays the trimmed billed
 // extent for all billing math. ($invoice has none of these keys → no clobber.)
+// Lease contract number for the lease-scoped breadcrumb (see below). NULL when
+// the invoice is standalone (no lease) or the lease row is gone → generic crumb.
+$leaseContractNumber = null;
 if (!empty($invoice['lease_id'])) {
     $_leasePeriodFields = db_row(
-        "SELECT actual_return_date, actual_return_time, start_time, billing_days_removed
+        "SELECT contract_number, actual_return_date, actual_return_time, start_time, billing_days_removed
            FROM leases WHERE id = ?",
         [$invoice['lease_id']]
     );
     if ($_leasePeriodFields) {
+        $leaseContractNumber = $_leasePeriodFields['contract_number'] ?? null;
+        // Don't leak contract_number into $invoice's own keyspace.
+        unset($_leasePeriodFields['contract_number']);
         $invoice += $_leasePeriodFields;
     }
 }
@@ -1246,7 +1252,19 @@ require_once FF_ROOT . '/includes/header.php';
 <nav class="breadcrumb no-print">
     <a href="<?= base_url('dashboard') ?>">Dashboard</a>
     <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('invoices') ?>">Invoices</a>
+    <?php if (!empty($invoice['lease_id']) && $leaseContractNumber !== null): ?>
+        <?php // Lease-scoped trail: the "Invoices" crumb returns to THIS lease's
+              // Invoices tab (leases/show#invoices — FF_TabHash opens it + loads),
+              // so a user who drilled Lease → Invoices → an invoice gets straight
+              // back to that lease's invoices instead of the global module. ?>
+        <a href="<?= base_url('leases') ?>">Leases</a>
+        <span class="breadcrumb-sep">/</span>
+        <a href="<?= base_url('leases/show') ?>?id=<?= (int)$invoice['lease_id'] ?>"><?= e($leaseContractNumber) ?></a>
+        <span class="breadcrumb-sep">/</span>
+        <a href="<?= base_url('leases/show') ?>?id=<?= (int)$invoice['lease_id'] ?>#invoices">Invoices</a>
+    <?php else: ?>
+        <a href="<?= base_url('invoices') ?>">Invoices</a>
+    <?php endif; ?>
     <span class="breadcrumb-sep">/</span>
     <span class="breadcrumb-current"><?= e($invoice['invoice_number']) ?></span>
 </nav>
