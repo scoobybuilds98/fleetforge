@@ -308,6 +308,12 @@ require_once FF_ROOT . '/includes/header.php';
                                 <span x-show="filters.sort === 'start_date'"
                                       x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
                             </th>
+                            <th scope="col" class="th-sortable" @click="setSort('billed_through')"
+                                title="Latest invoice coverage (non-void) — how far this unit has been billed">
+                                Billed Thru
+                                <span x-show="filters.sort === 'billed_through'"
+                                      x-text="filters.dir === 'ASC' ? '↑' : '↓'"></span>
+                            </th>
                             <th scope="col">Rates</th>
                             <th scope="col" class="th-sortable" @click="setSort('status')">
                                 Status
@@ -347,6 +353,15 @@ require_once FF_ROOT . '/includes/header.php';
                                     <div class="text-secondary"
                                          x-text="lease.end_date ? '→ ' + formatDate(lease.end_date) : 'Open-ended'">
                                     </div>
+                                </td>
+                                <td class="text-sm">
+                                    <!-- Billed-through: live invoice coverage. Amber on an
+                                         ACTIVE lease whose coverage is behind today = unbilled
+                                         usage the operator should invoice. -->
+                                    <span :class="billedThroughBehind(lease) ? 'text-warning' : (lease.billed_through ? '' : 'text-secondary')"
+                                          :title="billedThroughBehind(lease) ? 'Coverage is behind today — there is unbilled usage on this lease' : ''"
+                                          x-text="lease.billed_through ? formatDate(lease.billed_through) : (lease.status === 'active' ? 'Not billed' : '—')">
+                                    </span>
                                 </td>
                                 <td class="font-mono text-sm">
                                     <template x-if="parseFloat(lease.monthly_rate) > 0">
@@ -562,6 +577,18 @@ function FF_Leases() {
             if (!d) return '—';
             const dt = new Date(d + 'T00:00:00');
             return dt.toLocaleDateString('en-CA', { year:'numeric', month:'short', day:'numeric' });
+        },
+
+        /**
+         * True when an ACTIVE lease's invoice coverage ends before today —
+         * i.e. there is usage nobody has billed yet (or nothing billed at
+         * all). Completed/cancelled leases never flag: their coverage is
+         * settled at close. Date-string compare is safe (YYYY-MM-DD).
+         */
+        billedThroughBehind(lease) {
+            if (lease.status !== 'active') return false;
+            const today = new Date().toLocaleDateString('en-CA', { year:'numeric', month:'2-digit', day:'2-digit' }).slice(0, 10);
+            return !lease.billed_through || lease.billed_through < today;
         },
 
         formatMoney(val) {

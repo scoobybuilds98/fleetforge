@@ -36,9 +36,14 @@ $allowedSorts = [
     // Extended sorts
     'outstanding_balance', 'monthly_rate', 'total_invoiced',
     'company_name_snapshot', 'next_billing_date', 'updated_at',
+    // Computed (SELECT alias, not an l. column — see $orderBy below)
+    'billed_through',
 ];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'created_at';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
+// billed_through is a subquery alias; every other allowlisted sort is a real
+// leases column and keeps the l. prefix.
+$orderBy = $sort === 'billed_through' ? 'billed_through' : "l.$sort";
 
 // ── Filters ────────────────────────────────────────────────────
 $where  = ['l.deleted_at IS NULL'];
@@ -125,12 +130,23 @@ $rows = db_select(
         l.created_at,
         l.updated_at,
         COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
-        COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number
+        COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
+        -- Billed-through = LIVE invoice coverage (MAX billing_period_end over
+        -- non-void, non-deleted invoices). Deliberately NOT l.last_billed_date:
+        -- that anchor is monotonic (GREATEST on write) and is not walked back
+        -- when an invoice is voided/deleted, so it can point past real coverage
+        -- (the S-CLOSE-ZEROBILL lesson). Drafts count — the period is invoiced.
+        (SELECT MAX(i.billing_period_end)
+           FROM invoices i
+          WHERE i.lease_id = l.id
+            AND i.deleted_at IS NULL
+            AND i.status <> 'void'
+            AND i.billing_period_end IS NOT NULL) AS billed_through
      FROM leases l
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE $whereSQL
-     ORDER BY l.$sort $dir
+     ORDER BY $orderBy $dir
      LIMIT $perPage OFFSET $offset",
     $params
 );
