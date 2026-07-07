@@ -56,6 +56,19 @@ if ($status = clean_string($_GET['status'] ?? null)) {
         $where[]  = 'l.status = ?';
         $params[] = $status;
     }
+} elseif ($statusesRaw = clean_string($_GET['statuses'] ?? null)) {
+    // Multi-status scope (statuses=active,pending) — lets the tabbed list
+    // paginate open/closed server-side instead of over-fetching 200 rows and
+    // filtering client-side. Validated against the same allowlist; the
+    // single `status` param wins when both are passed.
+    $list = array_values(array_intersect(
+        array_map('trim', explode(',', $statusesRaw)),
+        $allowedStatuses
+    ));
+    if ($list) {
+        $where[] = 'l.status IN (' . implode(',', array_fill(0, count($list), '?')) . ')';
+        array_push($params, ...$list);
+    }
 }
 
 if ($customerId = clean_int($_GET['customer_id'] ?? null)) {

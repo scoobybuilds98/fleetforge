@@ -7,7 +7,9 @@ declare(strict_types=1);
  * @file        app/admin/leases/index.php
  * @description Paginated, filterable list of leases. Displays 4 KPI tiles (active,
  *              pending, completed, active revenue). Three tabs: Active+Pending,
- *              Closed (completed+cancelled), All. Filter toolbar: search, status
+ *              Closed (completed+cancelled), All — every tab paginates
+ *              SERVER-SIDE at 20 rows/page (statuses= multi-status API scope;
+ *              S-LEASES-PAGINATE-20). Filter toolbar: search, status
  *              (All tab), sort column, direction. Sortable column headers.
  *              Status badges: active=badge-success, pending=badge-info,
  *              completed=badge-neutral, cancelled=badge-danger.
@@ -398,8 +400,8 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </template>
 
-        <!-- Pagination — only shown on All tab (open/closed tabs load all records) -->
-        <template x-if="!loading && activeTab === 'all' && pagination.total_pages > 1">
+        <!-- Pagination — every tab paginates server-side (20 per page) -->
+        <template x-if="!loading && pagination.total_pages > 1">
             <div class="pagination">
                 <span class="pagination-info"
                       x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
@@ -506,11 +508,16 @@ function FF_Leases() {
 
             const params = new URLSearchParams();
 
-            // Tab drives the status scope.
-            // WHY client-side filter for open/closed: the API only accepts one status
-            // at a time; for typical fleet sizes (< 200 active leases) fetching 200
-            // unfiltered and filtering client-side is fast and avoids two round-trips.
-            if (this.activeTab === 'all' && this.filters.status) {
+            // Tab drives the status scope, server-side (statuses=a,b): every
+            // tab paginates properly — 20 rows per page with true totals —
+            // instead of the old over-fetch-200-and-filter-client-side, whose
+            // page counts were wrong for open/closed and which stopped
+            // scaling past 200 leases.
+            if (this.activeTab === 'open') {
+                params.set('statuses', 'active,pending');
+            } else if (this.activeTab === 'closed') {
+                params.set('statuses', 'completed,cancelled');
+            } else if (this.filters.status) {
                 params.set('status', this.filters.status);
             }
 
@@ -519,22 +526,12 @@ function FF_Leases() {
             params.set('dir',      this.filters.dir);
             if (this.filters.customer_filter) params.set('customer_filter', this.filters.customer_filter);
             params.set('page',     this.currentPage);
-            // Larger page for open/closed tabs to capture all with one request
-            params.set('per_page', this.activeTab === 'all' ? 25 : 200);
+            params.set('per_page', 20);
 
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/leases') ?>?' + params);
                 if (r.success) {
-                    let items = r.data.items;
-
-                    // Client-side filter for tab scopes
-                    if (this.activeTab === 'open') {
-                        items = items.filter(l => l.status === 'active' || l.status === 'pending');
-                    } else if (this.activeTab === 'closed') {
-                        items = items.filter(l => l.status === 'completed' || l.status === 'cancelled');
-                    }
-
-                    this.leases     = items;
+                    this.leases     = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
                     this.loadError = r.message || 'Failed to load leases.';
