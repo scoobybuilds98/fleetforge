@@ -812,7 +812,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         <tbody>
                             <template x-for="inv in invoices" :key="inv.id">
                                 <tr>
-                                    <td class="font-mono" x-text="inv.invoice_number"></td>
+                                    <td class="font-mono">
+                                        <a :href="'<?= base_url('invoices/show') ?>?id=' + inv.id"
+                                           class="link" x-text="inv.invoice_number"></a>
+                                    </td>
                                     <td x-text="inv.billing_period_start + ' → ' + (inv.display_period_end || inv.billing_period_end)"></td>
                                     <td>
                                         <span class="badge badge-no-dot"
