@@ -44,6 +44,7 @@
 2. The Mander drafts **INV-2026-01444** + **INV-2026-01454** have correct totals and may be sent as-is. For the cleaner presentation (single true-up line, no stub estimate), void+regenerate them **after** deploy — regenerating BEFORE deploy double-credits the $40.01 overflow (pre-fix true-up can't see the credit note).
 3. **CN-CR-2026-00011 ($40.01, Mander Bros, active)** is the missing piece of MTTS403's refund — apply it against a future Mander invoice (or refund it). The $0.00 on INV-2026-01444 is the subtotal floor: $52.67 of charges minus $52.67 of capped credit; the remaining $40.01 of the $92.68 refund lives in this CN.
 **Why PARTIAL (not blocking):** billing totals are correct pre-deploy; the fix is presentational + closes the reclose double-credit trap before anyone hits it.
+**UPDATE 2026-07-08 (same day, S-CLOSE-TRUEUP-GUARANTEE):** the deploy now also carries the close-path carrier guarantee — pre-deploy, a last-day close onto an existing monthly draft (or a close within an already-billed period) of an estimate-model lease SILENTLY SKIPS the mileage reconciliation entirely (the reading is ignored, only the estimates stand). Same single `ff-deploy`, still no migration. Prod data checked read-only for D132 rate-tier holes: none.
 
 ---
 

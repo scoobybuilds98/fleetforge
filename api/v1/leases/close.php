@@ -1069,6 +1069,11 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     $generator    = new \FleetForge\Billing\InvoiceGenerator();
     $finalInvoiceId = null;
     $advanceActions = [];
+    // S-CLOSE-NO-ESTIMATE: true when a legacy-path engine run received the
+    // closing reading (the partial_end final invoice). The append/fold branches
+    // never run the engine, so without a run the estimate-model true-up would
+    // silently be skipped — the carrier guarantee below covers those shapes.
+    $legacyTrueUpRan = false;
 
     // ── S-CLOSE-OVERSHOOT: canonical lease billable extent ─────────
     // ONE definition (lease_billable_extent in _close_reconciliation.php) shared
@@ -1329,6 +1334,10 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'engine_hours_at_period_end'   => $hoursAtClose,
                 ]);
                 $finalInvoiceId = $invoiceResult['invoice_id'];
+                // S-CLOSE-NO-ESTIMATE: this engine run carried the estimate
+                // true-up (cumulative_actual_km above) — the carrier guarantee
+                // below must not duplicate it.
+                $legacyTrueUpRan = true;
             }
         }
     }
@@ -1438,6 +1447,50 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         $advanceActions[] = [
             'action' => 'closeout_adjustment_invoice',
             'reason' => 'closeout/service charges billed on a standalone adjustment invoice (no rental final invoice was generated).',
+        ];
+    }
+
+    // ── S-CLOSE-NO-ESTIMATE guarantee: the estimate-model true-up always gets
+    // an engine run at close. The legacy partial_end call above carries it, but
+    // two legacy shapes skip that call entirely: (a) last-day close onto an
+    // existing cron full_month draft (append branch → $skipPartialEnd), and
+    // (b) close within an already-billed period (S-FIX-2 Bug #6 skip). The fold
+    // helpers only append raw lines — they never run InvoiceGenerator — so an
+    // estimate lease with a closing reading ended those closes UN-reconciled
+    // (estimates stood, actual ignored). Mirror the advance branch: emit a
+    // mileage_only carrier; the engine suppresses estimates there and books the
+    // lifetime true-up. Runs AFTER the closeout guarantee so extras keep their
+    // own carrier ($extraLines stay off this invoice — never double-billed).
+    // mode='off' excluded (the engine's true-up won't run → empty invoice).
+    // If billing already equals actual the true-up is $0 and this emits a
+    // line-less draft — rare (estimates virtually never equal actual exactly)
+    // and visible, not silent.
+    if (!$isAdvanceClose && !$legacyTrueUpRan && $usesEstimateMileage
+        && ($lease['mileage_tracking_mode'] ?? '') !== 'off'
+        && ($cumulativeActualKmOverride !== null || $odoAtClose !== null)) {
+        $carrierInv = $generator->createFromLease([
+            'lease_id'          => $id,
+            'period_start'      => $actualReturnDate,
+            'period_end'        => $actualReturnDate,
+            'billing_type'      => 'mileage_only',
+            'invoice_type'      => 'final',
+            'notes'             => $closeNotes,
+            'created_by'        => current_user_id(),
+            'auto_generated'    => 1,
+            'generation_source' => 'lease_close',
+            'extra_lines'       => [],
+            'odometer_at_period_start_km' => $odoPeriodStart,
+            'odometer_at_period_end_km'   => $odoAtClose,
+            'odometer_source'             => $odoSource,
+            'odometer_fetched_at'         => $odoFetchedAt,
+            'cumulative_actual_km'        => $cumulativeActualKmOverride,
+        ]);
+        if ($finalInvoiceId === null) {
+            $finalInvoiceId = $carrierInv['invoice_id'] ?? null;
+        }
+        $advanceActions[] = [
+            'action' => 'estimate_trueup_carrier',
+            'reason' => 'estimate-model mileage reconciled on a standalone mileage_only invoice (the rental final invoice was skipped/folded, so no engine run carried the true-up).',
         ];
     }
 
