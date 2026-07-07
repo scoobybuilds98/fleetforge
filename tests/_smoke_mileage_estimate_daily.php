@@ -26,10 +26,20 @@ declare(strict_types=1);
  *   E  Precharge estimate lease: the estimate charge draws down precharge_balance
  *      (mileage_drawdown_credit) and decrements the balance.
  *   F  QBO line invariant: the estimate line's quantity × unit_price == amount.
+ *   C2 Overflow idempotency (S-CLOSE-NO-ESTIMATE): a second settlement after a
+ *      mileage_overpayment credit_note produces a ZERO true-up — issued CNs
+ *      count as mileage already credited in the billed-to-date sum.
+ *   G  Final-settlement estimate suppression (S-CLOSE-NO-ESTIMATE): a close-
+ *      generated invoice (invoice_type=final + cumulative_actual_km, exactly
+ *      what close.php passes) emits NO stub-period estimate; the true-up alone
+ *      settles the lease to actual, and its description shows the arithmetic.
+ *   H  Regenerate parity (S-CLOSE-NO-ESTIMATE): a COMPLETED manual lease's
+ *      stored mileage_at_end feeds the true-up on a final invoice even without
+ *      the close.php override (the generateForLease regeneration path).
  *
  * Run: php tests/_smoke_mileage_estimate_daily.php
  *
- * @session S-MILEAGE-EST-DAILY
+ * @session S-MILEAGE-EST-DAILY (extended by S-CLOSE-NO-ESTIMATE)
  */
 
 require_once __DIR__ . '/../config/app.php';
@@ -144,6 +154,22 @@ try {
     ck('C1', $cnC !== null && bccomp((string) $cnC['amount'], '120.00', 2) === 0,
         "1000 km actual × \$0.50 = \$500 − \$620 estimate → \$" . ($cnC['amount'] ?? 'none') . " credit_note (expect 120.00 mileage_overpayment)");
 
+    // ── C2 — overflow idempotency: a SECOND settlement invoice after the
+    // overflow CN must produce a ZERO true-up (no fresh credit, no new CN).
+    // The billed-to-date sum subtracts issued mileage_overpayment credit_notes;
+    // without that, every reclose/regenerate re-credited the same overflow.
+    $ivC2 = $gen->createFromLease([
+        'lease_id' => $lC, 'period_start' => '2026-06-02', 'period_end' => '2026-06-02',
+        'billing_type' => 'mileage_only', 'invoice_type' => 'final', 'created_by' => $user,
+        'cumulative_actual_km' => '1000',
+    ]);
+    $crC2  = $line($ivC2['invoice_id'], 'mileage_credit');
+    $adjC2 = $line($ivC2['invoice_id'], 'mileage_adjustment');
+    $cnCnt = (int) db_row("SELECT COUNT(*) c FROM credit_notes WHERE lease_id=? AND source='mileage_overpayment'", [$lC])['c'];
+    ck('C2', $crC2 === null && $adjC2 === null && $cnCnt === 1,
+        "re-settlement after overflow CN is idempotent: credit=" . ($crC2 ? 'present' : 'none')
+        . " adj=" . ($adjC2 ? 'present' : 'none') . " CN count={$cnCnt} (expect none/none/1)");
+
     // ── D — legacy per-day = 0 path preserved (distance × rate usage line) ─
     $lD = $makeLease(['estimated_mileage_per_day' => '0.00', 'estimated_mileage_per_day_km' => '0.0000',
                       'odometer_start_km' => '1000.00']);
@@ -194,6 +220,53 @@ try {
             && abs((float) $estM['amount'] - $expM) < 0.10
             && bccomp(bcround(bcmul((string) $estM['quantity'], (string) $estM['unit_price'], 6), 2), (string) $estM['amount'], 2) === 0,
         "miles lease: 31 × 50 mi/day × \$1.00/mi = \$" . ($estM['amount'] ?? 'none') . ", qty=" . ($estM['quantity'] ?? '?') . " " . ($estM['unit'] ?? '?') . " (expect ~1550 miles, qty×price==amount)");
+
+    // ── G — S-CLOSE-NO-ESTIMATE: final invoice with a closing reading skips
+    // the estimate line; the true-up alone settles the lease to actual.
+    // Mirrors the MTTS403 close: estimates billed on prior months, then the
+    // close-generated partial_end (invoice_type=final, cumulative_actual_km
+    // passed by close.php) must NOT add a stub-period estimate on top.
+    $lG = $makeLease(['estimated_mileage_per_day' => '40.00', 'estimated_mileage_per_day_km' => '40.0000']);
+    $gen->createFromLease([ // May: estimate $620 billed
+        'lease_id' => $lG, 'period_start' => '2026-05-01', 'period_end' => '2026-05-31',
+        'billing_type' => 'full_month', 'invoice_type' => 'regular', 'created_by' => $user,
+    ]);
+    $ivG = $gen->createFromLease([ // close: Jun 1–2 stub, actual 1300 km lifetime
+        'lease_id' => $lG, 'period_start' => '2026-06-01', 'period_end' => '2026-06-02',
+        'billing_type' => 'partial_end', 'invoice_type' => 'final', 'created_by' => $user,
+        'cumulative_actual_km' => '1300',
+    ]);
+    $estG = $line($ivG['invoice_id'], 'mileage_estimate');
+    $adjG = $line($ivG['invoice_id'], 'mileage_adjustment');
+    // target 1300×0.5=650, billed 620 (May estimate only — no stub estimate) → +30
+    ck('G1', $estG === null, "final invoice with closing reading emits NO stub-period estimate line");
+    ck('G2', $adjG !== null && $adjG['amount'] === '30.00',
+        "true-up settles to actual: 1300 km × \$0.50 = \$650 − \$620 billed = +\$" . ($adjG['amount'] ?? 'none') . " (expect 30.00)");
+    ck('G3', $adjG !== null && str_contains((string) $adjG['description'], '650.00')
+            && str_contains((string) $adjG['description'], '620.00'),
+        "true-up description shows the arithmetic (\$650.00 target, \$620.00 billed): " . ($adjG['description'] ?? 'none'));
+
+    // ── H — regenerate parity: COMPLETED manual lease's mileage_at_end feeds
+    // the true-up on a final invoice even when no override is passed (the
+    // operator "regenerate invoices after close" path goes through
+    // generateForLease, which never passes cumulative_actual_km).
+    $lH = $makeLease([
+        'estimated_mileage_per_day' => '40.00', 'estimated_mileage_per_day_km' => '40.0000',
+        'status' => 'completed', 'actual_return_date' => '2026-06-02', 'mileage_at_end' => 1300,
+    ]);
+    $gen->createFromLease([
+        'lease_id' => $lH, 'period_start' => '2026-05-01', 'period_end' => '2026-05-31',
+        'billing_type' => 'full_month', 'invoice_type' => 'regular', 'created_by' => $user,
+    ]);
+    $ivH = $gen->createFromLease([ // NO cumulative_actual_km — fallback must kick in
+        'lease_id' => $lH, 'period_start' => '2026-06-01', 'period_end' => '2026-06-02',
+        'billing_type' => 'partial_end', 'invoice_type' => 'final', 'created_by' => $user,
+    ]);
+    $estH = $line($ivH['invoice_id'], 'mileage_estimate');
+    $adjH = $line($ivH['invoice_id'], 'mileage_adjustment');
+    ck('H1', $estH === null && $adjH !== null && $adjH['amount'] === '30.00',
+        "regenerated final invoice reads lease.mileage_at_end (1300 km): est=" . ($estH ? 'present' : 'none')
+        . " true-up=+\$" . ($adjH['amount'] ?? 'none') . " (expect none / 30.00)");
 
     db_execute("ROLLBACK");
 } catch (\Throwable $e) {

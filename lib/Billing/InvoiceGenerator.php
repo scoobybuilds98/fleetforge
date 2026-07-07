@@ -953,6 +953,76 @@ class InvoiceGenerator
             if ($trueUpAllowed && $prechargeGatePasses && bccomp($perDayKm, '0', 4) > 0) {
                 $rateKm = $mileageRateKm;
 
+                // ── (0) Cumulative actual distance (km) through this period end ──
+                // Priority:
+                //   • caller-supplied lifetime distance (close.php: a manual estimate
+                //     lease's mileage_at_end, converted to km) — the operator's
+                //     authoritative closing reading, else
+                //   • odometer-authoritative when a closing reading is present
+                //     ($cumulativeDistanceKm = odoEnd − lease.odometer_start_km,
+                //     computed in the odometer block above), else
+                //   • S-CLOSE-NO-ESTIMATE regenerate parity: a COMPLETED manual
+                //     lease's stored mileage_at_end on its final-settlement invoice.
+                //     Operator "regenerate invoices" after close goes through
+                //     generateForLease, not close.php, so nobody passes the
+                //     override — but the closing reading lives on the lease row.
+                //     Without this, a post-close regeneration silently loses the
+                //     whole-lease mileage reconciliation. Final invoice only: a
+                //     lifetime reading trued up on a mid-lease segment would
+                //     front-load the entire reconciliation onto that segment. Else
+                //   • sum of prior recorded period distances + this period
+                //     (Samsara/operator per-period), else
+                //   • null → no reading yet; only the estimate bills this period.
+                $cumActualKm = null;
+                if (isset($params['cumulative_actual_km'])
+                    && $params['cumulative_actual_km'] !== ''
+                    && $params['cumulative_actual_km'] !== null) {
+                    $ovr = (string) $params['cumulative_actual_km'];
+                    $cumActualKm = bccomp($ovr, '0', 4) >= 0 ? $ovr : '0';
+                } elseif ($cumulativeDistanceKm !== null) {
+                    $cumActualKm = (string) $cumulativeDistanceKm;
+                } elseif ($invoiceType === 'final'
+                    && ($lease['actual_return_date'] ?? null) !== null
+                    && ($lease['mileage_tracking_mode'] ?? '') === 'manual'
+                    && ($lease['mileage_at_end'] ?? null) !== null
+                    && (int) $lease['mileage_at_end'] > 0) {
+                    // Same unit conversion close.php applies to its override:
+                    // mileage_at_end is entered in the lease's display unit.
+                    if (($lease['mileage_unit'] ?? 'km') === 'miles') {
+                        $conv = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
+                        if (bccomp($conv, '0', 6) <= 0) {
+                            $conv = '0.621371';
+                        }
+                        // miles ÷ (miles per km) = km
+                        $cumActualKm = bcdiv((string) $lease['mileage_at_end'], $conv, 4);
+                    } else {
+                        $cumActualKm = (string) $lease['mileage_at_end'];
+                    }
+                } elseif ($periodDistanceKm !== null) {
+                    $priorDist = db_row(
+                        "SELECT COALESCE(SUM(period_distance_km), 0) AS s
+                           FROM invoices
+                          WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
+                            AND period_distance_km IS NOT NULL",
+                        [$leaseId]
+                    );
+                    $cumActualKm = bcadd((string) ($priorDist['s'] ?? '0'), (string) $periodDistanceKm, 4);
+                }
+
+                // ── S-CLOSE-NO-ESTIMATE: final-settlement invoices skip the
+                // estimate line. When this invoice settles the lease's known
+                // extent (invoice_type='final' — close.php's partial_end final /
+                // mileage_only carrier, or the last regenerated segment of a
+                // completed lease) AND a lifetime actual reading is available,
+                // estimating the closing stub period is noise: the true-up below
+                // bills the exact actual-vs-billed delta, so an estimate here
+                // only inflates both sides of that subtraction on the same
+                // invoice (an estimate charge plus an equal-and-opposite credit).
+                // Without a reading (e.g. close with no mileage entered) the
+                // estimate still bills the stub — otherwise those days would be
+                // silently unbilled.
+                $suppressEstimate = ($invoiceType === 'final' && $cumActualKm !== null);
+
                 // ── (1) Estimate line: billable days × per-day × rate ─────────
                 // Computed from DISPLAY values (miles × $/mile for a miles lease,
                 // km × $/km for a km lease) so quantity × unit_price == amount (the
@@ -960,7 +1030,7 @@ class InvoiceGenerator
                 // math below and the running true-up target. Skipped on the
                 // `mileage_only` carrier (estimate already billed on rental invoices).
                 $estAmount = '0.00';
-                if ($estimateEmitAllowed && bccomp($perDayKm, '0', 4) > 0 && $days > 0) {
+                if ($estimateEmitAllowed && !$suppressEstimate && bccomp($perDayKm, '0', 4) > 0 && $days > 0) {
                     $estDistanceKm = bcmul($perDayKm, (string) $days, 4);
                     $eDisp     = ff_mileage_line_display($lease, $estDistanceKm, $rateKm);
                     $estAmount = bcround(bcmul((string) $eDisp['distance'], (string) $eDisp['rate'], 6), 2);
@@ -989,35 +1059,9 @@ class InvoiceGenerator
                 }
 
                 // ── (2) Running cumulative true-up against actual ─────────────
-                // Cumulative actual distance (km) through this period end:
-                //   • odometer-authoritative when a closing reading is present
-                //     ($cumulativeDistanceKm = odoEnd − lease.odometer_start_km,
-                //     computed in the odometer block above), else
-                //   • sum of prior recorded period distances + this period
-                //     (Samsara/operator per-period), else
-                //   • null → no reading yet; only the estimate bills this period.
-                $cumActualKm = null;
-                if (isset($params['cumulative_actual_km'])
-                    && $params['cumulative_actual_km'] !== ''
-                    && $params['cumulative_actual_km'] !== null) {
-                    // Caller-supplied lifetime distance (close.php: a manual estimate
-                    // lease's mileage_at_end, converted to km). Top priority — it is
-                    // the operator's authoritative closing reading.
-                    $ovr = (string) $params['cumulative_actual_km'];
-                    $cumActualKm = bccomp($ovr, '0', 4) >= 0 ? $ovr : '0';
-                } elseif ($cumulativeDistanceKm !== null) {
-                    $cumActualKm = (string) $cumulativeDistanceKm;
-                } elseif ($periodDistanceKm !== null) {
-                    $priorDist = db_row(
-                        "SELECT COALESCE(SUM(period_distance_km), 0) AS s
-                           FROM invoices
-                          WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
-                            AND period_distance_km IS NOT NULL",
-                        [$leaseId]
-                    );
-                    $cumActualKm = bcadd((string) ($priorDist['s'] ?? '0'), (string) $periodDistanceKm, 4);
-                }
-
+                // ($cumActualKm computed above in block (0), before the estimate,
+                // so the final-settlement suppression could see it.)
+                //
                 // Net signed mileage charge on THIS invoice (estimate ± true-up).
                 // Drives the precharge drawdown below.
                 $netMileageCharge = $estAmount;
@@ -1036,8 +1080,26 @@ class InvoiceGenerator
                             AND li.item_type IN ('mileage_estimate','mileage_adjustment','mileage_credit','mileage_usage','mileage')",
                         [$leaseId]
                     );
+                    // Overflow credit_notes are mileage ALREADY credited: when a
+                    // prior mileage_credit exceeded its invoice's subtotal, the cap
+                    // reduced the on-invoice line and routed the excess to a
+                    // credit_notes row (source 'mileage_overpayment'). That excess
+                    // is invisible to the line-item SUM above, so without this
+                    // subtraction the true-up re-credits the same overflow on EVERY
+                    // subsequent settlement invoice (reclose, regenerate) — a
+                    // duplicate account credit each time. Full issued amount (not
+                    // amount_remaining): applying the credit elsewhere doesn't
+                    // un-credit the mileage.
+                    $cnRow = db_row(
+                        "SELECT COALESCE(SUM(amount), 0) AS credited
+                           FROM credit_notes
+                          WHERE lease_id = ? AND source = 'mileage_overpayment'
+                            AND deleted_at IS NULL AND voided_at IS NULL",
+                        [$leaseId]
+                    );
                     // Include this invoice's estimate line (not yet persisted).
                     $billedToDate = bcadd((string) ($billedRow['billed'] ?? '0'), $estAmount, 2);
+                    $billedToDate = bcsub($billedToDate, (string) ($cnRow['credited'] ?? '0'), 2);
 
                     // Target = cumulative actual × rate, in the lease's unit.
                     $aDisp           = ff_mileage_line_display($lease, $cumActualKm, $rateKm);
@@ -1049,7 +1111,7 @@ class InvoiceGenerator
                         $lineItems[] = [
                             'sort_order'   => $sortOrder++,
                             'item_type'    => 'mileage_adjustment',
-                            'description'  => 'Mileage true-up: ' . number_format((float) $aDisp['distance'], 2) . " {$aDisp['unit']} actual to date × \$" . $aDisp['rate'] . "/{$aDisp['rate_unit']} — additional charge vs estimated",
+                            'description'  => 'Mileage true-up: ' . number_format((float) $aDisp['distance'], 2) . " {$aDisp['unit']} actual × \$" . $aDisp['rate'] . "/{$aDisp['rate_unit']} = \${$cumActualCharge}, less \${$billedToDate} mileage billed to date — additional charge",
                             'quantity'     => '1.0000',
                             'unit'         => 'adjustment',
                             'unit_price'   => $trueUp,
@@ -1066,7 +1128,7 @@ class InvoiceGenerator
                         $lineItems[] = [
                             'sort_order'   => $sortOrder++,
                             'item_type'    => 'mileage_credit',
-                            'description'  => 'Mileage true-up credit: ' . number_format((float) $aDisp['distance'], 2) . " {$aDisp['unit']} actual to date — refund of over-estimated mileage",
+                            'description'  => 'Mileage true-up credit: ' . number_format((float) $aDisp['distance'], 2) . " {$aDisp['unit']} actual × \$" . $aDisp['rate'] . "/{$aDisp['rate_unit']} = \${$cumActualCharge}, less \${$billedToDate} mileage billed to date — refund of over-estimated mileage",
                             'quantity'     => '1.0000',
                             'unit'         => 'adjustment',
                             'unit_price'   => $creditAmt,
