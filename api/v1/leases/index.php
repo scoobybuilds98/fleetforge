@@ -159,7 +159,7 @@ $rows = db_select(
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE $whereSQL
-     ORDER BY $orderBy $dir
+     ORDER BY $orderBy $dir, l.id $dir
      LIMIT $perPage OFFSET $offset",
     $params
 );

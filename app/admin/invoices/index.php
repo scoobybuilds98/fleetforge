@@ -248,6 +248,24 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── TABLE CARD ────────────────────────────────────────────── -->
     <div class="card">
 
+        <!-- Top pagination — mirrors the bottom bar so Prev/Next + page count
+             are reachable without scrolling past a full page of rows -->
+        <template x-if="!loading && pagination.total_pages > 1">
+            <div class="pagination pagination-top">
+                <span class="pagination-info"
+                      x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
+                </span>
+                <div class="pagination-controls">
+                    <button class="page-btn"
+                            :disabled="pagination.page <= 1"
+                            @click="goToPage(pagination.page - 1)">← Prev</button>
+                    <button class="page-btn"
+                            :disabled="!pagination.has_more"
+                            @click="goToPage(pagination.page + 1)">Next →</button>
+                </div>
+            </div>
+        </template>
+
         <!-- Loading skeleton -->
         <template x-if="loading">
             <div aria-busy="true" aria-label="Loading invoices…">
@@ -544,10 +562,20 @@ function FF_Invoices() {
             if (urlCustomerId) this.filters.customerId = urlCustomerId;
 
             // When a status param is passed alongside lease/customer context,
-            // switch to the 'all' tab with that status so the filter applies.
-            // WHY: URL params take precedence over hash so deep-links from
-            // other pages still land in the right filtered view.
-            if (urlStatus) {
+            // switch to the matching view so the filter applies. URL params take
+            // precedence over hash so deep-links from other pages land right.
+            // A urlStatus may be a real enum value (draft/sent/overdue/…) OR a
+            // tab-scope alias: 'outstanding' (all open statuses — the dashboard
+            // "Outstanding Invoices → View all" link) / 'paid'. Aliases map to
+            // their TAB so the server-side multi-status scope applies; a real
+            // status lands on the All tab with that filter. (Before this, the
+            // alias 'outstanding' set filters.status='outstanding' — no invoice
+            // has that status, so the list came back empty.)
+            if (urlStatus === 'outstanding') {
+                this.activeTab = 'outstanding';
+            } else if (urlStatus === 'paid') {
+                this.activeTab = 'paid';
+            } else if (urlStatus) {
                 this.activeTab      = 'all';
                 this.filters.status = urlStatus;
             } else {
@@ -582,22 +610,23 @@ function FF_Invoices() {
 
             const params = new URLSearchParams();
 
-            // Tab drives status scoping.
-            // Outstanding = draft|sent|partially_paid|overdue — API only accepts one status
-            // at a time so we fetch unfiltered and filter client-side for this tab.
-            if (this.activeTab === 'paid') {
+            // Tab drives status scoping, SERVER-SIDE (statuses=a,b): every tab
+            // paginates properly — 20 rows/page with true totals — instead of
+            // the old fetch-one-page-then-filter-client-side, which made the
+            // Outstanding tab's page counts wrong and could render a page with
+            // zero matching rows once the first 25 were all Paid.
+            // The aging tiles (setAging) force activeTab='all', so the aging
+            // branch and the tab-scope branches are mutually exclusive.
+            if (this.filters.aging) {
+                // TILES-1: AR aging bucket — the API applies its own due_date +
+                // status constraint, so send only the bucket.
+                params.set('aging', this.filters.aging);
+            } else if (this.activeTab === 'outstanding') {
+                params.set('statuses', 'draft,sent,partially_paid,overdue');
+            } else if (this.activeTab === 'paid') {
                 params.set('status', 'paid');
             } else if (this.activeTab === 'all' && this.filters.status) {
                 params.set('status', this.filters.status);
-            }
-            // outstanding: no API status param — filter client-side after fetch
-
-            // TILES-1: AR aging bucket from tile click. API translates this
-            // into due_date range + status constraint so we DON'T also send
-            // the status filter when aging is set (the API already scopes it).
-            if (this.filters.aging) {
-                params.set('aging', this.filters.aging);
-                params.delete('status');
             }
 
             if (this.filters.search)     params.set('q',           this.filters.search);
@@ -607,19 +636,12 @@ function FF_Invoices() {
             params.set('dir',      this.filters.dir);
             if (this.filters.customer_filter) params.set('customer_filter', this.filters.customer_filter);
             params.set('page',     this.currentPage);
-            params.set('per_page', 25);
+            params.set('per_page', 20);
 
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/invoices') ?>?' + params);
                 if (r.success) {
-                    let items = r.data.items;
-
-                    if (this.activeTab === 'outstanding') {
-                        const open = ['draft', 'sent', 'partially_paid', 'overdue'];
-                        items = items.filter(i => open.includes(i.status));
-                    }
-
-                    this.invoices   = items;
+                    this.invoices   = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
                     this.loadError = r.message || 'Failed to load invoices.';

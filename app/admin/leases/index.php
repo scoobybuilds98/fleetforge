@@ -227,6 +227,24 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ── TABLE CARD ────────────────────────────────────────────── -->
     <div class="card">
 
+        <!-- Top pagination — mirrors the bottom bar so Prev/Next + page count
+             are reachable without scrolling past a full page of rows -->
+        <template x-if="!loading && pagination.total_pages > 1">
+            <div class="pagination pagination-top">
+                <span class="pagination-info"
+                      x-text="'Page ' + pagination.page + ' of ' + pagination.total_pages">
+                </span>
+                <div class="pagination-controls">
+                    <button class="page-btn"
+                            :disabled="pagination.page <= 1"
+                            @click="goToPage(pagination.page - 1)">← Prev</button>
+                    <button class="page-btn"
+                            :disabled="!pagination.has_more"
+                            @click="goToPage(pagination.page + 1)">Next →</button>
+                </div>
+            </div>
+        </template>
+
         <!-- Loading skeleton -->
         <template x-if="loading">
             <div aria-busy="true" aria-label="Loading leases…">

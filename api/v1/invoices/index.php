@@ -37,9 +37,28 @@ $dir = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
 $where = ['i.deleted_at IS NULL'];
 $params = [];
 
+// Allowed invoice statuses (mirrors the DB enum). Used to validate both the
+// single `status` filter and the multi-status `statuses` scope below.
+$allowedInvoiceStatuses = ['draft', 'sent', 'partially_paid', 'paid', 'overdue', 'void', 'written_off'];
 if ($status = clean_string($_GET['status'] ?? null)) {
-    $where[] = 'i.status = ?';
-    $params[] = $status;
+    if (in_array($status, $allowedInvoiceStatuses, true)) {
+        $where[] = 'i.status = ?';
+        $params[] = $status;
+    }
+} elseif ($statusesRaw = clean_string($_GET['statuses'] ?? null)) {
+    // Multi-status scope (statuses=draft,sent,partially_paid,overdue) — lets the
+    // Outstanding/Paid tabs paginate server-side instead of over-fetching one
+    // page and filtering client-side (which made page counts wrong and could
+    // render a page with zero matching rows). Validated against the allowlist;
+    // the single `status` param wins when both are supplied.
+    $list = array_values(array_intersect(
+        array_map('trim', explode(',', $statusesRaw)),
+        $allowedInvoiceStatuses
+    ));
+    if ($list) {
+        $where[] = 'i.status IN (' . implode(',', array_fill(0, count($list), '?')) . ')';
+        array_push($params, ...$list);
+    }
 }
 if ($customerId = clean_int($_GET['customer_id'] ?? null)) {
     $where[] = 'i.customer_id = ?';
@@ -151,7 +170,7 @@ $rows = db_select(
      LEFT JOIN leases l ON l.id = i.lease_id
      {$qboJoin}
      WHERE {$whereSQL}
-     ORDER BY i.{$sort} {$dir}
+     ORDER BY i.{$sort} {$dir}, i.id {$dir}
      LIMIT {$perPage} OFFSET {$offset}",
     $params
 );

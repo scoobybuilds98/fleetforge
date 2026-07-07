@@ -3133,6 +3133,9 @@ textarea.form-input {
     gap: 12px;
 }
 
+/* Top-of-table pagination bar: divider sits below it, not above. */
+.pagination-top { border-top: none; border-bottom: 1px solid var(--border-color); }
+
 .pagination-info { white-space: nowrap; }
 
 .pagination-controls {
