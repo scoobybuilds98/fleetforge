@@ -35,7 +35,11 @@
 
 ---
 
-### F46 — Deploy S-CLOSE-NO-ESTIMATE (close-time mileage estimate suppression + true-up idempotency) 🟡 PARTIAL
+### F46 — Deploy S-CLOSE-NO-ESTIMATE + regenerate the Mander drafts ✅ DEPLOYED + DRAFTS REGENERATED 2026-07-08; ⚠ apply/refund CN-CR-2026-00011 🟡
+
+**UPDATE 2026-07-08 (evening):** operator ran `ff-deploy` (prod at 04ccdbf, verified) and granted a one-time prod write; the agent regenerated both drafts via `scripts/fix_mander_close_invoices_2026_07_08.php` — INV-2026-01444→**INV-2026-01613** ($0.00) and INV-2026-01454→**INV-2026-01614** ($152.86, identical total). Counters/OB unchanged, no duplicate credit note. **⚠ REMAINING (the only open item): CN-CR-2026-00011 ($40.01, Mander Bros, active) — apply it against a future Mander invoice or refund it.** (Original entry below.)
+
+### F46 (original) — Deploy S-CLOSE-NO-ESTIMATE (close-time mileage estimate suppression + true-up idempotency) 🟡 PARTIAL
 
 **Surfaced by:** S-CLOSE-NO-ESTIMATE (2026-07-08) — operator report on the Mander Bros close invoices (MTTS403 "final billing came out to $0", MTTS406 "doesn't add up right", "remove the estimated mileage as soon as I hit close").
 **What shipped:** `InvoiceGenerator` — (1) final-settlement invoices skip the stub-period `mileage_estimate` when a lifetime actual reading is available (the true-up alone settles the lease); (2) completed manual leases feed `mileage_at_end` into the true-up on regenerated final invoices; (3) billed-to-date subtracts issued `mileage_overpayment` credit_notes so re-settlement is idempotent; (4) true-up descriptions show the arithmetic. NO migration.
