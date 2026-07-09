@@ -1453,32 +1453,49 @@ class InvoiceGenerator
             // The cap mechanism is identical to the mileage_credit path —
             // only the credit_notes.source differs so reports can
             // distinguish the two overflow sources.
-            $mileageOverflow         = '0.00';   // legacy name retained for blast-radius minimality
+            $mileageOverflow         = '0.00';   // total actually stripped from credit lines → routed to the credit_note (legacy name kept for blast-radius minimality)
             $mileageOverflowSource   = null;     // null | 'mileage_overpayment' | 'base_rental_reconciliation_overflow'
             if (bccomp($subtotal, '0', 2) < 0) {
-                $mileageOverflow = bcmul($subtotal, '-1', 2); // abs($subtotal)
+                // How much credit we must strip to floor the subtotal at $0.
+                $remainingOverflow = bcmul($subtotal, '-1', 2); // abs($subtotal)
 
                 // Cappable types in priority order. mileage_credit goes
                 // first to preserve the pre-S-BILLING-HOLISTIC-ENGINE
-                // behaviour byte-for-byte when both credit types are
-                // present on the same invoice (vanishingly rare in
-                // practice — the holistic engine emits a reconciliation
-                // credit on an invoice that already carries a mileage
-                // credit only in a contrived test scenario).
+                // behaviour byte-for-byte when a single mileage credit is
+                // the only cappable line. A single overflow CAN span BOTH
+                // types, though — a big mileage credit plus a reconciliation
+                // credit on the same low-charge final settlement (observed
+                // prod: lease 358 / INV-2026-01760). So we walk every
+                // cappable line, draining the overflow line-by-line, until
+                // it is fully absorbed.
+                //
+                // The previous implementation capped only the FIRST cappable
+                // line and `break 2`'d. When the overflow EXCEEDED that one
+                // line it clamped the line to $0, bailed, and left the
+                // residual sitting in the subtotal — a negative-total
+                // invoice with a $0 credit line — while still routing the
+                // full abs(subtotal) to account credit (crediting more than
+                // was removed from the invoice). Draining across all
+                // cappable lines and routing only what is actually removed
+                // fixes both.
                 $cappableTypes = ['mileage_credit', 'base_rental_reconciliation_credit'];
 
-                $capApplied = false;
                 foreach ($cappableTypes as $cappableType) {
+                    if (bccomp($remainingOverflow, '0', 2) <= 0) {
+                        break; // overflow fully absorbed
+                    }
                     foreach ($lineItems as &$capItem) {
+                        if (bccomp($remainingOverflow, '0', 2) <= 0) {
+                            break;
+                        }
                         if (($capItem['item_type'] ?? '') === $cappableType
                             && !empty($capItem['is_credit'])) {
                             $originalCredit = (string) $capItem['amount'];
-                            $newCredit      = bcsub($originalCredit, $mileageOverflow, 2);
-                            if (bccomp($newCredit, '0', 2) < 0) {
-                                // The overflow exceeds this single line — not expected,
-                                // but defensively cap to 0 and surface the residual.
-                                $newCredit = '0.00';
-                            }
+                            // Never remove more than this line's own amount.
+                            $removed = bccomp($originalCredit, $remainingOverflow, 2) <= 0
+                                ? $originalCredit
+                                : $remainingOverflow;
+                            $newCredit = bcsub($originalCredit, $removed, 2);
                             $capItem['amount'] = $newCredit;
 
                             $detail = isset($capItem['detail_lines'])
@@ -1490,26 +1507,32 @@ class InvoiceGenerator
                             $detail['cap_applied']                    = true;
                             $detail['original_credit_amount']         = $originalCredit;
                             $detail['capped_to']                      = $newCredit;
-                            $detail['overflow_routed_to_credit_note'] = $mileageOverflow;
+                            $detail['overflow_routed_to_credit_note'] = $removed;
                             $capItem['detail_lines'] = json_encode($detail);
 
-                            $mileageOverflowSource = $cappableType === 'mileage_credit'
-                                ? 'mileage_overpayment'
-                                : 'base_rental_reconciliation_overflow';
-
-                            $capApplied = true;
-                            break 2;  // exit both loops
+                            $remainingOverflow = bcsub($remainingOverflow, $removed, 2);
+                            $mileageOverflow   = bcadd($mileageOverflow, $removed, 2);
+                            // Source: prefer the mileage wording whenever any
+                            // mileage credit was capped; otherwise the
+                            // reconciliation wording. (A mixed overflow is
+                            // consolidated into one credit_note — rare in
+                            // practice, and the reason text names the invoice.)
+                            if ($mileageOverflowSource === null || $cappableType === 'mileage_credit') {
+                                $mileageOverflowSource = $cappableType === 'mileage_credit'
+                                    ? 'mileage_overpayment'
+                                    : 'base_rental_reconciliation_overflow';
+                            }
                         }
                     }
                     unset($capItem);
                 }
 
-                if (!$capApplied) {
-                    // No mileage_credit or base_rental_reconciliation_credit
-                    // line is present, yet the subtotal went negative. That
-                    // means a different is_credit line (manual, goodwill,
-                    // etc.) caused it — refuse rather than silently
-                    // rewriting a deliberate adjustment. Caller should split.
+                if (bccomp($remainingOverflow, '0', 2) > 0) {
+                    // The subtotal is STILL negative after zeroing every
+                    // cappable credit line — a non-cappable is_credit line
+                    // (manual, goodwill, discount) drove it under $0. Refuse
+                    // rather than silently rewriting a deliberate adjustment;
+                    // the caller should split into a separate credit_note.
                     json_error(
                         'VALIDATION_ERROR',
                         'Invoice subtotal is negative but no mileage_credit or base_rental_reconciliation_credit line is present to cap. Reduce other credit line items or split into a separate credit_note.',
@@ -1517,7 +1540,7 @@ class InvoiceGenerator
                     );
                 }
 
-                // Recompute subtotal after the cap (should be exactly 0.00).
+                // Recompute subtotal after the cap — now exactly 0.00.
                 $subtotal = '0.00';
                 foreach ($lineItems as $item) {
                     if ($item['is_credit']) {

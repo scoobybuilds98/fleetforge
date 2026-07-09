@@ -268,6 +268,60 @@ try {
         "regenerated final invoice reads lease.mileage_at_end (1300 km): est=" . ($estH ? 'present' : 'none')
         . " true-up=+\$" . ($adjH['amount'] ?? 'none') . " (expect none / 30.00)");
 
+    // ── I — TWO-credit-line overflow spill (S-CAP-MULTILINE regression) ────
+    // A final settlement can carry BOTH a mileage_credit (over-estimate) AND
+    // a base_rental_reconciliation_credit (prior over-billing) whose COMBINED
+    // total exceeds the invoice's charges. The overflow cap must drain the
+    // overflow across BOTH cappable lines and floor the subtotal at exactly
+    // $0 — routing to account credit only what it actually removed.
+    //
+    // This reproduces prod INV-2026-01760 (lease 358): the old cap capped only
+    // the FIRST cappable line then `break 2`'d, so when the overflow exceeded
+    // the mileage credit it clamped that line to $0, bailed, and left the
+    // residual in the subtotal — a NEGATIVE-total invoice with a $0 mileage
+    // line — while routing the full abs(subtotal) to account credit. Rate
+    // structure (daily ≫ monthly) forces a large downward reconciliation
+    // credit on close; the low actual reading forces a mileage credit.
+    $lI = $makeLease([
+        'daily_rate' => '600.00', 'weekly_rate' => '350.00', 'monthly_rate' => '700.00',
+        'estimated_mileage_per_day' => '40.00', 'estimated_mileage_per_day_km' => '40.0000',
+    ]);
+    $gen->createFromLease([ // partial_start over-bills base at the daily tier ($2400)
+        'lease_id' => $lI, 'period_start' => '2026-05-01', 'period_end' => '2026-05-04',
+        'billing_type' => 'partial_start', 'invoice_type' => 'regular', 'created_by' => $user,
+    ]);
+    $ivI = $gen->createFromLease([ // final: cumulative tier drops to monthly (recon credit) + low actual (mileage credit)
+        'lease_id' => $lI, 'period_start' => '2026-06-01', 'period_end' => '2026-06-01',
+        'billing_type' => 'partial_end', 'invoice_type' => 'final', 'created_by' => $user,
+        'cumulative_actual_km' => '50',
+    ]);
+    $hdrI  = db_row("SELECT subtotal FROM invoices WHERE id=?", [$ivI['invoice_id']]);
+    $reconI = $line($ivI['invoice_id'], 'base_rental_reconciliation_credit');
+    $mileI  = $line($ivI['invoice_id'], 'mileage_credit');
+    $cnI    = db_row("SELECT amount FROM credit_notes WHERE source_invoice_id=? AND source='mileage_overpayment'", [$ivI['invoice_id']]);
+    // Both credit lines present, overflow spilled from mileage into reconciliation.
+    ck('I1 (subtotal floor)', $hdrI !== null && bccomp((string) $hdrI['subtotal'], '0.00', 2) === 0,
+        "combined-credit-overflow final invoice floors subtotal at \$" . ($hdrI['subtotal'] ?? 'none') . " (expect 0.00 — was NEGATIVE pre-fix)");
+    ck('I2 (both capped)', $reconI !== null && $mileI !== null
+            && bccomp((string) $mileI['amount'], '0', 2) >= 0 && bccomp((string) $reconI['amount'], '0', 2) >= 0
+            && bccomp((string) $mileI['amount'], '0.00', 2) === 0,
+        "mileage fully drained + reconciliation partially capped: mileage=\$" . ($mileI['amount'] ?? '?') . " recon=\$" . ($reconI['amount'] ?? '?') . " (both ≥ 0, no \$0-line-with-negative-subtotal)");
+    // Money conservation: routed CN == exactly what was removed from the two lines.
+    // (Each capped line records its own original amount in detail_lines.)
+    $sumRemoved = '0.00';
+    foreach (db_select(
+        "SELECT amount, detail_lines FROM invoice_line_items
+          WHERE invoice_id=? AND item_type IN ('base_rental_reconciliation_credit','mileage_credit')",
+        [$ivI['invoice_id']]
+    ) as $capLn) {
+        $d = json_decode((string) ($capLn['detail_lines'] ?? '{}'), true);
+        if (is_array($d) && isset($d['original_credit_amount'])) {
+            $sumRemoved = bcadd($sumRemoved, bcsub((string) $d['original_credit_amount'], (string) $capLn['amount'], 2), 2);
+        }
+    }
+    ck('I3 (conservation)', $cnI !== null && bccomp((string) $cnI['amount'], $sumRemoved, 2) === 0,
+        "account-credit CN (\$" . ($cnI['amount'] ?? 'none') . ") == total removed from capped lines (\$" . $sumRemoved . ") — no over-routing");
+
     db_execute("ROLLBACK");
 } catch (\Throwable $e) {
     db_execute("ROLLBACK");
