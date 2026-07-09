@@ -1601,11 +1601,11 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 <div class="stat-grid">
     <div class="stat-card">
         <div class="stat-label">Invoice Date</div>
-        <div class="stat-value font-mono"><?= format_date($invoice['invoice_date']) ?></div>
+        <div class="stat-value stat-value--date font-mono"><?= format_date($invoice['invoice_date']) ?></div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Due Date</div>
-        <div class="stat-value font-mono" <?php if ($isOverdue): ?>style="color:var(--color-danger);"<?php endif; ?>>
+        <div class="stat-value stat-value--date font-mono" <?php if ($isOverdue): ?>style="color:var(--color-danger);"<?php endif; ?>>
             <?= format_date($invoice['due_date']) ?>
             <?php if ($isOverdue): ?>
                 <?php
