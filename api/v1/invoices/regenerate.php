@@ -145,7 +145,30 @@ if ($periodStart > $periodEnd) {
 $generator = new InvoiceGenerator();
 $number    = (string) $invoice['invoice_number'];
 
-$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd) {
+// S-ORPHAN-OVERFLOW-CN: an already-APPLIED overflow credit note blocks the
+// regenerate (the customer spent credit that traces to this invoice's old
+// computation); unapplied ones are auto-voided inside the transaction below.
+$cnBlockers = \FleetForge\Billing\OverflowCreditNotes::findBlockers($id);
+if ($cnBlockers) {
+    json_error(
+        'CREDIT_NOTE_APPLIED',
+        \FleetForge\Billing\OverflowCreditNotes::blockerMessage($cnBlockers, 'regenerate'),
+        422
+    );
+}
+
+$voidedCns = [];
+
+$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, &$voidedCns) {
+    // S-ORPHAN-OVERFLOW-CN: void the old computation's overflow CNs BEFORE
+    // createFromLease re-runs — the true-up's billed-to-date subtracts LIVE
+    // overflow CNs, so a stale one here would double-subtract and shrink the
+    // regenerated credit (the INV-2026-01760 poisoning, in-transaction).
+    $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(
+        $id, current_user_id(), current_user()['name'] ?? 'System',
+        "source invoice {$number} regenerated"
+    );
+
     // Explicitly remove the billing-period row first (the FK is ON DELETE SET
     // NULL, which would otherwise orphan it with invoice_id = NULL).
     db_execute("DELETE FROM lease_billing_periods WHERE invoice_id = ?", [$id]);
@@ -202,6 +225,11 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
 
     return ['id' => $newId, 'invoice_number' => $created['invoice_number'], 'total_amount' => $newRow['total_amount'] ?? null];
 });
+
+// Best-effort QBO void propagation AFTER commit (D-ENQUEUER-CONTRACT).
+foreach ($voidedCns as $cn) {
+    \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+}
 
 $fresh = db_row("SELECT updated_at FROM invoices WHERE id = ?", [$result['id']]);
 

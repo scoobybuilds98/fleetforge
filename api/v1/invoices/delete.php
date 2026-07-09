@@ -43,8 +43,24 @@ if ($invoice['status'] !== 'draft' && !is_super_admin()) {
     json_error('IMMUTABLE_RECORD', 'Only draft invoices can be deleted. Use void for sent invoices.', 422);
 }
 
+// S-ORPHAN-OVERFLOW-CN: an invoice and its auto-created overflow credit note
+// (mileage_overpayment / base_rental_reconciliation_overflow) live and die
+// together — a stranded active CN poisons every later mileage true-up. An
+// already-APPLIED overflow CN blocks the delete instead (the customer spent
+// credit that traces to this invoice).
+$cnBlockers = \FleetForge\Billing\OverflowCreditNotes::findBlockers($id);
+if ($cnBlockers) {
+    json_error(
+        'CREDIT_NOTE_APPLIED',
+        \FleetForge\Billing\OverflowCreditNotes::blockerMessage($cnBlockers, 'delete'),
+        422
+    );
+}
+
+$voidedCns = [];
+
 // FIX #19: audit_log moved inside transaction
-db_transaction(function () use ($id, $invoice) {
+db_transaction(function () use ($id, $invoice, &$voidedCns) {
     // Soft-delete the invoice
     db_update('invoices', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
 
@@ -154,7 +170,19 @@ db_transaction(function () use ($id, $invoice) {
         'new_values'   => json_encode(['deleted_at' => date('Y-m-d H:i:s')]),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // S-ORPHAN-OVERFLOW-CN: void the invoice's auto-created overflow CNs in
+    // the SAME transaction (unapplied-only; blockers were refused above).
+    $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(
+        $id, current_user_id(), current_user()['name'] ?? 'System',
+        "source invoice {$invoice['invoice_number']} deleted"
+    );
 });
+
+// Best-effort QBO void propagation AFTER commit (D-ENQUEUER-CONTRACT).
+foreach ($voidedCns as $cn) {
+    \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+}
 
 invalidate_dashboard_cache();
 

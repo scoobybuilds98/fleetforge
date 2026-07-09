@@ -116,9 +116,20 @@ foreach ($ids as $id) {
     // (A 'void' status is already rejected by the $voidable gate above — no
     //  separate already-void branch is needed; it would be unreachable.)
 
+    // S-ORPHAN-OVERFLOW-CN: an already-APPLIED overflow credit note blocks the
+    // void (mirrors FinancialActions::voidInvoice); unapplied ones are
+    // auto-voided inside the transaction below.
+    $cnBlockers = \FleetForge\Billing\OverflowCreditNotes::findBlockers($id);
+    if ($cnBlockers) {
+        $skipped++;
+        $errors[] = ['id' => $id, 'reason' => \FleetForge\Billing\OverflowCreditNotes::blockerMessage($cnBlockers, 'void')];
+        continue;
+    }
+
     // ── Per-invoice transaction: mirrors void.php exactly ────────────────────
     try {
-        db_transaction(function () use ($id, $invoice, $voidReason, $userId, $userName, $ipAddress): void {
+        $voidedCns = [];
+        db_transaction(function () use ($id, $invoice, $voidReason, $userId, $userName, $ipAddress, &$voidedCns): void {
             // S-FIX-2 Path B canonical truth (D45):
             //   draft → void : OB unchanged (decOb = 0.00)
             //   sent  → void : OB -= balance_due
@@ -219,6 +230,13 @@ foreach ($ids as $id) {
             // WHY inside transaction — reversal failure rolls back the void (A8, §16).
             \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, $userId);
 
+            // S-ORPHAN-OVERFLOW-CN: void this invoice's auto-created overflow
+            // CNs in the SAME transaction (unapplied-only; blockers skipped above).
+            $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(
+                $id, $userId, $userName,
+                "source invoice {$invoice['invoice_number']} voided (bulk)"
+            );
+
             // ── In-app notification (NOTIF-1) — non-fatal ────────────────────
             try {
                 \FleetForge\Notifications\NotificationService::notify(
@@ -240,6 +258,9 @@ foreach ($ids as $id) {
         // durably persisted before the QBO sync attempt fires. Matches void.php
         // pattern (D-ENQUEUER-GATE-0-ELIGIBILITY). status='void' is now on disk.
         \FleetForge\QboPushers\InvoiceEnqueuer::enqueue((int) $id, 'void');
+        foreach ($voidedCns as $cn) {
+            \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+        }
 
         $actioned++;
     } catch (\Throwable $e) {

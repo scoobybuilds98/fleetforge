@@ -49,7 +49,18 @@ class FinancialActions
                 "Cannot void invoice {$invoice['invoice_number']} with status '{$invoice['status']}'. Only draft or sent invoices can be voided (paid invoices need a credit note).", 409);
         }
 
-        db_transaction(function () use ($id, $invoice, $voidReason, $userId, $userName, $ip): void {
+        // S-ORPHAN-OVERFLOW-CN: an invoice and its auto-created overflow credit
+        // note live and die together — a stranded active CN poisons every later
+        // mileage true-up. An already-APPLIED overflow CN blocks the void.
+        $cnBlockers = \FleetForge\Billing\OverflowCreditNotes::findBlockers($id);
+        if ($cnBlockers) {
+            throw new ActionException('CREDIT_NOTE_APPLIED',
+                \FleetForge\Billing\OverflowCreditNotes::blockerMessage($cnBlockers, 'void'), 422);
+        }
+
+        $voidedCns = [];
+
+        db_transaction(function () use ($id, $invoice, $voidReason, $userId, $userName, $ip, &$voidedCns): void {
             $preVoidStatus = $invoice['status'];
             $totalAmount   = (string) $invoice['total_amount'];
             $balanceDue    = (string) $invoice['balance_due'];
@@ -129,6 +140,14 @@ class FinancialActions
             // failure rolls back the whole void (A8, §16).
             \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, $userId);
 
+            // S-ORPHAN-OVERFLOW-CN: void the invoice's auto-created overflow
+            // CNs in the SAME transaction (unapplied-only; blockers refused
+            // above). Reverses each CN's issue JE via onCreditNoteVoided.
+            $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(
+                $id, $userId, $userName,
+                "source invoice {$invoice['invoice_number']} voided"
+            );
+
             try {
                 \FleetForge\Notifications\NotificationService::notify(
                     type: 'invoice.voided',
@@ -144,6 +163,9 @@ class FinancialActions
 
         // Best-effort QBO void enqueue AFTER commit (state durably persisted).
         \FleetForge\QboPushers\InvoiceEnqueuer::enqueue($id, 'void');
+        foreach ($voidedCns as $cn) {
+            \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+        }
 
         return ['id' => $id, 'invoice_number' => $invoice['invoice_number'], 'status' => 'void', 'prev_status' => $invoice['status']];
     }

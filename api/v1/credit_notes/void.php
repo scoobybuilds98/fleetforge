@@ -66,7 +66,7 @@ $result = null;
 db_transaction(function () use ($id, $reason, $cnCheck, &$result) {
     // D20: FOR UPDATE — prevents concurrent apply + void race
     $cn = db_row(
-        "SELECT id, credit_note_number, status, amount_remaining FROM credit_notes WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+        "SELECT id, credit_note_number, status, amount, amount_remaining FROM credit_notes WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$id]
     );
     if (!$cn) {
@@ -106,6 +106,17 @@ db_transaction(function () use ($id, $reason, $cnCheck, &$result) {
         'notes'        => "Credit note {$cn['credit_note_number']} voided. Reason: {$reason}",
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
+
+    // ── GL: reverse the issue JE (S-CN-VOID-GL) ─────────────────────────
+    // Previously NOTHING reversed the CN's issue JE (DR revenue / CR 2060),
+    // so a voided credit note left a phantom liability on 2060. Only safe
+    // for a FULLY-UNAPPLIED note: a partially_used CN has consumed part of
+    // its liability via apply JEs, and reversing the full issue JE would
+    // over-reverse — those keep the pre-existing (no-reversal) behaviour.
+    // Inside the txn so a GL failure rolls back the whole void.
+    if (bccomp((string) $cn['amount_remaining'], (string) $cn['amount'], 2) === 0) {
+        \FleetForge\Accounting\AutoEntryBridge::onCreditNoteVoided($id, current_user_id());
+    }
 
     $result = [
         'id'                 => $id,

@@ -1549,6 +1549,19 @@ class InvoiceGenerator
                         $subtotal = bcadd($subtotal, $item['amount'], 2);
                     }
                 }
+
+                // HARD INVARIANT (S-CAP-MULTILINE): after the cap the subtotal
+                // is exactly $0.00, or the refusal above already fired. A
+                // negative subtotal escaping here means a cap-logic regression
+                // (the pre-fix bug shipped prod INV-2026-01760 at -$10.51).
+                // Throw so the surrounding db_transaction rolls the invoice
+                // back rather than persisting corrupt money.
+                if (bccomp($subtotal, '0', 2) !== 0) {
+                    throw new \RuntimeException(
+                        "Invoice cap invariant violated: subtotal {$subtotal} after credit-overflow cap "
+                        . "(expected exactly 0.00). Lease {$leaseId}, overflow routed {$mileageOverflow}."
+                    );
+                }
             }
 
             // --- Step 6: Apply discount ---

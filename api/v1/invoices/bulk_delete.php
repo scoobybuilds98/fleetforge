@@ -88,9 +88,20 @@ foreach ($ids as $id) {
         continue;
     }
 
+    // S-ORPHAN-OVERFLOW-CN: an already-APPLIED overflow credit note blocks the
+    // delete (mirrors invoices/delete.php); unapplied ones are auto-voided
+    // inside the transaction below.
+    $cnBlockers = \FleetForge\Billing\OverflowCreditNotes::findBlockers($id);
+    if ($cnBlockers) {
+        $skipped++;
+        $errors[] = ['id' => $id, 'reason' => \FleetForge\Billing\OverflowCreditNotes::blockerMessage($cnBlockers, 'delete')];
+        continue;
+    }
+
     // Each delete is its own transaction; failures are isolated.
     try {
-        db_transaction(function () use ($id, $invoice, $now, $userId, $userName, $ipAddress) {
+        $voidedCns = [];
+        db_transaction(function () use ($id, $invoice, $now, $userId, $userName, $ipAddress, &$voidedCns) {
             // Soft-delete the invoice row. I06: gate on deleted_at IS NULL so a
             // concurrent/overlapping bulk-delete cannot delete the same row twice
             // and double-reverse the Path-B counters below. 0 rows = already
@@ -204,7 +215,19 @@ foreach ($ids as $id) {
                 'new_values'   => json_encode(['deleted_at' => $now]),
                 'ip_address'   => $ipAddress,
             ]);
+
+            // S-ORPHAN-OVERFLOW-CN: void this invoice's auto-created overflow
+            // CNs in the SAME transaction (unapplied-only; blockers skipped above).
+            $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(
+                $id, $userId, $userName,
+                "source invoice {$invoice['invoice_number']} deleted (bulk)"
+            );
         });
+
+        // Best-effort QBO void propagation AFTER this id's commit.
+        foreach ($voidedCns as $cn) {
+            \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+        }
 
         $deleted++;
     } catch (\Throwable $e) {

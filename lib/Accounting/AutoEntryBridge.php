@@ -556,6 +556,52 @@ class AutoEntryBridge
     }
 
     // ============================================================
+    // CREDIT NOTE VOIDED — reverse the issue JE (S-CN-VOID-GL)
+    // ============================================================
+
+    /**
+     * Post the reversal JE when a FULLY-UNAPPLIED credit note is voided.
+     *
+     * The issue JE (onCreditNoteIssued: DR revenue / CR 2060 liability) is the
+     * FIRST (lowest-id) non-reversal JE carrying source_type='credit_note' for
+     * this CN — apply/unapply JEs share the same source_type/source_id but are
+     * created strictly later. Reversing it cancels the customer-credit
+     * liability the void just extinguished.
+     *
+     * LIMITATION (deliberate): only call this for a credit note whose
+     * amount_remaining still equals its full amount. A partially-used CN has
+     * already had part of its liability consumed by apply JEs; reversing the
+     * full issue JE would over-reverse 2060. Partial-void GL treatment is out
+     * of scope here — callers (credit_notes/void.php, OverflowCreditNotes)
+     * gate on fully-unapplied before calling.
+     *
+     * @param int      $creditNoteId
+     * @param int|null $userId
+     * @return array|null  The reversal JE row, or null (accounting disabled,
+     *                     no issue JE, or already reversed)
+     */
+    public static function onCreditNoteVoided(int $creditNoteId, ?int $userId = null): ?array
+    {
+        if (!self::isEnabled()) return null;
+
+        $originalJe = \db_row(
+            "SELECT id, reversed_by_id FROM acc_journal_entries
+             WHERE source_type = 'credit_note' AND source_id = ?
+               AND status = 'posted' AND is_reversal = 0
+             ORDER BY id ASC LIMIT 1",
+            [$creditNoteId]
+        );
+
+        // No JE to reverse (accounting was disabled at issue time).
+        if (!$originalJe) return null;
+
+        // Already reversed.
+        if ($originalJe['reversed_by_id']) return null;
+
+        return JournalEntryService::reverse((int) $originalJe['id'], date('Y-m-d'), $userId);
+    }
+
+    // ============================================================
     // CREDIT NOTE APPLIED — DR 2060 Customer Credits Liability / CR 1030 AR
     // Spec ref: §16 PASS-6:G2
     // ============================================================
