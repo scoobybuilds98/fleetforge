@@ -1030,8 +1030,21 @@ class InvoiceGenerator
                 // math below and the running true-up target. Skipped on the
                 // `mileage_only` carrier (estimate already billed on rental invoices).
                 $estAmount = '0.00';
-                if ($estimateEmitAllowed && !$suppressEstimate && bccomp($perDayKm, '0', 4) > 0 && $days > 0) {
-                    $estDistanceKm = bcmul($perDayKm, (string) $days, 4);
+                // S-REGEN-PRESERVE-ESTIMATE: an explicit distance override wins
+                // over days × current per-day. regenerate.php passes the OLD
+                // draft's billed estimate distance so a per-day edit made after
+                // billing doesn't silently re-price a historical line on
+                // regenerate (which would also distort the final true-up's
+                // billed-to-date side).
+                $estOverrideKm = (isset($params['estimate_distance_km_override'])
+                        && $params['estimate_distance_km_override'] !== null
+                        && $params['estimate_distance_km_override'] !== ''
+                        && bccomp((string) $params['estimate_distance_km_override'], '0', 4) > 0)
+                    ? (string) $params['estimate_distance_km_override']
+                    : null;
+                if ($estimateEmitAllowed && !$suppressEstimate && $days > 0
+                    && (bccomp($perDayKm, '0', 4) > 0 || $estOverrideKm !== null)) {
+                    $estDistanceKm = $estOverrideKm ?? bcmul($perDayKm, (string) $days, 4);
                     $eDisp     = ff_mileage_line_display($lease, $estDistanceKm, $rateKm);
                     $estAmount = bcround(bcmul((string) $eDisp['distance'], (string) $eDisp['rate'], 6), 2);
                     if (bccomp($estAmount, '0', 2) > 0) {

@@ -90,7 +90,8 @@ if (($invoice['invoice_type'] ?? 'regular') !== 'regular') {
 }
 
 $lease = db_row(
-    "SELECT id, precharge_enabled, start_date, end_date, actual_return_date
+    "SELECT id, precharge_enabled, start_date, end_date, actual_return_date,
+            miles_to_km_conversion
        FROM leases WHERE id = ? AND deleted_at IS NULL",
     [(int) $invoice['lease_id']]
 );
@@ -157,9 +158,35 @@ if ($cnBlockers) {
     );
 }
 
+// ── S-REGEN-PRESERVE-ESTIMATE: carry the billed estimate distance forward ──
+// The engine re-emits the estimate as days × the lease's CURRENT
+// estimated_mileage_per_day — but the operator may have raised the per-day
+// since this draft was billed (lease 358: 50→100→175 km/day across months).
+// A naive regenerate re-slices the estimate at today's rate, silently
+// re-pricing a historical line. Same carry-forward class as the hourly /
+// odometer snapshots below: preserve the line's own billed distance.
+$estKmOverride = null;
+$oldEst = db_row(
+    "SELECT quantity, unit FROM invoice_line_items
+      WHERE invoice_id = ? AND item_type = 'mileage_estimate' LIMIT 1",
+    [$id]
+);
+if ($oldEst && bccomp((string) $oldEst['quantity'], '0', 4) > 0) {
+    if (($oldEst['unit'] ?? 'km') === 'miles') {
+        // Line quantities live in the lease's display unit — convert back to km.
+        $conv = (string) ($lease['miles_to_km_conversion'] ?? '1.609344');
+        if (bccomp($conv, '0', 6) <= 0) {
+            $conv = '1.609344';
+        }
+        $estKmOverride = bcmul((string) $oldEst['quantity'], $conv, 4);
+    } else {
+        $estKmOverride = (string) $oldEst['quantity'];
+    }
+}
+
 $voidedCns = [];
 
-$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, &$voidedCns) {
+$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, $estKmOverride, &$voidedCns) {
     // S-ORPHAN-OVERFLOW-CN: void the old computation's overflow CNs BEFORE
     // createFromLease re-runs — the true-up's billed-to-date subtracts LIVE
     // overflow CNs, so a stale one here would double-subtract and shrink the
@@ -200,6 +227,9 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
         'odometer_at_period_end_km'    => $invoice['odometer_at_period_end_km'],
         'odometer_source'              => $invoice['odometer_source'],
         'odometer_fetched_at'          => $invoice['odometer_fetched_at'],
+        // S-REGEN-PRESERVE-ESTIMATE: keep the billed estimate distance (km);
+        // null when the old draft had no estimate line (engine derives normally).
+        'estimate_distance_km_override' => $estKmOverride,
     ]);
 
     $newId = (int) $created['invoice_id'];

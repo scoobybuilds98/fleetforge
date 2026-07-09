@@ -268,6 +268,27 @@ try {
         "regenerated final invoice reads lease.mileage_at_end (1300 km): est=" . ($estH ? 'present' : 'none')
         . " true-up=+\$" . ($adjH['amount'] ?? 'none') . " (expect none / 30.00)");
 
+    // ── J — S-REGEN-PRESERVE-ESTIMATE: distance override wins over per-day ─
+    // regenerate.php passes the OLD draft's billed estimate distance so a
+    // per-day edit made after billing doesn't re-price the historical line.
+    $lJ = $makeLease(['estimated_mileage_per_day' => '100.00', 'estimated_mileage_per_day_km' => '100.0000']);
+    $ivJ1 = $gen->createFromLease([ // override: preserve a 1240 km estimate (billed at 40/day)
+        'lease_id' => $lJ, 'period_start' => '2026-05-01', 'period_end' => '2026-05-31',
+        'billing_type' => 'full_month', 'invoice_type' => 'regular', 'created_by' => $user,
+        'estimate_distance_km_override' => '1240.0000',
+    ]);
+    $estJ1 = $line($ivJ1['invoice_id'], 'mileage_estimate');
+    ck('J1', $estJ1 !== null && $estJ1['amount'] === '620.00' && bccomp((string) $estJ1['quantity'], '1240', 2) === 0,
+        "override 1240 km preserved: \$" . ($estJ1['amount'] ?? 'none') . " qty=" . ($estJ1['quantity'] ?? '?')
+        . " (expect 620.00 / 1240 — NOT 31×100/day = \$1550)");
+    $ivJ2 = $gen->createFromLease([ // control: no override → current per-day re-derives
+        'lease_id' => $lJ, 'period_start' => '2026-06-01', 'period_end' => '2026-06-30',
+        'billing_type' => 'full_month', 'invoice_type' => 'regular', 'created_by' => $user,
+    ]);
+    $estJ2 = $line($ivJ2['invoice_id'], 'mileage_estimate');
+    ck('J2', $estJ2 !== null && $estJ2['amount'] === '1500.00',
+        "no override → 30 × 100 km/day × \$0.50 = \$" . ($estJ2['amount'] ?? 'none') . " (expect 1500.00)");
+
     // ── I — TWO-credit-line overflow spill (S-CAP-MULTILINE regression) ────
     // A final settlement can carry BOTH a mileage_credit (over-estimate) AND
     // a base_rental_reconciliation_credit (prior over-billing) whose COMBINED
