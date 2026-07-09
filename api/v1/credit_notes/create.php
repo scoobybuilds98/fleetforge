@@ -131,29 +131,9 @@ db_transaction(function () use (
     // 3a. Gap-free credit note number via FOR UPDATE on settings row
     //     Pattern: CN-CR-YYYY-NNNNN
     // ------------------------------------------------------------------
-    $year = date('Y');
-    $key  = "credit_note.next_number.{$year}";
-
-    $settingsRow = db_row(
-        "SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE",
-        [$key]
-    );
-    $next             = $settingsRow ? (int) $settingsRow['value'] : 1;
-    // WHY: prefix from settings so admin can rebrand without code change
-    $prefix           = settings_get('credit_note.prefix', 'CN-CR');
-    $creditNoteNumber = sprintf('%s-%s-%05d', $prefix, $year, $next);
-
-    if ($settingsRow) {
-        db_execute(
-            "UPDATE settings SET `value` = ? WHERE `key` = ?",
-            [$next + 1, $key]
-        );
-    } else {
-        db_execute(
-            "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
-            [$key, $next + 1]
-        );
-    }
+    // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper
+    // (was one of four verbatim copies; prefix still settings-driven inside).
+    $creditNoteNumber = ff_next_credit_note_number();
 
     // ------------------------------------------------------------------
     // 3b. Insert credit note row

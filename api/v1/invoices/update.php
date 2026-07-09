@@ -207,4 +207,14 @@ db_transaction(function () use ($id, $invoice, $updateData) {
     ]);
 });
 
+// S-AUDIT-LIFECYCLE-1 #24b: post-send metadata edits (po_number / billing
+// email) must mirror to QBO or the downstream copy drifts (D-QBO-CORE-1).
+// Best-effort AFTER commit per D-ENQUEUER-CONTRACT; gate-0 restricts to
+// sent/paid/partially_paid and the pusher demotes unmapped invoices.
+if (array_intersect(array_keys($updateData), ['po_number', 'sent_to_email'])
+    && in_array($invoice['status'], ['sent', 'paid', 'partially_paid'], true)
+) {
+    \FleetForge\QboPushers\InvoiceEnqueuer::enqueue($id, 'update');
+}
+
 json_success(['id' => $id]);

@@ -115,15 +115,27 @@ db_transaction(function () use ($id, $reopenReason, &$result) {
     //           cron doesn't immediately invoice a stale past date.
     // FIX #31: clear mileage_at_end and actual_mileage — stale from previous close;
     //           these will be re-captured at the next close.
+    // S-AUDIT-LIFECYCLE-1 #24d: also clear the REST of the close snapshot —
+    // actual_return_time, closing odometer trio, total_distance_km, and
+    // engine_hours_at_end were left stale on the now-active lease, so the
+    // show page displayed the OLD close's readings and the next close's
+    // "reading below start" guard compared against ghosts.
+    // (billing_days_removed is safe — always overwritten at re-close.)
     $nextBillingDate = date('Y-m-d', strtotime('first day of next month'));
     db_execute(
         "UPDATE leases
          SET status = 'active',
              actual_return_date = NULL,
+             actual_return_time = NULL,
              closed_at = NULL,
              closed_by_user_id = NULL,
              mileage_at_end = NULL,
              actual_mileage = 0,
+             odometer_end_km = NULL,
+             odometer_end_source = NULL,
+             odometer_end_fetched_at = NULL,
+             total_distance_km = NULL,
+             engine_hours_at_end = NULL,
              next_billing_date = ?,
              updated_by = ?,
              updated_at = NOW()

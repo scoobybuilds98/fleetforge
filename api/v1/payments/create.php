@@ -376,22 +376,9 @@ db_transaction(function () use (
             'overpayment_resolved' => 1,
         ], 'id = ?', [$paymentId]);
 
-        // Generate gap-free credit_note number — same FOR UPDATE pattern as
-        // api/v1/credit_notes/create.php (D15).
-        $cnYear   = date('Y');
-        $cnKey    = "credit_note.next_number.{$cnYear}";
-        $cnRow    = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$cnKey]);
-        $cnNext   = $cnRow ? (int) $cnRow['value'] : 1;
-        $cnPrefix = settings_get('credit_note.prefix', 'CN-CR');
-        $cnNumber = sprintf('%s-%s-%05d', $cnPrefix, $cnYear, $cnNext);
-        if ($cnRow) {
-            db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$cnNext + 1, $cnKey]);
-        } else {
-            db_execute(
-                "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
-                [$cnKey, $cnNext + 1]
-            );
-        }
+        // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper (D15) —
+        // was the FIFTH verbatim copy of this pattern.
+        $cnNumber = ff_next_credit_note_number();
 
         $cnId = db_insert('credit_notes', [
             'credit_note_number'      => $cnNumber,

@@ -39,7 +39,12 @@ class OdometerService
     /** Reading older than this many hours flags as stale. */
     private const STALENESS_THRESHOLD_HOURS = 24;
 
-    /** Sanity bound — Samsara odometer values outside this range are rejected. */
+    /** Sanity bound — Samsara odometer values outside this range are rejected.
+     *  S-AUDIT-LIFECYCLE-1 #18: the bound is EXCLUSIVE at the bottom — a
+     *  reading of exactly 0.00 km is treated as implausible (a gateway reset /
+     *  unprovisioned device), because COALESCE at activation would otherwise
+     *  overwrite a real prior gps reading with 0 and clamp the lease's whole
+     *  distance math to zero. */
     private const MIN_ODOMETER_KM = 0;
     private const MAX_ODOMETER_KM = 10_000_000;  // 10M km — spec T19 sanity cap
 
@@ -91,7 +96,7 @@ class OdometerService
         // implausible. Either way refuse to persist — fall through to
         // manual entry rather than poison the lease record.
         $odometerKm = (float) $odometerKm;
-        if ($odometerKm < self::MIN_ODOMETER_KM || $odometerKm > self::MAX_ODOMETER_KM) {
+        if ($odometerKm <= self::MIN_ODOMETER_KM || $odometerKm > self::MAX_ODOMETER_KM) {
             return $this->failResult("Samsara returned implausible odometer ({$odometerKm} km) — manual entry required");
         }
 

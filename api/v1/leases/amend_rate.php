@@ -15,10 +15,16 @@ declare(strict_types=1);
  *              mileage rates on an active lease, with structured audit
  *              trail in lease_amendments (amendment_type='rate_change').
  *
- *              Operator-locked decisions (S-LEASE-RATE-AMENDMENT):
- *                D-A  Prospective only — new rate applies from the
- *                     amendment moment forward. Sent invoices remain
- *                     immutable per D14. Draft invoices for future
+ *              Operator-locked decisions (S-LEASE-RATE-AMENDMENT,
+ *              amended by S-AUDIT-LIFECYCLE-1 #5 — operator 2026-07-09):
+ *                D-A  Sent invoices remain immutable per D14, BUT the
+ *                     holistic engine reconciles the WHOLE lease at the
+ *                     CURRENT (new) rates: the NEXT invoice's delta
+ *                     includes a catch-up charge/credit that re-prices
+ *                     all previously billed days at the amended rate.
+ *                     This retroactive reconciliation is the intended
+ *                     behaviour (there is no rate segmentation by
+ *                     amendment date). Draft invoices for future
  *                     periods are SURFACED in the response (not
  *                     auto-regenerated) so the operator can review
  *                     before sending.
@@ -295,6 +301,21 @@ db_transaction(function () use (
         foreach ($effectiveTiers as $v) {
             if (bccomp($v, '0', 4) > 0) { $anyTierPositive = true; break; }
         }
+        // S-AUDIT-LIFECYCLE-1 #13: the zero-with-siblings rule below is
+        // VACUOUS when every tier is zero — an amendment could zero out ALL
+        // rates on an active lease, after which billing silently produced
+        // empty $0 invoices (the D132 blind spot). Require at least one
+        // positive rental tier OR another billing basis on the row.
+        if (!$anyTierPositive
+            && bccomp((string) ($newRates['mileage_rate_km'] ?? $lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
+            && bccomp((string) ($newRates['hourly_rate'] ?? $lease['hourly_rate'] ?? '0'), '0', 4) <= 0
+        ) {
+            json_error('RATE_TIER_INCOMPLETE',
+                'This amendment would leave the lease with NO billing basis at all '
+                . '(every rental tier, mileage, and hourly rate zero) — a zero-rate '
+                . 'lease must not exist (D132). Keep at least one rate > 0.',
+                422);
+        }
         if ($anyTierPositive) {
             $holes = [];
             foreach ($effectiveTiers as $col => $v) {
@@ -363,12 +384,18 @@ db_transaction(function () use (
 
     // 5 — affected draft invoices for future periods (audit only;
     // no auto-regeneration per D-A / D-D).
+    // S-AUDIT-LIFECYCLE-1 F4: CURDATE() not NOW() (billing_period_start is a
+    // DATE — the DATETIME compare silently excluded a draft whose period
+    // starts TODAY), >= not > for the same reason, and regular non-advance
+    // drafts only (mirrors update.php's candidate query). Any unsent draft
+    // will re-price if regenerated, so surface every regular one.
     $affectedDrafts = db_select(
         "SELECT id, invoice_number, billing_period_start, billing_period_end
          FROM invoices
          WHERE lease_id = ?
            AND status = 'draft'
-           AND billing_period_start > NOW()
+           AND invoice_type = 'regular'
+           AND (generation_source IS NULL OR generation_source <> 'advance')
            AND deleted_at IS NULL
          ORDER BY billing_period_start ASC, id ASC",
         [$leaseId]

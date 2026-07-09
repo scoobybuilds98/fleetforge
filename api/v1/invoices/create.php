@@ -73,16 +73,19 @@ if (!in_array($lease['status'], ['active', 'completed'])) {
     );
 }
 
+// S-AUDIT-LIFECYCLE-1 #23: out-of-enum values are 422s, not silent coercions
+// — a mis-sent billing_type silently became 'partial_start' and billed a
+// different period shape than the caller asked for.
 $billingType = clean_string($body['billing_type'] ?? 'partial_start');
 $validBillingTypes = ['partial_start', 'full_month', 'partial_end', 'single_period'];
-if (!in_array($billingType, $validBillingTypes)) {
-    $billingType = 'partial_start';
+if (!in_array($billingType, $validBillingTypes, true)) {
+    json_validation_error(['billing_type' => 'Invalid billing_type — must be one of: ' . implode(', ', $validBillingTypes) . '.']);
 }
 
 $invoiceType = clean_string($body['invoice_type'] ?? 'regular');
 $validInvoiceTypes = ['regular', 'final', 'mileage_only', 'adjustment'];
-if (!in_array($invoiceType, $validInvoiceTypes)) {
-    $invoiceType = 'regular';
+if (!in_array($invoiceType, $validInvoiceTypes, true)) {
+    json_validation_error(['invoice_type' => 'Invalid invoice_type — must be one of: ' . implode(', ', $validInvoiceTypes) . '.']);
 }
 
 // ── Overlapping-period guard (§11) ─────────────────────────────

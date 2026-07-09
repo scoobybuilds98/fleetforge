@@ -6,16 +6,15 @@ declare(strict_types=1);
  *
  * Bulk soft-delete draft invoices. Each ID is processed independently inside
  * its own transaction; a failure on one ID does not abort the remaining IDs.
- * Non-draft invoices are skipped (returned as errors) unless the caller is a
- * super_admin, matching the single-delete immutability rule (D12).
+ * Non-draft invoices are skipped (returned as errors) for EVERYONE — the old
+ * super_admin any-status bypass was removed (S-AUDIT-LIFECYCLE-1 #3): it left
+ * revenue JEs posted, QBO mirrors open, and allocations orphaned. D12 has no
+ * role escape hatch; use void (draft/sent) or a credit note (paid).
  *
  * Counter deltas replicate Path B semantics from invoices/delete.php (S-FIX-2):
- *   draft         — total_invoiced -= total_amount; OB unchanged
- *   sent/partial/
- *   overdue       — total_invoiced -= total_amount; OB -= balance_due   (super_admin only)
- *   paid          — total_invoiced -= total_amount; OB unchanged        (super_admin only)
- *   void          — both deltas 0                                       (super_admin only)
- *   written_off   — both deltas 0                                       (super_admin only)
+ *   draft — total_invoiced -= total_amount; OB unchanged
+ *   (the non-draft branches below are now defense-in-depth only — the gate
+ *    above means they are unreachable)
  *
  * @method  POST
  * @body    { "ids": [1, 2, 3] }   (int[], max 100)
@@ -62,7 +61,6 @@ $skipped = 0;
 $errors  = [];
 
 $now        = date('Y-m-d H:i:s');
-$superAdmin = is_super_admin();
 $userId     = current_user_id();
 $userName   = current_user()['name'] ?? 'System';
 $ipAddress  = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -81,10 +79,12 @@ foreach ($ids as $id) {
         continue;
     }
 
-    // Immutability gate — mirrors invoices/delete.php (D12).
-    if ($invoice['status'] !== 'draft' && !$superAdmin) {
+    // Immutability gate — mirrors invoices/delete.php (D12). NO super_admin
+    // exemption (S-AUDIT-LIFECYCLE-1 #3): the old bypass left revenue JEs
+    // posted, QBO mirrors open, and allocations orphaned on tombstones.
+    if ($invoice['status'] !== 'draft') {
         $skipped++;
-        $errors[] = ['id' => $id, 'reason' => 'Only draft invoices can be deleted. Use void for sent invoices.'];
+        $errors[] = ['id' => $id, 'reason' => 'Only draft invoices can be deleted. Use void for sent invoices; paid invoices need a credit note.'];
         continue;
     }
 
@@ -106,10 +106,13 @@ foreach ($ids as $id) {
             // concurrent/overlapping bulk-delete cannot delete the same row twice
             // and double-reverse the Path-B counters below. 0 rows = already
             // deleted → abort this id's transaction.
-            $affected = db_update('invoices', ['deleted_at' => $now], 'id = ? AND deleted_at IS NULL', [$id]);
+            $affected = db_update('invoices', ['deleted_at' => $now], 'id = ? AND deleted_at IS NULL AND status = ?', [$id, $invoice['status']]);
             if ($affected === 0) {
-                throw new \RuntimeException('Invoice already deleted (modified concurrently).');
+                throw new \RuntimeException('Invoice already deleted or modified concurrently.');
             }
+
+            // S-AUDIT-LIFECYCLE-1 (closes F33 at the bulk-delete site).
+            ff_reverse_precharge_on_invoice_removal($id, $userId, $userName, 'deleted (bulk)');
 
             // ── Path B counter logic (S-FIX-2) ──────────────────────────────
             // Mirrors the exact branching in invoices/delete.php; comments there

@@ -267,6 +267,12 @@ function ff_run_monthly_billing(string $today): array
                         'billing_type'      => 'full_month',  // flat monthly rate — no pro-rating formula
                         'invoice_type'      => 'regular',
                         'generation_source' => 'cron',
+                        // S-AUDIT-LIFECYCLE-1 #19d: the eligibility check above ran
+                        // on an unlocked read — re-verified inside the generator
+                        // AFTER its FOR UPDATE, so a close that committed while we
+                        // waited on the lock aborts this generation (caught by the
+                        // per-lease catch below; catch-up stops for this lease).
+                        'require_lease_status' => 'active',
                         'auto_generated'    => 1,
                         'created_by'        => null,           // system — no user_id for cron
                         'odometer_at_period_start_km' => $odoPeriodStart,

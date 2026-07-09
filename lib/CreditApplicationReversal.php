@@ -84,6 +84,20 @@ class CreditApplicationReversal
                 throw new \RuntimeException(self::ERR_NOT_FOUND);
             }
 
+            // S-AUDIT-LIFECYCLE-1 #24a: terminal-status guard. Reversing an
+            // application on a written_off (or void) invoice would flip it back
+            // to sent/partially_paid and re-inflate the OB the write-off (or
+            // void) already cleared. Mirror FinancialActions::voidPayment's
+            // terminal skip: the credit note is restored by other means first
+            // (un-write-off / operator action), never through this path.
+            if (in_array($invoice['status'], ['written_off', 'void'], true)) {
+                throw new \RuntimeException(
+                    "TERMINAL_STATUS: invoice {$invoice['invoice_number']} is {$invoice['status']} — "
+                    . 'unapplying credit would resurrect it and corrupt the AR counters. Reverse the '
+                    . 'write-off/void first.'
+                );
+            }
+
             $creditUntouchedVoided = false;
 
             // ── 1+2. Restore credit note remaining + status (unless voided) ──

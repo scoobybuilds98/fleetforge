@@ -746,20 +746,35 @@ try {
 if (empty($c24Errors)) { echo "PASS C24 enqueue() returns false when sync_enabled='0' (master kill)\n"; $pass++; }
 else { echo "FAIL C24 " . implode('; ', $c24Errors) . "\n"; $failures[] = 'C24'; }
 
-// ── C25: enqueue with 'update' returns false (S-QBO-12 deferred)
+// ── C25: enqueue with 'update' — UN-DEFERRED by S-AUDIT-LIFECYCLE-1 #24b.
+// invoices/update.php now enqueues 'update' for post-send metadata edits
+// (po_number / billing email) so the QBO mirror stops drifting (D-QBO-CORE-1).
+// New contract: eligible sent invoice → queue row inserted (true); draft →
+// gate-0 rejects (false).
 $c25Errors = [];
 try {
     $setSetting('quickbooks.sync_enabled', '1');
+    $preStatus = db_row("SELECT status FROM invoices WHERE id = 999990")['status'] ?? null;
+
+    // (a) sentinel is 'sent' at this point in the suite → accepted.
     $result = InvoiceEnqueuer::enqueue(999990, 'update');
-    if ($result !== false) $c25Errors[] = "expected false for 'update' (S-QBO-12 deferred), got " . json_encode($result);
-    // Cleanup if it inadvertently created a row
+    if ($result !== true) $c25Errors[] = "expected true for 'update' on a sent invoice (S-AUDIT-LIFECYCLE-1 #24b), got " . json_encode($result);
+    $qrow = db_row("SELECT operation FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id=999990 AND operation='update'");
+    if (!$qrow) $c25Errors[] = 'no queue row inserted for the update op';
+    db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id=999990");
+
+    // (b) gate-0 still rejects 'update' for a draft.
+    db_execute("UPDATE invoices SET status='draft' WHERE id = 999990");
+    $resultDraft = InvoiceEnqueuer::enqueue(999990, 'update');
+    if ($resultDraft !== false) $c25Errors[] = "expected false for 'update' on a draft, got " . json_encode($resultDraft);
+    db_execute("UPDATE invoices SET status=? WHERE id = 999990", [$preStatus ?? 'sent']);
     db_execute("DELETE FROM acc_qbo_sync_queue WHERE entity_type='invoice' AND entity_id=999990");
 } catch (Throwable $e) {
     $c25Errors[] = 'C25 threw: ' . $e->getMessage();
 } finally {
     $setSetting('quickbooks.sync_enabled', '0');
 }
-if (empty($c25Errors)) { echo "PASS C25 enqueue('update') returns false (operation allowlist excludes update; deferred to S-QBO-12)\n"; $pass++; }
+if (empty($c25Errors)) { echo "PASS C25 enqueue('update') accepted for sent (queue row) + gate-0 rejects drafts (S-AUDIT-LIFECYCLE-1 #24b)\n"; $pass++; }
 else { echo "FAIL C25 " . implode('; ', $c25Errors) . "\n"; $failures[] = 'C25'; }
 
 // ── C26: buildPrivateNoteJson includes required fields

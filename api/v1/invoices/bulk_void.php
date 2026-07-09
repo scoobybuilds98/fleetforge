@@ -230,6 +230,11 @@ foreach ($ids as $id) {
             // WHY inside transaction — reversal failure rolls back the void (A8, §16).
             \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, $userId);
 
+            // S-AUDIT-LIFECYCLE-1 (closes F33 at the bulk-void site): restore
+            // any precharge drawdown this invoice consumed + re-open the D138
+            // emit gate if it carried the mileage_precharge charge.
+            ff_reverse_precharge_on_invoice_removal($id, $userId, $userName, 'voided (bulk)');
+
             // S-ORPHAN-OVERFLOW-CN: void this invoice's auto-created overflow
             // CNs in the SAME transaction (unapplied-only; blockers skipped above).
             $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(

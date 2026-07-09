@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-06-01
-**Tables:** 154 total · **Columns:** 2450
+**Generated:** 2026-07-09
+**Tables:** 162 total · **Columns:** 2596
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -162,11 +162,14 @@ _12 tables._
 | `contract_number_snapshot` | varchar(100) |  | YES |
 | `unit_number_invoice_snapshot` | varchar(100) |  | YES |
 | `billing_address_snapshot` | text |  | YES |
+| `province_snapshot` | varchar(10) |  | YES |
 | `customer_email_snapshot` | varchar(255) |  | YES |
 | `tax_exempt_snapshot` | tinyint(1) |  | NO |
 | `gst_exempt_snapshot` | tinyint(1) |  | NO |
 | `pst_exempt_snapshot` | tinyint(1) |  | NO |
 | `tax_exempt_number_snapshot` | varchar(100) |  | YES |
+| `gst_exempt_number_snapshot` | varchar(100) |  | YES |
+| `pst_exempt_number_snapshot` | varchar(100) |  | YES |
 | `po_number` | varchar(100) |  | YES |
 | `currency` | enum('CAD','USD') |  | NO |
 | `exchange_rate_to_cad` | decimal(10,6) |  | YES |
@@ -180,6 +183,9 @@ _12 tables._
 | `cumulative_distance_km` | decimal(10,2) |  | YES |
 | `odometer_source` | enum('gps','manual','estimated') |  | YES |
 | `odometer_fetched_at` | datetime |  | YES |
+| `engine_hours_at_period_start` | decimal(10,2) |  | YES |
+| `engine_hours_at_period_end` | decimal(10,2) |  | YES |
+| `period_engine_hours` | decimal(10,2) |  | YES |
 | `billing_type` | enum('partial_start','full_month','partial_end','single_period','mileage_only','credit_note','adjustment') |  | NO |
 | `rate_method_used` | enum('daily','weekly','weekly_capped','monthly','none') |  | NO |
 | `rate_method_explanation` | json |  | YES |
@@ -209,6 +215,8 @@ _12 tables._
 | `late_fee_amount` | decimal(10,2) |  | NO |
 | `late_fee_date` | date |  | YES |
 | `late_fee_invoice_id` | int unsigned | MUL | YES |
+| `late_fee_rule_id` | int unsigned |  | YES |
+| `late_fee_rule_snapshot` | json |  | YES |
 | `credit_note_for_invoice_id` | int unsigned | MUL | YES |
 | `pdf_path` | varchar(500) |  | YES |
 | `pdf_generated_at` | datetime |  | YES |
@@ -251,8 +259,11 @@ _12 tables._
 | `template_name_snapshot` | varchar(100) |  | YES |
 | `equipment_snapshot_json` | json |  | YES |
 | `start_date` | date | MUL | NO |
+| `start_time` | time |  | YES |
 | `end_date` | date |  | YES |
+| `end_time` | time |  | YES |
 | `actual_return_date` | date |  | YES |
+| `actual_return_time` | time |  | YES |
 | `status` | enum('pending','active','completed','cancelled') | MUL | NO |
 | `classification` | enum('operating','sales_type','direct_financing') |  | NO |
 | `classification_signed_off_by` | int unsigned | MUL | YES |
@@ -278,6 +289,9 @@ _12 tables._
 | `estimated_mileage` | decimal(10,2) |  | NO |
 | `estimated_mileage_km` | decimal(12,3) |  | YES |
 | `estimated_mileage_miles` | decimal(12,3) |  | YES |
+| `estimated_mileage_per_day` | decimal(10,2) |  | NO |
+| `estimated_mileage_per_day_km` | decimal(12,4) |  | YES |
+| `estimated_mileage_per_day_miles` | decimal(12,4) |  | YES |
 | `km_to_miles_conversion` | decimal(8,6) |  | NO |
 | `miles_to_km_conversion` | decimal(8,6) |  | NO |
 | `actual_mileage` | decimal(10,2) |  | NO |
@@ -337,7 +351,15 @@ _12 tables._
 | `precharge_refund_settled_at` | datetime |  | YES |
 | `gps_opt_in` | tinyint(1) |  | NO |
 | `gps_cost` | decimal(10,2) |  | NO |
+| `hourly_rate` | decimal(10,4) |  | YES |
+| `engine_hours_at_start` | decimal(10,2) |  | YES |
+| `engine_hours_at_end` | decimal(10,2) |  | YES |
+| `cartage_amount` | decimal(10,2) |  | YES |
+| `cartage_billed_at` | datetime |  | YES |
 | `engine_version` | enum('period_independent','holistic') |  | NO |
+| `mileage_tracking_mode` | enum('manual','off','samsara') |  | NO |
+| `minimum_billing_days` | tinyint unsigned |  | YES |
+| `billing_days_removed` | tinyint unsigned |  | NO |
 
 ## `notifications`
 
@@ -491,6 +513,7 @@ _12 tables._
 | `slack_user_id` | varchar(50) |  | YES |
 | `phone_e164` | varchar(32) |  | YES |
 | `weekly_brief_opt_in` | tinyint(1) |  | NO |
+| `notification_preferences` | json |  | YES |
 
 ## `vendors`
 
@@ -538,6 +561,7 @@ _12 tables._
 | `is_active` | tinyint(1) |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime | MUL | YES |
 
 # Accounting (`acc_*`) tables
 
@@ -2009,7 +2033,7 @@ _71 tables._
 
 # Other tables
 
-_71 tables._
+_79 tables._
 
 ## `ai_anomaly_alerts`
 
@@ -2052,6 +2076,25 @@ _71 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `last_message_at` | datetime |  | YES |
 
+## `ai_pending_changes`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `user_id` | int unsigned | MUL | NO |
+| `session_id` | int unsigned | MUL | YES |
+| `change_type` | varchar(64) |  | NO |
+| `entity_type` | varchar(64) |  | NO |
+| `summary` | varchar(500) |  | NO |
+| `payload` | json |  | NO |
+| `affected_count` | int unsigned |  | NO |
+| `status` | enum('pending','applied','undone','cancelled','expired') |  | NO |
+| `applied_diff` | json |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `expires_at` | datetime |  | YES |
+| `applied_at` | datetime |  | YES |
+| `applied_by` | int unsigned |  | YES |
+
 ## `ai_query_log`
 
 | Column | Type | Key | Nullable |
@@ -2062,7 +2105,7 @@ _71 tables._
 | `prompt_tokens` | int unsigned |  | YES |
 | `completion_tokens` | int unsigned |  | YES |
 | `total_tokens` | int unsigned |  | YES |
-| `cost_usd` | decimal(8,6) |  | YES |
+| `cost_usd` | decimal(12,6) |  | YES |
 | `latency_ms` | int unsigned |  | YES |
 | `was_cached` | tinyint(1) |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
@@ -2074,7 +2117,7 @@ _71 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `entity_type` | varchar(100) | MUL | NO |
 | `entity_id` | int unsigned |  | NO |
-| `summary_type` | enum('lease_summary','customer_insights','fleet_health','unit_analysis','payment_risk','forecast','anomaly','accounting_overview','pl_narrative','bs_narrative','cashflow_narrative','budget_variance') |  | NO |
+| `summary_type` | enum('lease_summary','customer_insights','fleet_health','unit_analysis','payment_risk','forecast','anomaly','accounting_overview','pl_narrative','bs_narrative','cashflow_narrative','budget_variance','invoice_analysis','reservation_summary','vendor_summary','payment_summary') |  | NO |
 | `content` | longtext |  | NO |
 | `tokens_used` | int unsigned |  | YES |
 | `model_used` | varchar(100) |  | YES |
@@ -2109,7 +2152,7 @@ _71 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `user_id` | int unsigned | MUL | YES |
 | `user_name` | varchar(255) |  | NO |
-| `action` | enum('create','update','delete','restore','login','logout','export','status_change','view','bulk_action','payment_recorded','invoice_sent','invoice_voided','lease_closed','cron') | MUL | NO |
+| `action` | enum('create','update','delete','restore','login','logout','export','status_change','view','bulk_action','payment_recorded','invoice_sent','invoice_voided','lease_closed','cron','manual_trigger') | MUL | NO |
 | `module` | varchar(100) | MUL | NO |
 | `entity_type` | varchar(100) | MUL | NO |
 | `entity_id` | int unsigned |  | YES |
@@ -2126,8 +2169,8 @@ _71 tables._
 | Column | Type | Key | Nullable |
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `destination` | enum('s3','dropbox','manual') |  | NO |
-| `backup_type` | enum('db','storage','full') |  | NO |
+| `destination` | enum('s3','dropbox','manual') | MUL | NO |
+| `backup_type` | enum('db','storage','full') | MUL | NO |
 | `status` | enum('in_progress','success','failed') |  | NO |
 | `progress_pct` | tinyint unsigned |  | YES |
 | `progress_stage` | varchar(40) |  | YES |
@@ -2261,6 +2304,11 @@ _71 tables._
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `credit_note_number` | varchar(100) | UNI | NO |
+| `company_name_snapshot` | varchar(255) |  | YES |
+| `customer_name_snapshot` | varchar(255) |  | YES |
+| `billing_address_snapshot` | text |  | YES |
+| `province_snapshot` | varchar(10) |  | YES |
+| `customer_email_snapshot` | varchar(255) |  | YES |
 | `customer_id` | int unsigned | MUL | NO |
 | `lease_id` | int unsigned | MUL | YES |
 | `source` | enum('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other','precharge_refund','base_rental_reconciliation_overflow') |  | NO |
@@ -2293,6 +2341,41 @@ _71 tables._
 | `is_primary` | tinyint(1) |  | NO |
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `customer_credit_applications`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `customer_id` | int unsigned | MUL | NO |
+| `token_hash` | varchar(64) | UNI | NO |
+| `token_expires_at` | datetime |  | NO |
+| `status` | enum('sent','opened','submitted','reviewed') | MUL | NO |
+| `review_outcome` | enum('approved','declined','needs_info') |  | YES |
+| `form_data` | json |  | YES |
+| `rendered_html` | mediumtext |  | YES |
+| `print_name_first` | varchar(100) |  | YES |
+| `print_name_last` | varchar(100) |  | YES |
+| `signed_date` | date |  | YES |
+| `terms_accepted` | tinyint(1) |  | NO |
+| `terms_version` | varchar(100) |  | YES |
+| `terms_url` | varchar(500) |  | YES |
+| `signature_path` | varchar(500) |  | YES |
+| `submitted_ip` | varchar(45) |  | YES |
+| `submitted_user_agent` | varchar(500) |  | YES |
+| `generated_pdf_document_id` | int unsigned | MUL | YES |
+| `uploaded_document_ids` | json |  | YES |
+| `sent_at` | datetime |  | YES |
+| `opened_at` | datetime |  | YES |
+| `submitted_at` | datetime |  | YES |
+| `reviewed_at` | datetime |  | YES |
+| `sent_by` | int unsigned | MUL | YES |
+| `reviewed_by` | int unsigned | MUL | YES |
+| `review_notes` | text |  | YES |
+| `approved_credit_limit` | decimal(12,2) |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime | MUL | YES |
 
 ## `customer_discounts`
 
@@ -2489,6 +2572,41 @@ _71 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `equipment_categories`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `slug` | varchar(50) | UNI | NO |
+| `label` | varchar(100) |  | NO |
+| `enforce_minimum_billing_days` | tinyint(1) |  | NO |
+| `is_active` | tinyint(1) | MUL | NO |
+| `sort_order` | smallint unsigned |  | NO |
+| `created_by` | int unsigned |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime |  | YES |
+
+## `equipment_distance_logs`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `equipment_unit_id` | int unsigned | MUL | NO |
+| `period_start` | datetime |  | NO |
+| `period_end` | datetime |  | NO |
+| `distance` | decimal(12,2) |  | NO |
+| `unit` | enum('km','miles') |  | NO |
+| `source` | enum('obd','gps','manual') |  | NO |
+| `reading_count` | int unsigned |  | YES |
+| `warnings` | json |  | YES |
+| `first_reading_at` | datetime |  | YES |
+| `last_reading_at` | datetime |  | YES |
+| `label` | varchar(255) |  | YES |
+| `queried_at` | datetime |  | YES |
+| `created_by` | int unsigned |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
+
 ## `equipment_status_log`
 
 | Column | Type | Key | Nullable |
@@ -2504,6 +2622,21 @@ _71 tables._
 | `changed_by_user_id` | int unsigned | MUL | YES |
 | `changed_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
 
+## `equipment_subcategories`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `category_id` | int unsigned | MUL | NO |
+| `slug` | varchar(50) |  | NO |
+| `label` | varchar(100) |  | NO |
+| `is_active` | tinyint(1) |  | NO |
+| `sort_order` | smallint unsigned |  | NO |
+| `created_by` | int unsigned |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime |  | YES |
+
 ## `equipment_templates`
 
 | Column | Type | Key | Nullable |
@@ -2512,7 +2645,9 @@ _71 tables._
 | `name` | varchar(100) |  | NO |
 | `slug` | varchar(100) | UNI | NO |
 | `description` | text |  | YES |
-| `category` | enum('chassis','dry_van','reefer','container','flatbed','step_deck','lowboy','tanker','dump','other') |  | NO |
+| `category` | varchar(50) |  | NO |
+| `category_id` | int unsigned | MUL | YES |
+| `subcategory_id` | int unsigned | MUL | YES |
 | `brand` | varchar(100) |  | YES |
 | `model` | varchar(100) |  | YES |
 | `default_length_ft` | decimal(6,2) |  | YES |
@@ -2681,7 +2816,7 @@ _71 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `invoice_id` | int unsigned | MUL | NO |
 | `sort_order` | tinyint unsigned |  | NO |
-| `item_type` | enum('base_rental','mileage_precharge','mileage_adjustment','mileage_credit','insurance','warranty','late_fee','early_return_credit','manual_adjustment','damage','discount','account_credit_applied','other','gps','mileage_usage','mileage_drawdown_credit','base_rental_reconciliation_credit') |  | NO |
+| `item_type` | enum('base_rental','mileage_precharge','mileage_adjustment','mileage_credit','insurance','warranty','late_fee','early_return_credit','manual_adjustment','damage','discount','account_credit_applied','other','gps','mileage_usage','mileage_drawdown_credit','base_rental_reconciliation_credit','mileage','hourly_usage','cartage','sweep','wash','fuel','mileage_estimate') |  | NO |
 | `description` | varchar(500) |  | NO |
 | `detail_lines` | json |  | YES |
 | `quantity` | decimal(10,4) |  | NO |
@@ -2928,14 +3063,14 @@ _71 tables._
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `rule_id` | int unsigned | MUL | YES |
-| `channel` | enum('email','sms','in_app','webhook') |  | NO |
+| `channel` | enum('email','sms','in_app','webhook','slack') |  | NO |
 | `recipient` | varchar(255) |  | NO |
 | `subject` | varchar(500) |  | YES |
 | `body` | text |  | YES |
 | `entity_type` | varchar(100) | MUL | YES |
 | `entity_id` | int unsigned |  | YES |
 | `notification_type` | varchar(100) |  | YES |
-| `status` | enum('queued','sent','delivered','failed','bounced') | MUL | NO |
+| `status` | enum('queued','sent','delivered','failed','bounced','skipped') | MUL | NO |
 | `error_message` | text |  | YES |
 | `sent_at` | datetime |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
@@ -2946,14 +3081,14 @@ _71 tables._
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `rule_id` | int unsigned |  | YES |
-| `channel` | enum('email','sms','in_app','webhook') |  | NO |
+| `channel` | enum('email','sms','in_app','webhook','slack') |  | NO |
 | `recipient` | varchar(255) |  | NO |
 | `subject` | varchar(500) |  | YES |
 | `body` | text |  | YES |
 | `entity_type` | varchar(100) | MUL | YES |
 | `entity_id` | int unsigned |  | YES |
 | `notification_type` | varchar(100) |  | YES |
-| `status` | enum('queued','sent','delivered','failed','bounced') | MUL | NO |
+| `status` | enum('queued','sent','delivered','failed','bounced','skipped') | MUL | NO |
 | `error_message` | text |  | YES |
 | `sent_at` | datetime |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
@@ -3066,7 +3201,7 @@ _71 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `rate_card_id` | int unsigned | MUL | NO |
 | `equipment_type` | varchar(255) |  | NO |
-| `equipment_template_id` | int unsigned | UNI (w/ rate_card_id) | YES |
+| `equipment_template_id` | int unsigned | MUL | YES |
 | `daily_rate` | decimal(10,2) |  | YES |
 | `weekly_rate` | decimal(10,2) |  | YES |
 | `monthly_rate` | decimal(10,2) |  | YES |
@@ -3074,12 +3209,11 @@ _71 tables._
 | `mileage_unit` | enum('km','miles') |  | NO |
 | `hourly_rate` | decimal(10,4) |  | YES |
 | `gps_price` | decimal(10,2) |  | YES |
+| `minimum_days` | tinyint unsigned |  | YES |
 | `currency` | enum('CAD','USD') |  | NO |
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
-**S-RATE-CARD-TEMPLATE-ITEM:** `equipment_template_id = NULL` = category-level row (applies to all equipment of that category). `equipment_template_id = X` = template-specific override (applies only to that template, takes priority over the category row). Lookup priority: customer card + template-specific > customer card + category > global card + template-specific > global card + category.
 
 ## `rate_cards`
 
@@ -3134,6 +3268,20 @@ _71 tables._
 | `lease_id_linked` | int unsigned | MUL | YES |
 | `entry_type` | enum('system','manual') |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `role_permission_overrides`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `role_id` | int unsigned | MUL | NO |
+| `module` | varchar(50) |  | NO |
+| `action` | varchar(50) |  | NO |
+| `granted` | tinyint(1) |  | NO |
+| `updated_by` | int unsigned | MUL | NO |
+| `reason` | text |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `samsara_location_history`
 
@@ -3193,6 +3341,15 @@ _71 tables._
 | `applied_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `applied_by` | varchar(100) |  | NO |
 | `execution_ms` | int unsigned |  | YES |
+
+## `ses_webhook_events`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `message_id` | varchar(255) | UNI | NO |
+| `notification_type` | varchar(50) |  | YES |
+| `received_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 
 ## `tax_rates`
 

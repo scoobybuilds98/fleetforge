@@ -107,9 +107,20 @@ function ff_favicon_tags(): string
 // clean_string() — trim, strip HTML tags, truncate
 // Returns null if the result is an empty string.
 if (!function_exists('clean_string')) {
-function clean_string(?string $val, int $maxLen = 255): ?string
+function clean_string(mixed $val, int $maxLen = 255): ?string
 {
+    // S-AUDIT-LIFECYCLE-1 #23: accept mixed — a JSON number/bool coerces, a
+    // JSON array/object returns null (→ the caller's normal "missing/invalid"
+    // path) instead of a strict_types TypeError 500. Mirrors clean_int/
+    // clean_decimal's ingestion posture.
     if ($val === null) return null;
+    if (!is_string($val)) {
+        if (is_int($val) || is_float($val) || is_bool($val)) {
+            $val = (string) $val;
+        } else {
+            return null;
+        }
+    }
 
     $val = trim(strip_tags($val));
 
@@ -220,9 +231,11 @@ function clean_non_negative_decimal(mixed $val): ?string
 // clean_time() — return a validated HH:MM or HH:MM:SS time string, or null
 // Validates that the value is a real time (00:00–23:59).
 if (!function_exists('clean_time')) {
-function clean_time(?string $val): ?string
+function clean_time(mixed $val): ?string
 {
-    if ($val === null || $val === '') return null;
+    // S-AUDIT-LIFECYCLE-1 #23: mixed ingestion — non-string JSON → null, not
+    // a strict_types TypeError 500 (see clean_string).
+    if ($val === null || $val === '' || !is_string($val)) return null;
     $val = trim($val);
     // Match HH:MM or HH:MM:SS
     if (!preg_match('/^(\d{2}):(\d{2})(?::(\d{2}))?$/', $val, $m)) return null;
@@ -346,6 +359,145 @@ function ff_expand_capped_invoice_lines(array $lineItems, int $invoiceId): array
 }
 }
 
+// ff_reverse_precharge_on_invoice_removal() — S-AUDIT-LIFECYCLE-1 (closes F33,
+// widened to ALL removal sites). When an invoice is voided or soft-deleted its
+// precharge side effects must be reversed or the lease's money state corrupts
+// silently:
+//   (a) drawdown — createFromLease decremented leases.precharge_balance when it
+//       emitted the invoice's mileage_drawdown_credit line(s); the credit line
+//       dies with the invoice but the balance stayed decremented → the next
+//       drawdown AND the close-time refund are both short (customer pays twice).
+//       Restore exactly the invoice's own drawdown-credit sum (never recomputed).
+//   (b) precharge stamp — voiding the SENT Invoice 1 that carried the
+//       mileage_precharge charge left precharge_invoiced_at stamped, so the
+//       precharge could never be re-billed while drawdowns kept spending the
+//       activation-initialized balance the customer never paid. Un-stamp it so
+//       the D138 emit gate re-opens on the next invoice.
+// MUST be called INSIDE the removal transaction, before the invoice's line
+// items are hard-deleted (void/soft-delete keep them). Safe no-op for
+// non-precharge leases and for invoices carrying neither line type.
+if (!function_exists('ff_reverse_precharge_on_invoice_removal')) {
+function ff_reverse_precharge_on_invoice_removal(int $invoiceId, ?int $userId, string $userName, string $context): array
+{
+    $inv = db_row(
+        "SELECT i.lease_id, i.invoice_number,
+                COALESCE(SUM(CASE WHEN li.item_type = 'mileage_drawdown_credit' THEN li.amount ELSE 0 END), '0.00') AS drawdown_sum,
+                MAX(CASE WHEN li.item_type = 'mileage_precharge' THEN 1 ELSE 0 END) AS has_precharge_line
+           FROM invoices i
+           LEFT JOIN invoice_line_items li ON li.invoice_id = i.id
+          WHERE i.id = ?
+          GROUP BY i.id",
+        [$invoiceId]
+    );
+    $result = ['drawdown_restored' => '0.00', 'stamp_cleared' => false];
+    if (!$inv || !$inv['lease_id']) {
+        return $result;
+    }
+    $leaseId     = (int) $inv['lease_id'];
+    $drawdownSum = (string) $inv['drawdown_sum'];
+
+    // Lock the lease row (re-entrant within the caller's txn) and read the
+    // precharge state fresh — K-21 discipline: never trust a cached row.
+    $lease = db_row(
+        "SELECT contract_number, precharge_enabled, precharge_balance, precharge_invoiced_at
+           FROM leases WHERE id = ? FOR UPDATE",
+        [$leaseId]
+    );
+    if (!$lease || (int) $lease['precharge_enabled'] !== 1) {
+        return $result;
+    }
+
+    if (bccomp($drawdownSum, '0', 2) > 0 && $lease['precharge_balance'] !== null) {
+        $pre  = (string) $lease['precharge_balance'];
+        $post = bcadd($pre, $drawdownSum, 2);
+        db_execute(
+            "UPDATE leases SET precharge_balance = ?, updated_at = NOW() WHERE id = ?",
+            [$post, $leaseId]
+        );
+        db_insert('audit_log', [
+            'user_id'      => $userId,
+            'user_name'    => $userName,
+            'action'       => 'update',
+            'module'       => 'billing',
+            'entity_type'  => 'lease_precharge_balance_drawdown_reversal',
+            'entity_id'    => $leaseId,
+            'entity_label' => $lease['contract_number'] ?? null,
+            'notes'        => sprintf(
+                'Precharge drawdown reversed on invoice %s %s: pre=$%s, restored=$%s, post=$%s',
+                $inv['invoice_number'], $context, $pre, $drawdownSum, $post
+            ),
+            'old_values'   => json_encode(['precharge_balance' => $pre]),
+            'new_values'   => json_encode([
+                'precharge_balance' => $post,
+                'restored_amount'   => $drawdownSum,
+                'invoice_id'        => $invoiceId,
+                'reason'            => $context,
+            ]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+        $result['drawdown_restored'] = $drawdownSum;
+    }
+
+    if ((int) $inv['has_precharge_line'] === 1 && $lease['precharge_invoiced_at'] !== null) {
+        db_execute(
+            "UPDATE leases SET precharge_invoiced_at = NULL, updated_at = NOW() WHERE id = ?",
+            [$leaseId]
+        );
+        db_insert('audit_log', [
+            'user_id'      => $userId,
+            'user_name'    => $userName,
+            'action'       => 'update',
+            'module'       => 'billing',
+            'entity_type'  => 'lease_precharge_invoiced_at_unstamp',
+            'entity_id'    => $leaseId,
+            'entity_label' => $lease['contract_number'] ?? null,
+            'notes'        => sprintf(
+                'precharge_invoiced_at cleared: invoice %s (carried the mileage_precharge charge) %s — precharge re-bills on the next invoice (D138 gate re-opened)',
+                $inv['invoice_number'], $context
+            ),
+            'old_values'   => json_encode(['precharge_invoiced_at' => $lease['precharge_invoiced_at']]),
+            'new_values'   => json_encode(['precharge_invoiced_at' => null, 'invoice_id' => $invoiceId, 'reason' => $context]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+        $result['stamp_cleared'] = true;
+    }
+
+    return $result;
+}
+}
+
+// ff_next_credit_note_number() — mint the next gap-free credit-note number
+// (PREFIX-YYYY-NNNNN) via FOR UPDATE on the per-year settings counter row.
+// MUST be called inside the caller's db_transaction (the row lock is what
+// serializes concurrent minting; the counter bump commits/rolls back with the
+// CN insert). S-AUDIT-LIFECYCLE-1 #24e: this pattern existed as FOUR verbatim
+// copies (credit_notes/create.php, InvoiceGenerator overflow block, close.php
+// precharge refund, _close_reconciliation adv_create_credit_note) — one home
+// now, so a numbering change can't drift between sites.
+if (!function_exists('ff_next_credit_note_number')) {
+function ff_next_credit_note_number(): string
+{
+    $year = date('Y');
+    $key  = "credit_note.next_number.{$year}";
+
+    $row  = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$key]);
+    $next = $row ? (int) $row['value'] : 1;
+    $prefix = settings_get('credit_note.prefix', 'CN-CR');
+    $number = sprintf('%s-%s-%05d', $prefix, $year, $next);
+
+    if ($row) {
+        db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$next + 1, $key]);
+    } else {
+        db_execute(
+            "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
+            [$key, $next + 1]
+        );
+    }
+
+    return $number;
+}
+}
+
 // ff_mileage_unit_label() — the lease's mileage unit for display ('km' | 'miles'),
 // and the singular '/unit' suffix label ('km' | 'mile'). S-MILEAGE-RATE-CONVERT-FIX.
 if (!function_exists('ff_mileage_unit_label')) {
@@ -372,9 +524,11 @@ function ff_km_to_lease_unit(array $lease, $km): string
 // clean_date() — return a validated Y-m-d date string, or null
 // Rejects invalid calendar dates (e.g. Feb 30).
 if (!function_exists('clean_date')) {
-function clean_date(?string $val): ?string
+function clean_date(mixed $val): ?string
 {
-    if ($val === null || $val === '') return null;
+    // S-AUDIT-LIFECYCLE-1 #23: mixed ingestion — non-string JSON → null, not
+    // a strict_types TypeError 500 (see clean_string).
+    if ($val === null || $val === '' || !is_string($val)) return null;
 
     $val = trim($val);
 

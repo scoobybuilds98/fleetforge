@@ -148,6 +148,12 @@ foreach ($cleanIds as $id) {
     // so a future-dated invoice (billing_period_start > today) cannot mask a real
     // unbilled tail — without this, such a row pushes coverageEnd past today and
     // the lease is wrongly NOT skipped, leaving the real gap unbilled.
+    // S-AUDIT-LIFECYCLE-1 #19a: NO last_billed_date fallback — close.php
+    // explicitly forbids trusting that anchor for coverage (S-CLOSE-ZEROBILL:
+    // it is GREATEST-monotonic and survives voids, so after a reopen/void
+    // cycle a stale month-end value masked a REAL unbilled tail and the lease
+    // bulk-closed with revenue silently unbilled). Live invoices are the only
+    // coverage truth; no live coverage ⇒ tail starts at start_date ⇒ skip.
     $coverageEnd = db_row(
         "SELECT MAX(billing_period_end) AS max_end
            FROM invoices
@@ -155,7 +161,7 @@ foreach ($cleanIds as $id) {
             AND status <> 'void' AND billing_period_end IS NOT NULL
             AND billing_period_start <= ?",
         [$id, $today]
-    )['max_end'] ?? ($lease['last_billed_date'] ?: null);
+    )['max_end'] ?? null;
     $tailStart = $coverageEnd
         ? date('Y-m-d', strtotime($coverageEnd . ' +1 day'))
         : ($lease['start_date'] ?: null);
@@ -175,9 +181,29 @@ foreach ($cleanIds as $id) {
             $id, $lease, $userId, $userName, $ipAddress,
             $today, $leaseStatusLogExists
         ): void {
-            // ── 1. D20: FOR UPDATE lock on equipment unit ──────
-            // Prevents race with monthly billing cron which also writes
-            // to the lease row. Only lock when a unit is assigned.
+            // ── 1. D20 + L01 parity (S-AUDIT-LIFECYCLE-1 #6): lease-row
+            // FOR UPDATE FIRST (lease-before-unit, matching close.php:533 and
+            // activate.php), then re-check status UNDER the lock — the gates
+            // above ran on an unlocked pre-txn read, so a racing individual
+            // close could complete this lease first and this bulk pass would
+            // overwrite its actual_return_date/closed_at and duplicate logs.
+            // Also re-check the precharge balance (#19/11): a drawdown that
+            // landed mid-flight must divert the lease to the individual close
+            // (bulk deliberately skips the refund flow — a completed lease
+            // with a positive balance and no method has NO settle path).
+            $locked = db_row(
+                "SELECT status, precharge_balance FROM leases
+                  WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                [$id]
+            );
+            if (!$locked || $locked['status'] !== 'active') {
+                throw new \RuntimeException('Lease is no longer active (closed concurrently).');
+            }
+            if ($locked['precharge_balance'] !== null
+                && bccomp((string) $locked['precharge_balance'], '0', 2) > 0
+            ) {
+                throw new \RuntimeException('Precharge balance changed mid-flight — close individually.');
+            }
             if ($lease['equipment_unit_id']) {
                 db_row(
                     "SELECT id FROM equipment_units
@@ -188,16 +214,21 @@ foreach ($cleanIds as $id) {
             }
 
             // ── 2. Update lease → completed ────────────────────
-            db_execute(
+            // Belt-and-suspenders AND status='active' (I05 pattern) on top of
+            // the locked re-check above.
+            $affected = db_execute(
                 "UPDATE leases
                     SET status             = 'completed',
                         actual_return_date = ?,
                         closed_at          = NOW(),
                         closed_by_user_id  = ?,
                         updated_by         = ?
-                  WHERE id = ?",
+                  WHERE id = ? AND status = 'active'",
                 [$today, $userId, $userId, $id]
             );
+            if ($affected === 0) {
+                throw new \RuntimeException('Lease status changed concurrently — not closed by bulk.');
+            }
 
             // ── 2b. S-CLOSE-OVERSHOOT: clamp any non-advance rental invoice
             // billed past today (the bulk close-out date). bulk_close does not

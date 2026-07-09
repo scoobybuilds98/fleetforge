@@ -98,7 +98,9 @@ if (!in_array($lease['status'], ['active', 'pending'], true)) {
 // S-LEASE-MILEAGE-MODE: a lease with mileage tracking 'off' captures no odometer.
 // Reject the write so a stale reading can't be stamped onto an off lease; the
 // operator must switch the lease to Manual or Samsara first.
-if (($lease['mileage_tracking_mode'] ?? 'samsara') === 'off') {
+// S-AUDIT-LIFECYCLE-1 #18: fail CLOSED — a missing column must read as
+// 'off' (Samsara-gate invariant), matching activate.php's ?? 'off'.
+if (($lease['mileage_tracking_mode'] ?? 'off') === 'off') {
     json_error('MILEAGE_TRACKING_OFF',
         'Cannot set a starting odometer: this lease has mileage tracking set to Off. '
         . 'Switch it to Manual or Samsara on the lease edit page first.',

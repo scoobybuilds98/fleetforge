@@ -5,7 +5,8 @@ declare(strict_types=1);
  * lib/Billing/HolisticLeaseEngine.php
  *
  * Running-reconciliation billing engine. Replaces ProRateCalculator
- * for leases marked engine_version='holistic' on the leases table.
+ * for EVERY lease — the sole rental engine since S-DELETE-LEGACY-ENGINE
+ * (leases.engine_version is a vestigial column, no longer dispatched on).
  *
  * The core idea (Revision 2 §6–§7): every invoice asks the same questions —
  *   1. Known extent E = actual_return (closed) · end_date (set) · else the
@@ -76,12 +77,9 @@ class HolisticLeaseEngine
      *   daily_rate:             string     bcmath
      *   weekly_rate:            string     bcmath
      *   monthly_rate:           string     bcmath
-     *   is_activation_invoice:  bool       True iff already_billed === '0.00' for this lease.
-     *                                       Caller (InvoiceGenerator) computes this from the
-     *                                       SUM query the engine also runs, OR may pass true
-     *                                       speculatively — the engine recomputes already_billed
-     *                                       itself and the activation branch only fires when the
-     *                                       SUM is 0. Spec §35.3.
+     *   (is_activation_invoice: RETIRED — Revision 2 removed the activation
+     *                                       branch; the body never reads this
+     *                                       key. S-AUDIT-LIFECYCLE-1.)
      * }
      * @return array{
      *   delta: string,                  Signed amount, bcmath; sign drives line type
@@ -680,12 +678,14 @@ class HolisticLeaseEngine
     }
 
     /**
-     * Apply the tier formula to a given day count + rates. Pure math,
-     * no DB access, fully reusable. Used by calculateForInvoice() for
-     * the cumulative_correct computation AND by whicheverPaysMore()
-     * for Option A on the activation invoice.
+     * @internal TEST-ONLY — NOT the live billing ladder (S-AUDIT-LIFECYCLE-1).
+     * Since Revision 2, calculateForInvoice() uses cumulativeCorrect(), whose
+     * rate-driven weekly→monthly crossover CONTRADICTS this method's fixed
+     * 8-29-day weekly band + monthly cap. Its only callers are the stress /
+     * tier-conformance tests (and whicheverPaysMore below, also test-only).
+     * Do NOT reuse it on a billing path — reuse cumulativeCorrect().
      *
-     * Formulas are IDENTICAL to ProRateCalculator::calculate (spec §5.2)
+     * Formulas match the retired ProRateCalculator::calculate (spec §5.2)
      * — only the input differs (cumulative days vs period days).
      *
      * @param int    $totalDays  Day count (1+; pass periodDays for
@@ -797,7 +797,12 @@ class HolisticLeaseEngine
     }
 
     /**
-     * "Whichever pays more" rule (spec §17) — applied ONLY at the
+     * @internal TEST-ONLY — the §17 rule is RETIRED (S-AUDIT-LIFECYCLE-1).
+     * Revision 2 replaced "whichever pays more" with the single-month-flat
+     * rule + running reconciliation; NO billing path calls this method (only
+     * the unit/stress tests do). Kept as a documented pure-math artifact.
+     *
+     * "Whichever pays more" rule (spec §17) — was applied ONLY at the
      * activation invoice. Compute both options for the current period,
      * pick the HIGHER, return rich metadata for the audit trail.
      *

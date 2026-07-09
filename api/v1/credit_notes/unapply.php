@@ -55,6 +55,10 @@ try {
     if ($e->getMessage() === CreditApplicationReversal::ERR_ALREADY_REVERSED) {
         json_error('INVALID_TRANSITION', 'This credit application has already been reversed.', 409);
     }
+    // S-AUDIT-LIFECYCLE-1 #24a: terminal-status refusal is a 409, not a 500.
+    if (str_starts_with($e->getMessage(), 'TERMINAL_STATUS')) {
+        json_error('INVALID_TRANSITION', substr($e->getMessage(), strlen('TERMINAL_STATUS: ')), 409);
+    }
     json_error('INTERNAL_ERROR', 'Un-apply failed: ' . $e->getMessage(), 500);
 }
 

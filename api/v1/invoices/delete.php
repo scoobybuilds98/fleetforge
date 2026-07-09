@@ -38,9 +38,14 @@ if (!$invoice) {
     json_error('NOT_FOUND', 'Invoice not found.', 404);
 }
 
-// Only draft invoices can be deleted — super_admin may delete any status
-if ($invoice['status'] !== 'draft' && !is_super_admin()) {
-    json_error('IMMUTABLE_RECORD', 'Only draft invoices can be deleted. Use void for sent invoices.', 422);
+// Only draft invoices can be deleted — NO super_admin exemption
+// (S-AUDIT-LIFECYCLE-1 #3). The old bypass soft-deleted sent/paid invoices
+// while leaving the revenue JE posted, the QBO mirror open, and payment/CN
+// applications pointing at a tombstone. Matches update.php's D-C posture:
+// CRA immutability has no role escape hatch — void (draft/sent) or credit
+// note (paid) instead.
+if ($invoice['status'] !== 'draft') {
+    json_error('IMMUTABLE_RECORD', 'Only draft invoices can be deleted. Use void for sent invoices; paid invoices need a credit note.', 422);
 }
 
 // S-ORPHAN-OVERFLOW-CN: an invoice and its auto-created overflow credit note
@@ -60,9 +65,31 @@ if ($cnBlockers) {
 $voidedCns = [];
 
 // FIX #19: audit_log moved inside transaction
+try {
 db_transaction(function () use ($id, $invoice, &$voidedCns) {
-    // Soft-delete the invoice
-    db_update('invoices', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
+    // S-AUDIT-LIFECYCLE-1 #21: the status gate above ran on an unlocked
+    // pre-txn read (D19 locking is off) — a send racing this delete could
+    // flip the row to 'sent' before we soft-delete it. Re-check under lock
+    // and predicate the write on the pre-read status; 0 rows → abort before
+    // any counter is touched (I05 pattern).
+    db_row("SELECT id FROM invoices WHERE id = ? FOR UPDATE", [$id]);
+    $affected = db_update(
+        'invoices',
+        ['deleted_at' => date('Y-m-d H:i:s')],
+        'id = ? AND deleted_at IS NULL AND status = ?',
+        [$id, $invoice['status']]
+    );
+    if ($affected === 0) {
+        throw new \RuntimeException(
+            "CONCURRENT_MODIFICATION: invoice {$invoice['invoice_number']} changed status/deleted while this delete was in flight. Refresh and retry."
+        );
+    }
+
+    // S-AUDIT-LIFECYCLE-1 (closes F33 at the delete site): restore any
+    // precharge drawdown this draft consumed before it disappears.
+    ff_reverse_precharge_on_invoice_removal(
+        $id, current_user_id(), current_user()['name'] ?? 'System', 'deleted'
+    );
 
     // S-FIX-2 Path B: status-aware counter logic.
     //   draft         -> deleted: total_invoiced -= total_amount; OB unchanged
@@ -178,6 +205,12 @@ db_transaction(function () use ($id, $invoice, &$voidedCns) {
         "source invoice {$invoice['invoice_number']} deleted"
     );
 });
+} catch (\RuntimeException $e) {
+    if (str_starts_with($e->getMessage(), 'CONCURRENT_MODIFICATION')) {
+        json_error('CONCURRENT_MODIFICATION', substr($e->getMessage(), strlen('CONCURRENT_MODIFICATION: ')), 409);
+    }
+    throw $e;
+}
 
 // Best-effort QBO void propagation AFTER commit (D-ENQUEUER-CONTRACT).
 foreach ($voidedCns as $cn) {

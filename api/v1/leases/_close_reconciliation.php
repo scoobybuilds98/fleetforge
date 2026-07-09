@@ -99,11 +99,10 @@ function adv_void_or_credit_full(array $inv, array $lease, string $reason): arra
  * S-FIX-2 Path B: status-aware OB decrement. Drafts: OB unchanged. Sent/etc:
  *   OB -= balance_due. Plus Phase 0.5 Bug B fix: zero balance_due on the void row.
  *
- * KNOWN LIMITATION (OPERATOR_FOLLOWUPS F33): does NOT restore leases.precharge_balance
- * that the voided invoice consumed via a mileage drawdown_credit line. If a
- * drawdown-carrying draft is voided here, the close-time precharge refund
- * under-refunds. Narrow (the canonical activation Invoice 1 carries no drawdown);
- * pre-existing void-path gap, deferred.
+ * F33 CLOSED (S-AUDIT-LIFECYCLE-1): ff_reverse_precharge_on_invoice_removal()
+ * now restores leases.precharge_balance consumed by the voided invoice's
+ * mileage_drawdown_credit line(s) — the clamped reissue's createFromLease
+ * re-draws from the restored balance, so the close-time refund stays exact.
  */
 function adv_void_invoice(array $inv, array $lease, string $reason): void
 {
@@ -155,6 +154,13 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
     ]);
 
     \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided((int) $inv['id'], current_user_id());
+
+    // S-AUDIT-LIFECYCLE-1 (closes F33): restore the voided invoice's precharge
+    // drawdown before any clamped reissue re-runs createFromLease, so the
+    // replacement draws from a correct balance and the refund stays exact.
+    ff_reverse_precharge_on_invoice_removal(
+        (int) $inv['id'], current_user_id(), current_user()['name'] ?? 'system', 'voided (close reconciliation)'
+    );
 }
 
 /**
@@ -280,20 +286,9 @@ function adv_partial_refund_containing(array $inv, array $lease, string $returnD
  */
 function adv_create_credit_note(array $inv, array $lease, string $amount, string $reason): array
 {
-    $year = date('Y');
-    $key  = "credit_note.next_number.{$year}";
-    $row  = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$key]);
-    $next = $row ? (int) $row['value'] : 1;
-    $prefix = settings_get('credit_note.prefix', 'CN-CR');
-    $cnNumber = sprintf('%s-%s-%05d', $prefix, $year, $next);
-    if ($row) {
-        db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$next + 1, $key]);
-    } else {
-        db_execute(
-            "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
-            [$key, $next + 1]
-        );
-    }
+    // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper
+    // (was one of four verbatim copies).
+    $cnNumber = ff_next_credit_note_number();
 
     $cnId = db_insert('credit_notes', [
         'credit_note_number'     => $cnNumber,

@@ -3282,7 +3282,7 @@ CREATE TABLE `leases` (
   `precharge_refund_method` enum('cash','credit') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: refund mechanism picked at lease close when precharge_balance > 0. NULL until close (S-MILEAGE-3 sets).',
   `precharge_refund_settled_at` datetime DEFAULT NULL COMMENT 'S-MILEAGE-1 Model B: when the refund (cash or credit) actually posted. Audit trail for S-MILEAGE-3.',
   `gps_opt_in` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'S-LEASE-GPS-COST: per-lease GPS tracking add-on toggle. Default 1 = ON for new leases (differs from insurance/warranty default 0).',
-  `gps_cost` decimal(10,2) NOT NULL DEFAULT '1.00' COMMENT 'S-LEASE-GPS-COST: GPS service rate per billing day. Default $1.00. Engine multiplies by billing-window day count when gps_opt_in=1 AND gps_cost>0.',
+  `gps_cost` decimal(10,2) NOT NULL DEFAULT '0.00' COMMENT 'S-LEASE-GPS-COST + S-AUDIT-LIFECYCLE-1: GPS service rate per billing day. Default $0.00 (rate-card gps_price is copied in at lease creation; no card price = no charge). Engine multiplies by billing-window day count when gps_opt_in=1 AND gps_cost>0.',
   `hourly_rate` decimal(10,4) DEFAULT NULL COMMENT 'S-LEASE-HOURLY-RATE: hourly reefer/etc rate captured from rate card at lease creation. NULL = no hourly billing. Amendable via amend_rate.php.',
   `engine_hours_at_start` decimal(10,2) DEFAULT NULL COMMENT 'S-LEASE-HOURLY-BILLING: engine/reefer hours reading at lease start (manual). Billing baseline when hourly_rate>0.',
   `engine_hours_at_end` decimal(10,2) DEFAULT NULL COMMENT 'S-LEASE-HOURLY-BILLING: engine/reefer hours reading at lease close (manual). Final hours = end - start.',

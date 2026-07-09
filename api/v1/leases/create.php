@@ -41,8 +41,9 @@ declare(strict_types=1);
  *              Optional: end_date, currency, mileage_unit, billing_cycle,
  *              gst_exempt, pst_exempt, discount_type, discount_value,
  *              insurance_opt_in, insurance_cost, warranty_opt_in, warranty_cost,
- *              gps_opt_in, gps_cost (S-LEASE-GPS-COST: per-day rate, defaults
- *              opt_in=true / cost=$1.00 if absent),
+ *              gps_opt_in, gps_cost (S-GPS-RATE-CARD: per-day rate auto-filled
+ *              from the rate card's gps_price; defaults opt_in=true /
+ *              cost=$0.00 if absent — no card price, no charge),
  *              po_number, notes, internal_notes, rate_notes, minimum_end_date,
  *              minimum_billing_days (S-LEASE-MIN-DAYS: short-lease floor frozen on
  *              the lease — absent inherits settings 'lease.minimum_billing_days'
@@ -95,6 +96,20 @@ if ($startDate && !isset($fields['start_date'])) {
     $maxYear   = (int) date('Y') + 2;
     if ($startYear < 2000 || $startYear > $maxYear) {
         $fields['start_date'] = "Start date {$startDate} looks invalid — the year must be between 2000 and {$maxYear}.";
+    }
+}
+
+// S-AUDIT-LIFECYCLE-1 #23: the same year-sanity clamp for end_date /
+// minimum_end_date (MTTS286 fixed only start_date; an absurd 0001/9999 end
+// date overflows billing_period_days at close the same way). end dates may
+// legitimately run further into the future than a start date — allow +30y.
+foreach (['end_date', 'minimum_end_date'] as $endKey) {
+    $endVal = clean_date($body[$endKey] ?? null);
+    if ($endVal && !isset($fields[$endKey])) {
+        $endYear = (int) substr($endVal, 0, 4);
+        if ($endYear < 2000 || $endYear > (int) date('Y') + 30) {
+            $fields[$endKey] = ucfirst(str_replace('_', ' ', $endKey)) . " {$endVal} looks invalid — the year must be between 2000 and " . ((int) date('Y') + 30) . '.';
+        }
     }
 }
 
@@ -185,13 +200,30 @@ $milesToKmFinal = bcround(
     (string)(settings_get('lease.miles_to_km_conversion', '1.609344') ?? '1.609344'), 6);
 
 // ── Optional fields ────────────────────────────────────────────
+// S-AUDIT-LIFECYCLE-1 #12/#23: out-of-enum values are hard 422s, not silent
+// coercions to defaults (the mileage_tracking_mode idiom below). The old
+// coercion let `billing_cycle:"weekly"` SKIP the D132 tier-completeness gate
+// (which keyed off the raw value) while 'monthly' was stored anyway — a
+// zero-tier lease creatable via raw API; and a mis-sent currency/unit was
+// silently re-written, mis-pricing the lease.
+$enumOrError = static function (string $key, array $allowed, string $default) use ($body, &$fields): string {
+    $raw = $body[$key] ?? null;
+    if ($raw === null || $raw === '') {
+        return $default;
+    }
+    if (in_array($raw, $allowed, true)) {
+        return (string) $raw;
+    }
+    $fields[$key] = 'Invalid value — must be one of: ' . implode(', ', $allowed) . '.';
+    return $default;
+};
 $endDate        = clean_date($body['end_date'] ?? null);
-$currency       = in_array($body['currency'] ?? '', ['CAD','USD']) ? $body['currency'] : 'CAD';
-$mileageUnit    = in_array($body['mileage_unit'] ?? '', ['km','miles']) ? $body['mileage_unit'] : 'km';
-$billingCycle   = in_array($body['billing_cycle'] ?? '', ['monthly','on_close_only']) ? $body['billing_cycle'] : 'monthly';
+$currency       = $enumOrError('currency', ['CAD', 'USD'], 'CAD');
+$mileageUnit    = $enumOrError('mileage_unit', ['km', 'miles'], 'km');
+$billingCycle   = $enumOrError('billing_cycle', ['monthly', 'on_close_only'], 'monthly');
 $gstExempt      = isset($body['gst_exempt']) ? (bool) $body['gst_exempt'] : null;
 $pstExempt      = isset($body['pst_exempt']) ? (bool) $body['pst_exempt'] : null;
-$discountType   = in_array($body['discount_type'] ?? '', ['none','percentage','flat']) ? $body['discount_type'] : 'none';
+$discountType   = $enumOrError('discount_type', ['none', 'percentage', 'flat'], 'none');
 
 $discountValueIn = clean_decimal($body['discount_value'] ?? null);
 if ($discountValueIn !== null && bccomp($discountValueIn, '0', 4) < 0) {
@@ -208,6 +240,12 @@ if ($insuranceCostIn !== null && bccomp($insuranceCostIn, '0', 4) < 0) {
     $fields['insurance_cost'] = 'Insurance cost cannot be negative.';
 }
 $insuranceCost = ($insuranceCostIn !== null && bccomp($insuranceCostIn, '0', 4) >= 0) ? $insuranceCostIn : '0.00';
+// S-AUDIT-LIFECYCLE-1 #23: opt-out zeroes the cost (mirrors the precharge
+// clear) — a dormant cost persisted with opt_in=0 bills unexpectedly the day
+// the toggle flips on.
+if (!$insuranceOptIn) {
+    $insuranceCost = '0.00';
+}
 
 $warrantyOptIn  = isset($body['warranty_opt_in']) ? (bool) $body['warranty_opt_in'] : false;
 $warrantyCostIn = clean_decimal($body['warranty_cost'] ?? null);
@@ -215,6 +253,9 @@ if ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) < 0) {
     $fields['warranty_cost'] = 'Warranty cost cannot be negative.';
 }
 $warrantyCost = ($warrantyCostIn !== null && bccomp($warrantyCostIn, '0', 4) >= 0) ? $warrantyCostIn : '0.00';
+if (!$warrantyOptIn) {
+    $warrantyCost = '0.00';
+}
 
 // S-GPS-RATE-CARD: GPS opt-in toggle stays on the lease. GPS cost is no longer
 // entered manually — the form auto-populates gps_cost from the rate card's
@@ -362,22 +403,13 @@ if ($odoStartRaw !== null && $odoStartRaw !== '') {
         $odometerStartSource = 'manual';
     }
 
-    // fetched_at only meaningful when source is 'gps'
+    // fetched_at only meaningful when source is 'gps'.
+    // S-AUDIT-LIFECYCLE-1 #23: ALWAYS server-stamped. The client used to be
+    // able to supply this "GPS-verified at" timestamp, making the audit
+    // metadata spoofable; the form fetches the reading seconds before
+    // submitting anyway, so the server clock is the honest value.
     if ($odometerStartSource === 'gps') {
-        $fetchedAtRaw = $body['odometer_start_fetched_at'] ?? null;
-        if ($fetchedAtRaw !== null && $fetchedAtRaw !== '') {
-            // Parse ISO 8601 into MySQL datetime format
-            try {
-                $dt = new DateTime((string) $fetchedAtRaw);
-                $odometerStartFetchedAt = $dt->format('Y-m-d H:i:s');
-            } catch (\Throwable) {
-                // Ignore malformed timestamp — keep source but leave timestamp null
-            }
-        }
-        if ($odometerStartFetchedAt === null) {
-            // Stamp server-side so we always have an audit trail
-            $odometerStartFetchedAt = date('Y-m-d H:i:s');
-        }
+        $odometerStartFetchedAt = date('Y-m-d H:i:s');
     }
 
     // SAMSARA-3: auto-derive the legacy integer `mileage_at_start` column
@@ -591,7 +623,17 @@ if ($customer['tax_rate_id']) {
 // WHY: prefix from settings so admin can rebrand without code change
 $leasePrefix     = settings_get('lease.prefix', 'CN');
 $year            = date('Y');
-$suppliedCN      = trim($body['contract_number'] ?? '');
+// S-AUDIT-LIFECYCLE-1 #23: non-string JSON (array/number) used to reach
+// trim() → TypeError 500 under strict_types; >100 chars used to hit the
+// varchar(100) column → SQLSTATE 22001 → 500. Both are client errors → 422.
+$suppliedCNRaw   = $body['contract_number'] ?? '';
+if (!is_string($suppliedCNRaw) && !is_numeric($suppliedCNRaw)) {
+    json_validation_error(['contract_number' => 'Contract number must be a string.']);
+}
+$suppliedCN      = trim((string) $suppliedCNRaw);
+if (mb_strlen($suppliedCN) > 100) {
+    json_validation_error(['contract_number' => 'Contract number cannot exceed 100 characters.']);
+}
 
 // leases.contract_number carries a GLOBAL UNIQUE index (FLEETFORGE_DATABASE_MASTER.sql
 // — `UNIQUE KEY contract_number`) that spans soft-deleted rows too. db_exists()

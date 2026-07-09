@@ -1098,12 +1098,15 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         <span x-text="rateAmendModal.error"></span>
                     </div>
 
-                    <!-- Helper text — D-A prospective + D-D no auto credits -->
+                    <!-- Helper text — D-A retroactive reconciliation (S-AUDIT-LIFECYCLE-1 #5,
+                         operator 2026-07-09: copy aligned to actual engine behaviour) -->
                     <p class="text-sm text-secondary" style="margin-bottom:14px;">
-                        Rate amendments take effect immediately and apply to invoices
-                        generated <strong>after</strong> this change. Already-sent
-                        invoices remain unchanged (D14 immutability) — issue a manual
-                        credit note if a retroactive adjustment is needed.
+                        Rate amendments take effect immediately. Already-sent invoices
+                        remain unchanged (D14 immutability), <strong>but the billing
+                        engine reconciles the whole lease at the new rates</strong>:
+                        the next invoice will include a catch-up charge (rate increased)
+                        or credit (rate lowered) that re-prices all previously billed
+                        days at the amended rate.
                     </p>
 
                     <!-- Base-rental rates -->

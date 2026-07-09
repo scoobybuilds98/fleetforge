@@ -96,10 +96,16 @@ if ($payment['currency'] !== $invoiceCheck['currency']) {
         "Payment currency must match invoice currency ({$invoiceCheck['currency']}).";
 }
 
-if ($invoiceCheck['status'] === 'void') {
-    $crossFieldErrors['invoice_id'] = 'Cannot allocate a payment to a voided invoice.';
-} elseif ($invoiceCheck['status'] === 'paid') {
+// S-AUDIT-LIFECYCLE-1 #8: only ISSUED invoices are payable — the old gate
+// rejected just void/paid, so a DRAFT could be allocated a payment, flipping
+// it to paid without ever being sent (no Path-B counters, no revenue JE, no
+// QBO push). Mirror payments/create.php's validPayableStatuses.
+$validPayableStatuses = ['sent', 'partially_paid', 'overdue'];
+if ($invoiceCheck['status'] === 'paid') {
     $crossFieldErrors['invoice_id'] = 'This invoice is already fully paid.';
+} elseif (!in_array($invoiceCheck['status'], $validPayableStatuses, true)) {
+    $crossFieldErrors['invoice_id'] =
+        "Cannot allocate a payment to a '{$invoiceCheck['status']}' invoice — only sent, partially paid, or overdue invoices are payable.";
 }
 
 // Allocation amount must not exceed balance due

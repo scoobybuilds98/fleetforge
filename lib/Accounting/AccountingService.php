@@ -117,15 +117,28 @@ class AccountingService
      */
     public static function recognitionDate(string $issueDate): string
     {
+        $today = self::businessToday();
+
+        return ($issueDate > $today) ? $today : $issueDate;
+    }
+
+    /**
+     * Today's date (Y-m-d) in the BUSINESS timezone (settings.company.timezone,
+     * fallback APP_TIMEZONE) — the single "what day is it" source for billing
+     * date math (recognition future-guard, late-fee grace days). Extracted from
+     * recognitionDate() by S-AUDIT-LIFECYCLE-1 so no caller hand-rolls a
+     * server-default-tz date() for money decisions.
+     */
+    public static function businessToday(): string
+    {
         $tzName = (string) (\settings_get('company.timezone', \APP_TIMEZONE) ?? \APP_TIMEZONE);
         try {
             $tz = new \DateTimeZone($tzName);
         } catch (\Throwable) {
             $tz = new \DateTimeZone(\APP_TIMEZONE);
         }
-        $today = (new \DateTimeImmutable('now', $tz))->format('Y-m-d');
 
-        return ($issueDate > $today) ? $today : $issueDate;
+        return (new \DateTimeImmutable('now', $tz))->format('Y-m-d');
     }
 
     /**

@@ -23,8 +23,10 @@ declare(strict_types=1);
  *              6. Write lease_status_log
  *              7. Write audit_log
  *
- *              Final invoice generation (mileage reconciliation) is stubbed here;
- *              InvoiceGenerator will be called from this point in S009+.
+ *              The final invoice (holistic partial_end, invoice_type='final'),
+ *              overshoot reconciliation, closeout charges, mileage true-up,
+ *              and the precharge refund dispatch all run INSIDE this
+ *              endpoint's transaction — see the ordered sequence below.
  *
  * @method      POST
  * @body        JSON — id (required), actual_return_date (optional, defaults today),
@@ -223,7 +225,8 @@ require_once __DIR__ . "/_close_reconciliation.php";
  *
  * Concurrency: the SELECT is FOR UPDATE so a concurrent monthly cron run cannot
  * insert a duplicate full_month invoice between our check and our action. The
- * outer close transaction already holds the equipment_unit lock so the cron
+ * outer close transaction already holds the LEASE row lock (the cron's
+ * createFromLease serializes on it — the cron never locks equipment_units) so the cron
  * cannot mid-process the same lease.
  */
 function legacy_handle_existing_full_month_draft(
@@ -881,8 +884,12 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     $cumulativeActualKmOverride = null;
     if ($usesEstimateMileage && $odoAtClose === null
         && $mileageAtEnd !== null && $mileageAtEnd > 0) {
-        $unit = (string) ($lease['mileage_unit'] ?? 'km');
-        if ($unit === 'miles') {
+        // S-AUDIT-LIFECYCLE-1 #19b: local renamed from $unit — it silently
+        // CLOBBERED the equipment-unit row fetched under FOR UPDATE above,
+        // so the lease.closed notification later read unit_number off the
+        // string 'km' and degraded to the snapshot.
+        $mileageUnitStr = (string) ($lease['mileage_unit'] ?? 'km');
+        if ($mileageUnitStr === 'miles') {
             $conv = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
             if (bccomp($conv, '0', 6) <= 0) $conv = '0.621371';
             // miles ÷ (miles per km) = km
@@ -1183,7 +1190,8 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         //     draft and use it as the final invoice (skip partial_end).
         //   - Mid-month close: void the draft, then fall through to partial_end.
         // Concurrency: helper uses FOR UPDATE on the draft row; outer txn already
-        // holds the equipment_unit lock so the cron cannot insert mid-flight.
+        // holds the LEASE row lock (the serializer createFromLease also takes —
+        // the cron never locks equipment_units) so the cron cannot insert mid-flight.
         $draftAction = legacy_handle_existing_full_month_draft(
             $id, $actualReturnDate, $extentEnd, $lease, $extraLines,
             $odoPeriodStart, $odoAtClose, $odoSource, $odoFetchedAt
@@ -1584,28 +1592,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // D-C: create credit_note with source='precharge_refund'.
             // Reuses the gap-free credit_note_number pattern from
             // api/v1/credit_notes/create.php (FOR UPDATE on settings row).
-            $year = date('Y');
-            $cnSettingsKey = "credit_note.next_number.{$year}";
-
-            $cnSettingsRow = db_row(
-                "SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE",
-                [$cnSettingsKey]
-            );
-            $cnNext   = $cnSettingsRow ? (int) $cnSettingsRow['value'] : 1;
-            $cnPrefix = settings_get('credit_note.prefix', 'CN-CR');
-            $refundCnNum = sprintf('%s-%s-%05d', $cnPrefix, $year, $cnNext);
-
-            if ($cnSettingsRow) {
-                db_execute(
-                    "UPDATE settings SET `value` = ? WHERE `key` = ?",
-                    [$cnNext + 1, $cnSettingsKey]
-                );
-            } else {
-                db_execute(
-                    "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
-                    [$cnSettingsKey, $cnNext + 1]
-                );
-            }
+            // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper
+            // (was one of four verbatim copies).
+            $refundCnNum = ff_next_credit_note_number();
 
             $cnReason = "Precharge balance refund — lease {$lease['contract_number']}"
                 . ($refundNotes ? " ({$refundNotes})" : '');
@@ -1804,13 +1793,26 @@ try {
 // dates, and operational actions remain so the closer still sees what happened.
 if (!can_view_financials()) {
     if (isset($result['precharge_refund']) && is_array($result['precharge_refund'])) {
-        unset(
-            $result['precharge_refund']['amount'],
-            $result['precharge_refund']['precharge_balance_at_close']
-        );
+        // (S-AUDIT-LIFECYCLE-1: dropped the dead 'precharge_balance_at_close'
+        // unset — that key only ever exists in the audit JSON, never here.)
+        unset($result['precharge_refund']['amount']);
     }
     if (isset($result['termination_je']) && is_array($result['termination_je'])) {
         unset($result['termination_je']['residual_written_off']);
+    }
+    // S-AUDIT-LIFECYCLE-1 #19c: L43 residual — the advance/overshoot action
+    // descriptors still carried dollar figures (CN amounts, old/new invoice
+    // totals) past the redaction. Strip every money key from each action.
+    foreach (['advance_actions', 'overshoot_actions'] as $actionsKey) {
+        if (isset($result[$actionsKey]) && is_array($result[$actionsKey])) {
+            foreach ($result[$actionsKey] as &$action) {
+                if (is_array($action)) {
+                    unset($action['amount'], $action['old_total'], $action['new_total'],
+                          $action['credit_amount'], $action['total_amount']);
+                }
+            }
+            unset($action);
+        }
     }
 }
 

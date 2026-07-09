@@ -46,7 +46,7 @@ class OverflowCreditNotes
      *
      * @return array<int, array<string,mixed>>
      */
-    public static function findLive(int $invoiceId): array
+    public static function findLive(int $invoiceId, bool $forUpdate = false): array
     {
         $ph = implode(',', array_fill(0, count(self::SOURCES), '?'));
         return \db_select(
@@ -56,9 +56,20 @@ class OverflowCreditNotes
                 AND source IN ($ph)
                 AND deleted_at IS NULL
                 AND voided_at IS NULL
-                AND status <> 'void'",
+                AND status <> 'void'"
+            . ($forUpdate ? ' FOR UPDATE' : ''),
             array_merge([$invoiceId], self::SOURCES)
         );
+    }
+
+    /**
+     * True when the invoice has ANY live overflow CN (applied or not).
+     * Used by the draft line editor to refuse edits that would desync the
+     * CN from its source computation (S-AUDIT-LIFECYCLE-1 #11b).
+     */
+    public static function hasLive(int $invoiceId): bool
+    {
+        return self::findLive($invoiceId) !== [];
     }
 
     /**
@@ -119,7 +130,12 @@ class OverflowCreditNotes
      */
     public static function voidForInvoice(int $invoiceId, ?int $userId, string $userName, string $context): array
     {
-        $live = self::findLive($invoiceId);
+        // S-AUDIT-LIFECYCLE-1 #16: read the CN rows FOR UPDATE. The old
+        // non-locking read + stale re-check had a TOCTOU hole — an apply
+        // committing between the read and the UPDATE below got blind-stomped
+        // to void/0.00 (spent credit clawed back + issue JE over-reversed).
+        // The lock serializes against credit_notes/apply.php's own FOR UPDATE.
+        $live = self::findLive($invoiceId, true);
         if (!$live) {
             return [];
         }
@@ -139,14 +155,21 @@ class OverflowCreditNotes
                 );
             }
 
-            \db_update('credit_notes', [
+            // Belt-and-suspenders on top of the FOR UPDATE read: predicate the
+            // void on the exact observed state; 0 rows = concurrent change.
+            $affected = \db_update('credit_notes', [
                 'status'           => 'void',
                 'amount_remaining' => '0.00',
                 'voided_by'        => $userId,
                 'voided_at'        => $now,
                 'internal_notes'   => "Auto-voided: {$context} (S-ORPHAN-OVERFLOW-CN — an overflow credit lives and dies with its source invoice).",
                 'updated_at'       => $now,
-            ], 'id = ?', [(int) $cn['id']]);
+            ], 'id = ? AND status = ? AND amount_remaining = ?', [(int) $cn['id'], $cn['status'], $cn['amount_remaining']]);
+            if ($affected === 0) {
+                throw new \RuntimeException(
+                    "Overflow credit note {$cn['credit_note_number']} changed concurrently; cannot auto-void."
+                );
+            }
 
             \db_insert('audit_log', [
                 'user_id'      => $userId,

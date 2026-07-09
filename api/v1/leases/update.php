@@ -133,6 +133,12 @@ $rateBlockedFields = [
     'daily_rate',
     'weekly_rate',
     'monthly_rate',
+    // S-AUDIT-LIFECYCLE-1 #15: the PRIMARY mileage_rate column was missing
+    // from this list — a PATCH containing it was silently dropped (no 422,
+    // no audit), the exact silent-drop this block exists to eliminate. The
+    // legacy close-overage path still reads it, so a client that "changed"
+    // it got a 200 while nothing happened.
+    'mileage_rate',
     'mileage_rate_km',
     'mileage_rate_miles',
 ];
@@ -343,11 +349,17 @@ if (array_key_exists('cartage_amount', $body)) {
 }
 
 if (array_key_exists('estimated_mileage', $body)) {
+    // S-AUDIT-LIFECYCLE-1 #23: a supplied-but-malformed value is a field
+    // error, not a silent '0.00' (the old coercion zeroed the allowance on a
+    // typo with a 200). Empty string/null = explicit clear to 0.
     $d = clean_decimal($body['estimated_mileage']);
-    if ($d !== null && bccomp($d, '0', 4) < 0) {
+    if ($body['estimated_mileage'] !== null && $body['estimated_mileage'] !== '' && $d === null) {
+        $fields['estimated_mileage'] = 'Estimated mileage must be a valid number.';
+    } elseif ($d !== null && bccomp($d, '0', 4) < 0) {
         $fields['estimated_mileage'] = 'Estimated mileage cannot be negative.';
+    } else {
+        $data['estimated_mileage'] = ($d !== null) ? $d : '0.00';
     }
-    $data['estimated_mileage'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
 }
 
 // S-MILEAGE-EST-DAILY: per-day estimate (primary, in the lease's mileage_unit).
@@ -364,22 +376,30 @@ if (array_key_exists('insurance_opt_in', $body))
     $data['insurance_opt_in'] = (bool) $body['insurance_opt_in'] ? 1 : 0;
 
 if (array_key_exists('insurance_cost', $body)) {
+    // S-AUDIT-LIFECYCLE-1 #23: malformed value = field error (see estimated_mileage).
     $d = clean_decimal($body['insurance_cost']);
-    if ($d !== null && bccomp($d, '0', 4) < 0) {
+    if ($body['insurance_cost'] !== null && $body['insurance_cost'] !== '' && $d === null) {
+        $fields['insurance_cost'] = 'Insurance cost must be a valid number.';
+    } elseif ($d !== null && bccomp($d, '0', 4) < 0) {
         $fields['insurance_cost'] = 'Insurance cost cannot be negative.';
+    } else {
+        $data['insurance_cost'] = ($d !== null) ? $d : '0.00';
     }
-    $data['insurance_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
 }
 
 if (array_key_exists('warranty_opt_in', $body))
     $data['warranty_opt_in'] = (bool) $body['warranty_opt_in'] ? 1 : 0;
 
 if (array_key_exists('warranty_cost', $body)) {
+    // S-AUDIT-LIFECYCLE-1 #23: malformed value = field error (see estimated_mileage).
     $d = clean_decimal($body['warranty_cost']);
-    if ($d !== null && bccomp($d, '0', 4) < 0) {
+    if ($body['warranty_cost'] !== null && $body['warranty_cost'] !== '' && $d === null) {
+        $fields['warranty_cost'] = 'Warranty cost must be a valid number.';
+    } elseif ($d !== null && bccomp($d, '0', 4) < 0) {
         $fields['warranty_cost'] = 'Warranty cost cannot be negative.';
+    } else {
+        $data['warranty_cost'] = ($d !== null) ? $d : '0.00';
     }
-    $data['warranty_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '0.00';
 }
 
 // S-LEASE-GPS-COST: GPS toggle + per-day cost are mutable (parallel to
@@ -389,26 +409,24 @@ if (array_key_exists('gps_opt_in', $body))
     $data['gps_opt_in'] = (bool) $body['gps_opt_in'] ? 1 : 0;
 
 if (array_key_exists('gps_cost', $body)) {
+    // S-AUDIT-LIFECYCLE-1 #23: malformed value = field error. The old
+    // fallback silently set $1.00/day (a CHARGE) on a typo with a 200.
     $d = clean_decimal($body['gps_cost']);
-    if ($d !== null && bccomp($d, '0', 4) < 0) {
+    if ($body['gps_cost'] !== null && $body['gps_cost'] !== '' && $d === null) {
+        $fields['gps_cost'] = 'GPS cost must be a valid number.';
+    } elseif ($d !== null && bccomp($d, '0', 4) < 0) {
         $fields['gps_cost'] = 'GPS cost cannot be negative.';
+    } elseif ($d !== null) {
+        $data['gps_cost'] = $d;
+    } else {
+        // Explicit clear ('' / null) → no GPS charge.
+        $data['gps_cost'] = '0.00';
     }
-    $data['gps_cost'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? $d : '1.00';
 }
 
-// S-LEASE-HOURLY-RATE: hourly rate mutable via edit (like GPS). NULL = clear billing.
-if (array_key_exists('hourly_rate', $body)) {
-    if ($body['hourly_rate'] === null || $body['hourly_rate'] === '') {
-        $data['hourly_rate'] = null;
-    } else {
-        $d = clean_decimal($body['hourly_rate']);
-        if ($d !== null && bccomp($d, '0', 4) < 0) {
-            $fields['hourly_rate'] = 'Hourly rate cannot be negative.';
-        } else {
-            $data['hourly_rate'] = $d;
-        }
-    }
-}
+// S-AUDIT-LIFECYCLE-1 F6: the second (duplicate) hourly_rate block was removed
+// — it silently overwrote the stricter S-LEASE-HOURLY-BILLING handler above
+// (which rejects malformed input; this copy nulled the rate on a typo).
 
 // ── S-LEASE-MIN-DAYS: short-lease floor (Config Layer 2) is operator-editable ──
 // Mutable here like insurance/warranty/gps (NOT a rate-immutable column — it's a
@@ -582,6 +600,22 @@ if ($prechargeEnabledSupplied || $prechargeAmountSupplied) {
         // ensures amount is present + > 0 when enabled).
         $data['precharge_amount'] = ($newEnabled === 1) ? $newAmount : null;
     }
+
+    // S-AUDIT-LIFECYCLE-1 #14: keep precharge_balance IN SYNC while the
+    // precharge is still un-billed. Activation initializes balance = amount
+    // (D137); in the activated-but-Invoice-1-not-yet-sent window this
+    // endpoint could change precharge_amount while the balance kept the OLD
+    // value — Invoice 1 then bills the NEW amount while drawdown/refund run
+    // off the OLD one (money drift), and disabling orphaned a non-null
+    // balance. Never touches a balance after the stamp ($prechargeFrozen
+    // rejected above) and never invents one pre-activation (balance stays
+    // NULL until D137 initializes it).
+    if (($enabledChanged || $amountChanged)) {
+        $curBalance = db_row("SELECT precharge_balance FROM leases WHERE id = ?", [$id])['precharge_balance'] ?? null;
+        if ($curBalance !== null) {
+            $data['precharge_balance'] = ($newEnabled === 1) ? $newAmount : null;
+        }
+    }
 }
 
 // ADV-BILL-1: advance_billing_periods is editable ONLY while the lease is pending.
@@ -671,6 +705,29 @@ if (isset($data['estimated_mileage_km']) || isset($data['estimated_mileage_miles
     $resolvedKm    = $data['estimated_mileage_km']    ?? $leaseRow['estimated_mileage_km']    ?? '0.000';
     $resolvedMiles = $data['estimated_mileage_miles'] ?? $leaseRow['estimated_mileage_miles'] ?? '0.000';
     $data['estimated_mileage'] = ($primaryUnit === 'miles') ? $resolvedMiles : $resolvedKm;
+} elseif (isset($data['estimated_mileage'])) {
+    // S-AUDIT-LIFECYCLE-1 F9: the inverse direction was missing — PATCHing
+    // the LEGACY estimated_mileage alone never touched the _km/_miles
+    // mirrors, so the dual-unit columns (which the estimate/true-up math
+    // reads) drifted from the value close.php bills on. Derive both mirrors
+    // from the legacy value in the lease's primary unit.
+    $emRow = db_row(
+        "SELECT mileage_unit, km_to_miles_conversion, miles_to_km_conversion FROM leases WHERE id = ?",
+        [$id]
+    );
+    $emUnit    = $emRow['mileage_unit'] ?? 'km';
+    $kmToMiles = (string) ($emRow['km_to_miles_conversion'] ?? '0.621371');
+    $milesToKm = (string) ($emRow['miles_to_km_conversion'] ?? '1.609344');
+    if (bccomp($kmToMiles, '0', 6) <= 0) $kmToMiles = '0.621371';
+    if (bccomp($milesToKm, '0', 6) <= 0) $milesToKm = '1.609344';
+    $em = (string) $data['estimated_mileage'];
+    if ($emUnit === 'miles') {
+        $data['estimated_mileage_miles'] = bcround($em, 3);
+        $data['estimated_mileage_km']    = bcround(bcmul($em, $milesToKm, 8), 3);
+    } else {
+        $data['estimated_mileage_km']    = bcround($em, 3);
+        $data['estimated_mileage_miles'] = bcround(bcmul($em, $kmToMiles, 8), 3);
+    }
 }
 
 // S-MILEAGE-EST-DAILY: when the per-day estimate is edited, derive its km/miles
@@ -701,27 +758,18 @@ $newUpdatedAt = null;
 
 try {
 db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdatedAt) {
-    // S-LEASE-DISTANCE-EDIT-ACTIVE: capture old values of distance fields before
-    // the write so the audit trail records old→new for each changed odometer/allowance
-    // column. Required by the audit_log standard (old_values + new_values per change).
-    $distanceCols = [
-        'mileage_at_start', 'estimated_mileage', 'estimated_mileage_km',
-        'estimated_mileage_miles', 'km_to_miles_conversion', 'miles_to_km_conversion',
-        'estimated_mileage_per_day', 'estimated_mileage_per_day_km',
-        'estimated_mileage_per_day_miles',
-    ];
-    $changedDistCols = array_intersect(array_keys($data), $distanceCols);
-    $oldDistValues   = null;
-    if ($changedDistCols !== []) {
-        $oldRow = db_row(
-            "SELECT mileage_at_start, estimated_mileage, estimated_mileage_km,
-                    estimated_mileage_miles, km_to_miles_conversion, miles_to_km_conversion,
-                    estimated_mileage_per_day, estimated_mileage_per_day_km,
-                    estimated_mileage_per_day_miles
-               FROM leases WHERE id = ?",
-            [$id]
-        );
-        $oldDistValues = array_intersect_key($oldRow, array_flip($changedDistCols));
+    // S-AUDIT-LIFECYCLE-1 #24f: capture the before-image for EVERY column this
+    // update touches (the old code snapshotted only the distance columns, so a
+    // contract-number rename, precharge change, gps_cost change, or date edit
+    // had new_values with no old_values — a one-sided audit trail). Column
+    // names come from OUR whitelist ($data keys), never client input, so the
+    // dynamic SELECT list is injection-safe.
+    $auditCols = array_values(array_diff(array_keys($data), ['updated_by']));
+    $oldValues = null;
+    if ($auditCols !== []) {
+        $colList = '`' . implode('`, `', $auditCols) . '`';
+        $oldRow  = db_row("SELECT {$colList} FROM leases WHERE id = ?", [$id]);
+        $oldValues = $oldRow ?: null;
     }
 
     db_update('leases', $data, 'id = ?', [$id]);
@@ -738,7 +786,7 @@ db_transaction(function () use ($id, $data, $existing, $nonStdConv, &$newUpdated
         'entity_id'    => $id,
         'entity_label' => $existing['contract_number'],
         'notes'        => "Lease {$existing['contract_number']} metadata updated",
-        'old_values'   => $oldDistValues !== null ? json_encode($oldDistValues) : null,
+        'old_values'   => $oldValues !== null ? json_encode($oldValues) : null,
         'new_values'   => json_encode($data),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);

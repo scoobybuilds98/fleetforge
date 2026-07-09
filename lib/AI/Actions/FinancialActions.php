@@ -140,6 +140,11 @@ class FinancialActions
             // failure rolls back the whole void (A8, §16).
             \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, $userId);
 
+            // S-AUDIT-LIFECYCLE-1 (closes F33 at the void site): restore any
+            // precharge drawdown this invoice consumed and re-open the D138
+            // precharge emit gate if it carried the mileage_precharge charge.
+            ff_reverse_precharge_on_invoice_removal($id, $userId, $userName, 'voided');
+
             // S-ORPHAN-OVERFLOW-CN: void the invoice's auto-created overflow
             // CNs in the SAME transaction (unapplied-only; blockers refused
             // above). Reverses each CN's issue JE via onCreditNoteVoided.
@@ -165,6 +170,12 @@ class FinancialActions
         \FleetForge\QboPushers\InvoiceEnqueuer::enqueue($id, 'void');
         foreach ($voidedCns as $cn) {
             \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+        }
+
+        // S-AUDIT-LIFECYCLE-1: bulk_void/delete invalidate the dashboard cache;
+        // the single-void path never did, leaving stale AR tiles.
+        if (function_exists('invalidate_dashboard_cache')) {
+            invalidate_dashboard_cache();
         }
 
         return ['id' => $id, 'invoice_number' => $invoice['invoice_number'], 'status' => 'void', 'prev_status' => $invoice['status']];

@@ -144,7 +144,37 @@ function db_pdo(): PDO
         PDO::MYSQL_ATTR_INIT_COMMAND => "SET time_zone = '+00:00'", // all DATETIMEs stored UTC
     ]);
 
+    // S-AUDIT-LIFECYCLE-1 #17: lets db_rollback_if_active() know a connection
+    // exists WITHOUT lazily opening one from the error path.
+    $GLOBALS['ff_db_connection_open'] = true;
+
     return $pdo;
+}
+
+// ============================================================
+// db_rollback_if_active() — defensive rollback for exit paths
+//
+// json_error() (echo + exit) is routinely reached from INSIDE an open
+// db_transaction() (billing library code, endpoint closures) — the exit
+// bypasses db_transaction's rollback branch. Today that is safe only
+// because PDO is non-persistent (MySQL rolls back on disconnect); this
+// helper makes the rollback explicit so persistent connections or a
+// long-lived worker runtime can never turn those exits into open-txn
+// leaks. No-op when no connection was ever opened (never connects just
+// to roll back). Never throws. (S-AUDIT-LIFECYCLE-1 #17)
+// ============================================================
+function db_rollback_if_active(): void
+{
+    if (empty($GLOBALS['ff_db_connection_open'])) {
+        return;
+    }
+    try {
+        if (db_pdo()->inTransaction()) {
+            db_pdo()->rollBack();
+        }
+    } catch (Throwable $e) {
+        error_log('[db_rollback_if_active] rollback safety net failed: ' . $e->getMessage());
+    }
 }
 
 // ============================================================

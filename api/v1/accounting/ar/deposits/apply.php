@@ -59,7 +59,7 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
     }
 
     $invoice = db_row(
-        "SELECT id, invoice_number, customer_id, balance_due, company_name_snapshot
+        "SELECT id, invoice_number, customer_id, balance_due, status, company_name_snapshot
          FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$invoiceId]
     );
@@ -67,6 +67,17 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
         json_error('NOT_FOUND', 'Invoice not found.', 404, [
             'fields' => ['invoice_id' => 'Invoice not found.'],
         ]);
+    }
+
+    // S-AUDIT-LIFECYCLE-1 #9: only ISSUED invoices can receive a deposit —
+    // the endpoint previously never read status at all, so a deposit could
+    // pay a DRAFT (skipping send/GL/QBO) or resurrect a VOID invoice to
+    // 'paid'. Same payable set as payments/create.php + allocate.php.
+    if (!in_array($invoice['status'], ['sent', 'partially_paid', 'overdue'], true)) {
+        json_error('INVALID_TRANSITION',
+            "Cannot apply a deposit to a '{$invoice['status']}' invoice — only sent, partially paid, or overdue invoices are payable.",
+            409,
+            ['fields' => ['invoice_id' => "Invoice is '{$invoice['status']}' — not payable."]]);
     }
 
     // Deposit and invoice must belong to the same customer

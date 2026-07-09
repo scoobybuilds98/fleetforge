@@ -123,10 +123,12 @@ class InvoiceEnqueuer
         // enqueues 'create', void.php / bulk_void.php enqueue 'void'. This gate
         // previously hard-rejected everything but 'create', so those void calls
         // were silently dropped (gate-0 accepted them, gate-3 killed them) and a
-        // voided FF invoice left a stale OPEN invoice in QBO (C6). 'update' stays
-        // deferred at the enqueuer (no flow enqueues it yet; pushUpdate is driven
-        // only via pushImpl directly per S-QBO-12). Unknown operations refused.
-        if (!in_array($operation, ['create', 'void'], true)) {
+        // voided FF invoice left a stale OPEN invoice in QBO (C6).
+        // S-AUDIT-LIFECYCLE-1 #24b: 'update' un-deferred — invoices/update.php
+        // now enqueues it when post-send metadata (po_number/billing email)
+        // changes, so the QBO mirror stops drifting from FF (D-QBO-CORE-1).
+        // InvoicePusher::pushUpdate already existed (gate-5 demotes unmapped).
+        if (!in_array($operation, ['create', 'void', 'update'], true)) {
             return false;
         }
 

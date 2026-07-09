@@ -110,6 +110,24 @@ class InvoiceGenerator
         // Wraps everything in a single transaction (Trap 6: denormalized counters)
         return db_transaction(function () use ($leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $params) {
 
+            // S-AUDIT-LIFECYCLE-1 #7: take the D20 lease lock as the FIRST
+            // statement of the transaction. Under REPEATABLE READ the first
+            // CONSISTENT read pins the snapshot — when the plain lease load
+            // below ran first, a generator that blocked here while a
+            // concurrent one committed would still read a pre-lock snapshot
+            // in sumAlreadyBilled and double-bill the same coverage. A
+            // locking read first means every later consistent read's view is
+            // established AFTER the lock is granted, so the winner's rows are
+            // visible. (mileage_only/adjustment skip the engine and its
+            // already_billed read entirely — no lock needed, matching the old
+            // behaviour.)
+            if ($billingType !== 'mileage_only' && $billingType !== 'adjustment') {
+                db_row(
+                    "SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
+                    [$leaseId]
+                );
+            }
+
             // Load lease with all rate/tax/customer data.
             // S-FIX-2 Bug #5: also pull customer exemption expiry dates so we can
             // re-evaluate exemption status at invoice creation time. The lease
@@ -146,6 +164,23 @@ class InvoiceGenerator
 
             if (!$lease) {
                 json_error('NOT_FOUND', 'Lease not found.', 404);
+            }
+
+            // S-AUDIT-LIFECYCLE-1 #19d: optional post-lock status gate. The
+            // monthly cron checks eligibility on an UNLOCKED read, then blocks
+            // on the FOR UPDATE above while a concurrent close completes — the
+            // load below (post-lock, current row) would then bill a full month
+            // on a completed lease whose overshoot reconciliation already ran.
+            // Callers that care pass require_lease_status; the throw is caught
+            // by their per-lease error handling (never a json_error — a cron
+            // must not die mid-run).
+            if (isset($params['require_lease_status'])
+                && (string) $lease['status'] !== (string) $params['require_lease_status']
+            ) {
+                throw new \RuntimeException(sprintf(
+                    'LEASE_STATUS_CHANGED: lease #%d is now %s (expected %s) — skipping generation.',
+                    $leaseId, (string) $lease['status'], (string) $params['require_lease_status']
+                ));
             }
 
             // Day counting: inclusive (D14)
@@ -234,14 +269,13 @@ class InvoiceGenerator
                 // engine now (period_independent / ProRateCalculator removed). Every
                 // non-mileage_only invoice bills via running reconciliation.
                 // ── Holistic engine path ────────────────────────────
-                // D20: lock the lease row for the duration of the
-                // already_billed read + later UPDATE counters. Mirrors
-                // the drawdown emit pattern at lines ~543-547 so concurrent
-                // invoice generation on the same lease serializes cleanly.
-                db_row(
-                    "SELECT id FROM leases WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
-                    [$leaseId]
-                );
+                // D20: the lease row was FOR UPDATE-locked as the FIRST
+                // statement of this transaction (see top of closure —
+                // S-AUDIT-LIFECYCLE-1 #7 moved it above the lease load so the
+                // read snapshot post-dates the lock). The lock spans the
+                // already_billed read + the later counter UPDATEs, so
+                // concurrent invoice generation on the same lease serializes
+                // cleanly.
 
                 // Revision 2 §6–§7: the engine bills on the lease's KNOWN
                 // EXTENT E = actual_return (closed) · end_date (expected, if
@@ -311,6 +345,42 @@ class InvoiceGenerator
                     // close/reconciliation yet never bind for ongoing long leases.
                     'minimum_days'         => $minBillingDays,
                 ]);
+
+                // S-AUDIT-LIFECYCLE-1 #4: close the D132 backstop's blind spot.
+                // The engine's own zero-base throw fires only when the emitted
+                // line type is 'base_rental' — with ALL rental tiers zero the
+                // delta is 0, the type is 'none', and a $0 EMPTY invoice was
+                // silently minted (runtime-proven). Throw here when the period
+                // has billable days, the engine produced nothing, AND the lease
+                // has NO billing basis at all (a mileage-only lease — rental
+                // tiers 0 but mileage_rate>0 — is a legitimate shape and passes;
+                // hourly-only likewise).
+                if ($days > 0
+                    && ($engineResult['line_item_type'] ?? '') === 'none'
+                    && bccomp((string)$engineResult['cumulative_correct'], '0', 2) === 0
+                    && bccomp((string)$lease['daily_rate'], '0', 4) <= 0
+                    && bccomp((string)$lease['weekly_rate'], '0', 4) <= 0
+                    && bccomp((string)$lease['monthly_rate'], '0', 4) <= 0
+                    && bccomp((string)($lease['mileage_rate_km'] ?? '0'), '0', 4) <= 0
+                    && bccomp((string)($lease['mileage_rate'] ?? '0'), '0', 4) <= 0
+                    && bccomp((string)($lease['hourly_rate'] ?? '0'), '0', 4) <= 0
+                ) {
+                    throw new BillingRateException(
+                        sprintf(
+                            'Refusing to generate an empty $0 invoice: lease #%d has NO billing basis '
+                            . '(all rental tiers, mileage, and hourly rates are zero) yet %d billable day(s) '
+                            . 'were requested. A zero-rate lease must not exist (D132) — fix the lease rates.',
+                            $leaseId, $days
+                        ),
+                        'none', $days,
+                        (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate'],
+                        [
+                            'lease_id'     => $leaseId,
+                            'period_start' => $periodStart,
+                            'period_end'   => $periodEnd,
+                        ]
+                    );
+                }
 
                 // Capture audit-column values for the invoices INSERT and
                 // the audit_log entry. Always populated on the holistic path
@@ -598,7 +668,11 @@ class InvoiceGenerator
             // carry it via SELECT l.*). When the lease is 'off', mileage is not
             // tracked at all: drop any caller-supplied odometer so no snapshot
             // is written and no distance/mileage line can be computed below.
-            $mileageMode = $lease['mileage_tracking_mode'] ?? 'samsara';
+            // S-AUDIT-LIFECYCLE-1 #18: fail CLOSED. The column is NOT NULL
+            // DEFAULT 'off', so this fallback is dead code today — but a
+            // future SELECT that omits the column must never silently re-open
+            // the Samsara consumption path ('mode is THE gate' invariant).
+            $mileageMode = $lease['mileage_tracking_mode'] ?? 'off';
             if ($mileageMode === 'off') {
                 $odoStartKm = null;
                 $odoEndKm   = null;
@@ -723,10 +797,21 @@ class InvoiceGenerator
             // odometer only; 'off' leases never bill mileage. This is the gate
             // that stops auto-billing from overwriting a manual reading with a
             // GPS (or 0) value — the core of the reported bug.
+            // S-AUDIT-LIFECYCLE-1 #10: never fetch for a FUTURE period. The
+            // activation and advance-batch paths bill periods whose end is
+            // ahead of today — a distance query for days that haven't happened
+            // returns ~0 and gets trued up later anyway, while the HTTP call
+            // (10s timeout, N+1 on the advance path) ran INSIDE this
+            // transaction holding the lease FOR UPDATE and, from invoice 2 of
+            // a batch, the GLOBAL invoice-counter lock — a slow Samsara could
+            // stall all invoice creation. Past-period fetches (monthly cron,
+            // close backfill) still run.
+            $periodEndIsFuture = $periodEnd > date('Y-m-d');
             if ($periodDistanceKm === null
                 && $mileageMode === 'samsara'
                 && !empty($lease['samsara_vehicle_id'])
                 && $billingType !== 'mileage_only'
+                && !$periodEndIsFuture
             ) {
                 try {
                     $samsara   = new \FleetForge\GPS\SamsaraClient();
@@ -2007,20 +2092,9 @@ class InvoiceGenerator
             // back if either fails. No tax: a customer credit liability
             // is not a billable line.
             if (bccomp($mileageOverflow ?? '0', '0', 2) > 0) {
-                $cnYear   = date('Y');
-                $cnKey    = "credit_note.next_number.{$cnYear}";
-                $cnRow    = db_row("SELECT `key`, `value` FROM settings WHERE `key` = ? FOR UPDATE", [$cnKey]);
-                $cnNext   = $cnRow ? (int) $cnRow['value'] : 1;
-                $cnPrefix = settings_get('credit_note.prefix', 'CN-CR');
-                $cnNumber = sprintf('%s-%s-%05d', $cnPrefix, $cnYear, $cnNext);
-                if ($cnRow) {
-                    db_execute("UPDATE settings SET `value` = ? WHERE `key` = ?", [$cnNext + 1, $cnKey]);
-                } else {
-                    db_execute(
-                        "INSERT INTO settings (`key`, `value`, `group_name`) VALUES (?, ?, 'credit_notes')",
-                        [$cnKey, $cnNext + 1]
-                    );
-                }
+                // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper
+                // (was one of four verbatim copies).
+                $cnNumber = ff_next_credit_note_number();
 
                 // Branch the human-readable reason on the source. Defaults
                 // to the legacy mileage wording when source wasn't set
@@ -2556,9 +2630,13 @@ class InvoiceGenerator
             }
 
             // Grace period: skip if invoice has not been overdue long enough
-            // (grace_days = 0 means apply immediately once overdue)
+            // (grace_days = 0 means apply immediately once overdue).
+            // S-AUDIT-LIFECYCLE-1: "today" in BUSINESS-LOCAL time, matching
+            // recognitionDate() (D-GL-REVREC-1) — the server-default-tz
+            // strtotime version was off by one grace day at tz boundaries.
+            $todayLocal = \FleetForge\Accounting\AccountingService::businessToday();
             $daysOverdue = (int)floor(
-                (strtotime(date('Y-m-d')) - strtotime($orig['due_date'])) / 86400
+                (strtotime($todayLocal) - strtotime($orig['due_date'])) / 86400
             );
             if ($daysOverdue <= (int)$rule['grace_days']) {
                 return ['skipped' => true, 'reason' => 'Within grace period'];

@@ -99,9 +99,14 @@ if (!$lease) {
     json_error('NO_LEASE', 'The lease for this invoice no longer exists.', 422);
 }
 if (!empty($lease['precharge_enabled'])) {
+    // S-AUDIT-LIFECYCLE-1: voiding a drawdown-carrying draft is now SAFE —
+    // ff_reverse_precharge_on_invoice_removal() restores the balance at every
+    // removal site — so the guidance below no longer routes operators into
+    // the (fixed) F33 corruption.
     json_error('PRECHARGE_REGENERATE_UNSUPPORTED',
         'This lease uses a mileage precharge, whose balance is drawn down as invoices are created — '
-        . 'regenerating in place could corrupt it. Void this draft and generate a fresh invoice from the lease instead.',
+        . 'regenerating in place could corrupt it. Void this draft (the precharge balance is restored '
+        . 'automatically) and generate a fresh invoice from the lease instead.',
         422);
 }
 
@@ -186,7 +191,18 @@ if ($oldEst && bccomp((string) $oldEst['quantity'], '0', 4) > 0) {
 
 $voidedCns = [];
 
+try {
 $result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, $estKmOverride, &$voidedCns) {
+    // S-AUDIT-LIFECYCLE-1 #21: re-check draft status UNDER LOCK — the gate
+    // ran on an unlocked pre-txn read; a racing send could have flipped the
+    // row to 'sent' before the hard DELETEs below destroy an issued record.
+    $locked = db_row("SELECT status FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE", [$id]);
+    if (!$locked || $locked['status'] !== 'draft') {
+        throw new \RuntimeException(
+            "CONCURRENT_MODIFICATION: invoice {$number} is no longer a draft. Refresh and retry."
+        );
+    }
+
     // S-ORPHAN-OVERFLOW-CN: void the old computation's overflow CNs BEFORE
     // createFromLease re-runs — the true-up's billed-to-date subtracts LIVE
     // overflow CNs, so a stale one here would double-subtract and shrink the
@@ -195,6 +211,17 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
         $id, current_user_id(), current_user()['name'] ?? 'System',
         "source invoice {$number} regenerated"
     );
+
+    // S-AUDIT-LIFECYCLE-1 #20: the hard DELETE below skips delete.php's
+    // counter reversal while createFromLease re-increments — without this
+    // decrement, leases.total_invoiced inflates by the old draft's total on
+    // EVERY regenerate (same drift class S-FIX-2 remediated).
+    if (!empty($invoice['lease_id'])) {
+        db_execute(
+            "UPDATE leases SET total_invoiced = total_invoiced - ?, updated_at = NOW() WHERE id = ?",
+            [(string) $invoice['total_amount'], (int) $invoice['lease_id']]
+        );
+    }
 
     // Explicitly remove the billing-period row first (the FK is ON DELETE SET
     // NULL, which would otherwise orphan it with invoice_id = NULL).
@@ -237,6 +264,25 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
     // Keep the original creation timestamp — this is the same invoice, re-derived.
     db_update('invoices', ['created_at' => $invoice['created_at']], 'id = ?', [$newId]);
 
+    // S-AUDIT-LIFECYCLE-1 #24c: last_billed_date is GREATEST-monotonic at
+    // create, so regenerating to a SHORTER period left the anchor pointing
+    // past real coverage (void/delete walk it back; regenerate didn't).
+    // Recompute from the live invoices, mirroring FinancialActions::voidInvoice.
+    if (!empty($invoice['lease_id'])) {
+        $cov = db_row(
+            "SELECT i2.billing_period_end AS max_end, i2.id AS inv_id
+               FROM invoices i2
+              WHERE i2.lease_id = ? AND i2.deleted_at IS NULL AND i2.status <> 'void'
+                AND i2.billing_period_end IS NOT NULL
+              ORDER BY i2.billing_period_end DESC, i2.id DESC LIMIT 1",
+            [(int) $invoice['lease_id']]
+        );
+        db_execute(
+            "UPDATE leases SET last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+            [$cov['max_end'] ?? null, $cov['inv_id'] ?? null, (int) $invoice['lease_id']]
+        );
+    }
+
     $newRow = db_row("SELECT total_amount FROM invoices WHERE id = ?", [$newId]);
 
     db_insert('audit_log', [
@@ -255,6 +301,12 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
 
     return ['id' => $newId, 'invoice_number' => $created['invoice_number'], 'total_amount' => $newRow['total_amount'] ?? null];
 });
+} catch (\RuntimeException $e) {
+    if (str_starts_with($e->getMessage(), 'CONCURRENT_MODIFICATION')) {
+        json_error('CONCURRENT_MODIFICATION', substr($e->getMessage(), strlen('CONCURRENT_MODIFICATION: ')), 409);
+    }
+    throw $e;
+}
 
 // Best-effort QBO void propagation AFTER commit (D-ENQUEUER-CONTRACT).
 foreach ($voidedCns as $cn) {

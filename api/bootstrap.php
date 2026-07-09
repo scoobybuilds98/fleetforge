@@ -211,6 +211,12 @@ function json_error(
     int    $status = 400,
     array  $extra  = []
 ): never {
+    // S-AUDIT-LIFECYCLE-1 #17: explicitly roll back any transaction still
+    // open when an error terminates the request — see db_rollback_if_active()
+    // for the WHY (exit bypasses db_transaction's rollback branch).
+    if (function_exists('db_rollback_if_active')) {
+        db_rollback_if_active();
+    }
     http_response_code($status);
     echo json_encode(
         [

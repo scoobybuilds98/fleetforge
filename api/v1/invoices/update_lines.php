@@ -48,7 +48,7 @@ if (!$id) {
 }
 
 $invoice = db_row(
-    "SELECT id, status, updated_at, invoice_number, generation_source
+    "SELECT id, status, updated_at, invoice_number, generation_source, lease_id
        FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -75,6 +75,19 @@ if (($invoice['generation_source'] ?? '') === 'advance') {
     json_error(
         'ADVANCE_LOCKED',
         'Advance-billing invoices are frozen at batch creation and cannot be line-edited.',
+        422
+    );
+}
+
+// S-AUDIT-LIFECYCLE-1 #11b: a draft whose $0-floor cap already minted a live
+// overflow credit note cannot be line-edited — the editor does not re-run the
+// cap logic, so any edit desyncs the CN from its source computation (the
+// void/delete/regenerate paths all handle this; the editor must refuse).
+if (\FleetForge\Billing\OverflowCreditNotes::hasLive($id)) {
+    json_error(
+        'OVERFLOW_CN_LOCKED',
+        "Invoice {$invoice['invoice_number']} has a live account-credit note minted by its \$0-floor cap. "
+        . 'Regenerate the invoice (which re-runs the cap) instead of hand-editing its lines.',
         422
     );
 }
@@ -165,10 +178,72 @@ if ($fields) {
     json_validation_error($fields);
 }
 
+// ── S-AUDIT-LIFECYCLE-1 #11a/#11c: engine-owned lines are read-only ────────
+// base_rental / base_rental_reconciliation_credit amounts feed the holistic
+// engine's already_billed SUM — editing one silently gets reversed by the
+// NEXT invoice's reconciliation delta (the engine re-converges on its own
+// number, undoing the operator's change). mileage_precharge /
+// mileage_drawdown_credit pair with leases.precharge_balance state the editor
+// never reconciles. All four must round-trip UNCHANGED: the multiset of
+// (type, amount, is_credit) for protected types must match what is stored.
+// Adjust a draft with manual_adjustment / discount lines instead.
+$PROTECTED_TYPES = ['base_rental', 'base_rental_reconciliation_credit', 'mileage_precharge', 'mileage_drawdown_credit'];
+
+$protectedKey = static function (array $ln): string {
+    return $ln['item_type'] . '|' . bcadd((string) $ln['amount'], '0', 2) . '|' . (int) (!empty($ln['is_credit']));
+};
+$existingProtected = [];
+foreach (db_select(
+    "SELECT item_type, amount, is_credit FROM invoice_line_items
+      WHERE invoice_id = ? AND item_type IN ('" . implode("','", $PROTECTED_TYPES) . "')",
+    [$id]
+) as $ln) {
+    $k = $protectedKey($ln);
+    $existingProtected[$k] = ($existingProtected[$k] ?? 0) + 1;
+}
+$submittedProtected = [];
+foreach ($clean as $ln) {
+    if (in_array($ln['item_type'], $PROTECTED_TYPES, true)) {
+        $k = $protectedKey($ln);
+        $submittedProtected[$k] = ($submittedProtected[$k] ?? 0) + 1;
+    }
+}
+if ($existingProtected !== $submittedProtected) {
+    json_error(
+        'ENGINE_LINE_LOCKED',
+        'base_rental, reconciliation-credit, and precharge/drawdown lines are engine-owned and cannot be '
+        . 'added, removed, or re-priced here — the billing engine would reverse the edit on the next invoice. '
+        . 'Use a manual_adjustment or discount line, or regenerate the invoice.',
+        422
+    );
+}
+
+// Refuse a line set whose signed sum is negative — the $0-floor cap lives in
+// the generator, not here, so the editor must not store a negative-subtotal
+// invoice (split the excess into a credit note instead).
+$signedSum = '0.00';
+foreach ($clean as $ln) {
+    $signedSum = $ln['is_credit']
+        ? bcsub($signedSum, $ln['amount'], 2)
+        : bcadd($signedSum, $ln['amount'], 2);
+}
+if (bccomp($signedSum, '0', 2) < 0) {
+    json_validation_error(['lines' => 'Credits exceed charges (subtotal would be negative). Issue a credit note for the excess instead.']);
+}
+
 // ── Persist: replace lines, recompute, audit (one transaction) ────────────
+try {
 $result = db_transaction(function () use ($id, $invoice, $clean) {
-    // Capture the pre-edit total for the audit trail.
-    $oldTotal = db_row("SELECT total_amount FROM invoices WHERE id = ?", [$id]);
+    // S-AUDIT-LIFECYCLE-1 #21: re-check draft status UNDER LOCK — the gate
+    // above ran on an unlocked pre-txn read, and a racing send could flip the
+    // row to 'sent' before the DELETE below lands (D19 locking is off).
+    $locked = db_row("SELECT status, total_amount FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE", [$id]);
+    if (!$locked || $locked['status'] !== 'draft') {
+        throw new \RuntimeException(
+            "CONCURRENT_MODIFICATION: invoice {$invoice['invoice_number']} is no longer a draft. Refresh and retry."
+        );
+    }
+    $oldTotal = ['total_amount' => $locked['total_amount']];
 
     db_execute("DELETE FROM invoice_line_items WHERE invoice_id = ?", [$id]);
 
@@ -191,6 +266,20 @@ $result = db_transaction(function () use ($id, $invoice, $clean) {
     db_update('invoices', ['updated_by' => current_user_id()], 'id = ?', [$id]);
     $totals = InvoiceRecalc::recalc($id);
 
+    // S-AUDIT-LIFECYCLE-1 #11d: leases.total_invoiced includes drafts (bumped
+    // at generation), so a draft-total edit must emit the new−old delta or the
+    // lease counter drifts by exactly the edit on every save (the Bug-C hazard
+    // update.php documents; close.php's line-fold does this correctly).
+    if (!empty($invoice['lease_id'])) {
+        $delta = bcsub((string) $totals['total_amount'], (string) ($oldTotal['total_amount'] ?? '0.00'), 2);
+        if (bccomp($delta, '0', 2) !== 0) {
+            db_execute(
+                "UPDATE leases SET total_invoiced = total_invoiced + ?, updated_at = NOW() WHERE id = ?",
+                [$delta, (int) $invoice['lease_id']]
+            );
+        }
+    }
+
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
         'user_name'    => current_user()['name'] ?? 'System',
@@ -207,6 +296,12 @@ $result = db_transaction(function () use ($id, $invoice, $clean) {
 
     return $totals;
 });
+} catch (\RuntimeException $e) {
+    if (str_starts_with($e->getMessage(), 'CONCURRENT_MODIFICATION')) {
+        json_error('CONCURRENT_MODIFICATION', substr($e->getMessage(), strlen('CONCURRENT_MODIFICATION: ')), 409);
+    }
+    throw $e;
+}
 
 $fresh = db_row("SELECT updated_at FROM invoices WHERE id = ?", [$id]);
 

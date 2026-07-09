@@ -112,7 +112,13 @@ $leaseId = db_insert('leases', [
     'start_date'              => date('Y-m-d'),
     'monthly_rate'            => '1000.00',
     'daily_rate'              => '40.00',
-    'weekly_rate'             => '0.00',
+    // S-AUDIT-LIFECYCLE-1: was '0.00' — a D132 rate-tier hole (invariant I2
+    // class). Under the R2 engine weeklyMath(total, 0)=0 never exceeds the
+    // monthly rate, so every period past 7 days billed $0 and the counter
+    // checks below went vacuous ($0 invoices) while step (f)'s partial-payment
+    // floor turned into a date-dependent flake. A complete tier set keeps the
+    // fixture a lease that create.php would actually accept.
+    'weekly_rate'             => '300.00',
     'currency'                => 'CAD',
     'billing_cycle'           => 'monthly',
     'gst_exempt'              => 0,
@@ -284,12 +290,18 @@ check('(e) draft void: customer.OB unchanged',                 '0.00', $c['custo
 echo "\n";
 
 // --- Step (f): create another draft, send it, partial payment ---------------
-echo "(f) Create draft #3, send it, record a partial payment\n";
+// S-AUDIT-LIFECYCLE-1: bill the NEXT month, not the same period a third time.
+// Under the holistic engine a third invoice for an already-fully-billed period
+// legitimately gets delta=0 → balance_due=0 → the $0.01 partial-payment floor
+// below contradicted its own "strictly less than balance_due" premise and the
+// expected OB went to -0.01 while the code floors at 0 (date-dependent flake,
+// pre-existing at d795211). A fresh period always carries a real charge.
+echo "(f) Create draft #3 (next month), send it, record a partial payment\n";
 $invoicedBeforeF = $c['lease_invoiced'];
 $inv3 = $generator->createFromLease([
     'lease_id'          => $leaseId,
-    'period_start'      => $firstOfMonth,
-    'period_end'        => $lastOfMonth,
+    'period_start'      => date('Y-m-01', strtotime($firstOfMonth . ' +1 month')),
+    'period_end'        => date('Y-m-t',  strtotime($firstOfMonth . ' +1 month')),
     'billing_type'      => 'full_month',
     'invoice_type'      => 'regular',
     'auto_generated'    => 0,
