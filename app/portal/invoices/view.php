@@ -45,6 +45,12 @@ $lineItems = db_select(
     [$invoiceId]
 );
 
+// S-REFUND-ON-INVOICE: show capped credit lines at their ORIGINAL amounts plus
+// one balancing "converted to account credit — CN-xxx" row, so the customer
+// sees the real refund math instead of a "$0.00 credit" (lines still sum to
+// the stored subtotal).
+$lineItems = ff_expand_capped_invoice_lines($lineItems, $invoiceId);
+
 // Payment history
 $payments = db_select(
     "SELECT pa.amount AS allocated, p.payment_date, p.payment_method, p.reference_number
@@ -305,8 +311,11 @@ function payOnlineButton(invoiceId, enabled) {
                         <?php
                         // [C4-FIX] invoice_line_items column is `amount`, not
                         // `line_total`. Previous code emitted Undefined array key.
+                        // S-REFUND-ON-INVOICE: credit lines carry an explicit −
+                        // sign (mirrors the admin invoice view) — without it a
+                        // mileage refund read as a positive charge.
                         ?>
-                        <td class="text-right font-mono" style="font-weight:600;"><?= e(format_currency($li['amount'])) ?></td>
+                        <td class="text-right font-mono" style="font-weight:600;"><?= !empty($li['is_credit']) ? '−' : '' ?><?= e(format_currency($li['amount'])) ?></td>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>

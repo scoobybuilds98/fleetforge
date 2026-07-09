@@ -143,6 +143,12 @@ foreach ($lineItems as &$item) {
 }
 unset($item);
 
+// S-REFUND-ON-INVOICE: capped credit lines display their ORIGINAL amounts plus
+// one balancing "converted to account credit — CN-xxx" row (lines still sum to
+// the stored subtotal). Runs BEFORE redaction so restricted roles get the
+// expanded rows zeroed like any other line.
+$lineItems = ff_expand_capped_invoice_lines($lineItems, $invoiceId);
+
 // I03: server-rendered financial redaction. Dispatchers (invoices:view,
 // payments:NONE) get the operational invoice — number/status/dates/parties and
 // line-item descriptions — but NOT dollar amounts (the documented "status +

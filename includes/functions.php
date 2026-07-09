@@ -261,6 +261,91 @@ function ff_mileage_line_display(array $lease, string $distanceKm, string $rateK
 }
 }
 
+// ff_expand_capped_invoice_lines() — S-REFUND-ON-INVOICE display expansion.
+//
+// When a final invoice's credit lines exceeded its charges, the engine caps
+// the credit lines so the subtotal floors at $0 and routes the excess to a
+// customer account-credit credit_note (see InvoiceGenerator's overflow cap /
+// S-CAP-MULTILINE). The STORED lines are therefore the capped remainders —
+// which read as nonsense to a human ("mileage credit $0.00").
+//
+// This expands the stored lines back to their ORIGINAL amounts for DISPLAY
+// (each capped line's detail_lines records original_credit_amount) and
+// appends one synthetic balancing row — "Converted to customer account
+// credit — CN-xxxx" — for the total routed amount, so the visible lines
+// still sum exactly to the stored subtotal. Pure presentation: nothing is
+// written; totals/tax always come from the invoice row.
+//
+// Call AFTER loading lines, BEFORE any redaction pass (redaction then zeroes
+// the expanded amounts for restricted roles like any other line).
+if (!function_exists('ff_expand_capped_invoice_lines')) {
+function ff_expand_capped_invoice_lines(array $lineItems, int $invoiceId): array
+{
+    if (!$lineItems) return $lineItems;
+
+    $routed = '0.00';
+    foreach ($lineItems as &$li) {
+        $detail = null;
+        if (isset($li['_detail']) && is_array($li['_detail'])) {
+            $detail = $li['_detail'];
+        } elseif (!empty($li['detail_lines'])) {
+            $detail = json_decode((string) $li['detail_lines'], true);
+        }
+        if (is_array($detail) && !empty($detail['cap_applied'])
+            && isset($detail['original_credit_amount']) && !empty($li['is_credit'])) {
+            $orig    = (string) $detail['original_credit_amount'];
+            $removed = bcsub($orig, (string) $li['amount'], 2);
+            if (bccomp($removed, '0', 2) > 0) {
+                $routed = bcadd($routed, $removed, 2);
+                $li['amount'] = $orig;
+                // Keep qty × price == amount readable (capped lines are qty=1).
+                if (bccomp((string) ($li['quantity'] ?? '1'), '1', 4) === 0) {
+                    $li['unit_price'] = $orig;
+                }
+            }
+        }
+    }
+    unset($li);
+
+    if (bccomp($routed, '0', 2) > 0) {
+        // Name the live overflow CN when there is one (regenerates void +
+        // re-issue, so newest live wins); degrade to a generic label otherwise.
+        $cn = db_row(
+            "SELECT credit_note_number FROM credit_notes
+              WHERE source_invoice_id = ?
+                AND source IN ('mileage_overpayment','base_rental_reconciliation_overflow')
+                AND deleted_at IS NULL AND voided_at IS NULL AND status <> 'void'
+              ORDER BY id DESC LIMIT 1",
+            [$invoiceId]
+        );
+        $label = $cn
+            ? "Refund converted to customer account credit — {$cn['credit_note_number']} (apply to any invoice or refund)"
+            : 'Refund converted to customer account credit';
+
+        // Synthetic display row: charge-side (+) so the expanded lines still
+        // sum to the stored subtotal. Inherit the key shape of a real row so
+        // renderers touching optional columns never hit undefined indexes.
+        $template = array_fill_keys(array_keys($lineItems[0]), null);
+        $lineItems[] = array_merge($template, [
+            'id'          => 0,
+            'invoice_id'  => $invoiceId,
+            'item_type'   => 'account_credit_issued',
+            'description' => $label,
+            'quantity'    => '1.0000',
+            'unit'        => null,
+            'unit_price'  => $routed,
+            'amount'      => $routed,
+            'is_credit'   => 0,
+            'taxable'     => 0,
+            '_detail'     => null,
+            '_synthetic'  => true,
+        ]);
+    }
+
+    return $lineItems;
+}
+}
+
 // ff_mileage_unit_label() — the lease's mileage unit for display ('km' | 'miles'),
 // and the singular '/unit' suffix label ('km' | 'mile'). S-MILEAGE-RATE-CONVERT-FIX.
 if (!function_exists('ff_mileage_unit_label')) {

@@ -113,6 +113,28 @@ try {
             ? "issue JE posted, unreversed (je=" . ($je1['id'] ?? 'none') . ")"
             : "accounting disabled in this DB — JE assertions skipped");
 
+    // ── L1c — S-REFUND-ON-INVOICE display expansion ────────────────────────
+    // The stored capped line reads "$0.00 credit"; the display expander must
+    // restore the original amount and append a balancing account-credit row
+    // naming the CN, with the signed sum still equal to the stored subtotal.
+    $rawLines = db_select("SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order", [(int) $iv1['invoice_id']]);
+    $disp = ff_expand_capped_invoice_lines($rawLines, (int) $iv1['invoice_id']);
+    $dispByType = [];
+    foreach ($disp as $dl) $dispByType[$dl['item_type']] = $dl;
+    $sumSigned = '0.00';
+    foreach ($disp as $dl) {
+        $sumSigned = !empty($dl['is_credit']) ? bcsub($sumSigned, (string) $dl['amount'], 2) : bcadd($sumSigned, (string) $dl['amount'], 2);
+    }
+    $storedSub = (string) db_row("SELECT subtotal FROM invoices WHERE id = ?", [(int) $iv1['invoice_id']])['subtotal'];
+    ck('L1c', isset($dispByType['mileage_credit']) && bccomp((string) $dispByType['mileage_credit']['amount'], '120.00', 2) === 0
+            && isset($dispByType['account_credit_issued']) && !empty($dispByType['account_credit_issued']['_synthetic'])
+            && bccomp((string) $dispByType['account_credit_issued']['amount'], '120.00', 2) === 0
+            && str_contains((string) $dispByType['account_credit_issued']['description'], (string) $cn1['credit_note_number'])
+            && bccomp($sumSigned, $storedSub, 2) === 0,
+        "display expansion: credit shows \$" . ($dispByType['mileage_credit']['amount'] ?? '?')
+        . ", synthetic account-credit row \$" . ($dispByType['account_credit_issued']['amount'] ?? '?')
+        . " names {$cn1['credit_note_number']}, signed sum {$sumSigned} == stored subtotal {$storedSub}");
+
     // ── L2 — voidForInvoice voids the CN + reverses the JE ────────────────
     $voided = OverflowCreditNotes::voidForInvoice((int) $iv1['invoice_id'], $user, 'Smoke', 'source invoice deleted (smoke)');
     $cn1b = db_row("SELECT status, amount_remaining, voided_at FROM credit_notes WHERE id = ?", [$cn1['id']]);
