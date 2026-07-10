@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * cron/late_fee_apply.php
  *
- * Late fee application cron — runs nightly at 6:30 AM.
+ * Late fee application cron — runs daily at 07:30 UTC (prod crontab verified 2026-07-10).
  * Finds all overdue invoices that have not yet had a late fee applied and calls
  * InvoiceGenerator::generateLateFeeInvoice() for each. The generator handles rule
  * lookup, grace period check, math (via LateFeeEngine), invoice creation, and all
@@ -13,7 +13,7 @@ declare(strict_types=1);
  * Skipped invoices (no rule, grace period, already applied) are counted but not
  * treated as errors — the generator returns a 'skipped' flag for these cases.
  *
- * Crontab (production): 30 6 * * * php /var/www/fleetforge/cron/late_fee_apply.php
+ * Crontab (production): 30 7 * * * php /var/www/fleetforge/cron/late_fee_apply.php
  * Local test:           php /Users/avi/Documents/fleetforge/cron/late_fee_apply.php
  *
  * Requires: config/app.php, includes/db.php, lib/Billing/InvoiceGenerator.php

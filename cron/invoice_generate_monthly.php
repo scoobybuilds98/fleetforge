@@ -307,6 +307,10 @@ function ff_run_monthly_billing(string $today): array
                 ]);
 
             } catch (\Throwable $e) {
+                // S-AUDIT-BILLING-ENGINE-1 #23: per-lease failures now reach
+                // Sentry — a lease silently failing every month produced zero
+                // alerts (error_log + audit row only).
+                \FleetForge\Observability\Sentry::captureException($e);
                 $errors++;
                 error_log("[CRON invoice_generate_monthly] Lease #{$leaseId} ({$lease['contract_number']}) period {$periodStart}: " . $e->getMessage());
 
@@ -357,6 +361,7 @@ if (!defined('FF_MONTHLY_BILLING_INCLUDE')) {
     // Operator on/off switch (settings → Intelligence → Scheduled Jobs). When off,
     // the cron exits cleanly without generating any invoices. Inside the execution
     // wrapper (not the top of file) so a test `require` is never gated. S-CRON-TOGGLES.
+    if (PHP_SAPI !== 'cli') { http_response_code(403); exit(1); } // S-AUDIT-BILLING-ENGINE-1 #24: in-file CLI guard (was nginx-config-only)
     if (!cron_enabled('invoice_generate_monthly')) {
         error_log('[CRON] invoice_generate_monthly disabled — skipping.');
         exit(0);
@@ -364,7 +369,14 @@ if (!defined('FF_MONTHLY_BILLING_INCLUDE')) {
 
     // D21: Advisory lock prevents two overlapping cron executions from double-invoicing
     $lock = db_row("SELECT GET_LOCK('ff_cron_invoice_generate_monthly', 0) AS ok", []);
-    if (!$lock || (int) $lock['ok'] !== 1) {
+    // S-AUDIT-BILLING-ENGINE-1 #23: distinguish a DB/lock-acquisition FAILURE
+    // (alert-worthy — a persistent one silently never bills) from the normal
+    // "another instance holds the lock" case.
+    if (!$lock || $lock['ok'] === null) {
+        error_log('[CRON invoice_generate_monthly] GET_LOCK returned NULL/failed — DB problem, not a concurrent run.');
+        exit(1);
+    }
+    if ((int) $lock['ok'] !== 1) {
         // Another instance is running — exit silently (not an error)
         exit(0);
     }
@@ -375,6 +387,12 @@ if (!defined('FF_MONTHLY_BILLING_INCLUDE')) {
         $r     = ff_run_monthly_billing($today);
 
         $summary = "invoice_generate_monthly completed (today={$today}): {$r['generated']} generated, {$r['skipped']} skipped, {$r['errors']} errors";
+        // S-AUDIT-BILLING-ENGINE-1 #23: a run with failed leases is NOT a
+        // success — monitoring keyed on exit status must see it (2 = completed
+        // with per-lease errors; 1 = fatal).
+        if (($r['errors'] ?? 0) > 0) {
+            $exitCode = 2;
+        }
         error_log("[CRON] {$summary}");
 
         db_insert('audit_log', [

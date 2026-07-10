@@ -4,12 +4,13 @@ declare(strict_types=1);
 /**
  * cron/invoice_overdue.php
  *
- * Overdue invoice cron — runs nightly at 6:15 AM.
+ * Overdue invoice cron — runs daily at 07:00 UTC (prod crontab verified 2026-07-10).
  * Finds all 'sent' and 'partially_paid' invoices whose due_date is in the past
  * and flips them to 'overdue'. Each status change is wrapped in its own transaction
- * with an audit_log entry.
+ * with an audit_log entry. Also expires credit notes past their expires_at
+ * (S-AUDIT-BILLING-ENGINE-1 #20) so stale credit can't keep being applied.
  *
- * Crontab (production): 15 6 * * * php /var/www/fleetforge/cron/invoice_overdue.php
+ * Crontab (production): 0 7 * * * php /var/www/fleetforge/cron/invoice_overdue.php
  * Local test:           php /Users/avi/Documents/fleetforge/cron/invoice_overdue.php
  *
  * Requires: config/app.php, includes/db.php
@@ -33,7 +34,7 @@ $marked = 0;
 $errors = 0;
 
 try {
-    $today = date('Y-m-d');
+    $today = \FleetForge\Accounting\AccountingService::businessToday(); // S-AUDIT-BILLING-ENGINE-1 #18: business tz (was server tz — diverged from the grace math when company.timezone ≠ APP_TIMEZONE)
 
     // Fetch all invoices that should flip to overdue.
     // Uses index idx_status_due_deleted (status, due_date, deleted_at).
@@ -163,3 +164,24 @@ try {
 } finally {
     db_execute("SELECT RELEASE_LOCK('ff_cron_invoice_overdue')", []);
 }
+
+// ── S-AUDIT-BILLING-ENGINE-1 #20: expire past-date credit notes ─────────────
+// status='expired' had NO writer anywhere — the ENUM value, the index filter,
+// and the KPI count were all decorative while expired-by-date CNs stayed
+// 'active'. Flip live CNs whose expires_at has passed (apply.php also refuses
+// them at apply time; this keeps the list/KPI surfaces honest).
+try {
+    $expired = db_execute(
+        "UPDATE credit_notes SET status = 'expired', updated_at = NOW()
+          WHERE status IN ('active','partially_used')
+            AND expires_at IS NOT NULL AND expires_at < ?
+            AND voided_at IS NULL AND deleted_at IS NULL",
+        [$today]
+    );
+    if ($expired > 0) {
+        error_log("[CRON invoice_overdue] expired {$expired} past-date credit note(s)");
+    }
+} catch (\Throwable $e) {
+    error_log('[CRON invoice_overdue] credit-note expiry flip failed: ' . $e->getMessage());
+}
+

@@ -1480,6 +1480,15 @@ function FF_CreateLease() {
         },
 
         togglePrimaryUnit(newUnit) {
+            // S-AUDIT-BILLING-ENGINE-1 #19: convert the populated rate with the
+            // INVERSE factor when the unit flips — relabeling $X/km as $X/mile
+            // mispriced the lease ×1.609 with zero warning.
+            const oldUnit = this.form.mileage_unit;
+            if (oldUnit !== newUnit && this.form.mileage_rate !== '' && parseFloat(this.form.mileage_rate) > 0) {
+                const r = parseFloat(this.form.mileage_rate);
+                // $/km = $/mile × 0.621371 ; $/mile = $/km × 1.609344 (rate = INVERSE of distance factor)
+                this.form.mileage_rate = (newUnit === 'km' ? r * 0.621371 : r * 1.609344).toFixed(4);
+            }
             this.form.mileage_unit = newUnit;
         },
 
@@ -1553,8 +1562,17 @@ function FF_CreateLease() {
                     this.form.weekly_rate = (parseFloat(this.form.monthly_rate) / 4.33).toFixed(2);
                 }
 
-                // Apply currency/unit from rate source if not already set by customer
-                if (d.currency)     this.form.currency     = d.currency;
+                // Apply currency/unit from the rate source.
+                // S-AUDIT-BILLING-ENGINE-1 #19: the card's currency used to
+                // OVERWRITE the customer's silently (item currency defaults
+                // 'CAD') — a USD customer got repriced with raw CAD numbers,
+                // no FX, no warning. Confirm before switching.
+                if (d.currency && d.currency !== this.form.currency) {
+                    const keep = this.form.currency;
+                    if (confirm(`This rate card is priced in ${d.currency}, but the lease/customer currency is ${keep}. Switch the lease to ${d.currency}? (Cancel keeps ${keep} — verify the rates manually.)`)) {
+                        this.form.currency = d.currency;
+                    }
+                }
                 if (d.mileage_unit) this.form.mileage_unit = d.mileage_unit;
 
                 // S-MILEAGE-UNIT-SIMPLIFY: set single rate in the selected unit

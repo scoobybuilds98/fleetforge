@@ -177,8 +177,13 @@ function my_cumulative(string $start, string $through, string $extent, string $d
     $monthlyApplies = $total > 7 && bccomp($m, '0', 6) > 0 && bccomp(my_wm($total, $w), $m, 6) > 0;
     if (!$monthlyApplies) {
         $n = max(1, $n);
-        if ($n <= 5) return my_round2(bcmul($d, (string) $n, 6));
-        if ($n <= 7) return my_round2($w);
+        if ($n <= 7) { // D-R2-2 cheaper-of (S-AUDIT-BILLING-ENGINE-1 #14)
+            $dt = my_round2(bcmul($d, (string) $n, 6));
+            $wf = my_round2($w);
+            $dOff = bccomp($d, '0', 6) > 0; $wOff = bccomp($w, '0', 6) > 0;
+            if ($wOff && (!$dOff || bccomp($wf, $dt, 2) < 0)) return $wf;
+            return $dt;
+        }
         return my_round2(my_wm($n, $w));
     }
     if ((new DateTimeImmutable($start))->format('Y-m') === (new DateTimeImmutable($extent))->format('Y-m')) {

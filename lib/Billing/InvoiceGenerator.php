@@ -163,6 +163,13 @@ class InvoiceGenerator
             );
 
             if (!$lease) {
+                // S-AUDIT-BILLING-ENGINE-1 #23: json_error() is an API-layer
+                // echo+exit and is UNDEFINED in cron context (fatal Error).
+                // Throw for library callers without it; endpoints still get
+                // their JSON 404.
+                if (!function_exists('json_error')) {
+                    throw new \RuntimeException("Lease {$leaseId} not found.");
+                }
                 json_error('NOT_FOUND', 'Lease not found.', 404);
             }
 
@@ -1674,6 +1681,14 @@ class InvoiceGenerator
                 $discountAmount = bcround($discountValue, 2);
             }
 
+            // S-AUDIT-BILLING-ENGINE-1 #17 (closes L16): clamp the discount at
+            // the subtotal. A flat discount larger than the (possibly $0-floor-
+            // capped) subtotal drove subtotal_after_discount, tax, and total
+            // NEGATIVE — defeating the cap invariant that runs just above.
+            if (bccomp($discountAmount, $subtotal, 2) > 0) {
+                $discountAmount = bccomp($subtotal, '0', 2) > 0 ? $subtotal : '0.00';
+            }
+
             $subtotalAfterDiscount = bcsub($subtotal, $discountAmount, 2);
 
             // --- Step 7: Tax (D11: looked up at invoice time, D22: granular exemptions) ---
@@ -1723,9 +1738,47 @@ class InvoiceGenerator
                 $pstExempt = false;
             }
 
-            // Only tax the taxable portion of the subtotal after discount
-            $taxableSubtotal = $subtotalAfterDiscount;
-            $tax = $this->taxCalc->calculate($taxableSubtotal, $province, $gstExempt, $pstExempt);
+            // S-AUDIT-BILLING-ENGINE-1 #13/#16 (+ closes L15/L17): ONE tax
+            // convention, shared with InvoiceRecalc — per-line taxes on the
+            // DISCOUNT-PRORATED taxable base, honoring each line's `taxable`
+            // flag, at the invoice's own transaction date; the invoice-level
+            // totals are the SUM of the per-line figures. The old code taxed
+            // the whole discounted subtotal in one aggregate call (taxable=0
+            // lines silently taxed; per-line taxes stored on UNDISCOUNTED
+            // amounts; recalc then redefined the totals by pennies on any
+            // draft save).
+            $discountFactor = bccomp($subtotal, '0', 2) > 0
+                ? bcdiv($subtotalAfterDiscount, $subtotal, 10)
+                : '1.0000000000';
+            $tax = ['gst' => '0.00', 'pst' => '0.00', 'hst' => '0.00', 'total' => '0.00'];
+            foreach ($lineItems as $li => $item) {
+                $lineTax = ['gst' => '0.00', 'pst' => '0.00', 'hst' => '0.00'];
+                if ($item['taxable'] ?? true) {
+                    $signedAmount = !empty($item['is_credit'])
+                        ? bcsub('0', (string) $item['amount'], 2)
+                        : (string) $item['amount'];
+                    $taxBase = bcround(bcmul($signedAmount, $discountFactor, 8), 2);
+                    // L17 fix: tax at the invoice's own date (effective-window
+                    // rates), not "today".
+                    $lineTax = $this->taxCalc->calculate($taxBase, $province, $gstExempt, $pstExempt,
+                        'CA', null, '', $periodStart);
+                }
+                // Freeze per-line taxes for the insert loop below (single source).
+                $lineItems[$li]['_tax_gst'] = $lineTax['gst'];
+                $lineItems[$li]['_tax_pst'] = $lineTax['pst'];
+                $lineItems[$li]['_tax_hst'] = $lineTax['hst'];
+                $tax['gst'] = bcadd($tax['gst'], $lineTax['gst'], 2);
+                $tax['pst'] = bcadd($tax['pst'], $lineTax['pst'], 2);
+                $tax['hst'] = bcadd($tax['hst'], $lineTax['hst'], 2);
+            }
+            $tax['total'] = bcadd(bcadd($tax['gst'], $tax['pst'], 2), $tax['hst'], 2);
+
+            // Rate snapshot for the invoices row (frozen even when fully
+            // exempt — recalc replays these, D14).
+            $rateSnapshot = $this->taxCalc->calculate('0.00', $province, false, false, 'CA', null, '', $periodStart);
+            $tax['gst_rate'] = $rateSnapshot['gst_rate'];
+            $tax['pst_rate'] = $rateSnapshot['pst_rate'];
+            $tax['hst_rate'] = $rateSnapshot['hst_rate'];
 
             // --- Step 8: Total ---
             $totalAmount = bcadd($subtotalAfterDiscount, $tax['total'], 2);
@@ -1972,13 +2025,16 @@ class InvoiceGenerator
             }
 
             // --- Insert line items ---
+            // S-AUDIT-BILLING-ENGINE-1 #16: per-line taxes were frozen in the
+            // Step-7 pass (discount-prorated, taxable-flag-honoring, dated) —
+            // reuse them so the stored lines SUM exactly to the invoice totals
+            // (single convention, matching InvoiceRecalc).
             foreach ($lineItems as $item) {
-                // Calculate per-line tax for line items that are taxable
-                $lineTax = ['gst' => '0.00', 'pst' => '0.00', 'hst' => '0.00'];
-                if ($item['taxable'] ?? true) {
-                    $lineAmount = $item['is_credit'] ? bcsub('0', $item['amount'], 2) : $item['amount'];
-                    $lineTax = $this->taxCalc->calculate($lineAmount, $province, $gstExempt, $pstExempt);
-                }
+                $lineTax = [
+                    'gst' => $item['_tax_gst'] ?? '0.00',
+                    'pst' => $item['_tax_pst'] ?? '0.00',
+                    'hst' => $item['_tax_hst'] ?? '0.00',
+                ];
 
                 db_insert('invoice_line_items', [
                     'invoice_id'   => $invoiceId,
@@ -2120,6 +2176,9 @@ class InvoiceGenerator
                     'source_invoice_id'       => $invoiceId,
                     'amount'                  => $mileageOverflow,
                     'currency'                => $lease['currency'],
+                    // S-AUDIT-BILLING-ENGINE-1 #21: freeze the CAD rate from
+                    // the lease so the bridge converts the CN's liability.
+                    'exchange_rate_to_cad'    => ($lease['currency'] ?? 'CAD') === 'USD' ? ($lease['exchange_rate_to_cad'] ?? null) : null,
                     'amount_remaining'        => $mileageOverflow,
                     'status'                  => 'active',
                     'reason'                  => $cnReason,
@@ -2143,6 +2202,9 @@ class InvoiceGenerator
                 // Customer Credits Liability. AR is unchanged (the invoice is
                 // already $0 — no AR was raised).
                 \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued($cnId, $params['created_by'] ?? null);
+                // S-AUDIT-BILLING-ENGINE-1 #20: QBO mirror for the overflow CN
+                // (queue row commits atomically with the CN; never throws).
+                \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cnId, 'create');
             }
 
             return [
@@ -2208,6 +2270,13 @@ class InvoiceGenerator
                 [$leaseId]
             );
             if (!$lease) {
+                // S-AUDIT-BILLING-ENGINE-1 #23: json_error() is an API-layer
+                // echo+exit and is UNDEFINED in cron context (fatal Error).
+                // Throw for library callers without it; endpoints still get
+                // their JSON 404.
+                if (!function_exists('json_error')) {
+                    throw new \RuntimeException("Lease {$leaseId} not found.");
+                }
                 json_error('NOT_FOUND', 'Lease not found.', 404);
             }
 
@@ -2466,6 +2535,13 @@ class InvoiceGenerator
                 [$leaseId]
             );
             if (!$lease) {
+                // S-AUDIT-BILLING-ENGINE-1 #23: json_error() is an API-layer
+                // echo+exit and is UNDEFINED in cron context (fatal Error).
+                // Throw for library callers without it; endpoints still get
+                // their JSON 404.
+                if (!function_exists('json_error')) {
+                    throw new \RuntimeException("Lease {$leaseId} not found.");
+                }
                 json_error('NOT_FOUND', 'Lease not found.', 404);
             }
 
@@ -2621,7 +2697,7 @@ class InvoiceGenerator
                 "SELECT * FROM late_fee_rules
                  WHERE (customer_id = ? OR customer_id IS NULL)
                    AND is_active = 1
-                 ORDER BY customer_id DESC
+                 ORDER BY customer_id DESC, id DESC
                  LIMIT 1",
                 [$orig['customer_id']]
             );
@@ -2635,9 +2711,13 @@ class InvoiceGenerator
             // recognitionDate() (D-GL-REVREC-1) — the server-default-tz
             // strtotime version was off by one grace day at tz boundaries.
             $todayLocal = \FleetForge\Accounting\AccountingService::businessToday();
-            $daysOverdue = (int)floor(
-                (strtotime($todayLocal) - strtotime($orig['due_date'])) / 86400
-            );
+            // S-AUDIT-BILLING-ENGINE-1 #18: calendar-day diff — the old
+            // strtotime/86400 floor undercounted by 1 across the DST
+            // spring-forward day (23-hour day → n·86400−3600 floors to n−1).
+            $daysOverdue = $todayLocal <= (string) $orig['due_date']
+                ? 0
+                : (int) (new \DateTimeImmutable((string) $orig['due_date']))
+                    ->diff(new \DateTimeImmutable($todayLocal))->days;
             if ($daysOverdue <= (int)$rule['grace_days']) {
                 return ['skipped' => true, 'reason' => 'Within grace period'];
             }
@@ -2674,7 +2754,7 @@ class InvoiceGenerator
 
             $subtotal    = $feeResult['fee_amount'];
             $totalAmount = bcadd($subtotal, $tax['total'], 2);
-            $today       = date('Y-m-d');
+            $today       = $todayLocal; // S-AUDIT-BILLING-ENGINE-1 #18: business tz for invoice_date/due/late_fee_date (was server tz)
             $dueDays     = (int)(settings_get('invoice.due_days_default', '30') ?? 30);
             $dueDate     = date('Y-m-d', strtotime("+{$dueDays} days"));
 
@@ -2747,7 +2827,10 @@ class InvoiceGenerator
                     'fee_value'      => (string)$rule['fee_value'],
                     'grace_days'     => (int)$rule['grace_days'],
                     'max_fee_amount' => $rule['max_fee_amount'] !== null ? (string)$rule['max_fee_amount'] : null,
-                    'compound'       => (bool)$rule['compound'],
+                    // S-AUDIT-BILLING-ENGINE-1 #18 (operator 2026-07-10): late
+                    // fees are ONE-SHOT per invoice by contract — the dead
+                    // `compound` column is no longer snapshotted (no math ever
+                    // read it; a rule bills once, latched by late_fee_applied).
                     'customer_id'    => $rule['customer_id'],
                 ]),
                 'auto_generated'                 => 1,

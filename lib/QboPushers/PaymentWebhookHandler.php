@@ -217,7 +217,8 @@ class PaymentWebhookHandler
     ): array {
         // a. Lock invoice row + validate state.
         $invoice = db_row(
-            "SELECT id, customer_id, currency, status, balance_due, amount_paid, total_amount
+            "SELECT id, customer_id, currency, status, balance_due, amount_paid, total_amount,
+                    credits_applied, lease_id, exchange_rate_to_cad, currency_markup_pct
                FROM invoices WHERE id = ? FOR UPDATE",
             [$ffInvoiceId]
         );
@@ -226,6 +227,13 @@ class PaymentWebhookHandler
         }
         if ($invoice['status'] === 'void') {
             return ['result' => 'invoice_void', 'detail' => "FF invoice {$ffInvoiceId} is voided"];
+        }
+        // S-AUDIT-BILLING-ENGINE-1 #12: payable-status gate (the same hole the
+        // audit closed in allocate.php/deposits — a webhook payment could pay
+        // a DRAFT, flipping it to paid without send/counters/JE).
+        if (!in_array($invoice['status'], ['sent', 'partially_paid', 'overdue'], true)) {
+            return ['result' => 'invoice_not_payable',
+                    'detail' => "FF invoice {$ffInvoiceId} is '{$invoice['status']}' — only sent/partially_paid/overdue are payable"];
         }
 
         $amount    = (string) ($qboPayment['TotalAmt'] ?? '0.00');
@@ -271,10 +279,19 @@ class PaymentWebhookHandler
         if ($referenceNumber === '') {
             $referenceNumber = "QBO-{$qboPaymentId}";
         }
+        // S-AUDIT-BILLING-ENGINE-1 #12: USD webhook payments carry the invoice's
+        // frozen rate (same-currency D18 guarantee; the QBO payload has no FX
+        // rate of its own) so the CAD-canonical GL (#21) can convert.
+        $exchangeRateToCad = $currency === 'USD' ? ($invoice['exchange_rate_to_cad'] ?? null) : null;
+        $amountInCad = $exchangeRateToCad !== null
+            ? bcround(bcmul($amount, (string) $exchangeRateToCad, 6), 2)
+            : ($currency === 'CAD' ? bcround($amount, 2) : null);
         $ffPaymentId = db_insert('payments', [
             'payment_number'       => $paymentNumber,
             'customer_id'          => (int) $invoice['customer_id'],
             'amount'               => $amount,
+            'exchange_rate_to_cad' => $exchangeRateToCad,
+            'amount_in_cad'        => $amountInCad,
             'currency'             => $currency,
             'payment_method'       => 'other',     // D-QBO-13-5
             'origin'               => 'qbo_payments_webhook',  // D-QBO-13-1
@@ -300,8 +317,11 @@ class PaymentWebhookHandler
         ]);
 
         // f. Update invoice counters + status (Trap 6 — same transaction).
+        // S-AUDIT-BILLING-ENGINE-1 #12: recompute from source INCLUDING
+        // credits_applied — the old formula (total − paid) resurrected any
+        // applied credits onto the balance.
         $newAmountPaid = bcadd((string) $invoice['amount_paid'], $allocated, 2);
-        $newBalanceDue = bcsub((string) $invoice['total_amount'], $newAmountPaid, 2);
+        $newBalanceDue = bcsub(bcsub((string) $invoice['total_amount'], (string) $invoice['credits_applied'], 2), $newAmountPaid, 2);
         if (bccomp($newBalanceDue, '0', 2) <= 0) {
             $newStatus = 'paid';
             $newBalanceDue = '0.00';
@@ -311,15 +331,47 @@ class PaymentWebhookHandler
             $newStatus = $invoice['status'];
         }
         db_execute(
-            "UPDATE invoices SET amount_paid = ?, balance_due = ?, status = ? WHERE id = ?",
-            [$newAmountPaid, $newBalanceDue, $newStatus, $ffInvoiceId]
+            "UPDATE invoices SET amount_paid = ?, balance_due = ?, status = ?, paid_date = CASE WHEN ? = 'paid' THEN CURDATE() ELSE paid_date END WHERE id = ?",
+            [$newAmountPaid, $newBalanceDue, $newStatus, $newStatus, $ffInvoiceId]
         );
 
         // g. Update customer.outstanding_balance counter (Trap 6 / D45).
         db_execute(
-            "UPDATE customers SET outstanding_balance = outstanding_balance - ? WHERE id = ?",
+            "UPDATE customers SET outstanding_balance = GREATEST(0, outstanding_balance - ?) WHERE id = ?",
             [$allocated, (int) $invoice['customer_id']]
         );
+        // S-AUDIT-BILLING-ENGINE-1 #12: leases.total_paid was never updated on
+        // the webhook path (create.php + allocate.php both do it).
+        if (!empty($invoice['lease_id'])) {
+            db_execute(
+                "UPDATE leases SET total_paid = total_paid + ?, updated_at = NOW() WHERE id = ?",
+                [$allocated, (int) $invoice['lease_id']]
+            );
+        }
+
+        // S-AUDIT-BILLING-ENGINE-1 #12: the overpayment excess must become an
+        // account-credit note (create.php's contract) — the webhook stamped
+        // overpayment_amount but minted nothing and under-posted cash, leaving
+        // unresolved money with no operator surface.
+        $overpaymentCnId = null;
+        if (bccomp($overpayment, '0', 2) > 0) {
+            $overpaymentCnId = db_insert('credit_notes', [
+                'credit_note_number'   => ff_next_credit_note_number(),
+                'customer_id'          => (int) $invoice['customer_id'],
+                'lease_id'             => $invoice['lease_id'] ?: null,
+                'source'               => 'overpayment',
+                'source_invoice_id'    => $ffInvoiceId,
+                'source_payment_id'    => $ffPaymentId,
+                'amount'               => $overpayment,
+                'exchange_rate_to_cad' => $exchangeRateToCad,
+                'currency'             => $currency,
+                'amount_remaining'     => $overpayment,
+                'status'               => 'active',
+                'reason'               => "Overpayment from QBO webhook payment {$paymentNumber} (received {$currency} {$amount}, invoice balance was {$currency} {$balanceDue})",
+                'created_by'           => null,
+            ]);
+            db_execute("UPDATE payments SET overpayment_resolved = 1 WHERE id = ?", [$ffPaymentId]);
+        }
 
         // h. Insert the acc_qbo_payment_map row. push_status='pulled_from_qbo'
         //    is the terminal state for webhook-originated payments per
@@ -346,7 +398,14 @@ class PaymentWebhookHandler
         //    handler (operator can re-post manually); the FF payment + map
         //    row are already written and reconciliation will catch the gap.
         try {
-            AutoEntryBridge::onPaymentReceived($ffPaymentId, $ffInvoiceId, $allocated, null);
+            if (bccomp($overpayment, '0', 2) > 0) {
+                // S-AUDIT-BILLING-ENGINE-1 #12: 3-line JE — DR Cash full /
+                // CR AR allocated / CR 2060 excess (was the 2-line hook, so
+                // cash was under-posted by the excess and 2060 never credited).
+                AutoEntryBridge::onOverpaymentReceived($ffPaymentId, $ffInvoiceId, $allocated, $overpayment, null);
+            } else {
+                AutoEntryBridge::onPaymentReceived($ffPaymentId, $ffInvoiceId, $allocated, null);
+            }
         } catch (\Throwable $e) {
             error_log("[PaymentWebhookHandler] AutoEntryBridge JE post failed for ff_payment={$ffPaymentId}: " . $e->getMessage());
             // Don't fail the whole handler — payment is recorded, JE can be re-posted manually.

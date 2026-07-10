@@ -326,7 +326,10 @@ try {
     $inv1 = gen_invoice($leaseId, '2026-03-28', '2026-03-31', 'partial_start');
     $inv2 = gen_invoice($leaseId, '2026-04-01', '2026-04-02', 'partial_end');
     $lines2 = fetch_base_rental_lines($inv2['invoice_id']);
-    eq("Day 6 close: invoice 2 amount", '150.00', $lines2[0]['amount']);  // 6d weekly_flat $350 - $200 = $150
+    // S-AUDIT-BILLING-ENGINE-1 #14 (D-R2-2 cheaper-of): 6 days now bills
+    // min(6 × $50 = $300, weekly flat $350) = $300 — the old fixed band
+    // charged the flat week even when days × daily was cheaper.
+    eq("Day 6 close: invoice 2 amount", '100.00', $lines2[0]['amount']);  // 6d cheaper-of $300 - $200 = $100
 } finally {
     $pdo->rollBack();
 }
@@ -471,16 +474,28 @@ try {
         'gps_opt_in'        => 0, 'gps_cost' => '0.00',
     ]);
 
-    // Invoice 1: 4 days at $1000 daily = $4000 (whichever-pays-more A wins)
-    $inv1 = gen_invoice($leaseId, '2026-03-28', '2026-03-31', 'partial_start');
+    // S-AUDIT-BILLING-ENGINE-1 #14 REWRITE: the old fixture manufactured the
+    // over-bill via the fixed daily band (4 × $1000 = $4000); D-R2-2 cheaper-of
+    // now bills min($4000, weekly $350) = $350, so that trigger is gone. The
+    // R2-native negative-delta trigger is an EXTENT SHRINK: bill the flat
+    // month (single-calendar-month rule), then the lease returns early — the
+    // cumulative through the reduced extent drops BELOW already_billed and the
+    // engine emits the reconciliation credit ("prorate in the past", D-R2-6).
+    //
+    // Invoice 1: Mar 8–31 (start Mar 8, open-ended → E=Mar 31, total 24 days,
+    // wm(24)=$1200 > monthly $700 → single calendar month → flat $700).
+    db_execute("UPDATE leases SET start_date = '2026-03-08' WHERE id = ?", [$leaseId]);
+    $inv1 = gen_invoice($leaseId, '2026-03-08', '2026-03-31', 'partial_start');
     $lines1 = fetch_base_rental_lines($inv1['invoice_id']);
-    eq("Neg-delta INV1 amount", '4000.00', $lines1[0]['amount']);
+    eq("Neg-delta INV1 amount", '700.00', $lines1[0]['amount']);
 
-    // Invoice 2: full April → total 34 days, cumulative monthly = $793.33
-    // delta = $793.33 - $4000 = -$3206.67 → reconciliation credit
-    // BUT credit would drive invoice negative — overflow handler kicks in,
-    // caps to $0 base_rental_reconciliation_credit, routes $3206.67 to credit_notes.
-    $inv2 = gen_invoice($leaseId, '2026-04-01', '2026-04-30', 'full_month');
+    // Lease actually returns Mar 20 → extent shrinks to Mar 20 (13 days,
+    // wm(13) = $650 ≤ $700 → weekly_math $650). Final invoice's delta =
+    // $650 − $700 = −$50 → reconciliation credit. The credit drives the
+    // (otherwise-empty) final invoice negative — overflow handler caps the
+    // line to $0 and routes $50 to a credit_notes row.
+    db_execute("UPDATE leases SET actual_return_date = '2026-03-20' WHERE id = ?", [$leaseId]);
+    $inv2 = gen_invoice($leaseId, '2026-03-20', '2026-03-20', 'partial_end');
     $lines2 = fetch_base_rental_lines($inv2['invoice_id']);
 
     eq("Neg-delta INV2 line type", 'base_rental_reconciliation_credit', $lines2[0]['item_type']);
@@ -498,14 +513,14 @@ try {
         bad("Neg-delta INV2 credit_note row missing");
     } else {
         eq("Neg-delta INV2 credit_note source", 'base_rental_reconciliation_overflow', $creditNote['source']);
-        eq("Neg-delta INV2 credit_note amount", '3206.67', $creditNote['amount']);
+        eq("Neg-delta INV2 credit_note amount", '50.00', $creditNote['amount']);
     }
 
     // Audit columns should still reflect the engine's evaluation
     $audit2 = fetch_audit_columns($inv2['invoice_id']);
-    eq("Neg-delta INV2 audit total_days", '34', (string)$audit2['total_days_at_period_end']);
-    eq("Neg-delta INV2 audit cumulative_correct", '793.33', $audit2['cumulative_correct_amount']);
-    eq("Neg-delta INV2 audit already_billed", '4000.00', $audit2['already_billed_before_this']);
+    eq("Neg-delta INV2 audit total_days", '13', (string)$audit2['total_days_at_period_end']);
+    eq("Neg-delta INV2 audit cumulative_correct", '650.00', $audit2['cumulative_correct_amount']);
+    eq("Neg-delta INV2 audit already_billed", '700.00', $audit2['already_billed_before_this']);
 } finally {
     $pdo->rollBack();
 }

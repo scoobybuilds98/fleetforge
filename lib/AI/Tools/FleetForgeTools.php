@@ -236,7 +236,14 @@ class FleetForgeTools
                     c.status, c.risk_score, c.risk_notes, c.credit_limit,
                     c.payment_terms, c.currency, c.billing_cycle,
                     c.lease_count, c.active_lease_count,
-                    c.total_revenue, c.outstanding_balance, c.account_credit_balance,
+                    c.total_revenue, c.outstanding_balance,
+                    (SELECT COALESCE(SUM(CASE WHEN cn.currency = 'USD'
+                                              THEN ROUND(cn.amount_remaining * COALESCE(cn.exchange_rate_to_cad, 1), 2)
+                                              ELSE cn.amount_remaining END), 0)
+                       FROM credit_notes cn
+                      WHERE cn.customer_id = c.id
+                        AND cn.status IN ('active','partially_used')
+                        AND cn.voided_at IS NULL AND cn.deleted_at IS NULL) AS account_credit_balance,
                     c.dot_number, c.mc_number, c.tax_exempt,
                     c.notes, c.created_at
              FROM customers c

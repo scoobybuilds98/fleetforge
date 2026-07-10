@@ -89,7 +89,10 @@ DbState::inTransaction(function () use ($gen, $addDue) {
     // T2 — created_at is the real generation time, NOT the (future) issue_date.
     $createdDate = substr((string)$i1['created_at'], 0, 10);
     ok($createdDate !== $i1['invoice_date'], 'T2 created_at distinct from invoice_date');
-    ok($createdDate <= (new DateTimeImmutable('now'))->format('Y-m-d') && $createdDate >= '2025-01-01',
+    // NB: created_at is DB CURRENT_TIMESTAMP (UTC session tz) — compare
+    // against UTC "today", not app-local (America/Vancouver), or this flakes
+    // every evening 5pm–midnight PT when the UTC date has already rolled over.
+    ok($createdDate <= gmdate('Y-m-d') && $createdDate >= '2025-01-01',
        'T2 created_at is a real recent generation timestamp (' . $i1['created_at'] . ')');
 });
 

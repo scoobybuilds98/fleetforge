@@ -134,10 +134,18 @@ db_transaction(function () use (
     //     D20: FOR UPDATE on both rows
     // ------------------------------------------------------------------
     $cn = db_row(
-        "SELECT id, credit_note_number, customer_id, currency, amount_remaining, status
+        "SELECT expires_at, id, credit_note_number, customer_id, currency, amount_remaining, status
          FROM credit_notes WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$creditNoteId]
     );
+
+    // S-AUDIT-BILLING-ENGINE-1 #20: expiry is LIVE now — an expired-by-date
+    // credit note cannot be applied (the column/status were decorative: nothing
+    // ever set status='expired' and this endpoint never read expires_at).
+    if (!empty($cn['expires_at']) && (string) $cn['expires_at'] < date('Y-m-d')) {
+        json_error('CREDIT_NOTE_EXPIRED',
+            "Credit note expired on {$cn['expires_at']} and can no longer be applied.", 422);
+    }
     if (!$cn) {
         json_error('NOT_FOUND', 'Credit note not found.', 404);
     }

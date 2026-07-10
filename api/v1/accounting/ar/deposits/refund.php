@@ -71,8 +71,17 @@ $result = db_transaction(function () use ($depositId, $refundMethod) {
     $depositAccountId = AccountingService::setting('accounting.customer_deposits_account_id');
     $cashAccountId    = AccountingService::setting('accounting.default_cash_account_id');
 
+    // S-AUDIT-BILLING-ENGINE-1 #10: HARD BLOCK on missing mappings (§16) —
+    // this endpoint used to mark the deposit refunded even when the JE was
+    // silently skipped (fail-open). json_error inside the txn rolls back.
+    if (!$depositAccountId || !$cashAccountId) {
+        json_error('ACCOUNTING_CONFIG_INCOMPLETE',
+            'Cannot refund deposit — accounting configuration incomplete. Map the Cash and Customer Deposits accounts in Accounting → Settings.',
+            422);
+    }
+
     $jeId = null;
-    if ($depositAccountId && $cashAccountId) {
+    if (true) {
         $jeLines = [
             [
                 'account_id'  => (int)$depositAccountId,
@@ -95,7 +104,10 @@ $result = db_transaction(function () use ($depositId, $refundMethod) {
             'description'      => "Deposit refund {$deposit['deposit_number']} — {$deposit['company_name']}",
             'entry_type'       => 'system',
             'reference'        => $deposit['deposit_number'],
-            'source_type'      => 'manual',
+            // S-AUDIT-BILLING-ENGINE-1 #10: real source stamping (§16) — was
+            // 'manual' with no source_id, making deposit JEs untraceable.
+            'source_type'      => 'customer_deposit',
+            'source_id'        => $depositId,
             'post_immediately' => true,
         ], $jeLines, current_user_id());
         $jeId = $je['id'];

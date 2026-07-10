@@ -303,6 +303,8 @@ function adv_create_credit_note(array $inv, array $lease, string $amount, string
         'source_invoice_id'      => (int) $inv['id'],
         'amount'                 => $amount,
         'currency'               => $inv['currency'] ?? 'CAD',
+        // S-AUDIT-BILLING-ENGINE-1 #21: freeze the source invoice's CAD rate.
+        'exchange_rate_to_cad'   => ($inv['currency'] ?? 'CAD') === 'USD' ? ($inv['exchange_rate_to_cad'] ?? null) : null,
         'amount_remaining'       => $amount,
         'status'                 => 'active',
         'reason'                 => $reason,
@@ -323,6 +325,8 @@ function adv_create_credit_note(array $inv, array $lease, string $amount, string
 
     // Auto-JE — same call site as api/v1/credit_notes/create.php.
     \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued($cnId, current_user_id());
+    // S-AUDIT-BILLING-ENGINE-1 #20: QBO mirror for the auto-minted CN.
+    \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cnId, 'create');
 
     return [
         'invoice_id'         => (int) $inv['id'],

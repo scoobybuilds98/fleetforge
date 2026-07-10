@@ -125,7 +125,14 @@ $rows = db_select(
         c.lease_count,
         c.outstanding_balance,
         c.total_revenue,
-        c.account_credit_balance,
+        -- S-AUDIT-BILLING-ENGINE-1 #11: derived from the CN subledger.
+        (SELECT COALESCE(SUM(CASE WHEN cn.currency = 'USD'
+                                  THEN ROUND(cn.amount_remaining * COALESCE(cn.exchange_rate_to_cad, 1), 2)
+                                  ELSE cn.amount_remaining END), 0)
+           FROM credit_notes cn
+          WHERE cn.customer_id = c.id
+            AND cn.status IN ('active','partially_used')
+            AND cn.voided_at IS NULL AND cn.deleted_at IS NULL) AS account_credit_balance,
         c.is_related_party,
         c.created_at,
         c.updated_at

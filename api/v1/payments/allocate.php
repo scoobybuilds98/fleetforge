@@ -177,11 +177,25 @@ db_transaction(function () use ($paymentId, $invoiceId, $amountRaw, $payment, &$
         "SELECT COALESCE(SUM(amount), '0') AS s FROM payment_allocations WHERE payment_id = ?",
         [$paymentId]
     )['s'];
-    $unapplied = bcsub((string) $paymentLocked['amount'], (string) $alreadyAllocated, 2);
+    // S-AUDIT-BILLING-ENGINE-1 #1: the bound must also subtract the OVERPAYMENT
+    // EXCESS that create.php already converted into an account-credit note
+    // (credit_notes.source_payment_id). Without this, a $600 payment on a $500
+    // invoice showed $100 "unapplied" here while the same $100 sat live as a
+    // spendable CN — the customer's money relieved TWO invoices. The full CN
+    // amount is held (spent or not — spending the CN is its own flow with its
+    // own GL); a VOIDED CN releases the excess back to allocation.
+    $cnHold = db_row(
+        "SELECT COALESCE(SUM(amount), '0') AS s FROM credit_notes
+          WHERE source_payment_id = ? AND status <> 'void' AND voided_at IS NULL AND deleted_at IS NULL",
+        [$paymentId]
+    )['s'];
+    $unapplied = bcsub(bcsub((string) $paymentLocked['amount'], (string) $alreadyAllocated, 2), (string) $cnHold, 2);
     if (bccomp($amountRaw, $unapplied, 2) > 0) {
         $unappliedFmt = '$' . number_format(max(0, (float) $unapplied), 2);
         json_error('ALLOCATION_EXCEEDS_PAYMENT',
-            "Allocation exceeds the payment's unapplied balance of {$unappliedFmt}.", 422,
+            "Allocation exceeds the payment's unapplied balance of {$unappliedFmt}"
+            . (bccomp((string) $cnHold, '0', 2) > 0 ? " (\${$cnHold} of this payment was issued as account credit — apply the credit note instead)" : '')
+            . '.', 422,
             ['fields' => ['amount' => "Allocation exceeds the payment's unapplied balance of {$unappliedFmt}."]]);
     }
 
@@ -246,6 +260,19 @@ db_transaction(function () use ($paymentId, $invoiceId, $amountRaw, $payment, &$
         );
     }
 
+    // S-AUDIT-BILLING-ENGINE-1 #2: post the GL for this allocation — the
+    // endpoint reduced the invoice + customer OB with NO journal entry, so GL
+    // AR stayed overstated on every post-hoc allocation. DR Cash / CR AR for
+    // the allocated slice is exactly right for every reachable shape: a
+    // create.php payment always fully resolves at record time (unapplied = 0
+    // with the CN-aware bound above → this hook can never double-post cash),
+    // while webhook/legacy payments posted cash only for their originally
+    // allocated portion, so the new slice's cash leg is still un-posted.
+    // Inside the txn — a mapping failure rolls the allocation back (§16).
+    \FleetForge\Accounting\AutoEntryBridge::onPaymentReceived(
+        $paymentId, $invoiceId, $allocatedAmount, current_user_id()
+    );
+
     // Audit log inside transaction
     db_insert('audit_log', [
         'user_id'      => current_user_id(),
@@ -267,5 +294,9 @@ db_transaction(function () use ($paymentId, $invoiceId, $amountRaw, $payment, &$
         'balance_due'    => $newBalanceDue,
     ];
 });
+
+// S-AUDIT-BILLING-ENGINE-1 #24: AR tiles read from the dashboard cache —
+// void paths invalidate it, the money-moving paths didn't.
+invalidate_dashboard_cache();
 
 json_success($result, 201);

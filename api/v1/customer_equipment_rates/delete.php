@@ -28,6 +28,17 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
+
+// S-AUDIT-BILLING-ENGINE-1 #24: DEPRECATED — customer rate overrides were folded
+// into customer-specific rate cards (S-RATES-CONSOLIDATE); nothing reads this
+// table anymore. A 200-OK write here silently priced NOTHING (the operator
+// believed a rate was set). Hard 410 until the cleanup migration drops the
+// table; use customer rate cards (Rates → New Card → customer) instead.
+require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
+json_error('GONE',
+    'Customer equipment rate overrides are deprecated — this write would have no pricing effect. Use a customer-specific rate card instead (Rates → New Card).',
+    410);
+
 require_method('POST');
 require_auth_api();
 require_permission('rates', 'delete');

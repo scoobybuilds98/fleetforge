@@ -679,8 +679,8 @@ class BankService
             if (!$payment) {
                 throw new \RuntimeException('Payment not found.');
             }
-            if ($payment['status'] === 'failed') {
-                throw new \RuntimeException('Payment is already marked as failed/NSF.');
+            if (in_array($payment['status'], ['failed', 'returned'], true)) {
+                throw new \RuntimeException('Payment is already marked as returned/NSF.');
             }
 
             $bankAccount = \db_row("SELECT * FROM acc_bank_accounts WHERE id = ?", [$bankAccountId]);
@@ -700,19 +700,83 @@ class BankService
             $paymentAmount = $payment['amount'];
             $totalCr = bcadd($paymentAmount, $nsfFee, 2);
 
+            // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical GL. The bounced cash
+            // reverses at the PAYMENT's frozen rate; each invoice's AR restores
+            // at ITS frozen rate (what the original payment JE relieved); the
+            // NSF fee is bank-charged in CAD; any residue is the reversal of
+            // the original realized FX gain/loss.
+            $payFxRate = 'CAD' === ($payment['currency'] ?? 'CAD')
+                ? '1'
+                : (string) ($payment['exchange_rate_to_cad'] ?? '');
+            if ($payFxRate !== '1' && (trim($payFxRate) === '' || bccomp($payFxRate, '0', 6) <= 0)) {
+                throw new \RuntimeException("USD payment {$payment['payment_number']} has no frozen exchange_rate_to_cad — cannot post NSF JE.");
+            }
+            $toCadNsf = static function (string $amt) use ($payFxRate): string {
+                return $payFxRate === '1' ? bcround($amt, 2) : bcround(bcmul($amt, $payFxRate, 6), 2);
+            };
+
+            // S-AUDIT-BILLING-ENGINE-1 #9: the payment's OVERPAYMENT slice never
+            // touched AR — its credit was booked to 2060 (Customer Credits) by
+            // the 3-line overpayment JE. Debiting AR for the FULL payment
+            // over-stated AR by the excess and left 2060 credited for money
+            // that bounced. Split the debit: allocated portion → AR,
+            // overpayment portion → 2060. The linked overpayment CN is voided
+            // below (its liability is being debited back here).
+            $overpaySlice = (string) ($payment['overpayment_amount'] ?? '0.00');
+            if (bccomp($overpaySlice, $paymentAmount, 2) > 0) {
+                $overpaySlice = $paymentAmount; // defensive clamp
+            }
+            $arSlice = bcsub($paymentAmount, $overpaySlice, 2);
+
+            // CAD figures for the JE legs (#21): AR restores at each invoice's
+            // OWN frozen rate (sum over allocations); cash + 2060 at the
+            // payment's rate; fee is CAD.
+            $arSliceCad = '0.00';
+            foreach (\db_select(
+                "SELECT pa.amount, i.currency, i.exchange_rate_to_cad, i.invoice_number
+                   FROM payment_allocations pa JOIN invoices i ON i.id = pa.invoice_id
+                  WHERE pa.payment_id = ?", [$paymentId]) as $fxAlloc) {
+                if (($fxAlloc['currency'] ?? 'CAD') !== 'USD') {
+                    $arSliceCad = bcadd($arSliceCad, (string) $fxAlloc['amount'], 2);
+                } else {
+                    $r = (string) ($fxAlloc['exchange_rate_to_cad'] ?? '');
+                    if (trim($r) === '' || bccomp($r, '0', 6) <= 0) {
+                        throw new \RuntimeException("USD invoice {$fxAlloc['invoice_number']} has no frozen exchange_rate_to_cad — cannot post NSF JE.");
+                    }
+                    $arSliceCad = bcadd($arSliceCad, bcround(bcmul((string) $fxAlloc['amount'], $r, 6), 2), 2);
+                }
+            }
+            $overpayCad = $toCadNsf($overpaySlice);
+            $cashCad    = bcadd($toCadNsf($paymentAmount), $nsfFee, 2); // fee already CAD
+
             // Build JE lines per spec:
-            // DR  1030 Accounts Receivable  [original payment amount]
+            // DR  1030 Accounts Receivable  [allocated portion]
+            // DR  2060 Customer Credits     [overpayment portion, if any]
             // DR  6170 Bank Charges         [NSF fee, if any]
             //   CR 1010 Cash               [total]
-            $lines = [
-                [
+            $lines = [];
+            if (bccomp($arSliceCad, '0.00', 2) > 0) {
+                $lines[] = [
                     'account_id'  => (int) $arAccountId,
-                    'debit'       => $paymentAmount,
+                    'debit'       => $arSliceCad,
                     'credit'      => '0.00',
                     'description' => "NSF reversal — Payment {$payment['payment_number']}",
                     'customer_id' => $payment['customer_id'],
-                ],
-            ];
+                ];
+            }
+            if (bccomp($overpaySlice, '0.00', 2) > 0) {
+                $creditsLiabilityId = AccountingService::setting('accounting.customer_credits_account_id');
+                if (!$creditsLiabilityId) {
+                    throw new \RuntimeException('Customer Credits (2060) account not configured in settings — required to reverse this payment\'s overpayment slice.');
+                }
+                $lines[] = [
+                    'account_id'  => (int) $creditsLiabilityId,
+                    'debit'       => $overpayCad,
+                    'credit'      => '0.00',
+                    'description' => "NSF reversal (overpayment credit released) — Payment {$payment['payment_number']}",
+                    'customer_id' => $payment['customer_id'],
+                ];
+            }
 
             if (bccomp($nsfFee, '0.00', 2) > 0 && $bankChargeAccountId) {
                 $lines[] = [
@@ -726,9 +790,30 @@ class BankService
             $lines[] = [
                 'account_id'  => $cashAccountId,
                 'debit'       => '0.00',
-                'credit'      => $totalCr,
+                'credit'      => $cashCad,
                 'description' => "NSF reversal — Payment {$payment['payment_number']}",
             ];
+
+            // FX balancer (#21): the difference between the cash reversal (at
+            // the payment rate) and the AR/2060 restorations (at their booked
+            // rates) reverses the realized FX from the original receipt.
+            $fxResidue = bcsub(bcadd(bcadd($arSliceCad, $overpayCad, 2), $nsfFee, 2), $cashCad, 2);
+            // Positive residue → debits exceed cash credit → post extra CR (gain).
+            if (bccomp($fxResidue, '0', 2) !== 0) {
+                if (bccomp($fxResidue, '0', 2) > 0) {
+                    $fxGainId = (int) AccountingService::setting('accounting.fx_gain_account_id', 0)
+                        ?: (int) (\db_row("SELECT id FROM acc_accounts WHERE code='7030' AND is_active=1 LIMIT 1")['id'] ?? 0);
+                    if (!$fxGainId) throw new \RuntimeException('FX gain account not configured (7030).');
+                    $lines[] = ['account_id' => $fxGainId, 'debit' => '0.00', 'credit' => $fxResidue,
+                                'description' => "Realized FX reversal — NSF {$payment['payment_number']}"];
+                } else {
+                    $fxLossId = (int) AccountingService::setting('accounting.fx_loss_account_id', 0)
+                        ?: (int) (\db_row("SELECT id FROM acc_accounts WHERE code='7040' AND is_active=1 LIMIT 1")['id'] ?? 0);
+                    if (!$fxLossId) throw new \RuntimeException('FX loss account not configured (7040).');
+                    $lines[] = ['account_id' => $fxLossId, 'debit' => bcmul($fxResidue, '-1', 2), 'credit' => '0.00',
+                                'description' => "Realized FX reversal — NSF {$payment['payment_number']}"];
+                }
+            }
 
             // Create the reversal JE
             $je = JournalEntryService::create([
@@ -740,17 +825,57 @@ class BankService
                 'post_immediately' => true,
             ], $lines, $userId);
 
-            // Mark payment as failed
+            // Mark payment as RETURNED (spec §7: "mark payment as returned").
+            // S-AUDIT-BILLING-ENGINE-1 #24: the 'returned' ENUM value and
+            // returned_reason/returned_date columns were writer-less while the
+            // code wrote 'failed' — aligned to spec; readers/guards accept both
+            // for legacy rows.
             \db_update('payments', [
-                'status' => 'failed',
+                'status'          => 'returned',
+                'returned_reason' => 'NSF',
+                'returned_date'   => date('Y-m-d'),
             ], 'id = ?', [$paymentId]);
+
+            // S-AUDIT-BILLING-ENGINE-1 #9: the overpayment CN dies with the
+            // bounced money. Drawn CN blocks the NSF (customer already spent
+            // credit that traces to this payment — resolve that first).
+            $nsfLinkedCns = \db_select(
+                "SELECT id, credit_note_number, amount, amount_remaining, status
+                   FROM credit_notes
+                  WHERE source_payment_id = ? AND status <> 'void' AND voided_at IS NULL AND deleted_at IS NULL",
+                [$paymentId]
+            );
+            foreach ($nsfLinkedCns as $cn) {
+                if (bccomp((string) $cn['amount_remaining'], (string) $cn['amount'], 2) !== 0
+                    || in_array($cn['status'], ['partially_used', 'fully_used'], true)) {
+                    throw new \RuntimeException(
+                        "Cannot process NSF: overpayment credit {$cn['credit_note_number']} from this payment has already been applied. Unapply it first."
+                    );
+                }
+                // GL deliberately handled by the 2060 debit in the NSF JE above —
+                // no onCreditNoteVoided call (would double-debit 2060).
+                \db_update('credit_notes', [
+                    'status'           => 'void',
+                    'amount_remaining' => '0.00',
+                    'voided_by'        => $userId,
+                    'voided_at'        => date('Y-m-d H:i:s'),
+                    'internal_notes'   => "Auto-voided: source payment {$payment['payment_number']} returned NSF (S-AUDIT-BILLING-ENGINE-1).",
+                ], 'id = ?', [(int) $cn['id']]);
+                \db_insert('audit_log', [
+                    'user_id' => $userId, 'user_name' => 'system', 'action' => 'status_change',
+                    'module' => 'accounting', 'entity_type' => 'credit_note', 'entity_id' => (int) $cn['id'],
+                    'entity_label' => $cn['credit_note_number'],
+                    'notes' => "Credit note {$cn['credit_note_number']} auto-voided by NSF on payment {$payment['payment_number']} (2060 released in the NSF JE).",
+                    'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+                ]);
+            }
 
             // Reverse payment allocations — reopen invoices.
             // S-FIX-2 D-E: status guard. If an allocated invoice is now void / written_off
             // / soft-deleted, those events already reversed the counters; do NOT re-INC
             // OB on this NSF reversal. Otherwise we get a phantom positive balance.
             $allocations = \db_select(
-                "SELECT pa.*, i.status AS invoice_status, i.deleted_at AS invoice_deleted_at
+                "SELECT pa.*, i.status AS invoice_status, i.deleted_at AS invoice_deleted_at, i.lease_id
                  FROM payment_allocations pa
                  JOIN invoices i ON i.id = pa.invoice_id
                  WHERE pa.payment_id = ?",
@@ -778,21 +903,35 @@ class BankService
                 // flagging partially-restored invoices as 'overdue'. Compare the
                 // restored balance directly — the same already-applied semantics
                 // ap-payments/create.php documents.
+                // S-AUDIT-BILLING-ENGINE-1 #24/11: recompute from source
+                // (total − credits − paid) instead of incremental ±, derive the
+                // status from what remains + due_date, and clear paid_date —
+                // the old CASE ignored credits_applied (a credited invoice
+                // could never reach the right state) and marked 'overdue'
+                // regardless of due_date.
                 \db_execute(
                     "UPDATE invoices SET
-                        balance_due = balance_due + ?,
-                        amount_paid = amount_paid - ?,
+                        amount_paid = GREATEST(0, amount_paid - ?),
+                        balance_due = GREATEST(0, total_amount - credits_applied - GREATEST(0, amount_paid)),
+                        paid_date   = NULL,
                         status = CASE
-                            WHEN balance_due >= total_amount THEN 'overdue'
-                            WHEN balance_due > 0 THEN 'partially_paid'
-                            ELSE status
+                            WHEN total_amount - credits_applied - amount_paid <= 0 THEN 'paid'
+                            WHEN amount_paid > 0 OR credits_applied > 0 THEN 'partially_paid'
+                            WHEN due_date < CURDATE() THEN 'overdue'
+                            ELSE 'sent'
                         END
                      WHERE id = ? AND deleted_at IS NULL",
-                    [
-                        $alloc['amount'], $alloc['amount'],
-                        $alloc['invoice_id'],
-                    ]
+                    [$alloc['amount'], $alloc['invoice_id']]
                 );
+
+                // S-AUDIT-BILLING-ENGINE-1 #9: leases.total_paid was never
+                // reversed on NSF (voidPayment reverses it; NSF didn't).
+                if (!empty($alloc['lease_id'])) {
+                    \db_execute(
+                        "UPDATE leases SET total_paid = GREATEST(0, total_paid - ?), updated_at = NOW() WHERE id = ?",
+                        [$alloc['amount'], $alloc['lease_id']]
+                    );
+                }
 
                 $obReinflateAmount = bcadd($obReinflateAmount, (string) $alloc['amount'], 2);
             }

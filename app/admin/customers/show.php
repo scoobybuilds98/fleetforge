@@ -36,7 +36,11 @@ if (!$customerId || $customerId <= 0) {
 
 // ── Load customer ─────────────────────────────────────────────
 $customer = db_row(
-    "SELECT c.*, creator.name AS created_by_name
+    "SELECT c.*, creator.name AS created_by_name,
+            -- S-AUDIT-BILLING-ENGINE-1 #11: account credit derived from the
+            -- CN subledger — the stored column has no transactional writer
+            -- (permanently \$0/stale), so this SELECT overrides c.* with truth.
+            " . ff_customer_credit_sql('c') . " AS account_credit_balance
      FROM customers c
      LEFT JOIN users creator ON creator.id = c.created_by
      WHERE c.id = ? AND c.deleted_at IS NULL",

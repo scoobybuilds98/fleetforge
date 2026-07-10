@@ -393,12 +393,19 @@ db_transaction(function () use (
             'source_invoice_id'       => $invoiceId,
             'source_payment_id'       => $paymentId,
             'amount'                  => $overpaymentAmount,
+            // S-AUDIT-BILLING-ENGINE-1 #21: freeze the payment's CAD rate onto
+            // the CN so the bridge converts its liability deterministically.
+            'exchange_rate_to_cad'    => $currency === 'USD' ? $paymentExchangeRate : null,
             'currency'                => $currency,
             'amount_remaining'        => $overpaymentAmount,
             'status'                  => 'active',
             'reason'                  => "Overpayment from payment {$paymentNumber} (received {$currency} {$amountRaw}, invoice balance was {$currency} {$balanceDue})",
             'created_by'              => current_user_id(),
         ]);
+
+        // S-AUDIT-BILLING-ENGINE-1 #20: QBO mirror for the overpayment CN
+        // (the other mint sites enqueue too; queue row commits with the CN).
+        \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cnId, 'create');
 
         db_insert('audit_log', [
             'user_id'      => current_user_id(),

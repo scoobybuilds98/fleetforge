@@ -187,6 +187,23 @@ class AccountingService
         );
 
         $next = $row ? (int) $row['value'] : 1;
+
+        // S-AUDIT-BILLING-ENGINE-1 #15: drift guard (the invoice counter has
+        // one; this didn't). A counter behind MAX(entry_number) — seeded rows,
+        // restores, manual inserts — produced a 1062 duplicate that 500'd the
+        // whole send. Runtime-proven via the closed-period redirect posting
+        // into a prior year whose counter was stale.
+        $maxRow = \db_row(
+            "SELECT MAX(entry_number) AS m FROM acc_journal_entries WHERE entry_number LIKE ?",
+            ["JE-{$year}-%"]
+        );
+        if (!empty($maxRow['m'])) {
+            $maxNum = (int) substr((string) strrchr((string) $maxRow['m'], '-'), 1);
+            if ($next <= $maxNum) {
+                $next = $maxNum + 1;
+            }
+        }
+
         $number = sprintf("JE-%s-%05d", $year, $next);
 
         if ($row) {
@@ -464,11 +481,22 @@ class AccountingService
         $arAccountId = self::setting('accounting.ar_account_id');
         $glBalance = $arAccountId ? self::accountBalance($arAccountId) : '0.00';
 
-        // Sum of open invoice balances (the subledger)
+        // Sum of open invoice balances (the subledger).
+        // S-AUDIT-BILLING-ENGINE-1 #5 — the old check was structurally broken:
+        //   (a) it included DRAFTS ('status NOT IN paid/void/written_off'), but
+        //       the GL only posts AR at SEND — any draft made the check fail;
+        //   (b) it compared mixed-currency FACE values against the (now
+        //       CAD-canonical, #21) GL — any USD invoice made it fail.
+        // Compare like units: ISSUED invoices only, CAD-converted at each
+        // invoice's frozen rate.
         $row = \db_row(
-            "SELECT COALESCE(SUM(balance_due), 0) AS total
+            "SELECT COALESCE(SUM(
+                        CASE WHEN currency = 'USD'
+                             THEN ROUND(balance_due * COALESCE(exchange_rate_to_cad, 1), 2)
+                             ELSE balance_due END
+                    ), 0) AS total
              FROM invoices
-             WHERE status NOT IN ('paid','void','written_off')
+             WHERE status IN ('sent','partially_paid','overdue')
                AND deleted_at IS NULL",
             []
         );

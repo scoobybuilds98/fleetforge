@@ -37,7 +37,7 @@ class FinancialActions
         }
 
         $invoice = db_row(
-            "SELECT id, status, invoice_number, total_amount, balance_due, customer_id, lease_id
+            "SELECT id, status, invoice_number, invoice_type, total_amount, balance_due, customer_id, lease_id
              FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [$id]
         );
@@ -138,12 +138,50 @@ class FinancialActions
 
             // Reverse the original invoice JE — inside the txn, so a reversal
             // failure rolls back the whole void (A8, §16).
-            \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, $userId);
+            // S-AUDIT-BILLING-ENGINE-1 #22: closed-period reversal surfaces as
+            // a clean 409 (voidPayment already did this; invoice/CN voids were
+            // raw 500s).
+            try {
+                \FleetForge\Accounting\AutoEntryBridge::onInvoiceVoided($id, $userId);
+            } catch (\RuntimeException $e) {
+                if (stripos($e->getMessage(), 'period') !== false) {
+                    throw new ActionException('PERIOD_CLOSED',
+                        "Cannot void invoice {$invoice['invoice_number']}: its journal entry's accounting period is closed. Re-open the period (or open a current one) and retry. " . $e->getMessage(), 409);
+                }
+                throw $e;
+            }
 
             // S-AUDIT-LIFECYCLE-1 (closes F33 at the void site): restore any
             // precharge drawdown this invoice consumed and re-open the D138
             // precharge emit gate if it carried the mileage_precharge charge.
             ff_reverse_precharge_on_invoice_removal($id, $userId, $userName, 'voided');
+
+            // S-AUDIT-BILLING-ENGINE-1 #18: voiding a LATE-FEE invoice unlatches
+            // its original — the latch (late_fee_applied=1 + dangling
+            // late_fee_invoice_id) used to survive the void, so the original
+            // showed "Late fee applied" forever and could never legitimately be
+            // re-assessed.
+            if (($invoice['invoice_type'] ?? '') === 'late_fee') {
+                $latched = db_row(
+                    "SELECT id, invoice_number FROM invoices WHERE late_fee_invoice_id = ? AND deleted_at IS NULL FOR UPDATE",
+                    [$id]
+                );
+                if ($latched) {
+                    db_update('invoices', [
+                        'late_fee_applied'    => 0,
+                        'late_fee_amount'     => '0.00',
+                        'late_fee_date'       => null,
+                        'late_fee_invoice_id' => null,
+                    ], 'id = ?', [(int) $latched['id']]);
+                    db_insert('audit_log', [
+                        'user_id' => $userId, 'user_name' => $userName, 'action' => 'update',
+                        'module' => 'invoices', 'entity_type' => 'invoice', 'entity_id' => (int) $latched['id'],
+                        'entity_label' => $latched['invoice_number'],
+                        'notes' => "Late-fee latch cleared: fee invoice {$invoice['invoice_number']} was voided — {$latched['invoice_number']} may be re-assessed by the late-fee cron.",
+                        'ip_address' => $ip ?? '127.0.0.1',
+                    ]);
+                }
+            }
 
             // S-ORPHAN-OVERFLOW-CN: void the invoice's auto-created overflow
             // CNs in the SAME transaction (unapplied-only; blockers refused
@@ -362,6 +400,35 @@ class FinancialActions
             throw new ActionException('NOT_FOUND', 'Payment not found.', 404);
         }
 
+        // S-AUDIT-BILLING-ENGINE-1 #9: an NSF'd payment ('failed') already had
+        // its counters + GL unwound by BankService::processNsf's compensating
+        // JE — voiding it on top would reverse everything a SECOND time
+        // (OB double-incremented, AR debited twice).
+        if (in_array($payment['status'], ['failed', 'returned'], true)) {
+            throw new ActionException('INVALID_TRANSITION',
+                "Payment {$payment['payment_number']} bounced (NSF) — its effects were already reversed by the NSF entry; it cannot be voided again.", 409);
+        }
+
+        // S-AUDIT-BILLING-ENGINE-1 #8: the overpayment excess of this payment
+        // lives on as an account-credit note. Voiding the payment reverses the
+        // 3-line JE (un-crediting 2060), so the CN must die with it — a live
+        // CN would stay spendable with no funding (2060 goes negative on
+        // apply). A DRAWN CN blocks the void instead (the customer already
+        // spent money that traces to this payment).
+        $linkedCns = db_select(
+            "SELECT id, credit_note_number, amount, amount_remaining, status
+               FROM credit_notes
+              WHERE source_payment_id = ? AND status <> 'void' AND voided_at IS NULL AND deleted_at IS NULL",
+            [$id]
+        );
+        foreach ($linkedCns as $cn) {
+            if (bccomp((string) $cn['amount_remaining'], (string) $cn['amount'], 2) !== 0
+                || in_array($cn['status'], ['partially_used', 'fully_used'], true)) {
+                throw new ActionException('CREDIT_NOTE_APPLIED',
+                    "Cannot void payment {$payment['payment_number']}: its overpayment credit {$cn['credit_note_number']} has already been applied. Unapply the credit first.", 422);
+            }
+        }
+
         $allocations = db_select(
             "SELECT pa.id, pa.invoice_id, pa.amount,
                     i.lease_id, i.invoice_number, i.total_amount, i.credits_applied,
@@ -375,8 +442,36 @@ class FinancialActions
 
         $revertedStatuses = [];
 
-        db_transaction(function () use ($id, $payment, $allocations, $reason, $userId, $userName, $ip, &$revertedStatuses): void {
+        db_transaction(function () use ($id, $payment, $allocations, $linkedCns, $reason, $userId, $userName, $ip, &$revertedStatuses): void {
             db_update('payments', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
+
+            // S-AUDIT-BILLING-ENGINE-1 #8: void the (fully-unapplied — blockers
+            // refused above) overpayment CNs WITH the payment. Deliberately NO
+            // onCreditNoteVoided call: the overpayment CN's 2060 credit lives
+            // in the payment's own 3-line JE, whose reversal below un-credits
+            // 2060 exactly once — a forfeiture JE on top would double-debit it.
+            foreach ($linkedCns as $cn) {
+                $affected = db_update('credit_notes', [
+                    'status'           => 'void',
+                    'amount_remaining' => '0.00',
+                    'voided_by'        => $userId,
+                    'voided_at'        => date('Y-m-d H:i:s'),
+                    'internal_notes'   => "Auto-voided: source payment {$payment['payment_number']} voided (S-AUDIT-BILLING-ENGINE-1 — an overpayment credit lives and dies with its payment).",
+                ], 'id = ? AND status = ? AND amount_remaining = ?', [(int) $cn['id'], $cn['status'], $cn['amount_remaining']]);
+                if ($affected === 0) {
+                    throw new ActionException('CREDIT_NOTE_APPLIED',
+                        "Overpayment credit {$cn['credit_note_number']} was applied concurrently; cannot void the payment.", 409);
+                }
+                db_insert('audit_log', [
+                    'user_id' => $userId, 'user_name' => $userName, 'action' => 'status_change',
+                    'module' => 'payments', 'entity_type' => 'credit_note', 'entity_id' => (int) $cn['id'],
+                    'entity_label' => $cn['credit_note_number'],
+                    'old_values' => json_encode(['status' => $cn['status'], 'amount_remaining' => $cn['amount_remaining']]),
+                    'new_values' => json_encode(['status' => 'void', 'amount_remaining' => '0.00']),
+                    'notes' => "Credit note {$cn['credit_note_number']} auto-voided with payment {$payment['payment_number']} (GL handled by the payment JE reversal).",
+                    'ip_address' => $ip ?? '127.0.0.1',
+                ]);
+            }
 
             foreach ($allocations as $alloc) {
                 $allocated  = (string) $alloc['amount'];
@@ -488,6 +583,10 @@ class FinancialActions
 
         // Best-effort QBO void enqueue AFTER commit (soft-delete IS the void signal).
         \FleetForge\QboPushers\PaymentEnqueuer::enqueue($id, 'void');
+        // S-AUDIT-BILLING-ENGINE-1 #8: mirror the auto-voided overpayment CNs.
+        foreach ($linkedCns as $cn) {
+            \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cn['id'], 'void');
+        }
         if (function_exists('invalidate_dashboard_cache')) {
             invalidate_dashboard_cache();
         }

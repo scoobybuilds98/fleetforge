@@ -440,47 +440,24 @@ function legacy_append_mileage_to_full_month_draft(
         ]);
     }
 
-    // Recompute totals using the current discount on the lease (snapshotted into
-    // the original draft as discount_amount; we re-run the formula on the new
-    // subtotal so the discount stays proportional for percentage discounts).
-    // $baseSubtotal is $invoice['subtotal'] with any re-added (deleted-above) lines
-    // already backed out, so reclose replaces rather than double-counts.
-    $newSubtotal   = bcadd($baseSubtotal, $addToSubtotal, 2);
-    $discountType  = $lease['discount_type']  ?? 'none';
-    $discountValue = (string) ($lease['discount_value'] ?? '0.0000');
-    $discountAmt   = '0.00';
-    if ($discountType === 'percentage' && bccomp($discountValue, '0', 4) > 0) {
-        $discountAmt = bcround(bcmul($newSubtotal, bcdiv($discountValue, '100', 6), 6), 2);
-    } elseif ($discountType === 'flat' && bccomp($discountValue, '0', 4) > 0) {
-        $discountAmt = bcround($discountValue, 2);
-    }
-    $newSubtotalAfterDiscount = bcsub($newSubtotal, $discountAmt, 2);
-    $newTax     = $taxCalc->calculate($newSubtotalAfterDiscount, $province, $gstExempt, $pstExempt);
-    $newTotal   = bcadd($newSubtotalAfterDiscount, $newTax['total'], 2);
-    $newBalance = $newTotal; // draft → no payments / credits applied yet
-
-    // Update odometer columns when supplied — last-day close brings closing odo.
-    $invoiceUpdate = [
-        'subtotal'                => $newSubtotal,
-        'discount_amount'         => $discountAmt,
-        'subtotal_after_discount' => $newSubtotalAfterDiscount,
-        'tax_gst_rate'            => $newTax['gst_rate'],
-        'tax_pst_rate'            => $newTax['pst_rate'],
-        'tax_hst_rate'            => $newTax['hst_rate'],
-        'tax_gst_amount'          => $newTax['gst'],
-        'tax_pst_amount'          => $newTax['pst'],
-        'tax_hst_amount'          => $newTax['hst'],
-        'tax_total'               => $newTax['total'],
-        'total_amount'            => $newTotal,
-        'balance_due'             => $newBalance,
-        'updated_by'              => current_user_id(),
-    ];
+    // S-AUDIT-BILLING-ENGINE-1 #17 (B5): totals via InvoiceRecalc — the ONE
+    // draft-recompute authority. The fold used to re-implement the whole
+    // pipeline itself: live TaxCalculator lookups that OVERWROTE the invoice's
+    // frozen tax_*_rate snapshots (D14 violation), per-line taxes on
+    // undiscounted amounts, invoice tax ignoring the `taxable` flag, and
+    // discount re-derived from the LIVE lease instead of the invoice's frozen
+    // discount snapshot. InvoiceRecalc replays the frozen snapshots with the
+    // per-line prorated convention (same as createFromLease post-#16) and
+    // rewrites the per-line taxes inserted above consistently.
+    $invoiceUpdate = ['updated_by' => current_user_id()];
     if ($odoPeriodStart !== null) $invoiceUpdate['odometer_at_period_start_km'] = $odoPeriodStart;
     if ($odoAtClose     !== null) $invoiceUpdate['odometer_at_period_end_km']   = $odoAtClose;
     if ($odoSource      !== null) $invoiceUpdate['odometer_source']             = $odoSource;
     if ($odoFetchedAt   !== null) $invoiceUpdate['odometer_fetched_at']         = $odoFetchedAt;
-
     db_update('invoices', $invoiceUpdate, 'id = ?', [$invoice['id']]);
+
+    $totals   = \FleetForge\Billing\InvoiceRecalc::recalc((int) $invoice['id']);
+    $newTotal = (string) $totals['total_amount'];
 
     // Path B: lease.total_invoiced gets the delta. customer.outstanding_balance
     // unchanged (this is a draft edit; the OB increment fires only on send).
@@ -1613,6 +1590,8 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 'source_payment_id'       => null,
                 'amount'                  => $refundAmount,
                 'currency'                => $lease['currency'] ?? 'CAD',
+                // S-AUDIT-BILLING-ENGINE-1 #21: freeze the CAD rate (bridge conversion).
+                'exchange_rate_to_cad'    => ($lease['currency'] ?? 'CAD') === 'USD' ? ($lease['exchange_rate_to_cad'] ?? null) : null,
                 'amount_remaining'        => $refundAmount,
                 'status'                  => 'active',
                 'expires_at'              => null,
@@ -1625,13 +1604,17 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // Customer Credits Liability per S-FIX-2 D47/D48. If CPA
             // confirms precharge-source credit needs different JE
             // shape (D-I question d), S-MILEAGE-3-ACCT-SPEC will rework.
-            // Wrapped in try/catch with error_log fallback — accounting
-            // is best-effort at this layer per S-FIX-2 precedent.
-            try {
-                \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued((int) $refundCnId, current_user_id());
-            } catch (\Throwable $e) {
-                error_log('[S-MILEAGE-3 onCreditNoteIssued] ' . $e->getMessage());
-            }
+            // S-AUDIT-BILLING-ENGINE-1 #20: NO try/catch — this was the ONLY
+            // mint site that swallowed the issue-JE failure (inside the close
+            // txn!), letting a precharge_refund CN commit with no 2060 credit;
+            // its later apply then debited a liability that was never booked.
+            // A mapping/period failure now rolls back the whole close, exactly
+            // like credit_notes/create.php and every other mint site (§16
+            // hard-block contract).
+            \FleetForge\Accounting\AutoEntryBridge::onCreditNoteIssued((int) $refundCnId, current_user_id());
+            // S-AUDIT-BILLING-ENGINE-1 #20: QBO mirror for the auto-minted CN
+            // (queue row commits atomically with the CN; enqueue never throws).
+            \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $refundCnId, 'create');
 
             $settledAtSql = date('Y-m-d H:i:s');
         }

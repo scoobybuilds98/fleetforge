@@ -72,6 +72,26 @@ class AutoEntryBridge
             throw new \RuntimeException("AutoEntryBridge: Invoice {$invoiceId} not found.");
         }
 
+        // S-AUDIT-BILLING-ENGINE-1 #22: bridge-level idempotency backstop.
+        // Upstream I05 gates make double-send impossible on the canonical
+        // path, but any NEW caller (AI action, future endpoint, manual
+        // re-post) invoking this hook a second time would double-post
+        // revenue with no defense — there is no UNIQUE on (source_type,
+        // source_id). Mirror the damage hooks' existence guard.
+        $existingJe = \db_row(
+            "SELECT id FROM acc_journal_entries
+              WHERE source_type = 'invoice' AND source_id = ?
+                AND status = 'posted' AND is_reversal = 0
+                AND reversed_by_id IS NULL
+                AND description LIKE 'Invoice %sent%'
+              LIMIT 1",
+            [$invoiceId]
+        );
+        if ($existingJe) {
+            \error_log("AutoEntryBridge::onInvoiceSent — JE already posted for invoice {$invoiceId} (id {$existingJe['id']}), skipping duplicate post.");
+            return null;
+        }
+
         // Fetch line items to determine revenue account mapping
         $lineItems = \db_select(
             "SELECT * FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order",
@@ -158,14 +178,23 @@ class AutoEntryBridge
             }
         }
 
+        // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical GL. Face amounts group
+        // above in document currency (exact netting), then each posted figure
+        // converts ONCE at the invoice's frozen rate. AR posts the converted
+        // TOTAL (so payment-side AR relief at alloc×rate clears it exactly);
+        // any Σ-of-parts rounding residue posts to FX gain/loss.
+        $invFxRate = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+
         // Build JE lines
         $jeLines = [];
 
-        // Line 1: DR 1030 Accounts Receivable for total_amount
+        // Line 1: DR 1030 Accounts Receivable for total_amount (CAD)
         $arAccountId = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+        $arCad = self::toCad((string) $invoice['total_amount'], $invFxRate);
         $jeLines[] = [
             'account_id'  => $arAccountId,
-            'debit'       => (string) $invoice['total_amount'],
+            'debit'       => $arCad,
             'credit'      => '0.00',
             'description' => "AR — Invoice {$invoice['invoice_number']}",
             'customer_id' => $invoice['customer_id'],
@@ -173,21 +202,22 @@ class AutoEntryBridge
 
         // Revenue lines: CR each revenue account (or DR if net is negative from credits)
         foreach ($revenueByAccount as $accountId => $netAmount) {
-            if (bccomp($netAmount, '0', 2) > 0) {
+            $netCad = self::toCad($netAmount, $invFxRate);
+            if (bccomp($netCad, '0', 2) > 0) {
                 // Normal: credit revenue
                 $jeLines[] = [
                     'account_id'  => $accountId,
                     'debit'       => '0.00',
-                    'credit'      => $netAmount,
+                    'credit'      => $netCad,
                     'description' => "Revenue — Invoice {$invoice['invoice_number']}",
                     'customer_id' => $invoice['customer_id'],
                 ];
-            } elseif (bccomp($netAmount, '0', 2) < 0) {
+            } elseif (bccomp($netCad, '0', 2) < 0) {
                 // PASS-6:G3: Net negative = credit line items exceeded charges for this account
                 // Post as a debit (revenue reduction)
                 $jeLines[] = [
                     'account_id'  => $accountId,
-                    'debit'       => bcmul($netAmount, '-1', 2),
+                    'debit'       => bcmul($netCad, '-1', 2),
                     'credit'      => '0.00',
                     'description' => "Revenue credit — Invoice {$invoice['invoice_number']}",
                     'customer_id' => $invoice['customer_id'],
@@ -203,7 +233,7 @@ class AutoEntryBridge
             $jeLines[] = [
                 'account_id'  => $gstAccountId,
                 'debit'       => '0.00',
-                'credit'      => $gstHst,
+                'credit'      => self::toCad($gstHst, $invFxRate),
                 'description' => "GST/HST — Invoice {$invoice['invoice_number']}",
                 'customer_id' => $invoice['customer_id'],
             ];
@@ -215,10 +245,23 @@ class AutoEntryBridge
             $jeLines[] = [
                 'account_id'  => $pstAccountId,
                 'debit'       => '0.00',
-                'credit'      => $pst,
+                'credit'      => self::toCad($pst, $invFxRate),
                 'description' => "PST — Invoice {$invoice['invoice_number']}",
                 'customer_id' => $invoice['customer_id'],
             ];
+        }
+
+        // Balance the converted-per-part rounding residue (±pennies, USD only)
+        // into FX gain/loss so the JE stays exactly balanced.
+        if ($invFxRate !== '1') {
+            $sumDr = '0.00'; $sumCr = '0.00';
+            foreach ($jeLines as $l) {
+                $sumDr = bcadd($sumDr, (string) $l['debit'], 2);
+                $sumCr = bcadd($sumCr, (string) $l['credit'], 2);
+            }
+            // DR-heavy → need extra CR (gain); CR-heavy → extra DR (loss).
+            self::appendFxLine($jeLines, bcsub($sumDr, $sumCr, 2),
+                "FX rounding — Invoice {$invoice['invoice_number']}", $invoice['customer_id'] ?? null);
         }
 
         // D-GL-REVREC-1 (S-INVOICE-DATING-FIX): rental revenue recognizes in its
@@ -250,6 +293,8 @@ class AutoEntryBridge
             'reference'        => $invoice['invoice_number'],
             'source_type'      => 'invoice',
             'source_id'        => $invoiceId,
+            'currency'         => $invoice['currency'] ?? 'CAD',
+            'exchange_rate'    => $invFxRate === '1' ? null : $invFxRate,
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
@@ -279,6 +324,25 @@ class AutoEntryBridge
              ORDER BY id DESC LIMIT 1",
             [$invoiceId]
         );
+
+        // S-AUDIT-BILLING-ENGINE-1 #6: onDamageRecoveryBilled RETAGS the
+        // invoice's send JE to source_type='damage_recovery' with source_id =
+        // the CLAIM id — so the lookup above finds nothing for a retagged
+        // (still-voidable 'sent') invoice, the void reversed the counters but
+        // LEFT the DR AR / CR revenue posted (GL ≠ subledger, A9 broken).
+        // Follow the claim link to find the retagged JE.
+        if (!$originalJe) {
+            $originalJe = \db_row(
+                "SELECT je.id, je.status, je.reversed_by_id
+                   FROM acc_journal_entries je
+                   JOIN damage_claims dc ON dc.id = je.source_id
+                  WHERE je.source_type = 'damage_recovery'
+                    AND dc.invoice_id = ?
+                    AND je.status = 'posted' AND je.is_reversal = 0
+                  ORDER BY je.id DESC LIMIT 1",
+                [$invoiceId]
+            );
+        }
 
         // No JE to reverse (invoice was draft-only, never sent, or accounting was disabled at send time)
         if (!$originalJe) return null;
@@ -320,7 +384,7 @@ class AutoEntryBridge
         if (!$payment) return null;
 
         $invoice = \db_row(
-            "SELECT invoice_number, customer_id, company_name_snapshot
+            "SELECT invoice_number, customer_id, company_name_snapshot, currency, exchange_rate_to_cad
              FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [$invoiceId]
         );
@@ -329,10 +393,21 @@ class AutoEntryBridge
         $cashAccountId = self::requireAccountId('accounting.default_cash_account_id', 'Cash');
         $arAccountId   = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
 
+        // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical. Cash converts at the
+        // PAYMENT's frozen rate; the AR relief converts at the INVOICE's rate
+        // (that is what was booked at send); the difference is realized FX
+        // gain/loss (spec §16). D18 guarantees same document currency.
+        $payFxRate = self::fxRate($payment['currency'] ?? 'CAD', $payment['exchange_rate_to_cad'] ?? null,
+            "payment {$payment['payment_number']}");
+        $invFxRate = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+        $cashCad = self::toCad($allocatedAmount, $payFxRate);
+        $arCad   = self::toCad($allocatedAmount, $invFxRate);
+
         $jeLines = [
             [
                 'account_id'  => $cashAccountId,
-                'debit'       => $allocatedAmount,
+                'debit'       => $cashCad,
                 'credit'      => '0.00',
                 'description' => "Cash received — {$payment['payment_number']}",
                 'customer_id' => $invoice['customer_id'],
@@ -340,11 +415,14 @@ class AutoEntryBridge
             [
                 'account_id'  => $arAccountId,
                 'debit'       => '0.00',
-                'credit'      => $allocatedAmount,
+                'credit'      => $arCad,
                 'description' => "AR reduced — {$payment['payment_number']} → {$invoice['invoice_number']}",
                 'customer_id' => $invoice['customer_id'],
             ],
         ];
+        // Cash > AR relief → gain (CR 7030); Cash < AR relief → loss (DR 7040).
+        self::appendFxLine($jeLines, bcsub($cashCad, $arCad, 2),
+            "Realized FX — {$payment['payment_number']} → {$invoice['invoice_number']}", $invoice['customer_id']);
 
         $periodInfo = self::resolvePeriod($payment['payment_date']);
 
@@ -355,6 +433,8 @@ class AutoEntryBridge
             'reference'        => $payment['payment_number'],
             'source_type'      => 'payment',
             'source_id'        => $paymentId,
+            'currency'         => $payment['currency'] ?? 'CAD',
+            'exchange_rate'    => $payFxRate === '1' ? null : $payFxRate,
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
@@ -405,7 +485,7 @@ class AutoEntryBridge
         if (!$payment) return null;
 
         $invoice = \db_row(
-            "SELECT invoice_number, customer_id, company_name_snapshot
+            "SELECT invoice_number, customer_id, company_name_snapshot, currency, exchange_rate_to_cad
              FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [$invoiceId]
         );
@@ -418,23 +498,34 @@ class AutoEntryBridge
             'Customer Credits Liability (2060)'
         );
 
+        // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical. Cash + the 2060 credit
+        // convert at the PAYMENT's rate; AR relief at the INVOICE's rate; the
+        // residue (alloc × rate difference) is realized FX gain/loss.
+        $payFxRate = self::fxRate($payment['currency'] ?? 'CAD', $payment['exchange_rate_to_cad'] ?? null,
+            "payment {$payment['payment_number']}");
+        $invFxRate = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+
         $totalCash = bcadd($allocatedAmount, $overpaymentAmount, 2);
+        $cashCad   = self::toCad($totalCash, $payFxRate);
+        $arCad     = self::toCad($allocatedAmount, $invFxRate);
+        $opCad     = self::toCad($overpaymentAmount, $payFxRate);
 
         $jeLines = [
             [
                 'account_id'  => $cashAccountId,
-                'debit'       => $totalCash,
+                'debit'       => $cashCad,
                 'credit'      => '0.00',
                 'description' => "Cash received — {$payment['payment_number']} (incl. overpayment)",
                 'customer_id' => $invoice['customer_id'],
             ],
         ];
 
-        if (bccomp($allocatedAmount, '0', 2) > 0) {
+        if (bccomp($arCad, '0', 2) > 0) {
             $jeLines[] = [
                 'account_id'  => $arAccountId,
                 'debit'       => '0.00',
-                'credit'      => $allocatedAmount,
+                'credit'      => $arCad,
                 'description' => "AR reduced — {$payment['payment_number']} → {$invoice['invoice_number']}",
                 'customer_id' => $invoice['customer_id'],
             ];
@@ -443,10 +534,13 @@ class AutoEntryBridge
         $jeLines[] = [
             'account_id'  => $creditsLiabilityId,
             'debit'       => '0.00',
-            'credit'      => $overpaymentAmount,
+            'credit'      => $opCad,
             'description' => "Customer credit — overpayment from {$payment['payment_number']}",
             'customer_id' => $invoice['customer_id'],
         ];
+
+        self::appendFxLine($jeLines, bcsub(bcsub($cashCad, $arCad, 2), $opCad, 2),
+            "Realized FX — {$payment['payment_number']} → {$invoice['invoice_number']}", $invoice['customer_id']);
 
         $periodInfo = self::resolvePeriod($payment['payment_date']);
 
@@ -457,6 +551,8 @@ class AutoEntryBridge
             'reference'        => $payment['payment_number'],
             'source_type'      => 'payment',
             'source_id'        => $paymentId,
+            'currency'         => $payment['currency'] ?? 'CAD',
+            'exchange_rate'    => $payFxRate === '1' ? null : $payFxRate,
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
@@ -522,13 +618,16 @@ class AutoEntryBridge
             'Customer Credits Liability (2060)'
         );
 
-        $amount = (string) $cn['amount'];
+        // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical — both legs convert at
+        // the CN's frozen rate (same rate → no FX leg at issuance).
+        $cnRate = self::cnFxRate($cn);
+        $amountCad = self::toCad((string) $cn['amount'], $cnRate);
         $companyName = $customer['company_name'] ?? 'Unknown';
 
         $jeLines = [
             [
                 'account_id'  => $revenueAccountId,
-                'debit'       => $amount,
+                'debit'       => $amountCad,
                 'credit'      => '0.00',
                 'description' => "Revenue reversal — CN {$cn['credit_note_number']}",
                 'customer_id' => $cn['customer_id'],
@@ -536,7 +635,7 @@ class AutoEntryBridge
             [
                 'account_id'  => $creditsLiabilityId,
                 'debit'       => '0.00',
-                'credit'      => $amount,
+                'credit'      => $amountCad,
                 'description' => "Customer credit liability — CN {$cn['credit_note_number']}",
                 'customer_id' => $cn['customer_id'],
             ],
@@ -551,6 +650,8 @@ class AutoEntryBridge
             'reference'        => $cn['credit_note_number'],
             'source_type'      => 'credit_note',
             'source_id'        => $creditNoteId,
+            'currency'         => $cn['currency'] ?? 'CAD',
+            'exchange_rate'    => $cnRate === '1' ? null : $cnRate,
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
@@ -584,13 +685,77 @@ class AutoEntryBridge
     {
         if (!self::isEnabled()) return null;
 
+        $cn = \db_row(
+            "SELECT credit_note_number, source, amount, customer_id, currency,
+                    exchange_rate_to_cad, source_invoice_id, source_payment_id
+               FROM credit_notes WHERE id = ?",
+            [$creditNoteId]
+        );
+        if (!$cn) return null;
+
+        // S-AUDIT-BILLING-ENGINE-1 #7: OVERPAYMENT-source CNs have NO
+        // 'credit_note' issue JE — their 2060 credit lives inside the payment's
+        // 3-line JE (source_type='payment', deliberately, to avoid double-
+        // counting). Two failure modes of the generic path below: (a) a
+        // never-applied overpayment CN void found nothing → 2060 stayed
+        // credited forever; (b) with apply/unapply history, ORDER BY id ASC
+        // picked the APPLY JE and reversed the WRONG entry (AR + 2060 both
+        // misstated). Post an explicit forfeiture-shaped JE instead:
+        // DR 2060 / CR Other Revenue (the deposit-forfeiture pattern,
+        // PASS-6:G5) for the CN's full amount — callers gate on
+        // fully-unapplied, so the full amount is exactly the residual 2060.
+        if (($cn['source'] ?? '') === 'overpayment') {
+            $liabilityId = self::requireAccountId('accounting.customer_credits_account_id', 'Customer Credits Liability (2060)');
+            $otherRevId  = self::resolveRevenueAccount('other');
+            if ($otherRevId === null) {
+                throw new \RuntimeException(
+                    "Cannot void overpayment credit {$cn['credit_note_number']} — no 'other' revenue account mapped. "
+                    . 'Go to Accounting → Settings to map revenue accounts.'
+                );
+            }
+            $cnRate = self::cnFxRate($cn);
+            $amountCad = self::toCad((string) $cn['amount'], $cnRate);
+            return JournalEntryService::create([
+                'entry_date'       => date('Y-m-d'),
+                'description'      => "Overpayment credit {$cn['credit_note_number']} voided — liability released",
+                'entry_type'       => 'system',
+                'reference'        => $cn['credit_note_number'],
+                'source_type'      => 'credit_note',
+                'source_id'        => $creditNoteId,
+                'currency'         => $cn['currency'] ?? 'CAD',
+                'exchange_rate'    => $cnRate === '1' ? null : $cnRate,
+                'post_immediately' => true,
+            ], [
+                ['account_id' => $liabilityId, 'debit' => $amountCad, 'credit' => '0.00',
+                 'description' => "2060 released — {$cn['credit_note_number']} voided", 'customer_id' => $cn['customer_id']],
+                ['account_id' => $otherRevId, 'debit' => '0.00', 'credit' => $amountCad,
+                 'description' => "Forfeited overpayment credit — {$cn['credit_note_number']}", 'customer_id' => $cn['customer_id']],
+            ], $userId);
+        }
+
+        // S-AUDIT-BILLING-ENGINE-1 #7b: match the ISSUE JE precisely by its
+        // reference (= the CN number, stamped at issue) instead of assuming
+        // lowest-id — if accounting was disabled at issue but enabled before an
+        // apply, the lowest 'credit_note' JE was the APPLY entry and a void
+        // reversed it wrongly. Fall back to lowest-id only when no
+        // reference-match exists (legacy rows).
         $originalJe = \db_row(
             "SELECT id, reversed_by_id FROM acc_journal_entries
              WHERE source_type = 'credit_note' AND source_id = ?
                AND status = 'posted' AND is_reversal = 0
+               AND reference = ? AND description LIKE 'Credit note %issued%'
              ORDER BY id ASC LIMIT 1",
-            [$creditNoteId]
+            [$creditNoteId, $cn['credit_note_number']]
         );
+        if (!$originalJe) {
+            $originalJe = \db_row(
+                "SELECT id, reversed_by_id FROM acc_journal_entries
+                 WHERE source_type = 'credit_note' AND source_id = ?
+                   AND status = 'posted' AND is_reversal = 0
+                 ORDER BY id ASC LIMIT 1",
+                [$creditNoteId]
+            );
+        }
 
         // No JE to reverse (accounting was disabled at issue time).
         if (!$originalJe) return null;
@@ -627,13 +792,16 @@ class AutoEntryBridge
         if (bccomp($amountApplied, '0', 2) <= 0) return null;
 
         $cn = \db_row(
-            "SELECT credit_note_number, customer_id FROM credit_notes WHERE id = ? AND deleted_at IS NULL",
+            "SELECT credit_note_number, customer_id, currency, exchange_rate_to_cad,
+                    source_invoice_id, source_payment_id
+               FROM credit_notes WHERE id = ? AND deleted_at IS NULL",
             [$creditNoteId]
         );
         if (!$cn) return null;
 
         $invoice = \db_row(
-            "SELECT invoice_number, company_name_snapshot FROM invoices WHERE id = ? AND deleted_at IS NULL",
+            "SELECT invoice_number, company_name_snapshot, currency, exchange_rate_to_cad
+               FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [$invoiceId]
         );
         if (!$invoice) return null;
@@ -644,10 +812,18 @@ class AutoEntryBridge
         );
         $arAccountId = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
 
+        // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical (same-currency guard is
+        // upstream in apply.php; the RATES can still differ between docs).
+        $cnRate  = self::cnFxRate($cn);
+        $invRate = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+        $liabilityCad = self::toCad($amountApplied, $cnRate);
+        $arCad        = self::toCad($amountApplied, $invRate);
+
         $jeLines = [
             [
                 'account_id'  => $creditsLiabilityId,
-                'debit'       => $amountApplied,
+                'debit'       => $liabilityCad,
                 'credit'      => '0.00',
                 'description' => "Credit applied — {$cn['credit_note_number']} → {$invoice['invoice_number']}",
                 'customer_id' => $cn['customer_id'],
@@ -655,11 +831,15 @@ class AutoEntryBridge
             [
                 'account_id'  => $arAccountId,
                 'debit'       => '0.00',
-                'credit'      => $amountApplied,
+                'credit'      => $arCad,
                 'description' => "AR reduced — {$cn['credit_note_number']} → {$invoice['invoice_number']}",
                 'customer_id' => $cn['customer_id'],
             ],
         ];
+        // 2060 booked at the CN's rate vs AR booked at the invoice's — the
+        // difference is realized FX (S-AUDIT-BILLING-ENGINE-1 #21).
+        self::appendFxLine($jeLines, bcsub($liabilityCad, $arCad, 2),
+            "Realized FX — {$cn['credit_note_number']} → {$invoice['invoice_number']}", $cn['customer_id']);
 
         $periodInfo = self::resolvePeriod(date('Y-m-d'));
 
@@ -670,6 +850,8 @@ class AutoEntryBridge
             'reference'        => $cn['credit_note_number'] . '→' . $invoice['invoice_number'],
             'source_type'      => 'credit_note',
             'source_id'        => $creditNoteId,
+            'currency'         => $cn['currency'] ?? 'CAD',
+            'exchange_rate'    => $cnRate === '1' ? null : $cnRate,
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
@@ -704,13 +886,15 @@ class AutoEntryBridge
         if (bccomp($amountApplied, '0', 2) <= 0) return null;
 
         $cn = \db_row(
-            "SELECT credit_note_number, customer_id FROM credit_notes WHERE id = ?",
+            "SELECT credit_note_number, customer_id, currency, exchange_rate_to_cad,
+                    source_invoice_id, source_payment_id
+               FROM credit_notes WHERE id = ?",
             [$creditNoteId]
         );
         if (!$cn) return null;
 
         $invoice = \db_row(
-            "SELECT invoice_number FROM invoices WHERE id = ?",
+            "SELECT invoice_number, currency, exchange_rate_to_cad FROM invoices WHERE id = ?",
             [$invoiceId]
         );
         if (!$invoice) return null;
@@ -722,10 +906,18 @@ class AutoEntryBridge
         $arAccountId = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
 
         // Inverse of onCreditNoteApplied: DR AR (restore) / CR Credits Liability.
+        // S-AUDIT-BILLING-ENGINE-1 #21: same frozen rates as the apply → the
+        // FX leg reverses deterministically.
+        $cnRate  = self::cnFxRate($cn);
+        $invRate = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+        $liabilityCad = self::toCad($amountApplied, $cnRate);
+        $arCad        = self::toCad($amountApplied, $invRate);
+
         $jeLines = [
             [
                 'account_id'  => $arAccountId,
-                'debit'       => $amountApplied,
+                'debit'       => $arCad,
                 'credit'      => '0.00',
                 'description' => "AR restored — credit {$cn['credit_note_number']} un-applied from {$invoice['invoice_number']}",
                 'customer_id' => $cn['customer_id'],
@@ -733,11 +925,14 @@ class AutoEntryBridge
             [
                 'account_id'  => $creditsLiabilityId,
                 'debit'       => '0.00',
-                'credit'      => $amountApplied,
+                'credit'      => $liabilityCad,
                 'description' => "Credit liability restored — {$cn['credit_note_number']} un-applied",
                 'customer_id' => $cn['customer_id'],
             ],
         ];
+        // Inverse FX: apply posted gain when liability>AR, so unapply posts the mirror.
+        self::appendFxLine($jeLines, bcsub($arCad, $liabilityCad, 2),
+            "Realized FX reversal — {$cn['credit_note_number']} ↩ {$invoice['invoice_number']}", $cn['customer_id']);
 
         $periodInfo = self::resolvePeriod(date('Y-m-d'));
 
@@ -748,6 +943,8 @@ class AutoEntryBridge
             'reference'        => $cn['credit_note_number'] . '↩' . $invoice['invoice_number'],
             'source_type'      => 'credit_note',
             'source_id'        => $creditNoteId,
+            'currency'         => $cn['currency'] ?? 'CAD',
+            'exchange_rate'    => $cnRate === '1' ? null : $cnRate,
             'post_immediately' => true,
         ], $jeLines, $userId);
     }
@@ -772,19 +969,40 @@ class AutoEntryBridge
         if (bccomp($amount, '0', 2) <= 0) return null;
 
         $invoice = \db_row(
-            "SELECT invoice_number, customer_id, company_name_snapshot
+            "SELECT invoice_number, customer_id, company_name_snapshot, currency, exchange_rate_to_cad
              FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [$invoiceId]
         );
         if (!$invoice) return null;
 
+        // S-AUDIT-BILLING-ENGINE-1 #22: the inverse of the onDamageWrittenOff
+        // guard — if a damage-claim write-off already posted 6160/AR for this
+        // invoice, don't credit AR a second time.
+        $damageJe = \db_row(
+            "SELECT je.id FROM acc_journal_entries je
+               JOIN damage_claims dc ON dc.id = je.source_id
+              WHERE je.source_type = 'damage_writeoff' AND dc.invoice_id = ?
+                AND je.status = 'posted' AND je.is_reversal = 0
+              LIMIT 1",
+            [$invoiceId]
+        );
+        if ($damageJe) {
+            \error_log("AutoEntryBridge::onBadDebtWriteOff — invoice {$invoiceId} already has a damage-writeoff JE (id {$damageJe['id']}); skipping duplicate AR credit.");
+            return null;
+        }
+
         $badDebtAccountId = self::requireAccountId('accounting.bad_debt_expense_account_id', 'Bad Debt Expense');
         $arAccountId      = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+
+        // S-AUDIT-BILLING-ENGINE-1 #21: write off the CAD-booked AR (invoice rate).
+        $invRate   = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+        $amountCad = self::toCad($amount, $invRate);
 
         $jeLines = [
             [
                 'account_id'  => $badDebtAccountId,
-                'debit'       => $amount,
+                'debit'       => $amountCad,
                 'credit'      => '0.00',
                 'description' => "Bad debt — Invoice {$invoice['invoice_number']}",
                 'customer_id' => $invoice['customer_id'],
@@ -792,7 +1010,7 @@ class AutoEntryBridge
             [
                 'account_id'  => $arAccountId,
                 'debit'       => '0.00',
-                'credit'      => $amount,
+                'credit'      => $amountCad,
                 'description' => "AR written off — Invoice {$invoice['invoice_number']}",
                 'customer_id' => $invoice['customer_id'],
             ],
@@ -934,6 +1152,106 @@ class AutoEntryBridge
     // HELPER: Require a GL account ID from settings — throw if missing
     // ============================================================
 
+    // ============================================================
+    // FX HELPERS — CAD-canonical GL (S-AUDIT-BILLING-ENGINE-1 #21,
+    // operator 2026-07-10: "full spec — CAD conversion + FX legs")
+    //
+    // Every JE line amount in the GL is CAD. Foreign (USD) document
+    // amounts convert at the DOCUMENT's own frozen exchange_rate_to_cad;
+    // when the two sides of an event were frozen at different rates
+    // (invoice at issue vs payment at receipt) the difference posts as
+    // realized FX gain (CR 7030) / loss (DR 7040) per spec §16. JE
+    // headers stamp the document currency + rate for forensics.
+    // ============================================================
+
+    /**
+     * The document's CAD conversion rate: '1' for CAD; the frozen
+     * exchange_rate_to_cad for USD (hard block when missing — a USD
+     * document without a rate cannot post to a CAD-canonical ledger).
+     */
+    private static function fxRate(?string $currency, mixed $rate, string $context): string
+    {
+        if (($currency ?? 'CAD') !== 'USD') {
+            return '1';
+        }
+        $r = trim((string) ($rate ?? ''));
+        if ($r === '' || bccomp($r, '0', 6) <= 0) {
+            throw new \RuntimeException(
+                "Cannot post journal entry — USD {$context} has no frozen exchange_rate_to_cad. Fix the document's exchange rate first."
+            );
+        }
+        return $r;
+    }
+
+    /** Convert a document-currency amount to CAD at the given fxRate(). */
+    private static function toCad(string $amount, string $rate): string
+    {
+        if ($rate === '1') {
+            return \bcround($amount, 2);
+        }
+        return \bcround(bcmul($amount, $rate, 6), 2);
+    }
+
+    /**
+     * A credit note's CAD rate. Prefers the frozen credit_notes.exchange_
+     * rate_to_cad (stamped at mint since S-AUDIT-BILLING-ENGINE-1); falls
+     * back through the source invoice → source payment for legacy rows.
+     */
+    private static function cnFxRate(array $cn): string
+    {
+        if (($cn['currency'] ?? 'CAD') !== 'USD') {
+            return '1';
+        }
+        $rate = $cn['exchange_rate_to_cad'] ?? null;
+        if ($rate === null && !empty($cn['source_invoice_id'])) {
+            $rate = \db_row("SELECT exchange_rate_to_cad FROM invoices WHERE id = ?", [(int) $cn['source_invoice_id']])['exchange_rate_to_cad'] ?? null;
+        }
+        if ($rate === null && !empty($cn['source_payment_id'])) {
+            $rate = \db_row("SELECT exchange_rate_to_cad FROM payments WHERE id = ?", [(int) $cn['source_payment_id']])['exchange_rate_to_cad'] ?? null;
+        }
+        return self::fxRate('USD', $rate, "credit note {$cn['credit_note_number']}");
+    }
+
+    /** FX gain account (CR-normal, 7030) — setting first, COA code fallback. */
+    private static function fxGainAccountId(): int
+    {
+        $id = (int) AccountingService::setting('accounting.fx_gain_account_id', 0);
+        if ($id > 0) return $id;
+        $row = \db_row("SELECT id FROM acc_accounts WHERE code = '7030' AND is_active = 1 LIMIT 1");
+        if ($row) return (int) $row['id'];
+        throw new \RuntimeException('FX gain account not configured (accounting.fx_gain_account_id / COA 7030).');
+    }
+
+    /** FX loss account (DR-normal, 7040) — setting first, COA code fallback. */
+    private static function fxLossAccountId(): int
+    {
+        $id = (int) AccountingService::setting('accounting.fx_loss_account_id', 0);
+        if ($id > 0) return $id;
+        $row = \db_row("SELECT id FROM acc_accounts WHERE code = '7040' AND is_active = 1 LIMIT 1");
+        if ($row) return (int) $row['id'];
+        throw new \RuntimeException('FX loss account not configured (accounting.fx_loss_account_id / COA 7040).');
+    }
+
+    /**
+     * Append a realized-FX line for a signed CAD difference (positive =
+     * gain → CR 7030; negative = loss → DR 7040). No-op at zero.
+     *
+     * @param array  $lines by-ref JE lines
+     * @param string $fxCad signed CAD amount (bcmath)
+     */
+    private static function appendFxLine(array &$lines, string $fxCad, string $description, ?int $customerId = null): void
+    {
+        $sign = bccomp($fxCad, '0', 2);
+        if ($sign === 0) return;
+        if ($sign > 0) {
+            $lines[] = ['account_id' => self::fxGainAccountId(), 'debit' => '0.00', 'credit' => $fxCad,
+                        'description' => $description, 'customer_id' => $customerId];
+        } else {
+            $lines[] = ['account_id' => self::fxLossAccountId(), 'debit' => bcmul($fxCad, '-1', 2), 'credit' => '0.00',
+                        'description' => $description, 'customer_id' => $customerId];
+        }
+    }
+
     /**
      * Get a required GL account ID from accounting settings.
      * Throws RuntimeException if the setting is empty or the account doesn't exist.
@@ -1002,8 +1320,23 @@ class AutoEntryBridge
             ];
         }
 
-        // Period is closed/locked or doesn't exist — fall back to earliest open period
-        $openPeriod = AccountingService::currentOpenPeriod();
+        // Period is closed/locked or doesn't exist — redirect FORWARD to the
+        // earliest open period ON OR AFTER the transaction date.
+        // S-AUDIT-BILLING-ENGINE-1 #15: the old fallback picked the GLOBALLY
+        // earliest open period — runtime-proven posting a 2026-03 invoice's
+        // revenue into an open January-2025 period (a PRIOR fiscal year).
+        // Backdated activity belongs in the next open period going forward,
+        // never a still-open past year. Fall back to the globally earliest
+        // open period only when nothing is open at/after the date, preserving
+        // the never-fail-silently contract.
+        $openPeriod = \db_row(
+            "SELECT * FROM acc_periods WHERE status = 'open' AND end_date >= ?
+             ORDER BY start_date ASC LIMIT 1",
+            [$date]
+        );
+        if (!$openPeriod) {
+            $openPeriod = AccountingService::currentOpenPeriod();
+        }
         if (!$openPeriod) {
             throw new \RuntimeException(
                 "No open accounting period available. Cannot post journal entry for date {$date}. " .
@@ -1418,6 +1751,19 @@ class AutoEntryBridge
     public static function onDamageWrittenOff(int $claimId, ?int $userId = null): ?array
     {
         if (!self::isEnabled()) return null;
+
+        // S-AUDIT-BILLING-ENGINE-1 #22: if the claim's invoice has ALREADY been
+        // written off through the AR path (status='written_off'), its AR was
+        // already credited by onBadDebtWriteOff — posting a second 6160/AR JE
+        // here would double-credit AR for the same balance.
+        $claimInv = \db_row(
+            "SELECT i.status FROM damage_claims dc JOIN invoices i ON i.id = dc.invoice_id WHERE dc.id = ?",
+            [$claimId]
+        );
+        if ($claimInv && $claimInv['status'] === 'written_off') {
+            \error_log("AutoEntryBridge::onDamageWrittenOff — claim {$claimId}'s invoice is already written_off (AR credited via bad-debt path); skipping duplicate JE.");
+            return null;
+        }
 
         $existing = \db_row(
             "SELECT * FROM acc_journal_entries

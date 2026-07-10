@@ -44,7 +44,7 @@ if (!$submittedUpdatedAt) {
 
 // Load existing record
 $cn = db_row(
-    "SELECT id, credit_note_number, status, updated_at FROM credit_notes WHERE id = ? AND deleted_at IS NULL",
+    "SELECT id, credit_note_number, status, updated_at, reason, internal_notes, expires_at FROM credit_notes WHERE id = ? AND deleted_at IS NULL", // S-AUDIT-BILLING-ENGINE-1 #24: +reason/internal_notes/expires_at — audit old_values was always null (I11 class)
     [$id]
 );
 if (!$cn) {

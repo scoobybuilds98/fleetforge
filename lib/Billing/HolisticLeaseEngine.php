@@ -386,23 +386,35 @@ class HolisticLeaseEngine
             && bccomp($this->weeklyMath($total, $weekly), $monthly, 6) > 0;
 
         if (!$monthlyApplies) {
-            // ── Sub-month ladder (R2 §3, preserved) ──────────────
+            // ── Sub-month ladder (R2 §3 / D-R2-2) ──────────────
             // The ladder grows per accrued days: cumulative through period_end
             // uses the day count THROUGH period_end, so a short lease billed in
             // pieces (activation then close) reconciles correctly. Because the
             // regime is sub-month, weeklyMath(daysThrough) ≤ weeklyMath(total)
             // ≤ monthly — the monthly cap never trips here.
+            //
+            // S-AUDIT-BILLING-ENGINE-1 #14 (operator 2026-07-10, aligns code to
+            // the R2 law): ≤7 days bills the CHEAPER of (days × daily) vs the
+            // flat weekly — the old fixed bands (1-5 daily unconditionally,
+            // 6-7 weekly flat unconditionally) overbilled short high-daily
+            // leases ($150/day × 4 = $600 vs the $500 week) and overbilled
+            // 6-7-day low-daily leases the other way. A zero rate means that
+            // arm is "not offered" and the other side wins outright.
             $n = max(1, $daysThrough);
-            if ($n <= 5) {
-                $amount = bcround(bcmul($daily, (string)$n, 6), 2);
-                return ['amount' => $amount, 'tier' => 'daily', 'basis' => 'daily',
-                        'explanation' => ["{$n} cumulative days × \${$daily}/day = \${$amount}"],
-                        'segments' => []];
-            }
             if ($n <= 7) {
-                $amount = bcround($weekly, 2);
-                return ['amount' => $amount, 'tier' => 'weekly_flat', 'basis' => 'weekly_flat',
-                        'explanation' => ["{$n} cumulative days — weekly flat rate = \${$amount}"],
+                $dailyTotal   = bcround(bcmul($daily, (string)$n, 6), 2);
+                $weeklyFlat   = bcround($weekly, 2);
+                $dailyOffered = bccomp($daily, '0', 6) > 0;
+                $weeklyOffered = bccomp($weekly, '0', 6) > 0;
+                $useWeekly = $weeklyOffered
+                    && (!$dailyOffered || bccomp($weeklyFlat, $dailyTotal, 2) < 0);
+                if ($useWeekly) {
+                    return ['amount' => $weeklyFlat, 'tier' => 'weekly_flat', 'basis' => 'weekly_flat',
+                            'explanation' => ["{$n} cumulative day(s) — flat weekly \${$weeklyFlat} is cheaper than {$n} × \${$daily}/day = \${$dailyTotal} (D-R2-2 cheaper-of)"],
+                            'segments' => []];
+                }
+                return ['amount' => $dailyTotal, 'tier' => 'daily', 'basis' => 'daily',
+                        'explanation' => ["{$n} cumulative day(s) × \${$daily}/day = \${$dailyTotal}" . ($weeklyOffered ? " (≤ flat weekly \${$weeklyFlat}, D-R2-2 cheaper-of)" : '')],
                         'segments' => []];
             }
             $wm        = $this->weeklyMath($n, $weekly);

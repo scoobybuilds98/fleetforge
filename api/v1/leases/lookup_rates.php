@@ -176,7 +176,14 @@ if ($rateCardItem) {
 $hasTemplateRates = (
     $template['default_daily_rate']   !== null ||
     $template['default_weekly_rate']  !== null ||
-    $template['default_monthly_rate'] !== null
+    $template['default_monthly_rate'] !== null ||
+    // S-AUDIT-BILLING-ENGINE-1 #24: a template with ONLY a default hourly (or
+    // mileage) rate used to return source 'none' and DROP those defaults.
+    // NB: default_mileage_rate is NOT NULL DEFAULT 0.0000 (0 = mileage
+    // disabled, D135) — so a strict !== null check would make EVERY template
+    // register as "has rates". Compare > 0 for mileage; hourly stays nullable.
+    $template['default_hourly_rate']  !== null ||
+    bccomp((string)($template['default_mileage_rate'] ?? '0'), '0', 4) > 0
 );
 
 if ($hasTemplateRates) {

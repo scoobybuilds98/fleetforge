@@ -81,36 +81,18 @@ $result = db_transaction(function () use ($customerId, $amount, $receivedDate, $
     $cashAccountId    = AccountingService::setting('accounting.default_cash_account_id');
     $depositAccountId = AccountingService::setting('accounting.customer_deposits_account_id');
 
-    $jeId = null;
-    if ($cashAccountId && $depositAccountId) {
-        $jeLines = [
-            [
-                'account_id'  => (int)$cashAccountId,
-                'debit'       => $amount,
-                'credit'      => '0.00',
-                'description' => "Cash received — Deposit {$depNumber}",
-                'customer_id' => $customerId,
-            ],
-            [
-                'account_id'  => (int)$depositAccountId,
-                'debit'       => '0.00',
-                'credit'      => $amount,
-                'description' => "Customer deposit liability — {$depNumber}",
-                'customer_id' => $customerId,
-            ],
-        ];
-
-        $je = JournalEntryService::create([
-            'entry_date'       => $receivedDate,
-            'description'      => "Customer deposit {$depNumber} — {$customer['company_name']}",
-            'entry_type'       => 'system',
-            'reference'        => $depNumber,
-            'source_type'      => 'manual',
-            'post_immediately' => true,
-        ], $jeLines, current_user_id());
-        $jeId = $je['id'];
+    // S-AUDIT-BILLING-ENGINE-1 #10: HARD BLOCK on missing mappings (§16) —
+    // this endpoint used to silently record the deposit with NO journal entry
+    // (journal_entry_id=NULL, no error, no log). json_error inside the txn
+    // rolls back (db_rollback_if_active).
+    if (!$cashAccountId || !$depositAccountId) {
+        json_error('ACCOUNTING_CONFIG_INCOMPLETE',
+            'Cannot record deposit — accounting configuration incomplete. Map the Cash and Customer Deposits accounts in Accounting → Settings.',
+            422);
     }
 
+    // Deposit row FIRST so the JE can stamp source_id = the deposit id
+    // (S-AUDIT-BILLING-ENGINE-1 #10 — JEs must be traceable to their source).
     $id = db_insert('acc_customer_deposits', [
         'deposit_number'       => $depNumber,
         'customer_id'          => $customerId,
@@ -120,11 +102,42 @@ $result = db_transaction(function () use ($customerId, $amount, $receivedDate, $
         'currency'             => $currency,
         'received_date'        => $receivedDate,
         'status'               => 'held',
-        'journal_entry_id'     => $jeId,
-        'liability_account_id' => $depositAccountId ? (int)$depositAccountId : null,
+        'journal_entry_id'     => null,
+        'liability_account_id' => (int)$depositAccountId,
         'notes'                => $notes,
         'created_by'           => current_user_id(),
     ]);
+
+    $jeLines = [
+        [
+            'account_id'  => (int)$cashAccountId,
+            'debit'       => $amount,
+            'credit'      => '0.00',
+            'description' => "Cash received — Deposit {$depNumber}",
+            'customer_id' => $customerId,
+        ],
+        [
+            'account_id'  => (int)$depositAccountId,
+            'debit'       => '0.00',
+            'credit'      => $amount,
+            'description' => "Customer deposit liability — {$depNumber}",
+            'customer_id' => $customerId,
+        ],
+    ];
+
+    $je = JournalEntryService::create([
+        'entry_date'       => $receivedDate,
+        'description'      => "Customer deposit {$depNumber} — {$customer['company_name']}",
+        'entry_type'       => 'system',
+        'reference'        => $depNumber,
+        // S-AUDIT-BILLING-ENGINE-1 #10: real source stamping (§16) — was
+        // 'manual' with no source_id, making deposit JEs untraceable.
+        'source_type'      => 'customer_deposit',
+        'source_id'        => $id,
+        'post_immediately' => true,
+    ], $jeLines, current_user_id());
+    $jeId = $je['id'];
+    db_update('acc_customer_deposits', ['journal_entry_id' => $jeId], 'id = ?', [$id]);
 
     db_insert('audit_log', [
         'user_id'     => current_user_id(),

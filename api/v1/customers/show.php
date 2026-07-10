@@ -47,7 +47,16 @@ $customer = db_row(
         currency, billing_cycle, mileage_unit,
         payment_terms, po_required, default_po_number, credit_limit,
         discount_type, discount_value,
-        outstanding_balance, total_revenue, account_credit_balance,
+        outstanding_balance, total_revenue,
+        -- S-AUDIT-BILLING-ENGINE-1 #11: derived from the CN subledger (the
+        -- stored column has no transactional writer — permanently stale).
+        (SELECT COALESCE(SUM(CASE WHEN cn.currency = 'USD'
+                                  THEN ROUND(cn.amount_remaining * COALESCE(cn.exchange_rate_to_cad, 1), 2)
+                                  ELSE cn.amount_remaining END), 0)
+           FROM credit_notes cn
+          WHERE cn.customer_id = customers.id
+            AND cn.status IN ('active','partially_used')
+            AND cn.voided_at IS NULL AND cn.deleted_at IS NULL) AS account_credit_balance,
         active_lease_count, lease_count,
         late_fee_enabled, late_fee_value, late_fee_grace_days,
         notes, internal_notes,

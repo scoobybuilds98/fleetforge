@@ -466,6 +466,27 @@ function ff_reverse_precharge_on_invoice_removal(int $invoiceId, ?int $userId, s
 }
 }
 
+// ff_customer_credit_sql() — the DERIVED account-credit balance expression.
+// S-AUDIT-BILLING-ENGINE-1 #11: customers.account_credit_balance has NO
+// transactional writer anywhere (only seeders / the go-live reset touch it),
+// yet it was displayed as live money on the customer page, the customers API,
+// and the AI tools — permanently $0/stale. The truth is the credit-note
+// subledger: SUM(amount_remaining) over live CNs, CAD-converted per the
+// reporting policy. Returns a SQL scalar-subquery fragment keyed on the given
+// customers-table alias (no user input — safe to inline).
+if (!function_exists('ff_customer_credit_sql')) {
+function ff_customer_credit_sql(string $customerAlias = 'c'): string
+{
+    return "(SELECT COALESCE(SUM(CASE WHEN cn.currency = 'USD'
+                                      THEN ROUND(cn.amount_remaining * COALESCE(cn.exchange_rate_to_cad, 1), 2)
+                                      ELSE cn.amount_remaining END), 0)
+               FROM credit_notes cn
+              WHERE cn.customer_id = {$customerAlias}.id
+                AND cn.status IN ('active','partially_used')
+                AND cn.voided_at IS NULL AND cn.deleted_at IS NULL)";
+}
+}
+
 // ff_next_credit_note_number() — mint the next gap-free credit-note number
 // (PREFIX-YYYY-NNNNN) via FOR UPDATE on the per-year settings counter row.
 // MUST be called inside the caller's db_transaction (the row lock is what

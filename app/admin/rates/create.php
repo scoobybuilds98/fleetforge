@@ -23,9 +23,13 @@ require_auth();
 require_permission('rates', 'create');
 
 // Distinct equipment categories from active templates — one rate per category
+// S-AUDIT-BILLING-ENGINE-1 #19: NO is_active filter — S-GPS-RATE-INACTIVE-TMPL
+// removed it from lookup_rates + rates/show.php but MISSED this file, so an
+// inactive-template category (the Combo case) could be rated when EDITING a
+// card but not when CREATING one.
 $categories = db_select(
     "SELECT DISTINCT category FROM equipment_templates
-     WHERE deleted_at IS NULL AND is_active = 1
+     WHERE deleted_at IS NULL
      ORDER BY category ASC"
 );
 
@@ -477,7 +481,7 @@ function FF_RateCardCreate() {
                 return;
             }
             try {
-                const params = new URLSearchParams({ search: query, category: item.equipment_type, per_page: 10, active: 1 });
+                const params = new URLSearchParams({ search: query, category: item.equipment_type, per_page: 10 }); // S-AUDIT-BILLING-ENGINE-1 #19: no active filter (match show.php)
                 const r = await FF_Api.get(FF_Api.url('/api/v1/equipment/templates/index.php') + '?' + params.toString());
                 if (r.success) {
                     item._templateResults = r.data.items || [];

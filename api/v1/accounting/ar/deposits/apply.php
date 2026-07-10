@@ -59,7 +59,8 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
     }
 
     $invoice = db_row(
-        "SELECT id, invoice_number, customer_id, balance_due, status, company_name_snapshot
+        "SELECT id, invoice_number, customer_id, balance_due, status, company_name_snapshot,
+                total_amount, amount_paid, credits_applied
          FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$invoiceId]
     );
@@ -107,12 +108,22 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
 
     $amount = (string) $deposit['amount'];
 
-    // Post JE: DR Deposit Liability / CR AR
+    // Post JE: DR Deposit Liability / CR AR.
+    // S-AUDIT-BILLING-ENGINE-1 #10: HARD BLOCK on missing mappings (§16
+    // contract) — this endpoint used to silently skip the JE and still mark
+    // the deposit applied (journal_entry_id=NULL, no log): subledger moved,
+    // GL didn't. json_error inside the txn rolls everything back
+    // (db_rollback_if_active).
     $depositAccountId = AccountingService::setting('accounting.customer_deposits_account_id');
     $arAccountId      = AccountingService::setting('accounting.ar_account_id');
+    if (!$depositAccountId || !$arAccountId) {
+        json_error('ACCOUNTING_CONFIG_INCOMPLETE',
+            'Cannot apply deposit — accounting configuration incomplete. Map the Customer Deposits and Accounts Receivable accounts in Accounting → Settings.',
+            422);
+    }
 
     $jeId = null;
-    if ($depositAccountId && $arAccountId) {
+    if (true) {
         $jeLines = [
             [
                 'account_id'  => (int)$depositAccountId,
@@ -135,7 +146,9 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
             'description'      => "Deposit {$deposit['deposit_number']} applied to {$invoice['invoice_number']}",
             'entry_type'       => 'system',
             'reference'        => $deposit['deposit_number'] . '→' . $invoice['invoice_number'],
-            'source_type'      => 'manual',
+            // S-AUDIT-BILLING-ENGINE-1 #10: real source stamping (§16).
+            'source_type'      => 'customer_deposit',
+            'source_id'        => $depositId,
             'post_immediately' => true,
         ], $jeLines, current_user_id());
         $jeId = $je['id'];
@@ -148,16 +161,29 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
         'applied_date'          => date('Y-m-d'),
     ], 'id = ?', [$depositId]);
 
-    // Reduce invoice balance
-    $newBalance = bcsub((string)$invoice['balance_due'], $amount, 2);
+    // S-AUDIT-BILLING-ENGINE-1 #4: book the deposit into credits_applied and
+    // RECOMPUTE balance_due from source (total − credits − paid). The old code
+    // decremented balance_due alone — the next recompute writer (CN apply,
+    // payment void, InvoiceRecalc) derived balance from the untouched
+    // components and silently RESURRECTED the deposit amount onto the invoice.
+    $newCredits = bcround(bcadd((string) $invoice['credits_applied'], $amount, 6), 2);
+    $newBalance = bcround(
+        bcsub(bcsub((string) $invoice['total_amount'], $newCredits, 6), (string) $invoice['amount_paid'], 6),
+        2
+    );
     if (bccomp($newBalance, '0', 2) < 0) $newBalance = '0.00';
 
     $invoiceStatus = bccomp($newBalance, '0', 2) === 0 ? 'paid' : 'partially_paid';
-    db_update('invoices', [
-        'balance_due' => $newBalance,
-        'status'      => $invoiceStatus,
-        'updated_by'  => current_user_id(),
-    ], 'id = ?', [$invoiceId]);
+    $invUpdates = [
+        'credits_applied' => $newCredits,
+        'balance_due'     => $newBalance,
+        'status'          => $invoiceStatus,
+        'updated_by'      => current_user_id(),
+    ];
+    if ($invoiceStatus === 'paid') {
+        $invUpdates['paid_date'] = date('Y-m-d');
+    }
+    db_update('invoices', $invUpdates, 'id = ?', [$invoiceId]);
 
     // Update customer outstanding_balance
     db_execute(

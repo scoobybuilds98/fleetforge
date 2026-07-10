@@ -145,6 +145,15 @@ class TaxCalculator
                 $customerId !== null ? $customerId : 'unknown',
                 $customerName !== '' ? $customerName : 'unknown'
             ));
+            // S-AUDIT-BILLING-ENGINE-1 #24: a $0-tax fail-open is a CRA
+            // exposure — alert, don't just log. Sentry must never break billing.
+            try {
+                \FleetForge\Observability\Sentry::captureMessage(
+                    "TAX_RATE_MISSING: province={$province} — invoice billed at \$0 tax (fail-open)",
+                    'warning'
+                );
+            } catch (\Throwable $ignored) {
+            }
             return [
                 'gst_rate' => '0.000000',
                 'pst_rate' => '0.000000',

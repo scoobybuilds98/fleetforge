@@ -300,19 +300,29 @@ try {
     // the FIRST cappable line then `break 2`'d, so when the overflow exceeded
     // the mileage credit it clamped that line to $0, bailed, and left the
     // residual in the subtotal — a NEGATIVE-total invoice with a $0 mileage
-    // line — while routing the full abs(subtotal) to account credit. Rate
-    // structure (daily ≫ monthly) forces a large downward reconciliation
-    // credit on close; the low actual reading forces a mileage credit.
+    // line — while routing the full abs(subtotal) to account credit.
+    //
+    // S-AUDIT-BILLING-ENGINE-1 #14 REWRITE: the old trigger (daily ≫ monthly →
+    // partial_start over-billed at the daily tier) is gone — D-R2-2 cheaper-of
+    // caps short-period billing at the flat weekly. The R2-native over-bill is
+    // an EXTENT SHRINK: bill the flat single-calendar month, then the lease
+    // returns early → cumulative drops below already_billed → big
+    // reconciliation credit; the low actual reading forces the mileage credit.
     $lI = $makeLease([
-        'daily_rate' => '600.00', 'weekly_rate' => '350.00', 'monthly_rate' => '700.00',
+        'daily_rate' => '100.00', 'weekly_rate' => '500.00', 'monthly_rate' => '2000.00',
         'estimated_mileage_per_day' => '40.00', 'estimated_mileage_per_day_km' => '40.0000',
     ]);
-    $gen->createFromLease([ // partial_start over-bills base at the daily tier ($2400)
-        'lease_id' => $lI, 'period_start' => '2026-05-01', 'period_end' => '2026-05-04',
-        'billing_type' => 'partial_start', 'invoice_type' => 'regular', 'created_by' => $user,
+    $gen->createFromLease([ // full May at the single-calendar-month flat $2000 (+ 31-day estimate line)
+        'lease_id' => $lI, 'period_start' => '2026-05-01', 'period_end' => '2026-05-31',
+        'billing_type' => 'full_month', 'invoice_type' => 'regular', 'created_by' => $user,
     ]);
-    $ivI = $gen->createFromLease([ // final: cumulative tier drops to monthly (recon credit) + low actual (mileage credit)
-        'lease_id' => $lI, 'period_start' => '2026-06-01', 'period_end' => '2026-06-01',
+    // Early return May 10 → extent shrinks: cumulative = wm(10) = $714.29 vs
+    // already_billed $2000 → recon credit $1285.71; actual 50 km vs the 1240 km
+    // billed estimate → mileage credit; the final carries no charges → both
+    // credits overflow and the cap must drain BOTH lines to $0.
+    db_execute("UPDATE leases SET actual_return_date = '2026-05-10' WHERE id = ?", [$lI]);
+    $ivI = $gen->createFromLease([
+        'lease_id' => $lI, 'period_start' => '2026-05-10', 'period_end' => '2026-05-10',
         'billing_type' => 'partial_end', 'invoice_type' => 'final', 'created_by' => $user,
         'cumulative_actual_km' => '50',
     ]);
