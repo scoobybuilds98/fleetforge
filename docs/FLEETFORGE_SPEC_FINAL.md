@@ -743,6 +743,23 @@ Group 9: acc_periods through acc_qbo_sync_log (accounting tables)
 The billing engine is the most critical component in FleetForge. All billing logic lives in `lib/Billing/`. None of it touches the database directly — it receives data, computes results, and returns arrays. `InvoiceGenerator` orchestrates everything and handles DB writes.
 
 ### The Pro-Rating Formula (THE LAW)
+
+> **SUPERSEDED (period-independent law).** This §9 formula described the deleted
+> `ProRateCalculator` engine. Since S-BILLING-HOLISTIC-ENGINE every lease bills
+> via `lib/Billing/HolisticLeaseEngine.php` (R2 running-reconciliation:
+> cumulative-correct − already-billed), with these amendments to the sub-month
+> ladder:
+> - **≤7 days bills the cheaper of `days × daily` vs `weekly` (D-R2-2,
+>   S-AUDIT-BILLING-ENGINE-1 2026-07-10).** A zero/absent rate means that tier
+>   is "not offered" and the other tier applies. The fixed 1–5-daily /
+>   6–7-weekly bands below are RETIRED.
+> - 8+ days: weekly math (`full_weeks × weekly + rem × weekly/7`) capped at
+>   monthly when `weekly_math > monthly` (rate-driven crossover — never a fixed
+>   day count).
+> - ≤1 calendar month spans bill FLAT monthly (D-R2-1 + S-MONTHLY-SHORT-FLAT).
+> The block below is retained for historical context only — do not implement
+> against it.
+
 ```
 function calculate_period_charge(days, daily, weekly, monthly):
 

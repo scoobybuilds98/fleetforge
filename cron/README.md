@@ -96,8 +96,8 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 | `backup_db.php` | Every 6 hours | `ff_cron_backup_db` | mysqldump → S3, tiered retention |
 | `backup_storage.php` | Sunday 03:00 UTC | `ff_cron_backup_storage` | storage/uploads/ tarball → S3 |
 | `invoice_generate_monthly.php` | 1st of month 06:00 local / 14:00 UTC | `ff_cron_invoice_generate_monthly` | Monthly invoice generation (tz-safe `<=` catch-up, idempotent — S-CRON-FIX-1) |
-| `invoice_overdue.php` | Daily 07:00 | `ff_cron_invoice_overdue` | Mark overdue invoices |
-| `late_fee_apply.php` | Daily 07:30 | `ff_cron_late_fee` | Apply late fees |
+| `invoice_overdue.php` | Daily 07:00 | `ff_cron_invoice_overdue` | Mark overdue invoices + expire past-`expires_at` credit notes (S-AUDIT-BILLING-ENGINE-1 #20) |
+| `late_fee_apply.php` | Daily 07:30 | `ff_cron_late_fee_apply` | Apply late fees |
 | `collections_auto_escalate.php` | Daily 08:00 | `ff_cron_collections` | Auto-escalate collections |
 | `promise_to_pay_check.php` | Daily 09:00 | `ff_cron_ptp_check` | Check promise-to-pay dates |
 | `samsara_sync.php` | Every 5 min | `ff_cron_samsara_sync` | Live GPS telemetry sync |

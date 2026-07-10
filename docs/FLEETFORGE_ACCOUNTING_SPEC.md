@@ -1934,7 +1934,25 @@ For credit line items (is_credit = 1) on an invoice, the Revenue line is a DEBIT
 ### Entry generation rules
 - Every auto-entry references `source_type` and `source_id` in `acc_journal_entries`
 - If an auto-entry fails (e.g. no GL account mapped to a revenue type), system blocks the FleetForge action and shows an error: "Cannot complete — accounting configuration incomplete. Go to Accounting → Settings to map revenue accounts."
-- All auto-entries post to the period matching the transaction date. If that period is closed, entry posts to earliest open period with a warning.
+- All auto-entries post to the period matching the transaction date. If that period is closed, entry posts to the earliest open period **at or after** the transaction date (forward-only redirect — S-AUDIT-BILLING-ENGINE-1 #15; the globally-earliest open period is only a last-resort fallback when nothing forward exists).
+- Customer-deposit JEs stamp `source_type='customer_deposit'` + `source_id=<deposit_id>` (migration 202607100002) so the deposit subledger drills down like every other source.
+
+### CAD-canonical GL + realized FX (S-AUDIT-BILLING-ENGINE-1, 2026-07-10)
+All JE line amounts are **CAD**. USD documents convert at their own frozen
+`exchange_rate_to_cad` (invoices, payments, and — new — `credit_notes.exchange_rate_to_cad`,
+migration 202607100003). When a payment's rate differs from the invoice's rate,
+`AutoEntryBridge` posts the realized-FX leg automatically: CR 7030 FX Gain /
+DR 7040 FX Loss (settings `accounting.fx_gain/loss_account_id`, else COA
+7030/7040). JE headers stamp the document `currency` + `exchange_rate`. The
+"Realized FX gain/loss on payment" rows in the rule table above are IMPLEMENTED,
+not aspirational.
+
+### Late-fee timing (one-shot)
+Late fees are assessed by the monthly generator **at generation time against
+invoices already SENT and past due** — not when an invoice is created. Each
+overdue invoice latches at most ONE late fee (`late_fee_applied`); there is no
+compounding. Voiding a late-fee invoice unlatches the original so it can be
+re-assessed.
 
 ---
 
