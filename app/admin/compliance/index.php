@@ -298,7 +298,7 @@ require_once FF_ROOT . '/includes/header.php';
         Expired
     </span>
     <span style="display:flex;align-items:center;gap:6px;">
-        <span style="width:3px;height:14px;border-radius:2px;background:#f59e0b;display:inline-block;"></span>
+        <span style="width:3px;height:14px;border-radius:2px;background:var(--color-warning);display:inline-block;"></span>
         Expiring within 30 days
     </span>
     <span style="display:flex;align-items:center;gap:6px;">
@@ -692,7 +692,7 @@ function FF_Compliance() {
             const s = this.expiryStatus(date);
             const styles = {
                 expired: 'border-left:3px solid #ef4444;background:rgba(239,68,68,0.08);color:#991b1b;padding:6px 10px;',
-                warning: 'border-left:3px solid #f59e0b;background:rgba(245,158,11,0.08);color:#92400e;padding:6px 10px;',
+                warning: 'border-left:3px solid var(--color-warning);background:var(--color-warning-light);color:var(--color-warning-text);padding:6px 10px;',
                 ok:      'border-left:3px solid #22c55e;background:rgba(34,197,94,0.07);color:#166534;padding:6px 10px;',
                 none:    'border-left:3px solid #d1d5db;padding:6px 10px;color:#6b7280;',
             };

@@ -125,7 +125,7 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
 
             <template x-if="preflight && preflight.requires_super_admin_override">
-                <div style="margin-top:12px;padding:8px 10px;background:#fff7d6;border:1px solid #b8860b;color:#6b4900;border-radius:4px;font-size:0.78rem;">
+                <div class="alert alert-warning" style="margin-top:12px;font-size:0.78rem;">
                     <label style="display:flex;gap:6px;align-items:center;cursor:pointer;">
                         <input type="checkbox" x-model="arDriftOverride">
                         I acknowledge the AR drift and wish to proceed (super_admin override).

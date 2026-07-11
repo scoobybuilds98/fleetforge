@@ -53,7 +53,7 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="card" style="padding:18px;margin-bottom:14px;">
         <div style="font-weight:600;font-size:0.95rem;margin-bottom:14px;">Template Details</div>
 
-        <div x-show="error" x-cloak style="margin-bottom:12px;padding:8px 10px;background:#ffe6e6;border:1px solid #cc0000;color:#990000;border-radius:4px;font-size:0.8125rem;" x-text="error"></div>
+        <div x-show="error" x-cloak class="alert alert-danger" style="margin-bottom:12px;font-size:0.8125rem;" x-text="error"></div>
 
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:14px;margin-bottom:14px;">
             <div>

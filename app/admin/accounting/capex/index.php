@@ -97,11 +97,11 @@ require_once FF_ROOT . '/includes/header.php';
          Completed work orders whose total_cost > capex_threshold_cad
          that are not yet linked to a CapEx review row.
          ============================================================ -->
-    <div class="card" style="margin-bottom:24px;border-left:4px solid #f59e0b;padding:16px 20px;" x-show="flaggedWorkOrders.length > 0 || flaggedLoading">
+    <div class="card" style="margin-bottom:24px;border-left:4px solid var(--color-warning);padding:16px 20px;" x-show="flaggedWorkOrders.length > 0 || flaggedLoading">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <div>
                 <h3 class="h6" style="margin:0;">
-                    <svg width="18" height="18" style="vertical-align:-3px;color:#f59e0b;"><use href="#icon-exclamation-triangle"/></svg>
+                    <svg width="18" height="18" style="vertical-align:-3px;color:var(--color-warning);"><use href="#icon-exclamation-triangle"/></svg>
                     Flagged Work Orders
                     <span class="text-secondary text-sm" x-text="'(' + flaggedWorkOrders.length + ' awaiting review, threshold $' + parseFloat(flaggedThreshold).toLocaleString('en-CA', {minimumFractionDigits: 2}) + ')'"></span>
                 </h3>

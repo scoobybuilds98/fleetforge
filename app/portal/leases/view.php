@@ -400,7 +400,7 @@ $statusBadge = match($lease['status']) {
                 $refundColor = '#15803d';
             }
             ?>
-            <div style="margin-top:12px; padding:10px 12px; background:#f8fafc; border-left:3px solid <?= e($refundColor) ?>; border-radius:4px;">
+            <div style="margin-top:12px; padding:10px 12px; background:var(--bg-surface-2); border-left:3px solid <?= e($refundColor) ?>; border-radius:4px;">
                 <span style="color:<?= e($refundColor) ?>; font-weight:600; font-size:0.875rem;">
                     <?= e($refundLabel) ?>:
                 </span>

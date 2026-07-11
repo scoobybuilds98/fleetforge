@@ -37,7 +37,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <div x-data="budgetCreate()" style="max-width:600px;">
     <div class="card" style="padding:18px;">
-        <div x-show="error" x-cloak style="margin-bottom:12px;padding:8px 10px;background:#ffe6e6;border:1px solid #cc0000;color:#990000;border-radius:4px;font-size:0.8125rem;" x-text="error"></div>
+        <div x-show="error" x-cloak class="alert alert-danger" style="margin-bottom:12px;font-size:0.8125rem;" x-text="error"></div>
 
         <div style="margin-bottom:14px;">
             <label style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Name *</label>

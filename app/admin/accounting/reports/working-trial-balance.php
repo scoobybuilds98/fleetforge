@@ -188,13 +188,13 @@ require_once FF_ROOT . '/includes/header.php';
                                         @click="row.aje_entries && row.aje_entries.length ? toggleAje(row.account_id) : null"
                                         x-text="'$' + money(row.ajes)"></td>
                                     <td class="font-mono text-right"
-                                        :style="row.balance_flag === 'red' ? 'background:#ffe6e6;font-weight:600;' : ''"
+                                        :style="row.balance_flag === 'red' ? 'background:var(--color-danger-light);font-weight:600;' : ''"
                                         x-text="'$' + money(row.adj_cy)"></td>
                                     <td class="font-mono text-right"
-                                        :style="row.variance_flag === 'yellow' ? 'background:#fff7d6;' : ''"
+                                        :style="row.variance_flag === 'yellow' ? 'background:var(--color-warning-light);' : ''"
                                         x-text="'$' + money(row.var_amt)"></td>
                                     <td class="font-mono text-right"
-                                        :style="row.variance_flag === 'yellow' ? 'background:#fff7d6;' : ''"
+                                        :style="row.variance_flag === 'yellow' ? 'background:var(--color-warning-light);' : ''"
                                         x-text="row.var_pct !== null ? Number(row.var_pct).toFixed(2) + '%' : '—'"></td>
                                     <td class="text-secondary text-sm" x-text="row.ref || ''"></td>
                                     <td>

@@ -2327,7 +2327,7 @@ foreach ($cronJobs as $cronName => $cronMeta) {
                                 </template>
                             </div>
                             <h4 class="h6" style="margin:0 0 6px;">AI brief text</h4>
-                            <div style="background:#f7f7f6;padding:14px;border-radius:6px;font-size:0.8125rem;line-height:1.6;white-space:pre-wrap;" x-text="contentModal.data.brief"></div>
+                            <div style="background:var(--bg-surface-2);padding:14px;border-radius:6px;font-size:0.8125rem;line-height:1.6;white-space:pre-wrap;" x-text="contentModal.data.brief"></div>
 
                             <h4 class="h6" style="margin:14px 0 6px;">Recipients (<span x-text="contentModal.data.recipient_count"></span>)</h4>
                             <template x-if="contentModal.data.recipients.length === 0">
@@ -2689,7 +2689,7 @@ function FF_BriefingControl() {
                         this.genFlash = { message: 'Cache hit (used recent brief). ' + d.message, type: 'success' };
                     } else {
                         this.genFlash = {
-                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:#f7f7f6;color:#1a1a1a;padding:12px 14px;border-radius:6px;margin-top:8px;font-size:0.8125rem;line-height:1.55;white-space:pre-wrap;max-height:55vh;overflow:auto;">' + this.escapeHtml(d.brief_full || d.brief_preview) + '</div>',
+                            message: '<strong>Brief generated</strong> — tokens=' + d.tokens_used.toLocaleString() + ', cost=$' + d.cost_usd.toFixed(4) + ', latency=' + d.latency_ms + 'ms.<br><div style="background:var(--bg-surface-2);color:var(--text-primary);padding:12px 14px;border-radius:6px;margin-top:8px;font-size:0.8125rem;line-height:1.55;white-space:pre-wrap;max-height:55vh;overflow:auto;">' + this.escapeHtml(d.brief_full || d.brief_preview) + '</div>',
                             type: 'success'
                         };
                     }

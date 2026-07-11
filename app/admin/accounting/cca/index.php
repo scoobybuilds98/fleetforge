@@ -62,14 +62,14 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- S-ACCT-CCA-2: dynamic AIIP banner based on reinstatement setting state. -->
     <template x-if="reinstatementEnabled">
-        <div style="background:#e6f5e6;border:1px solid #2e8b2e;color:#1e5e1e;padding:10px 14px;margin-bottom:16px;font-size:0.8125rem;border-radius:6px;">
+        <div class="alert alert-success" style="margin-bottom:16px;font-size:0.8125rem;">
             <strong>✓ AIIP proposed reinstatement active:</strong>
             2025+ acquisitions receive full AIIP (1.5× multiplier, half-year suspended).
             Disable in Settings → Tax Filing if CRA reverses the proposal.
         </div>
     </template>
     <template x-if="!reinstatementEnabled && hasPost2025Acquisitions()">
-        <div class="banner-amber" style="background:#fff7d6;border:1px solid #b8860b;color:#6b4900;padding:10px 14px;margin-bottom:16px;font-size:0.8125rem;border-radius:6px;">
+        <div class="alert alert-warning" style="margin-bottom:16px;font-size:0.8125rem;">
             <strong>ℹ AIIP proposed reinstatement not enabled.</strong>
             2025+ acquisitions use phase-out rules (half-year suspended, no multiplier).
             Toggle in Settings → Tax Filing if your accountant confirms CRA enactment.
@@ -151,7 +151,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <tbody>
                     <template x-for="row in schedule.rows" :key="row.cca_class_id">
                         <template>
-                            <tr :style="(parseFloat(row.recapture) > 0 || parseFloat(row.terminal_loss) > 0) ? 'background:#fff7d6;' : ''">
+                            <tr :style="(parseFloat(row.recapture) > 0 || parseFloat(row.terminal_loss) > 0) ? 'background:var(--color-warning-light);' : ''">
                                 <td class="font-mono" x-text="row.class_number"></td>
                                 <td x-text="row.class_description"></td>
                                 <td class="font-mono text-right" x-text="(parseFloat(row.class_rate) * 100).toFixed(2) + '%'"></td>

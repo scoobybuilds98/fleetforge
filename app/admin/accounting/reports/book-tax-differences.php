@@ -78,7 +78,7 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="!loading && !error && data">
         <div>
             <!-- Method banner -->
-            <div class="banner-amber" style="background:#fff7d6;border:1px solid #b8860b;color:#6b4900;padding:10px 14px;margin-bottom:16px;font-size:0.8125rem;border-radius:6px;">
+            <div class="alert alert-warning" style="margin-bottom:16px;font-size:0.8125rem;">
                 <strong>Method: <span x-text="data.method"></span></strong> — <span x-text="data.disclosure_note"></span>
             </div>
 

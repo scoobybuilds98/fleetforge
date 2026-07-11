@@ -387,7 +387,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <input type="checkbox" x-model="tax_filing.aiip_proposed_reinstatement_enabled">
                 AIIP 2024 FES Proposed Reinstatement
             </label>
-            <p style="margin:6px 0 0 24px;font-size:0.75rem;color:#6b4900;background:#fff7d6;border:1px solid #b8860b;padding:8px 12px;border-radius:4px;">
+            <p style="margin:6px 0 0 24px;font-size:0.75rem;color:var(--color-warning-text);background:var(--color-warning-light);border:1px solid color-mix(in srgb,var(--color-warning) 28%,transparent);padding:8px 12px;border-radius:4px;">
                 ⚠ This toggle applies a proposed-but-not-yet-enacted CRA rule. When enabled,
                 acquisitions on or after Jan 1 2025 receive full AIIP (1.5× multiplier,
                 half-year suspended) per the proposed Budget 2024 reinstatement.

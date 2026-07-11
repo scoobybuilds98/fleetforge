@@ -52,7 +52,7 @@ require_once FF_ROOT . '/includes/header.php';
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
 <?php if (!$fxEnabled): ?>
-<div style="padding:10px 14px;margin-bottom:14px;background:#fff7d6;border:1px solid #b8860b;color:#6b4900;border-radius:4px;font-size:0.85rem;">
+<div class="alert alert-warning" style="margin-bottom:14px;font-size:0.85rem;">
     <strong>FX Revaluation is disabled.</strong>
     Enable it by setting <code>accounting.fx_revaluation_enabled = 1</code> in
     <a href="<?= base_url('accounting/settings') ?>">Accounting Settings</a>.
@@ -108,9 +108,9 @@ require_once FF_ROOT . '/includes/header.php';
             <button class="btn btn-secondary btn-sm" @click="clearPreview()" x-show="preview" x-cloak>Clear</button>
         </div>
 
-        <div x-show="previewError" x-cloak style="margin-top:10px;padding:8px 10px;background:#ffe6e6;border:1px solid #cc0000;color:#990000;border-radius:4px;font-size:0.8125rem;" x-text="previewError"></div>
-        <div x-show="postError" x-cloak style="margin-top:10px;padding:8px 10px;background:#ffe6e6;border:1px solid #cc0000;color:#990000;border-radius:4px;font-size:0.8125rem;" x-text="postError"></div>
-        <div x-show="postSuccess" x-cloak style="margin-top:10px;padding:8px 10px;background:#e6ffe6;border:1px solid #008800;color:#005500;border-radius:4px;font-size:0.8125rem;" x-text="postSuccess"></div>
+        <div x-show="previewError" x-cloak class="alert alert-danger" style="margin-top:10px;font-size:0.8125rem;" x-text="previewError"></div>
+        <div x-show="postError" x-cloak class="alert alert-danger" style="margin-top:10px;font-size:0.8125rem;" x-text="postError"></div>
+        <div x-show="postSuccess" x-cloak class="alert alert-success" style="margin-top:10px;font-size:0.8125rem;" x-text="postSuccess"></div>
 
         <!-- Preview Result -->
         <template x-if="preview">

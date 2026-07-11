@@ -116,7 +116,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
          per-source-type strip showing Fixed Asset + Tax Remittance sync
          health side-by-side. Tiles always render regardless of the active
          source-type chip below so the operator sees both at a glance. -->
-    <div class="card" style="padding:10px 16px;margin-bottom:14px;display:flex;gap:32px;align-items:center;background:#f8fafc;border-left:3px solid #0ea5e9;flex-wrap:wrap;">
+    <div class="card" style="padding:10px 16px;margin-bottom:14px;display:flex;gap:32px;align-items:center;background:var(--bg-surface-2);border-left:3px solid var(--color-info);flex-wrap:wrap;">
         <div style="display:flex;gap:18px;align-items:center;">
             <div class="text-sm text-secondary" style="font-weight:600;">Fixed Asset JEs</div>
             <div>

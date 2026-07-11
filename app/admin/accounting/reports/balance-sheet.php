@@ -63,7 +63,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <template x-if="report && !report.is_balanced">
-        <div style="padding:10px 14px;margin-bottom:14px;background:#ffe6e6;border:1px solid #cc0000;color:#990000;border-radius:4px;font-size:0.85rem;">
+        <div class="alert alert-danger" style="margin-bottom:14px;font-size:0.85rem;">
             <strong>Balance sheet unbalanced</strong> — drift <span x-text="fmt(report.drift)"></span>.
             This usually indicates an AR/AP reconciliation gap (known issue, deferred to S-QBO-27).
         </div>

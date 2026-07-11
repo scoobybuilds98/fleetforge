@@ -60,7 +60,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <template x-if="report && !report.is_tied_out">
-        <div style="padding:10px 14px;margin-bottom:14px;background:#fff7d6;border:1px solid #b8860b;color:#6b4900;border-radius:4px;font-size:0.85rem;">
+        <div class="alert alert-warning" style="margin-bottom:14px;font-size:0.85rem;">
             <strong>Cash tie-out difference</strong> <span x-text="fmt(report.tie_diff)"></span>.
             Calculated closing cash does not match the GL 1010 balance (known issue, S-QBO-27).
         </div>

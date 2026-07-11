@@ -101,14 +101,14 @@ require_once FF_ROOT . '/includes/header.php';
         <div>
             <!-- Quick Method banner -->
             <template x-if="data.quick_method">
-                <div class="banner-amber" style="background:#fff7d6;border:1px solid #b8860b;color:#6b4900;padding:10px 14px;margin-bottom:14px;font-size:0.8125rem;border-radius:6px;">
+                <div class="alert alert-warning" style="margin-bottom:14px;font-size:0.8125rem;">
                     <strong>⚠ Quick Method active</strong> (<span x-text="data.quick_rate"></span>%): Line 103 computed as revenue × Quick Method rate. ITCs limited to capital purchases only. Mainland likely exceeds the $400K Quick Method ceiling — confirm with accountant before relying on this filing.
                 </div>
             </template>
 
             <!-- ITC restrictions banner -->
             <template x-if="(data.lines.L106.restrictions_applied || []).length > 0">
-                <div class="banner-amber" style="background:#fff7d6;border:1px solid #b8860b;color:#6b4900;padding:10px 14px;margin-bottom:14px;font-size:0.8125rem;border-radius:6px;">
+                <div class="alert alert-warning" style="margin-bottom:14px;font-size:0.8125rem;">
                     <strong>ITC restrictions applied:</strong>
                     <span x-text="data.lines.L106.restrictions_applied.length"></span> restriction(s) reducing claimed ITCs.
                     Total reduction:
@@ -249,7 +249,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </tr></thead>
                         <tbody>
                             <template x-for="r in (taxDetail.by_customer || [])" :key="r.customer_id">
-                                <tr :style="r.pos_mismatch ? 'background:#fff7d6;' : ''">
+                                <tr :style="r.pos_mismatch ? 'background:var(--color-warning-light);' : ''">
                                     <td x-text="r.company_name"></td>
                                     <td class="font-mono" x-text="r.province_applied"></td>
                                     <td class="font-mono">

@@ -148,7 +148,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <!-- Legend -->
                 <div style="width:100%;display:flex;flex-direction:column;gap:6px;font-size:0.8125rem;">
                     <div style="display:flex;align-items:center;gap:7px;">
-                        <span style="width:9px;height:9px;border-radius:50%;background:#f59e0b;flex-shrink:0;"></span>
+                        <span style="width:9px;height:9px;border-radius:50%;background:var(--color-warning);flex-shrink:0;"></span>
                         <span class="text-secondary">Pending</span>
                         <span class="font-mono font-medium" style="margin-left:auto;" x-text="chartData.statuses.pending"></span>
                     </div>
@@ -455,7 +455,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <span style="width:12px;height:12px;border-radius:2px;background:#22c55e;display:inline-block;"></span> Confirmed
                     </div>
                     <div style="display:flex;align-items:center;gap:5px;">
-                        <span style="width:12px;height:12px;border-radius:2px;background:#f59e0b;display:inline-block;"></span> Pending
+                        <span style="width:12px;height:12px;border-radius:2px;background:var(--color-warning);display:inline-block;"></span> Pending
                     </div>
                     <div style="margin-left:auto;" x-text="ganttRows.length + ' units · ' + ganttDays.length + ' days'"></div>
                 </div>

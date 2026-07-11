@@ -294,6 +294,16 @@ hr {
     --text-inverse: var(--text-on-primary);
     --border-strong: var(--border-color-strong);
     --bg-selected:  color-mix(in srgb, var(--color-primary) 12%, transparent);  /* FIX #35 */
+    /* S-LUX-5: legacy accounting/QBO views reference these names with LIGHT
+       hex fallbacks (`var(--border-default, #e2e8f0)`, `var(--bg-elev, #f8fafc)`)
+       — undefined, so 320+ borders rendered as currentColor and elevated
+       panels went transparent (or light in the 2 fallback cases). Alias them
+       to the real Atelier tokens so every one of those references resolves
+       theme-correctly in one place. */
+    --border-default: var(--border-color);
+    --bg-elev:        var(--bg-surface-2);
+    --bg-elevated:    var(--bg-surface-2);
+    --bg-subtle:      var(--bg-surface-2);
 
     /* ── Atelier material tokens (S-LUX-1) ────────────────────
        --card-sheen: 1px inner top highlight — the "machined edge"
@@ -3125,10 +3135,15 @@ textarea.form-input {
     line-height: 1.5;
     border: 1px solid transparent;
 }
-.alert-danger  { background: var(--badge-danger-bg);  color: var(--badge-danger-text);  border-color: rgba(220,38,38,0.25); }
-.alert-success { background: var(--badge-success-bg); color: var(--badge-success-text); border-color: rgba(22,163,74,0.25); }
-.alert-warning { background: var(--badge-warning-bg); color: var(--badge-warning-text); border-color: rgba(217,119,6,0.25); }
-.alert-info    { background: var(--badge-info-bg);    color: var(--badge-info-text);    border-color: rgba(8,145,178,0.25); }
+/* S-LUX-5: the .alert-* variants referenced undefined --badge-*-bg/-text tokens,
+   so every .alert rendered a transparent, bg-less box (51 markup consumers) — the
+   very reason accounting screens hardcoded amber/red inline. Rebased onto the real
+   --color-*-light / --color-*-text token pairs (theme-adaptive) with a color-mix
+   border. This is the root fix behind the S-LUX-5 banner-idiom swaps. */
+.alert-danger  { background: var(--color-danger-light);  color: var(--color-danger-text);  border-color: color-mix(in srgb, var(--color-danger) 28%, transparent); }
+.alert-success { background: var(--color-success-light); color: var(--color-success-text); border-color: color-mix(in srgb, var(--color-success) 28%, transparent); }
+.alert-warning { background: var(--color-warning-light); color: var(--color-warning-text); border-color: color-mix(in srgb, var(--color-warning) 28%, transparent); }
+.alert-info    { background: var(--color-info-light);    color: var(--color-info-text);    border-color: color-mix(in srgb, var(--color-info) 28%, transparent); }
 
 /* Checkbox & Radio */
 .form-check {
