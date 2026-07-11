@@ -827,6 +827,21 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
             border-radius: 10px;
             font-size: 0.875rem;
         }
+
+        /* ── S-LUX-4: card entrance — rises + fades in once on load with the
+           Atelier chrome ease. Honors reduced motion (the global block in
+           app.css also covers this; kept here so the card never starts at
+           opacity:0 if animations are disabled). ── */
+        @keyframes auth-card-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .auth-card {
+            animation: auth-card-in 280ms cubic-bezier(0.25, 1, 0.5, 1) both;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .auth-card { animation: none; }
+        }
     </style>
 </head>
 <body>

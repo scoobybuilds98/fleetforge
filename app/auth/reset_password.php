@@ -147,12 +147,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try { var t=localStorage.getItem('ff-theme'); if(t==='light'||t==='dark') document.documentElement.setAttribute('data-theme',t); } catch(e){}
     </script>
     <style>
-        .auth-page { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px; background-color:var(--bg-body); }
-        .auth-card { width:100%; max-width:420px; background:var(--bg-surface); border:1px solid var(--border-color); border-radius:var(--radius-xl); box-shadow:var(--shadow-lg); padding:36px 32px 32px; }
+        /* S-LUX-4: restrained dark stage — subtle radial brand glow over --bg-body. */
+        .auth-page { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px;
+            background:radial-gradient(600px circle at 50% 22%, color-mix(in srgb, var(--color-primary) 6%, transparent), transparent 70%), var(--bg-body); }
+        /* S-LUX-4: Atelier card recipe — radius-2xl + sheen + shadow-xl + entrance. */
+        .auth-card { width:100%; max-width:420px; background:var(--bg-surface); border:1px solid var(--border-color); border-radius:var(--radius-2xl); box-shadow:var(--card-sheen),var(--shadow-xl); padding:36px 32px 32px; animation:auth-card-in 280ms cubic-bezier(0.25,1,0.5,1) both; }
+        @keyframes auth-card-in { from{opacity:0;transform:translateY(8px);} to{opacity:1;transform:translateY(0);} }
+        @media (prefers-reduced-motion:reduce){ .auth-card{animation:none;} }
         .auth-logo { display:flex; flex-direction:column; align-items:center; margin-bottom:28px; }
         .auth-logo-mark { width:48px; height:48px; background:var(--color-primary); border-radius:var(--radius-lg); display:flex; align-items:center; justify-content:center; margin-bottom:12px; }
         .auth-logo-mark svg { width:28px; height:28px; color:#fff; }
-        .auth-logo-name { font-size:1.25rem; font-weight:700; color:var(--text-primary); }
+        .auth-logo-name { font-size:1.25rem; font-weight:700; letter-spacing:var(--tracking-tight); color:var(--text-primary); }
         .auth-heading { font-size:1rem; font-weight:600; color:var(--text-primary); margin-bottom:4px; }
         .auth-subheading { font-size:0.875rem; color:var(--text-tertiary); margin-bottom:24px; }
         .auth-back { text-align:center; margin-top:20px; font-size:0.875rem; }
