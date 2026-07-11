@@ -1417,21 +1417,16 @@ function FF_Dashboard() {
             const border  = cssVar('--border-color')   || '#1d2133';
             const gridBg  = cssVar('--bg-surface')     || '#111318';
 
-            // Shared base options applied to all charts.
-            // S-DASHBOARD-CHART-POLISH:
-            //   - parentHeightOffset:0 stops ApexCharts from adding ~30px of
-            //     phantom vertical space that pushed chart bodies past the
-            //     card-body's allotted height and caused the visible clipping.
-            //   - redrawOnParentResize / redrawOnWindowResize default true in
-            //     ApexCharts v3 but we set them explicitly so the patched
-            //     constructor in app.js can't accidentally clear them.
-            //   - animateGradually:false keeps the chart's "draw-in" feel but
-            //     fires it once on render rather than slowly per-datapoint.
-            //   - grid.padding gives bars/lines breathing room from card edges.
-            const base = {
+            // S-LUX-2: shared base now comes from the global Atelier chart
+            // theme (FF_CHART_THEME) — Geist font, token palette, token grid +
+            // axes, area gradient, tooltip.theme, dataLabels-off. We pass ONLY
+            // the dashboard-specific behavior on top: a download-only toolbar +
+            // the anti-clip flags (parentHeightOffset / redrawOn*). Every chart
+            // below spreads `base`, so all charts flow through FF_CHART_THEME
+            // (D-LUX2-1) and become brand- + theme-toggle-reactive. fg/fgMuted
+            // are kept for the per-chart yaxis/dataLabel colour overrides.
+            const base = FF_CHART_THEME({
                 chart: {
-                    background: 'transparent',
-                    fontFamily: 'DM Sans, sans-serif',
                     toolbar: {
                         show: true,
                         tools: {
@@ -1439,23 +1434,12 @@ function FF_Dashboard() {
                             zoomin: false, zoomout: false, pan: false, reset: false,
                         },
                     },
-                    animations: { enabled: true, speed: 400, animateGradually: { enabled: false } },
                     parentHeightOffset: 0,
                     redrawOnParentResize: true,
                     redrawOnWindowResize: true,
                 },
-                theme: { mode: isLight ? 'light' : 'dark' },
-                colors: palette,
-                grid: {
-                    borderColor: border,
-                    strokeDashArray: 3,
-                    padding: { top: 0, right: 8, bottom: 0, left: 8 },
-                },
-                tooltip: { theme: isLight ? 'light' : 'dark' },
-                legend: { labels: { colors: fg } },
-                xaxis: { labels: { style: { colors: fgMuted } }, axisBorder: { color: border }, axisTicks: { color: border } },
-                yaxis: { labels: { style: { colors: fgMuted } } },
-            };
+                grid: { padding: { top: 0, right: 8, bottom: 0, left: 8 } },
+            });
 
             // S-DASHBOARD-CHART-POLISH — shared donut + hbar plot options.
             // Defined once so both donut charts share donut.size + total label
@@ -1699,7 +1683,7 @@ function FF_Dashboard() {
                         chart:      Object.assign({}, base.chart, { type: 'heatmap', height: 300 }),
                         dataLabels: { enabled: false },
                         stroke:     { width: 2, colors: [gridBg] },
-                        colors:     ['#f97316'],
+                        colors:     [cssVar('--color-primary') || '#f97316'],  /* S-LUX-2: brand-derived heat shade (was hardcoded) */
                         plotOptions: { heatmap: { shadeIntensity: 0.8, radius: 2, useFillColorAsStroke: false } },
                         series: d.weekly_heatmap.series,
                         tooltip: Object.assign({}, base.tooltip, { y: { formatter: moneyFmt } }),

@@ -3193,34 +3193,20 @@ function FF_UnitDetail() {
                 chart: {
                     type: 'area',
                     height: 300,
-                    background: 'transparent',
-                    fontFamily: 'DM Sans, sans-serif',
-                    toolbar: { show: false },
-                    animations: { enabled: true, speed: 400 },
                 },
-                theme: { mode: isLight ? 'light' : 'dark' },
-                colors: [primary],
-                stroke: { curve: 'smooth', width: 2 },
                 fill: {
                     type: 'gradient',
                     gradient: { opacityFrom: 0.35, opacityTo: 0.05 },
                 },
-                dataLabels: { enabled: false },
-                grid: { borderColor: border },
                 xaxis: {
                     categories,
-                    labels: { style: { colors: fgMuted, fontFamily: 'DM Mono, monospace' } },
-                    axisBorder: { color: border },
-                    axisTicks:  { color: border },
                 },
                 yaxis: {
                     labels: {
-                        style: { colors: fgMuted, fontFamily: 'DM Mono, monospace' },
                         formatter: v => '$' + (Math.round(v)).toLocaleString('en-CA'),
                     },
                 },
                 tooltip: {
-                    theme: isLight ? 'light' : 'dark',
                     y: { formatter: v => '$' + parseFloat(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
                 },
                 series,
@@ -3240,7 +3226,7 @@ function FF_UnitDetail() {
             };
 
             try {
-                this.payoffChart = new ApexCharts(el, opts);
+                this.payoffChart = new ApexCharts(el, FF_CHART_THEME(opts));
                 this.payoffChart.render();
             } catch (e) {
                 console.error('[UnitShow] Payoff chart render failed', e);

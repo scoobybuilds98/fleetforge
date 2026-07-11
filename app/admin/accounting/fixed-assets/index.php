@@ -1416,13 +1416,9 @@ function FF_FixedAssets() {
                 this.payoffChart = null;
             }
 
-            const isLight = (window.FF_Theme && FF_Theme.current() === 'light');
             const cs = getComputedStyle(document.documentElement);
             const cssVar = v => (cs.getPropertyValue(v) || '').trim();
-            const primary = cssVar('--color-primary') || '#f97316';
             const success = cssVar('--color-success') || '#22c55e';
-            const fgMuted = cssVar('--text-tertiary') || '#64748b';
-            const border  = cssVar('--border-default') || '#1d2133';
 
             const categories = this.payoff.monthly_data.map(r => r.month);
             const series = [{
@@ -1436,34 +1432,16 @@ function FF_FixedAssets() {
                 chart: {
                     type: 'area',
                     height: 280,
-                    background: 'transparent',
-                    fontFamily: 'DM Sans, sans-serif',
-                    toolbar: { show: false },
-                    animations: { enabled: true, speed: 400 },
                 },
-                theme: { mode: isLight ? 'light' : 'dark' },
-                colors: [primary],
-                stroke: { curve: 'smooth', width: 2 },
-                fill: {
-                    type: 'gradient',
-                    gradient: { opacityFrom: 0.35, opacityTo: 0.05 },
-                },
-                dataLabels: { enabled: false },
-                grid: { borderColor: border },
                 xaxis: {
                     categories,
-                    labels: { style: { colors: fgMuted, fontFamily: 'DM Mono, monospace' } },
-                    axisBorder: { color: border },
-                    axisTicks: { color: border },
                 },
                 yaxis: {
                     labels: {
-                        style: { colors: fgMuted, fontFamily: 'DM Mono, monospace' },
                         formatter: v => '$' + (Math.round(v)).toLocaleString('en-CA'),
                     },
                 },
                 tooltip: {
-                    theme: isLight ? 'light' : 'dark',
                     y: { formatter: v => '$' + parseFloat(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
                 },
                 annotations: target > 0 ? {
@@ -1482,7 +1460,7 @@ function FF_FixedAssets() {
             };
 
             try {
-                this.payoffChart = new ApexCharts(el, opts);
+                this.payoffChart = new ApexCharts(el, FF_CHART_THEME(opts));
                 this.payoffChart.render();
             } catch (e) {
                 console.error('[FixedAssets] Payoff chart render failed', e);

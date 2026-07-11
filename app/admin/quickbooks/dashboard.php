@@ -291,23 +291,20 @@ function qboDashboard() {
             const el = document.getElementById('chart-qbo-activity');
             if (!el || !this.data.chart || typeof ApexCharts === 'undefined') return;
 
-            const fgMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() || '#94a3b8';
+            const css = getComputedStyle(document.documentElement);
+            // Deliberate semantic colours: completed=success (green), failed=danger (red).
+            const cSuccess = css.getPropertyValue('--color-success').trim() || '#22c55e';
+            const cDanger  = css.getPropertyValue('--color-danger').trim()  || '#ef4444';
 
             const opts = {
-                chart:    { type: 'area', height: 280, toolbar: { show: false }, fontFamily: 'inherit', background: 'transparent' },
-                colors:   ['#22c55e', '#ef4444'],
-                stroke:   { curve: 'smooth', width: 2 },
-                fill:     { type: 'gradient', gradient: { opacityFrom: 0.3, opacityTo: 0.05 } },
-                dataLabels:{ enabled: false },
-                xaxis:    { categories: this.data.chart.labels, labels: { style: { colors: fgMuted } } },
-                yaxis:    { labels: { style: { colors: fgMuted } } },
-                legend:   { position: 'top', horizontalAlign: 'right', labels: { colors: fgMuted } },
-                grid:     { borderColor: 'rgba(148,163,184,0.2)' },
-                tooltip:  { theme: 'dark' },
+                chart:    { type: 'area', height: 280 },
+                colors:   [cSuccess, cDanger],
+                xaxis:    { categories: this.data.chart.labels },
+                legend:   { position: 'top', horizontalAlign: 'right' },
                 series:   this.data.chart.series,
             };
 
-            this.chart = new ApexCharts(el, opts);
+            this.chart = new ApexCharts(el, FF_CHART_THEME(opts));
             this.chart.render();
         },
 

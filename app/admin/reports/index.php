@@ -712,18 +712,17 @@ function FF_Reports() {
             const moneyFmt = (v) => '$' + (v||0).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0});
             const pctFmt   = (v) => (v||0).toFixed(1) + '%';
 
-            const base = {
-                chart:    { background:'transparent', fontFamily:'inherit', toolbar:{show:true, tools:{download:true,selection:false,zoom:false,zoomin:false,zoomout:false,pan:false,reset:false}} },
-                colors:   palette,
-                theme:    { mode: isDark ? 'dark' : 'light' },
-                grid:     { borderColor: gridCol, strokeDashArray: 3 },
-                xaxis:    { labels:{style:{colors:txtCol,fontSize:'11px'}} },
-                yaxis:    { labels:{style:{colors:txtCol,fontSize:'11px'}, formatter:moneyFmt} },
-                tooltip:  { theme: isDark ? 'dark' : 'light' },
-                dataLabels: { enabled:false },
-                legend:   { labels:{colors:txtCol}, fontSize:'12px' },
-                stroke:   { width:2 },
-            };
+            // S-LUX-2: shared base from the global Atelier chart theme
+            // (FF_CHART_THEME) — Geist font (was 'inherit'), token palette,
+            // token grid/axes, tooltip.theme, dataLabels-off. Pass the reports
+            // download-only toolbar + the base money yaxis formatter (non-money
+            // charts override yaxis wholesale). palette/txtCol/gridCol locals
+            // are kept for the per-chart SEMANTIC colour overrides (roi
+            // green/red, utilisation health gradient, annotations, dual-axis).
+            const base = FF_CHART_THEME({
+                chart:  { toolbar:{show:true, tools:{download:true,selection:false,zoom:false,zoomin:false,zoomout:false,pan:false,reset:false}} },
+                yaxis:  { labels:{ formatter:moneyFmt } },
+            });
 
             const R = (id, opts) => this.render(id, opts);
 

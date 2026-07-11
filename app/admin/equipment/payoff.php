@@ -1055,20 +1055,20 @@ function renderPayoffCharts(p) {
     const targetLine = months.map(() => target);
 
     if (typeof ApexCharts !== 'undefined' && document.getElementById('pa-cumulative-chart')) {
-        new ApexCharts(document.getElementById('pa-cumulative-chart'), {
-            chart: { type:'line', height:300, toolbar:{show:false}, animations:{enabled:false} },
+        new ApexCharts(document.getElementById('pa-cumulative-chart'), FF_CHART_THEME({
+            chart: { type:'line', height:300, animations:{enabled:false} },
             series: [
                 { name:'Cumulative Net Revenue', data: cumNet },
                 { name:'Payoff Target',           data: targetLine },
             ],
             colors: ['var(--color-primary)', 'var(--color-success)'],
             stroke: { width:[3,2], curve:'smooth', dashArray:[0,6] },
-            xaxis: { categories: months, labels:{rotate:0, style:{fontSize:'11px'}} },
+            xaxis: { categories: months, labels:{rotate:0} },
             yaxis: { labels:{ formatter: v => '$'+v.toLocaleString('en-CA',{minimumFractionDigits:0,maximumFractionDigits:0}) } },
             tooltip: { y:{ formatter: v => '$'+v.toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}) } },
             legend: { position:'top' },
-            grid:   { strokeDashArray:4, borderColor:'var(--border-color)' },
-        }).render();
+            grid:   { strokeDashArray:4 },
+        })).render();
     }
 
     // ── Chart 2: Monthly revenue vs costs (grouped bar) ───────────────────────
@@ -1078,20 +1078,20 @@ function renderPayoffCharts(p) {
     const costs = mnt.map((m, i) => +(m + dmg[i]).toFixed(2));
 
     if (typeof ApexCharts !== 'undefined' && document.getElementById('pa-monthly-chart')) {
-        new ApexCharts(document.getElementById('pa-monthly-chart'), {
-            chart: { type:'bar', height:280, toolbar:{show:false}, animations:{enabled:false} },
+        new ApexCharts(document.getElementById('pa-monthly-chart'), FF_CHART_THEME({
+            chart: { type:'bar', height:280, animations:{enabled:false} },
             series: [
                 { name:'Gross Revenue', data: rev  },
                 { name:'Costs (Maint+Damage)', data: costs },
             ],
             colors: ['var(--color-success)', 'var(--color-danger)'],
             plotOptions: { bar:{ columnWidth:'60%', borderRadius:3 } },
-            xaxis: { categories: months, labels:{rotate:0, style:{fontSize:'11px'}} },
+            xaxis: { categories: months, labels:{rotate:0} },
             yaxis: { labels:{ formatter: v => '$'+v.toLocaleString('en-CA',{minimumFractionDigits:0,maximumFractionDigits:0}) } },
             tooltip: { y:{ formatter: v => '$'+v.toLocaleString('en-CA',{minimumFractionDigits:2,maximumFractionDigits:2}) } },
             legend: { position:'top' },
-            grid:   { strokeDashArray:4, borderColor:'var(--border-color)' },
-        }).render();
+            grid:   { strokeDashArray:4 },
+        })).render();
     }
 }
 </script>

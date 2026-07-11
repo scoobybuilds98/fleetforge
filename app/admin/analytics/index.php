@@ -764,26 +764,23 @@ function FF_Analytics() {
             const moneyFmt = (v) => '$' + (v||0).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0});
             const daysFmt  = (v) => (v||0).toFixed(1) + 'd';
 
-            // Shared base config for all charts
-            const base = {
+            // S-LUX-2: shared base from the global Atelier chart theme
+            // (FF_CHART_THEME) — Geist font (was 'inherit'), token palette,
+            // token grid/axes, tooltip.theme, dataLabels-off, legend. We pass
+            // the analytics download-only toolbar + the base money yaxis
+            // formatter (charts that aren't money override yaxis wholesale).
+            // The `palette`/`txtMuted`/`gridCol`/`bgCard` locals above are kept
+            // — per-chart overrides still use them for semantic series colours
+            // (e.g. Current vs Recommended, confidence bands, annotations).
+            const base = FF_CHART_THEME({
                 chart: {
-                    background:  'transparent',
-                    fontFamily:  'inherit',
                     toolbar: {
                         show: true,
                         tools: { download: true, selection: false, zoom: false, zoomin: false, zoomout: false, pan: false, reset: false }
                     },
                 },
-                colors:  palette,
-                theme:   { mode: isDark ? 'dark' : 'light' },
-                grid:    { borderColor: gridCol, strokeDashArray: 3 },
-                xaxis:   { labels: { style: { colors: txtMuted, fontSize: '11px' } }, axisBorder: { color: gridCol }, axisTicks: { color: gridCol } },
-                yaxis:   { labels: { style: { colors: txtMuted, fontSize: '11px' }, formatter: moneyFmt } },
-                tooltip: { theme: isDark ? 'dark' : 'light' },
-                dataLabels: { enabled: false },
-                legend:  { labels: { colors: txtMuted }, fontSize: '12px' },
-                stroke:  { width: 2 },
-            };
+                yaxis: { labels: { formatter: moneyFmt } },
+            });
 
             let opts = null;
 

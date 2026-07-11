@@ -392,44 +392,39 @@ function <?= e($_vizId) ?>() {
             const isPie = ['pie', 'donut', 'radialBar'].includes(chartType);
 
             // Build ApexCharts options
+            // WHY: Atelier theme (background, foreColor, palette, grid, axis/legend/tooltip
+            // colours, theme.mode from data-theme) is owned by FF_CHART_THEME(); only
+            // series/data, formatters, and deliberate per-chart overrides live here.
             const opts = {
                 chart: {
                     type: chartType,
                     height: 340,
-                    fontFamily: 'inherit',
-                    background: 'transparent',
                     toolbar: { show: true, tools: { download: true, selection: false, zoom: false, zoomin: false, zoomout: false, pan: false, reset: false } },
-                    animations: { enabled: true, easing: 'easeinout', speed: 600 },
                 },
-                colors: resolvedColors,
-                theme: { mode: isDark ? 'dark' : 'light' },
+                // WHY: honour AI-report-supplied colours; otherwise defer to the base palette
+                ...(config.colors ? { colors: resolvedColors } : {}),
                 ...(isPie ? {
                     labels: config.categories || [],
                     series: (config.series?.[0]?.data || config.series || []),
                 } : {
                     xaxis: {
                         categories: config.categories || [],
-                        labels: { style: { colors: textColor, fontSize: '11px' }, rotate: -45, rotateAlways: (config.categories || []).length > 8 },
-                        axisBorder: { color: gridColor },
-                        axisTicks: { color: gridColor },
+                        labels: { rotate: -45, rotateAlways: (config.categories || []).length > 8 },
                     },
                     yaxis: {
-                        labels: { style: { colors: textColor, fontSize: '11px' }, formatter: yFormatter },
+                        labels: { formatter: yFormatter },
                     },
                     series: config.series || [],
                 }),
-                grid: { borderColor: gridColor, strokeDashArray: 3 },
+                grid: { strokeDashArray: 3 },
                 dataLabels: { enabled: isPie },
                 stroke: { curve: 'smooth', width: chartType === 'line' ? 3 : chartType === 'area' ? 2 : 0 },
                 fill: { opacity: chartType === 'area' ? 0.15 : 1 },
                 tooltip: {
-                    theme: isDark ? 'dark' : 'light',
                     y: { formatter: tooltipFormatter },
                 },
                 legend: {
                     position: isPie ? 'bottom' : 'top',
-                    labels: { colors: textColor },
-                    fontSize: '12px',
                 },
                 plotOptions: {
                     bar: { borderRadius: 4, columnWidth: '60%', distributed: (config.series || []).length <= 1 },
@@ -443,7 +438,7 @@ function <?= e($_vizId) ?>() {
             }
 
             try {
-                const chart = new ApexCharts(el, opts);
+                const chart = new ApexCharts(el, FF_CHART_THEME(opts));
                 chart.render();
                 this.chartInstances.push(chart);
             } catch(e) {

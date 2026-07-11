@@ -198,18 +198,21 @@
     };
 
     // The subset of options that actually change with the theme /
-    // brand tokens. Series, formatters, geometry are untouched.
+    // brand tokens. CRITICAL: we deliberately DO NOT send xaxis/yaxis here.
+    // ApexCharts normalises yaxis to an array internally, and pushing a
+    // {labels:{style:…}} object through updateOptions drops the per-chart
+    // label formatter (money/percent/days) — turning "$120,000" into
+    // "120000". chart.foreColor recolors axis + legend text on its own, so
+    // axis label colours still follow the theme without ever touching the
+    // formatter-bearing axis config. Series, formatters, geometry untouched.
     function themeSubset() {
         const t = FF_CHART_TOKENS();
         const light = isLight();
-        const axisLabel = { style: { colors: t.textTertiary, fontFamily: t.fontSans } };
         return {
             chart: { foreColor: t.textSecondary, fontFamily: t.fontSans },
             theme: { mode: light ? 'light' : 'dark' },
             colors: paletteFrom(t),
             grid: { borderColor: t.border },
-            xaxis: { labels: axisLabel },
-            yaxis: { labels: axisLabel },
             legend: { labels: { colors: t.textSecondary } },
             tooltip: { theme: light ? 'light' : 'dark' },
         };
