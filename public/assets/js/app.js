@@ -494,6 +494,12 @@ const FF_Theme = {
         } catch {
             /* storage unavailable in private mode — ignore */
         }
+        // S-LUX-2: notify live ApexCharts so they re-read the Atelier
+        // tokens and re-theme in place (ff-chart-theme.js listens). CSS
+        // reacts to the data-theme attribute on its own; charts don't.
+        try {
+            window.dispatchEvent(new CustomEvent('ff:theme-changed', { detail: { theme } }));
+        } catch (_e) { /* CustomEvent unsupported — ignore */ }
         // Non-blocking server persist (best-effort)
         FF_Api.post(FF_Api.url('/api/v1/account/theme'), { theme }).catch(() => {});
     },
@@ -4948,7 +4954,11 @@ window.openEmailCompose = function (opts) {
                 };
             }
         } catch (_e) { /* noop — never break chart rendering */ }
-        return new Original(el, opts);
+        const _inst = new Original(el, opts);
+        // S-LUX-2: register every instance so a theme toggle can re-theme
+        // it in place (ff-chart-theme.js listens on 'ff:theme-changed').
+        try { if (typeof window.FF_CHART_REGISTER === 'function') window.FF_CHART_REGISTER(_inst); } catch (_e2) {}
+        return _inst;
     }
     Patched.prototype = Original.prototype;
     // Copy static members (exec, initOnLoad, etc.)

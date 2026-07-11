@@ -178,6 +178,10 @@
 <!-- ApexCharts v3.45.1 (pinned, self-hosted via S-PROD-3 2026-05-14) -->
 <script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>"></script>
 
+<!-- S-LUX-2: global ApexCharts theme (FF_CHART_THEME). MUST load after the
+     ApexCharts lib and before app.js (which registers instances) + any chart init. -->
+<script src="<?= asset_url('assets/js/ff-chart-theme.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+
 <!-- FleetForge application JS -->
 <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
 <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
