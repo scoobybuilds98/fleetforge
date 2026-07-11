@@ -406,54 +406,59 @@ require_once FF_ROOT . '/includes/header.php';
                          allowance in — both estimated_mileage_km + _miles are stored, kept in
                          sync via onAllowanceInput(). $estPrimary seeds the default to the
                          lease's contracted unit. */ ?>
-                <div class="ff-dual-label">Allowance per lease</div>
-                <div class="form-group" style="max-width:320px;margin:0 auto;">
-                    <div class="input-group">
-                        <input type="number"
-                               class="form-control font-mono"
-                               step="0.001"
-                               min="0"
-                               :value="_estUnit === 'km' ? form.estimated_mileage_km : form.estimated_mileage_miles"
-                               @input.debounce.150ms="onAllowanceInput($event.target.value)"
-                               aria-label="Estimated mileage allowance"
-                               placeholder="0">
-                        <?php /* Alpine's string :style REPLACES the whole style attribute, so the
-                                 structural styles must live INSIDE the binding (not only in the static
-                                 style=, which is just a no-Alpine fallback) or padding/flex/weight are lost. */ ?>
-                        <span class="input-group-suffix" style="padding:0;display:inline-flex;align-items:stretch;align-self:stretch;overflow:hidden;" role="group" aria-label="Allowance entry unit">
-                            <span role="button" tabindex="0" :aria-pressed="_estUnit === 'km'"
-                                  @click="_estUnit = 'km'" @keydown.enter.prevent="_estUnit = 'km'" @keydown.space.prevent="_estUnit = 'km'"
-                                  style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;"
-                                  :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;' + (_estUnit === 'km' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);')">km</span>
-                            <span role="button" tabindex="0" :aria-pressed="_estUnit === 'miles'"
-                                  @click="_estUnit = 'miles'" @keydown.enter.prevent="_estUnit = 'miles'" @keydown.space.prevent="_estUnit = 'miles'"
-                                  style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;border-left:1px solid var(--border-color);"
-                                  :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;border-left:1px solid var(--border-color);' + (_estUnit === 'miles' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);')">miles</span>
-                        </span>
+                <!-- ── Allowance + Estimated mileage per day — one responsive, LEFT-ALIGNED
+                     row (S-FORM-LAYOUT). Was two hard-centered `max-width:320px;margin:0 auto`
+                     fields floating mid-card while the rate grid above spanned full width —
+                     inconsistent + wasted space. Each column keeps its ff-dual-label + hint. ── -->
+                <div class="form-row-2">
+                    <!-- Allowance (editable, single field + km/miles input toggle) -->
+                    <div class="form-group">
+                        <div class="ff-dual-label">Allowance per lease</div>
+                        <div class="input-group">
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="0.001"
+                                   min="0"
+                                   :value="_estUnit === 'km' ? form.estimated_mileage_km : form.estimated_mileage_miles"
+                                   @input.debounce.150ms="onAllowanceInput($event.target.value)"
+                                   aria-label="Estimated mileage allowance"
+                                   placeholder="0">
+                            <?php /* Alpine's string :style REPLACES the whole style attribute, so the
+                                     structural styles must live INSIDE the binding (not only in the static
+                                     style=, which is just a no-Alpine fallback) or padding/flex/weight are lost. */ ?>
+                            <span class="input-group-suffix" style="padding:0;display:inline-flex;align-items:stretch;align-self:stretch;overflow:hidden;" role="group" aria-label="Allowance entry unit">
+                                <span role="button" tabindex="0" :aria-pressed="_estUnit === 'km'"
+                                      @click="_estUnit = 'km'" @keydown.enter.prevent="_estUnit = 'km'" @keydown.space.prevent="_estUnit = 'km'"
+                                      style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;"
+                                      :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;' + (_estUnit === 'km' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);')">km</span>
+                                <span role="button" tabindex="0" :aria-pressed="_estUnit === 'miles'"
+                                      @click="_estUnit = 'miles'" @keydown.enter.prevent="_estUnit = 'miles'" @keydown.space.prevent="_estUnit = 'miles'"
+                                      style="display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;border-left:1px solid var(--border-color);"
+                                      :style="'display:flex;align-items:center;padding:0 12px;font-size:0.8125rem;font-weight:600;cursor:pointer;border-left:1px solid var(--border-color);' + (_estUnit === 'miles' ? 'background:var(--color-primary);color:#fff;' : 'color:var(--text-secondary);')">miles</span>
+                            </span>
+                        </div>
+                        <div class="form-error" x-show="errors.estimated_mileage_km || errors.estimated_mileage_miles" x-text="errors.estimated_mileage_km || errors.estimated_mileage_miles"></div>
+                        <div class="form-hint" style="margin-top:6px;">Total distance included in the lease — enter in km or miles (both are stored). Set 0 with a rate to bill every unit from 0.</div>
                     </div>
-                    <div class="form-error" x-show="errors.estimated_mileage_km || errors.estimated_mileage_miles" x-text="errors.estimated_mileage_km || errors.estimated_mileage_miles"></div>
-                </div>
-                <div class="form-hint" style="text-align:center;margin-top:6px;margin-bottom:24px;">Total distance included in the lease — enter in km or miles (both are stored). Set 0 with a rate to bill every unit from 0.</div>
 
-                <!-- ── Estimated mileage per day (S-MILEAGE-EST-DAILY) ── -->
-                <?php /* Entered in the lease's fixed primary unit; the API derives the km/miles
-                         mirrors. Each invoice bills days × per-day × rate as an estimate, then
-                         trues up against actual distance. */ ?>
-                <div class="ff-dual-label">Estimated mileage per day</div>
-                <div class="form-group" style="max-width:320px;margin:0 auto;">
-                    <div class="input-group">
-                        <input type="number"
-                               class="form-control font-mono"
-                               step="1"
-                               min="0"
-                               x-model="form.estimated_mileage_per_day"
-                               aria-label="Estimated mileage per day"
-                               placeholder="0">
-                        <span class="input-group-suffix" x-text="(_mileageUnit === 'km' ? 'km' : 'miles') + '/day'"></span>
+                    <!-- Estimated mileage per day (S-MILEAGE-EST-DAILY). Entered in the lease's
+                         fixed primary unit; the API derives the km/miles mirrors. -->
+                    <div class="form-group">
+                        <div class="ff-dual-label">Estimated mileage per day</div>
+                        <div class="input-group">
+                            <input type="number"
+                                   class="form-control font-mono"
+                                   step="1"
+                                   min="0"
+                                   x-model="form.estimated_mileage_per_day"
+                                   aria-label="Estimated mileage per day"
+                                   placeholder="0">
+                            <span class="input-group-suffix" x-text="(_mileageUnit === 'km' ? 'km' : 'miles') + '/day'"></span>
+                        </div>
+                        <div class="form-error" x-show="errors.estimated_mileage_per_day" x-text="errors.estimated_mileage_per_day"></div>
+                        <div class="form-hint" style="margin-top:6px;">Each invoice bills an estimate (days &times; this &times; rate), then trues up against the actual distance driven — adding a charge or credit. 0 = bill only actual mileage.</div>
                     </div>
-                    <div class="form-error" x-show="errors.estimated_mileage_per_day" x-text="errors.estimated_mileage_per_day"></div>
                 </div>
-                <div class="form-hint" style="text-align:center;margin-top:6px;margin-bottom:24px;">Each invoice bills an estimate (days &times; this &times; rate), then trues up against the actual distance driven — adding a charge or credit. 0 = bill only actual mileage.</div>
 
                 <!-- ── Collapsible conversion factor section ── -->
                 <div style="margin-bottom:24px;">
