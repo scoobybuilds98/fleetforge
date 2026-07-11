@@ -2786,7 +2786,8 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
    ============================================================ */
 
 .form-group {
-    margin-bottom: 18px;
+    /* S-LUX-2.5: field vertical rhythm 20px (density variants still override) */
+    margin-bottom: 20px;
 }
 
 .form-group:last-child {
@@ -2809,7 +2810,10 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .form-label .required {
-    color: var(--color-danger);
+    /* S-LUX-2.5: quieter required marker — danger-text at 0.7 so it reads as
+       a hint, not an alarm, on an unfilled field. */
+    color: var(--color-danger-text);
+    opacity: 0.7;
     margin-left: 2px;
 }
 
@@ -2838,6 +2842,16 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .form-control::placeholder,
 .form-input::placeholder,
 .form-select::placeholder { color: var(--input-placeholder); }
+
+/* S-LUX-2.5 (D-LUX25-1): quiet hover — the pill bg nudges ~60% toward its
+   focus fill so the field feels responsive before you commit to it, without
+   a border or a jump. Suppressed while focused (the ring owns that state) and
+   while disabled. */
+.form-control:hover:not(:focus):not(:disabled),
+.form-input:hover:not(:focus):not(:disabled),
+.form-select:hover:not(:focus):not(:disabled) {
+    background: color-mix(in srgb, var(--input-bg-focus) 60%, var(--input-bg));
+}
 
 .form-control:focus,
 .form-input:focus,
@@ -2872,35 +2886,73 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .form-control-lg { height: var(--input-height-lg); font-size: 1rem; padding: 0 14px; }
 .form-select-sm  { height: var(--input-height-sm); font-size: 0.8125rem; padding: 0 10px; padding-right: 32px; }
 
-/* Select arrow */
-.form-select {
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+/* Select chevron — S-LUX-2.5: warm --text-tertiary (was a cool slate #94a3b8).
+   A data-URI can't read a CSS var, so the stroke is the resolved warm-dark
+   tertiary #736D61; the [data-theme="light"] override below swaps in the
+   light tertiary #8A857A so the chevron tracks the theme.
+   Applies to every native <select> pill — not just .form-select — because the
+   base .form-control sets appearance:none, which strips the browser's own
+   arrow; a bare select.form-control (e.g. the HH/MM time pickers) would
+   otherwise have no dropdown affordance at all. Multiselects (list boxes)
+   are excluded. */
+.form-select,
+select.form-control:not([multiple]) {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%23736D61'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 10px center;
     background-size: 16px;
     padding-right: 36px;
 }
+[data-theme="light"] .form-select,
+[data-theme="light"] select.form-control:not([multiple]) {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%238A857A'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+}
 
-/* Textarea */
+/* Textarea — S-LUX-2.5: min-height 80px, pill radius parity, vertical resize only */
 textarea.form-control,
 textarea.form-input {
     height: auto;
-    min-height: 100px;
+    min-height: 80px;
     padding: 10px 12px;
+    border-radius: 8px;
     resize: vertical;
     line-height: 1.5;
 }
 
-/* Form hint / helper text */
+/* S-LUX-2.5: native date/time picker indicator — invert on the dark theme so
+   the black glyph reads on the warm-dark pill; leave normal on light. */
+.form-control::-webkit-calendar-picker-indicator {
+    opacity: 0.6;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+}
+.form-control:hover::-webkit-calendar-picker-indicator { opacity: 0.9; }
+:root:not([data-theme="light"]) .form-control::-webkit-calendar-picker-indicator {
+    filter: invert(1) brightness(0.85);
+}
+
+/* S-LUX-2.5: money inputs (.font-mono number fields) drop the spinner buttons —
+   the up/down arrows are meaningless on a dollar amount and crowd the pill.
+   Scoped to .font-mono so plain count fields (e.g. billing periods) keep them.
+   tabular-nums already applies via the .font-mono group in §00. */
+.form-control.font-mono::-webkit-outer-spin-button,
+.form-control.font-mono::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+.form-control.font-mono[type="number"] { -moz-appearance: textfield; }
+
+/* Form hint / helper text — S-LUX-2.5: 12px, --text-tertiary, 4px gap */
 .form-hint {
-    margin-top: 5px;
-    font-size: 0.8125rem;
+    margin-top: 4px;
+    font-size: 0.75rem;
     color: var(--text-tertiary);
 }
 
+/* Error message — S-LUX-2.5: 12px, --color-danger-text, 4px gap (no motion) */
 .form-error {
-    margin-top: 5px;
-    font-size: 0.8125rem;
+    margin-top: 4px;
+    font-size: 0.75rem;
     color: var(--color-danger-text);
 }
 
@@ -2915,8 +2967,9 @@ textarea.form-input {
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    margin-top: 5px;
-    font-size: 0.8125rem;
+    /* S-LUX-2.5: 12px, 4px gap (matches .form-error) */
+    margin-top: 4px;
+    font-size: 0.75rem;
     font-weight: 500;
     color: var(--color-danger-text);
     line-height: 1.4;
@@ -2957,6 +3010,25 @@ textarea.form-input {
     box-shadow: 0 0 0 2px var(--color-danger);
 }
 
+/* S-LUX-2.5 (D-LUX25-4): the same 2px danger ring on the OTHER control types,
+   applied to each control's outer box. Covers both the native .is-invalid and
+   FF_Validate's .ff-invalid. No motion — the ring is the whole error state. */
+.form-check-input.is-invalid,
+.form-check-input.ff-invalid {
+    box-shadow: 0 0 0 2px var(--color-danger);
+    border-color: var(--color-danger);
+}
+.ff-picker.is-invalid .ff-picker-input,
+.ff-picker.ff-invalid .ff-picker-input,
+.ff-picker-input.is-invalid,
+.ff-picker-input.ff-invalid {
+    box-shadow: 0 0 0 2px var(--color-danger);
+}
+.ff-segment-control.is-invalid,
+.ff-segment-control.ff-invalid {
+    box-shadow: 0 0 0 2px var(--color-danger);
+}
+
 /* Inline alert banners — used in forms and modals */
 .alert {
     padding: 12px 16px;
@@ -2978,28 +3050,74 @@ textarea.form-input {
     cursor: pointer;
 }
 
+/* S-LUX-2.5 (D-LUX25-2): checkboxes/radios keep their border (the
+   S-DESIGN-INPUTS carve-out) but get the full Atelier custom pass — a
+   1.5px hairline box that fills with the brand colour and shows a white
+   glyph when checked. appearance:none removes the platform control so the
+   glyph is our own SVG; the checked fill consumes var(--color-primary), so
+   the white-label brand-override chain recolours it. */
 .form-check-input {
+    appearance: none;
+    -webkit-appearance: none;
     width: 16px;
     height: 16px;
-    border: 2px solid var(--input-border);
+    border: 1.5px solid var(--border-color-strong);
     border-radius: var(--radius-sm);
     background: var(--input-bg);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 100% 100%;
     cursor: pointer;
     flex-shrink: 0;
     margin-top: 2px;
-    accent-color: var(--color-primary);
-    transition: border-color var(--transition-fast);
+    transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .form-check-input[type="radio"] { border-radius: 50%; }
 
-.form-check-input:checked { border-color: var(--color-primary); }
+.form-check-input:checked {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+    /* white check glyph */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='white' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 8.5l3 3 6-7'/%3E%3C/svg%3E");
+    background-size: 15px 15px;
+}
+.form-check-input[type="radio"]:checked {
+    /* white centre dot instead of a check */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='3.25' fill='white'/%3E%3C/svg%3E");
+    background-size: 16px 16px;
+}
+.form-check-input:indeterminate {
+    background-color: var(--color-primary);
+    border-color: var(--color-primary);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='3.5' y='7' width='9' height='2' rx='1' fill='white'/%3E%3C/svg%3E");
+    background-size: 15px 15px;
+}
+.form-check-input:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--color-primary);
+}
+.form-check-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 
 .form-check-label {
     font-size: 0.9rem;
-    color: var(--text-primary);
+    /* S-LUX-2.5: quiet by default, brightens to primary text when its box is
+       checked — a subtle confirmation without a colour shout. */
+    color: var(--text-secondary);
     cursor: pointer;
     line-height: 1.4;
+    transition: color var(--transition-fast);
+}
+.form-check:has(.form-check-input:checked) .form-check-label {
+    color: var(--text-primary);
+}
+.form-check-input:disabled + .form-check-label,
+.form-check:has(.form-check-input:disabled) .form-check-label {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* Form row / grid */
@@ -3321,9 +3439,11 @@ textarea.form-input {
     color: var(--text-primary);
 }
 .ff-picker-toggle--active {
-    background: var(--accent-color, #2563eb);
+    /* S-LUX-2.5: brand fill (was a stale #2563eb blue fallback) so the active
+       toggle follows the white-label chain. */
+    background: var(--color-primary);
     color: #fff;
-    border-color: var(--accent-color, #2563eb);
+    border-color: var(--color-primary);
 }
 .ff-picker-clear {
     position: absolute;
@@ -3347,9 +3467,11 @@ textarea.form-input {
     right: 0;
     max-height: 260px;
     overflow-y: auto;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
+    /* S-LUX-2.5: match the panel recipe used by the other picker block —
+       raised surface-2 + strong hairline + radius-lg + shadow-lg. */
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
 }
 .ff-picker-item {
@@ -3362,7 +3484,7 @@ textarea.form-input {
 .ff-picker-item:last-child { border-bottom: none; }
 .ff-picker-item:hover,
 .ff-picker-item--highlight {
-    background: var(--bg-surface-2);
+    background: var(--bg-surface-hover);
 }
 .ff-picker-empty {
     padding: 10px 12px;
@@ -9673,28 +9795,31 @@ body:has(.chat-page-content) #ff-chat-widget {
     color: var(--text-primary);
 }
 
+/* S-LUX-2.5: floating panel recipe (LUX-3 not shipped yet) — raised
+   --bg-surface-2 with a strong hairline, radius-lg and --shadow-lg so the
+   dropdown reads as a distinct layer above the pill it drops from. */
 .ff-picker-dropdown {
     position: absolute;
     top: 100%;
     left: 0;
     right: 0;
     margin-top: 4px;
-    background: var(--bg-surface, #fff);
-    border: 1px solid var(--border-color, #e0e0e0);
-    border-radius: 8px;
-    box-shadow: 0 6px 20px rgba(0,0,0,.12);
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
     z-index: 1000;
     max-height: 320px;
     overflow-y: auto;
 }
 .ff-picker-dropdown::-webkit-scrollbar { width: 6px; }
-.ff-picker-dropdown::-webkit-scrollbar-thumb { background: var(--border-color, #e0e0e0); border-radius: 3px; }
+.ff-picker-dropdown::-webkit-scrollbar-thumb { background: var(--border-color-strong); border-radius: 3px; }
 
 .ff-picker-option {
     padding: 10px 14px;
     cursor: pointer;
-    border-bottom: 1px solid var(--border-color, #f0f0f0);
-    transition: background .08s;
+    border-bottom: 1px solid var(--border-color);
+    transition: background var(--transition-fast);
     display: flex;
     flex-direction: column;
     gap: 2px;
@@ -9702,7 +9827,7 @@ body:has(.chat-page-content) #ff-chat-widget {
 .ff-picker-option:last-child { border-bottom: none; }
 .ff-picker-option:hover,
 .ff-picker-option.is-highlighted {
-    background: var(--bg-muted, #f5f5f5);
+    background: var(--bg-surface-hover);
 }
 .ff-picker-option-label {
     font-size: 14px;
@@ -9845,7 +9970,8 @@ body:has(.chat-page-content) #ff-chat-widget {
    form fields under a subheading. Matches the existing .card look
    but without the outer border so it can nest inside a card. */
 .form-section {
-    margin-bottom: 24px;
+    /* S-LUX-2.5: section rhythm 32px */
+    margin-bottom: 32px;
     padding-bottom: 16px;
     border-bottom: 1px solid var(--border-color);
 }
@@ -10367,21 +10493,24 @@ tr.ff-row-selected > td:first-child {
    ============================================================ */
 
 :root {
-    --segment-track-bg:        rgba(118, 118, 128, 0.24);
-    --segment-active-bg:        #636366;
-    --segment-active-shadow:    0 3px 8px rgba(0, 0, 0, 0.32),
-                                0 1px 2px rgba(0, 0, 0, 0.18);
+    /* S-LUX-2.5: warm-neutral track (was cool rgba 118,118,128) to match the
+       Atelier input-pill alphas; active pill stays grayscale-elevated (D-D,
+       no brand orange) with the shadow re-tuned to the --shadow-sm language. */
+    --segment-track-bg:        rgba(140, 130, 115, 0.20);
+    --segment-active-bg:        #6B6660;
+    --segment-active-shadow:    0 1px 4px rgba(0, 0, 0, 0.40),
+                                0 1px 2px rgba(0, 0, 0, 0.25);
     --segment-active-text:      rgba(255, 255, 255, 1);
-    --segment-inactive-text:    rgba(235, 235, 245, 0.6);
+    --segment-inactive-text:    rgba(235, 230, 220, 0.62);
 }
 
 [data-theme="light"] {
-    --segment-track-bg:        rgba(118, 118, 128, 0.12);
+    --segment-track-bg:        rgba(140, 130, 115, 0.14);
     --segment-active-bg:        #FFFFFF;
-    --segment-active-shadow:    0 3px 8px rgba(0, 0, 0, 0.12),
-                                0 1px 2px rgba(0, 0, 0, 0.04);
-    --segment-active-text:      rgba(0, 0, 0, 1);
-    --segment-inactive-text:    rgba(60, 60, 67, 0.6);
+    --segment-active-shadow:    0 1px 3px rgba(0, 0, 0, 0.10),
+                                0 1px 2px rgba(0, 0, 0, 0.05);
+    --segment-active-text:      rgba(26, 24, 21, 1);
+    --segment-inactive-text:    rgba(60, 60, 67, 0.62);
 }
 
 /* The control itself */
@@ -11757,7 +11886,12 @@ tr.ff-row-selected > td:first-child {
 .perm-ios-toggle {
     display:inline-block; position:relative;
     width:42px; height:25px; border-radius:12.5px;
-    background:rgba(100,116,139,.32); cursor:pointer; flex-shrink:0;
+    /* S-LUX-2.5: warm-neutral off-track (was cool slate rgba 100,116,139) to
+       match the Atelier pills. The semantic ON states below (is-on green /
+       ovr-allow brand / ovr-deny danger) are the permission language and are
+       deliberately left as-is — this is a tri-state control, not a plain
+       switch, so it is NOT flattened to a single brand colour. */
+    background:rgba(140,130,115,.28); cursor:pointer; flex-shrink:0;
     transition:background 200ms ease, box-shadow 200ms ease;
     -webkit-user-select:none; user-select:none;
 }
