@@ -70,6 +70,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? '$' + formatMoney(kpis.active_revenue) : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Active lease rates</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Fleet Utilization -->
@@ -86,6 +88,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-delta text-secondary" x-show="kpisLoaded"
                  x-text="kpisLoaded ? kpis.on_lease_count + ' of ' + kpis.total_active_units + ' units' : ''"></div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Overdue Invoices -->
@@ -102,6 +106,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-delta" x-show="kpisLoaded"
                  x-text="kpisLoaded ? '$' + formatMoney(kpis.overdue_invoices.total) + ' outstanding' : ''"></div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Compliance Alerts -->
@@ -117,6 +123,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.compliance_alerts : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Expiring in 30 days</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Open Leases -->
@@ -132,6 +140,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.open_leases : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Active &amp; pending</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Today's Pickups — links to reservations module (S018) -->
@@ -147,6 +157,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.todays_pickups : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Reservations today</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Available Units -->
@@ -162,6 +174,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.available_units : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Ready to rent</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Open Work Orders -->
@@ -177,6 +191,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.open_work_orders : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Open &amp; in progress</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Open Damage Claims -->
@@ -193,6 +209,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.open_damage_claims : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Open claims</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Sent Invoices (awaiting payment) -->
@@ -208,6 +226,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.sent_invoices : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Awaiting payment</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- This Month's Collections -->
@@ -223,6 +243,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? '$' + formatMoney(kpis.monthly_collections) : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Collected this month</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
         <!-- Active Reservations -->
@@ -238,6 +260,8 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-value" x-text="kpisLoaded ? kpis.active_reservations : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded">Pending &amp; confirmed</div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
+            <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
+            <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
     </div><!-- /stat-grid -->

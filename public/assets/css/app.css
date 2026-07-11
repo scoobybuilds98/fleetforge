@@ -1866,8 +1866,16 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     position: sticky;
     top: 0;
     z-index: 2;
-    background: var(--bg-surface);
-    box-shadow: 0 1px 0 var(--border-color);
+    /* S-LUX-2: glass sticky header — frosts the rows scrolling beneath,
+       matching the topbar recipe. Solid fallback where backdrop-filter
+       is unsupported. */
+    background: color-mix(in srgb, var(--bg-surface-2) 82%, transparent);
+    -webkit-backdrop-filter: blur(10px) saturate(1.3);
+    backdrop-filter: blur(10px) saturate(1.3);
+    box-shadow: 0 1px 0 var(--border-color-strong);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .tab-table-container thead th { background: var(--bg-surface-2); }
 }
 .tab-filter-bar {
     display: flex;
@@ -2195,17 +2203,19 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-card {
-    /* Cream tile (Apple light-card look) — pops against the dark app shell.
-       Light theme overrides to white for contrast (see [data-theme="light"]). */
-    background: #f7f5f0;
-    border: 1px solid rgba(0, 0, 0, 0.06);
-    border-radius: 16px;
+    /* S-LUX-2: Atelier card recipe (was a hardcoded cream island). Now a
+       token-driven surface — sheen + ambient shadow + radius-xl, identical
+       material to .card — so tiles read as part of one system and follow
+       the theme + brand override. */
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
     padding: 18px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.30), 0 1px 2px rgba(0,0,0,0.18);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
     position: relative;
     overflow: hidden;
     min-width: 0;
-    transition: box-shadow 200ms ease, transform 200ms ease;
+    transition: box-shadow var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
 /* Left accent bar removed — accent colour now lives in the icon only */
@@ -2214,23 +2224,18 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-card:hover {
-    background: #fffefb;
-    box-shadow: 0 12px 28px rgba(0,0,0,0.45), 0 3px 8px rgba(0,0,0,0.28);
-    transform: translateY(-2px);
+    /* S-LUX-2: lift 1px + deepen shadow (Atelier card hover language). */
+    border-color: var(--border-color-strong);
+    box-shadow: var(--card-sheen), var(--shadow-ambient), var(--shadow-md);
+    transform: translateY(-1px);
 }
 
-/* Dark text so labels/values read on the cream (dark mode) and white (light mode) tile.
-   Greys are deliberately darker than Apple defaults — the lighter shades washed
-   out on the warm cream fill. */
-.stat-card .stat-label { color: #44464c; font-weight: 600; }
-.stat-card .stat-value { color: #16161a; }
-.stat-card .stat-delta { color: #5d5f66; }
-/* Many tiles tag the sub-line with `.text-secondary`, whose `!important` (a light
-   slate meant for the dark theme) otherwise wins and washes out on the tile.
-   Re-assert the dark greys with equal weight but higher specificity. */
-.stat-card .stat-label.text-secondary { color: #44464c !important; }
-.stat-card .stat-delta.text-secondary { color: #5d5f66 !important; }
-.stat-card .stat-value.text-secondary { color: #16161a !important; }
+/* S-LUX-2: text follows tokens (the tile is now a themed surface, not a
+   fixed cream card) — so labels/values read correctly in BOTH themes and
+   the old dark-on-cream literals are gone. */
+.stat-card .stat-label { color: var(--text-tertiary); }
+.stat-card .stat-value { color: var(--text-primary); }
+.stat-card .stat-delta { color: var(--text-tertiary); }
 
 /* Per-card accent color variants */
 .stat-card--green  { --stat-accent: #22c55e; }
@@ -2271,11 +2276,14 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .stat-icon--orange { background: rgba(249,115,22,0.12); color: #f97316; }
 
 .stat-label {
-    font-size: 0.75rem;              /* 12px */
-    font-weight: 500;
-    color: var(--text-secondary);
+    /* S-LUX-2: uppercase micro-label — matches thead / card-title language. */
+    font-size: 0.6875rem;           /* 11px */
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
+    color: var(--text-tertiary);
     line-height: 1.3;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
     /* WHY: reserve room for absolute .stat-icon in legacy tile structure */
     padding-right: 38px;
     display: -webkit-box;
@@ -2285,11 +2293,15 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .stat-value {
-    font-size: 1.5rem;
-    font-weight: 700;
+    /* S-LUX-2: large display numeral — 28px, weight 600, tight tracking,
+       tabular figures (via the .stat-value group in the tabular-nums rule).
+       Sans (not mono) reads as a headline figure. */
+    font-size: 1.75rem;             /* 28px */
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
     color: var(--text-primary);
-    font-family: var(--font-mono);
-    line-height: 1.2;
+    font-family: var(--font-sans);
+    line-height: 1.15;
     margin-bottom: 4px;
     min-width: 0;
     white-space: nowrap;
@@ -2325,6 +2337,37 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* S-LUX-2 — delta CHIP variants (opt-in via .stat-delta--up / --down).
+   Base .stat-delta stays a plain subtitle for descriptive sub-lines
+   ("Active lease rates", "19 of 49 units"); pages that show a real
+   +/- movement add the modifier to get a badge-language pill. */
+.stat-delta--up,
+.stat-delta--down {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 7px;
+    border-radius: var(--radius-full);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+}
+.stat-delta--up   { background: var(--color-success-light); color: var(--color-success-text); }
+.stat-delta--down { background: var(--color-danger-light);  color: var(--color-danger-text); }
+.stat-delta--up::before   { content: '▲'; font-size: 0.5625rem; }
+.stat-delta--down::before { content: '▼'; font-size: 0.5625rem; }
+
+/* S-LUX-2 — sparkline hook. A fixed-height slot at the tile foot for a
+   later session to populate (kpi sparkline data queries are out of scope
+   here — D-LUX2-4). Empty today; reserves rhythm without shifting layout. */
+.kpi-spark {
+    margin-top: 10px;
+    height: 34px;
+    min-height: 34px;
+}
+.kpi-spark:empty { display: none; }
 
 /* Clickable stat-card KPI tiles — active ring + pointer affordance */
 .stat-card[style*="cursor:pointer"],
@@ -3024,15 +3067,17 @@ textarea.form-input {
 
 .table thead th,
 .data-table thead th {
-    padding: 12px 16px;
+    /* S-LUX-2: micro-label thead — weight 600, tracking token, stronger
+       bottom hairline. Row rhythm bumped to 14px (was 12) to match tbody. */
+    padding: 14px 16px;
     text-align: left;
     font-size: 0.6875rem;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: var(--tracking-label);
     color: var(--text-tertiary);
     background: var(--bg-surface-2);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color-strong);
     white-space: nowrap;
 }
 
@@ -3057,7 +3102,10 @@ textarea.form-input {
 
 .table tbody td,
 .data-table tbody td {
-    padding: 13px 16px;
+    /* S-LUX-2: row rhythm 13→14px (comfortable). compact/spacious density
+       rules carry higher specificity (body[data-density] .page-content …)
+       so they still win — compact stays compact. */
+    padding: 14px 16px;
     color: var(--text-primary);
     vertical-align: middle;
 }
@@ -3198,9 +3246,12 @@ textarea.form-input {
 }
 
 .page-btn.is-active {
-    background: var(--color-primary);
-    color: #ffffff;
-    border-color: var(--color-primary);
+    /* S-LUX-2: active page = brand TEXT on a hairline, not a solid fill
+       (quieter, matches the Atelier neutral-chrome language). */
+    background: transparent;
+    color: var(--color-primary);
+    font-weight: 600;
+    border-color: var(--border-color-strong);
 }
 
 .page-btn:disabled {
@@ -4050,10 +4101,13 @@ textarea.form-input {
 }
 
 .skeleton {
+    /* S-LUX-2: highlight stop is --border-color-strong (not --bg-surface-hover)
+       — in LIGHT mode --bg-surface-hover == --bg-surface-2, so the old sweep
+       had zero contrast and was invisible. border-strong contrasts in both. */
     background: linear-gradient(
         90deg,
         var(--bg-surface-2) 25%,
-        var(--bg-surface-hover) 50%,
+        var(--border-color-strong) 50%,
         var(--bg-surface-2) 75%
     );
     background-size: 800px 100%;
@@ -4469,26 +4523,30 @@ html.is-mac .non-mac-only { display: none; }
     opacity: 0.7;
 }
 
-/* Inline skeleton for stat card value area */
+/* Inline skeleton for stat card value area (S-LUX-2: border-strong highlight
+   for both-theme contrast; taller + tabular to match the new 28px value). */
 .stat-skeleton {
-    height: 32px;
+    height: 30px;
     border-radius: var(--radius-sm);
     background: var(--bg-surface-2);
     animation: ff-shimmer 1.5s ease infinite;
     background-size: 800px 100%;
-    background-image: linear-gradient(90deg, var(--bg-surface-2) 25%, var(--bg-surface-hover) 50%, var(--bg-surface-2) 75%);
+    background-image: linear-gradient(90deg, var(--bg-surface-2) 25%, var(--border-color-strong) 50%, var(--bg-surface-2) 75%);
     width: 60%;
     margin: 4px 0;
 }
 
-/* Chart loading placeholder */
+/* Chart loading placeholder (S-LUX-2: border-strong shimmer + faint grid-line
+   placeholders so a loading chart reads as a chart, not a blank bar). */
 .chart-skeleton {
     width: 100%;
     border-radius: var(--radius-sm);
     background: var(--bg-surface-2);
     animation: ff-shimmer 1.5s ease infinite;
     background-size: 800px 100%;
-    background-image: linear-gradient(90deg, var(--bg-surface-2) 25%, var(--bg-surface-hover) 50%, var(--bg-surface-2) 75%);
+    background-image:
+        repeating-linear-gradient(to bottom, transparent 0, transparent 47px, var(--border-color) 47px, var(--border-color) 48px),
+        linear-gradient(90deg, var(--bg-surface-2) 25%, var(--border-color-strong) 50%, var(--bg-surface-2) 75%);
 }
 
 /* 2/3 + 1/3 grid layout */
@@ -4572,6 +4630,39 @@ html.is-mac .non-mac-only { display: none; }
    overflow into the next card. Visible at the wrap level is fine because
    the parent .chart-card already has overflow:hidden for the skeleton. */
 .chart-wrap .apexcharts-canvas { overflow: visible !important; }
+
+/* S-LUX-2 — Atelier chart tooltip. ApexCharts renders the tooltip DOM
+   with .apexcharts-theme-{dark,light}; we override the surface with
+   tokens so it matches every card (surface-2 fill, strong hairline,
+   radius-lg, ambient shadow, Geist, tabular figures) AND follows the
+   brand override + theme toggle for free. Covers both theme classes. */
+.apexcharts-tooltip.apexcharts-theme-dark,
+.apexcharts-tooltip.apexcharts-theme-light {
+    background: var(--bg-surface-2) !important;
+    border: 1px solid var(--border-color-strong) !important;
+    border-radius: var(--radius-lg) !important;
+    box-shadow: var(--shadow-md) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-sans) !important;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.apexcharts-tooltip-title {
+    background: var(--bg-surface-hover) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    font-family: var(--font-sans) !important;
+    font-weight: 600;
+}
+.apexcharts-tooltip-series-group { font-variant-numeric: tabular-nums; }
+.apexcharts-xaxistooltip,
+.apexcharts-yaxistooltip {
+    background: var(--bg-surface-2) !important;
+    border-color: var(--border-color-strong) !important;
+    color: var(--text-primary) !important;
+    font-family: var(--font-sans) !important;
+}
+.apexcharts-xaxistooltip::before,
+.apexcharts-xaxistooltip::after { border-bottom-color: var(--border-color-strong) !important; }
 
 /* Dashboard list widgets (recent activity, pickups, etc.) — uniform shell. */
 .dashboard-widget {
@@ -4933,22 +5024,24 @@ html.is-mac .non-mac-only { display: none; }
 .stat-card__icon--info    { background: var(--color-info-light);     color: var(--color-info-text);    }
 .stat-card__icon--purple  { background: rgba(139,92,246,0.14);       color: #a78bfa;                   }
 
-/* Tiles are light (cream in dark mode, white in day mode), so the accent
-   icons need darker, saturated glyphs — the default light-on-dark colours
-   ('#4ade80', '#fb923c', …) wash out on a light tile. Applies to both the
-   modern (__icon) and legacy (.stat-icon) structures, both themes. */
-.stat-card__icon--primary, .stat-icon--primary { background: rgba(249,115,22,0.15); color: #c2410c; }
-.stat-card__icon--success, .stat-icon--success,
-.stat-icon--green                               { background: rgba(34,197,94,0.16);  color: #15803d; }
-.stat-card__icon--warning, .stat-icon--warning,
-.stat-icon--amber                               { background: rgba(245,158,11,0.18); color: #b45309; }
-.stat-card__icon--danger,  .stat-icon--danger,
-.stat-icon--red                                 { background: rgba(239,68,68,0.15);  color: #b91c1c; }
-.stat-card__icon--info,    .stat-icon--info,
-.stat-icon--blue                                { background: rgba(59,130,246,0.15); color: #1d4ed8; }
-.stat-card__icon--purple,  .stat-icon--purple   { background: rgba(139,92,246,0.16); color: #6d28d9; }
-.stat-icon--teal                                { background: rgba(20,184,166,0.16); color: #0f766e; }
-.stat-icon--slate                               { background: rgba(100,116,139,0.16);color: #475569; }
+/* S-LUX-2: the "darker glyphs for a light tile" override block was removed.
+   The tile is now a themed surface (dark in dark mode), so the __icon
+   variants correctly fall back to their token colours above (bright glyphs
+   on dark, dark glyphs on light — the semantic tokens already flip per
+   theme). Legacy .stat-icon--{green,blue,…} keep their base defs. Only the
+   light-theme darkening that the cream tile needed is dropped. */
+[data-theme="light"] .stat-card__icon--primary, [data-theme="light"] .stat-icon--primary { background: rgba(249,115,22,0.15); color: #c2410c; }
+[data-theme="light"] .stat-card__icon--success, [data-theme="light"] .stat-icon--success,
+[data-theme="light"] .stat-icon--green                               { background: rgba(34,197,94,0.16);  color: #15803d; }
+[data-theme="light"] .stat-card__icon--warning, [data-theme="light"] .stat-icon--warning,
+[data-theme="light"] .stat-icon--amber                               { background: rgba(245,158,11,0.18); color: #b45309; }
+[data-theme="light"] .stat-card__icon--danger,  [data-theme="light"] .stat-icon--danger,
+[data-theme="light"] .stat-icon--red                                 { background: rgba(239,68,68,0.15);  color: #b91c1c; }
+[data-theme="light"] .stat-card__icon--info,    [data-theme="light"] .stat-icon--info,
+[data-theme="light"] .stat-icon--blue                                { background: rgba(59,130,246,0.15); color: #1d4ed8; }
+[data-theme="light"] .stat-card__icon--purple,  [data-theme="light"] .stat-icon--purple   { background: rgba(139,92,246,0.16); color: #6d28d9; }
+[data-theme="light"] .stat-icon--teal                                { background: rgba(20,184,166,0.16); color: #0f766e; }
+[data-theme="light"] .stat-icon--slate                               { background: rgba(100,116,139,0.16);color: #475569; }
 
 /* ── Chart card accent borders ───────────────────────────── */
 .card--accent-primary { border-top: 3px solid var(--color-primary); }
@@ -6288,17 +6381,11 @@ dl.detail-grid dd {
 [data-theme="light"] .topbar-theme-btn svg { color: var(--text-primary); }
 [data-theme="dark"]  .topbar-theme-btn svg { color: var(--text-primary); }
 
-/* Day mode: white cards with a crisp shadow so they lift off the light
-   (#f8fafc) page — cream would blend, so contrast comes from elevation. */
-[data-theme="light"] .stat-card {
-    background: #ffffff;
-    border-color: rgba(0, 0, 0, 0.08);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.07), 0 6px 18px rgba(0,0,0,0.06);
-}
-[data-theme="light"] .stat-card:hover {
-    background: #ffffff;
-    box-shadow: 0 6px 16px rgba(0,0,0,0.12), 0 10px 30px rgba(0,0,0,0.09);
-}
+/* S-LUX-2: the [data-theme="light"] .stat-card cream/white override was
+   removed — .stat-card now uses the token-driven Atelier recipe
+   (var(--bg-surface) + --card-sheen + --shadow-ambient), whose light
+   variants already give a white tile with a soft ambient shadow. One
+   surface definition for both themes. */
 
 /* ── FIX 2 — Shared utility classes (new, non-conflicting) ─── */
 
@@ -9908,12 +9995,17 @@ body:has(.chat-page-content) #ff-chat-widget {
 }
 
 /* ── Selected row highlight ──────────────────────────────────
-   Very subtle brand-colour tint — visible but never garish. */
+   S-LUX-2: brand-derived tint (via color-mix so the white-label brand
+   override retints it — no hardcoded orange) + a 2px brand rail on the
+   first cell, mirroring the sidebar active-item rail. */
 tr.ff-row-selected > td {
-    background: rgba(249, 115, 22, 0.07) !important;
+    background: color-mix(in srgb, var(--color-primary) 8%, transparent) !important;
 }
 [data-theme="light"] tr.ff-row-selected > td {
-    background: rgba(249, 115, 22, 0.06) !important;
+    background: color-mix(in srgb, var(--color-primary) 7%, transparent) !important;
+}
+tr.ff-row-selected > td:first-child {
+    box-shadow: inset 2px 0 0 var(--color-primary);
 }
 
 /* ── Floating bulk-action bar ────────────────────────────────
@@ -10139,9 +10231,10 @@ tr.ff-row-selected > td {
     display: inline-block;
     width: 100%;
     height: 14px;
+    /* S-LUX-2: border-strong highlight so the sweep is visible in light mode. */
     background: linear-gradient(90deg,
         var(--bg-surface-2) 0%,
-        var(--bg-surface-hover) 50%,
+        var(--border-color-strong) 50%,
         var(--bg-surface-2) 100%);
     background-size: 200% 100%;
     border-radius: 4px;
