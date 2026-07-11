@@ -186,9 +186,9 @@ hr {
     --sidebar-text-hover:    #F4F1EA;
     --sidebar-text-active:   #ffffff;
     --sidebar-item-hover-bg: rgba(255, 255, 255, 0.05);
-    --sidebar-item-active-bg: rgba(249, 115, 22, 0.15);
+    --sidebar-item-active-bg: color-mix(in srgb, var(--color-primary) 15%, transparent);
     --sidebar-hover:         rgba(255, 255, 255, 0.05);
-    --sidebar-active:        rgba(249, 115, 22, 0.15);
+    --sidebar-active:        color-mix(in srgb, var(--color-primary) 15%, transparent);
     --sidebar-icon:          #736D61;
     --sidebar-icon-active:   var(--color-primary);
     --sidebar-section-text:  #8A8478;
@@ -266,7 +266,7 @@ hr {
     --text-muted:   var(--text-tertiary);
     --text-inverse: var(--text-on-primary);
     --border-strong: var(--border-color-strong);
-    --bg-selected:  rgba(249, 115, 22, 0.12);  /* FIX #35: --bg-selected */
+    --bg-selected:  color-mix(in srgb, var(--color-primary) 12%, transparent);  /* FIX #35 */
 
     /* ── Atelier material tokens (S-LUX-1) ────────────────────
        --card-sheen: 1px inner top highlight — the "machined edge"
@@ -326,7 +326,7 @@ hr {
     --bg-hover:              #E9E5DD;  /* one step beyond, perceptible row/item hover */
     --bg-secondary:          #F1EEE8;
     --bg-input:              #F1EEE8;
-    --bg-selected:           rgba(234, 111, 0, 0.10);
+    --bg-selected:           color-mix(in srgb, var(--color-primary) 10%, transparent);
 
     --text-primary:          #1A1815;
     --text-secondary:        #57534A;
@@ -394,7 +394,7 @@ hr {
     --bg-input:              #1C1A16;
     --bg-surface-hover:      #232019;
     --bg-hover:              #232019;
-    --bg-selected:           rgba(249, 115, 22, 0.12);
+    --bg-selected:           color-mix(in srgb, var(--color-primary) 12%, transparent);
 
     /* ── Sidebar — always dark regardless of theme ── */
     --sidebar-bg:            #0A0908;
@@ -405,9 +405,9 @@ hr {
     --sidebar-text-hover:    #F4F1EA;
     --sidebar-text-active:   #ffffff;
     --sidebar-hover:         rgba(255, 255, 255, 0.05);
-    --sidebar-active:        rgba(249, 115, 22, 0.15);
+    --sidebar-active:        color-mix(in srgb, var(--color-primary) 15%, transparent);
     --sidebar-item-hover-bg: rgba(255, 255, 255, 0.05);
-    --sidebar-item-active-bg: rgba(249, 115, 22, 0.15);
+    --sidebar-item-active-bg: color-mix(in srgb, var(--color-primary) 15%, transparent);
     --sidebar-icon:          #736D61;
     --sidebar-icon-active:   var(--color-primary);
     --sidebar-brand-text:    #F4F1EA;

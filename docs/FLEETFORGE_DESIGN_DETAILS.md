@@ -5,15 +5,19 @@
 
 ## 1. DESIGN TOKENS — EXACT CSS VARIABLE VALUES
 
-The full token system lives at `public/assets/css/app.css` section "02. CSS Custom Properties (Design Tokens)" (lines ~215-337) with a dark-theme refresh block at lines 398-497 ("THEME-1 (2026-04-08) — Dark theme refresh"). **Brand identity is orange `#f97316`** ("fleet/logistics identity") — NOT blue. **Default theme is DARK** at `:root`; light is opt-in via `[data-theme="light"]`.
+The full token system lives at `public/assets/css/app.css` section "02. CSS Custom Properties (Design Tokens)" (starts ~line 126) with the D-LUX-1 mirror block `[data-theme="dark"]` immediately after the light block. **Brand identity is orange `#f97316`** ("fleet/logistics identity") — NOT blue. **Default theme is DARK** at `:root`; light is opt-in via `[data-theme="light"]`. **S-LUX-1 (2026-07-11, "Atelier") rebased every surface/text/border token onto a warm palette**, made `:root` ≡ `[data-theme="dark"]` (one dark palette — D-LUX-1), self-hosted **Geist Sans/Geist Mono** variable fonts (`--font-sans`/`--font-mono`, files at `public/assets/fonts/`), and added the material tokens in §1.7. Typography treatments shipped with it: `.form-label`/`.card-title`/`.form-section-title`/`.badge` are uppercase micro-labels (11-12px, `--tracking-label`), h1/h2/`.page-title` carry `--tracking-tight`, and tables/`.stat-value`/mono text get `font-variant-numeric: tabular-nums`.
 
 The runtime can override `--color-primary` / `--color-primary-hover` / `--color-primary-light` at request-time via `<style id="ff-brand-override">` injected in `includes/header.php` from the `brand.*` settings rows (S-DESIGN-SETTINGS-FOOTER-LOGIN, see Section 2 below). When those settings are empty, `app.css` defaults survive.
 
-### 1.1 :root (dark theme — DEFAULT)
+### 1.1 :root (dark theme — DEFAULT, Atelier S-LUX-1)
 
 ```css
 :root {
-  /* Brand colours */
+  /* Typography (S-LUX-1) */
+  --font-sans: "Geist", -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Brand colours (UNCHANGED by S-LUX-1 — D-LUX-2) */
   --color-primary:         #f97316;   /* orange — fleet/logistics identity */
   --color-primary-hover:   #ea6f00;
   --color-primary-light:   rgba(249, 115, 22, 0.14);
@@ -25,43 +29,51 @@ The runtime can override `--color-primary` / `--color-primary-hover` / `--color-
   --color-danger:          #ef4444;   --color-danger-light:    rgba(239, 68, 68, 0.13);   --color-danger-text:     #f87171;
   --color-info:            #06b6d4;   --color-info-light:      rgba(6, 182, 212, 0.12);   --color-info-text:       #22d3ee;
 
-  /* Dark surfaces (default theme) */
-  --bg-body:               #0a0b0e;
-  --bg-surface:            #111318;
-  --bg-surface-2:          #181b23;
-  --bg-surface-hover:      #1e2230;
+  /* Atelier warm-dark surfaces (VERBATIM-duplicated in [data-theme="dark"] — D-LUX-1) */
+  --bg-body:               #0C0B09;
+  --bg-surface:            #151310;
+  --bg-surface-2:          #1C1A16;
+  --bg-surface-hover:      #232019;
+  --bg-muted:              #1C1A16;   --bg-secondary: #1C1A16;   --bg-input: #1C1A16;   --bg-hover: #232019;
 
   /* Text */
-  --text-primary:          #f1f5f9;
-  --text-secondary:        #94a3b8;
-  --text-tertiary:         #64748b;
+  --text-primary:          #F4F1EA;
+  --text-secondary:        #A6A094;
+  --text-tertiary:         #736D61;
+  --text-disabled:         #5C564B;
   --text-on-primary:       #ffffff;
   --text-on-danger:        #ffffff;
 
   /* Borders */
-  --border-color:          #1d2133;
-  --border-color-strong:   #2a3347;
-  --border-focus:          #f97316;
+  --border-color:          #26231D;
+  --border-color-strong:   #36322A;
+  --border-focus:          var(--color-primary);   /* follows the brand override chain */
 
   /* Sidebar (always dark — sidebar doesn't theme-shift) */
   --sidebar-width:           240px;
   --sidebar-width-collapsed:  64px;
-  --sidebar-bg:              #0d0e12;
+  --sidebar-bg:              #0A0908;
   --sidebar-border:          rgba(255, 255, 255, 0.06);
-  --sidebar-text:            #6b7280;
-  --sidebar-text-hover:      #f9fafb;
+  --sidebar-text:            #A6A094;
+  --sidebar-text-muted:      #736D61;
+  --sidebar-text-hover:      #F4F1EA;
   --sidebar-text-active:     #ffffff;
   --sidebar-item-hover-bg:   rgba(255, 255, 255, 0.05);
-  --sidebar-item-active-bg:  rgba(249, 115, 22, 0.15);   /* brand orange @ 15% */
-  --sidebar-icon-active:     #f97316;
-  --sidebar-section-text:    #4b5563;
-  --sidebar-brand-text:      #f9fafb;
+  --sidebar-item-active-bg:  color-mix(in srgb, var(--color-primary) 15%, transparent);
+  --sidebar-icon:            #736D61;
+  --sidebar-icon-active:     var(--color-primary);
+  --sidebar-section-text:    #8A8478;   /* bumped from tertiary for WCAG AA on #0A0908 */
+  --sidebar-brand-text:      #F4F1EA;
 
-  /* Topbar */
+  /* Topbar — GLASS (S-LUX-1 C4): translucent + backdrop blur */
   --topbar-height:         60px;
-  --topbar-bg:             #111318;
-  --topbar-border:         #1d2133;
-  --topbar-text:           #f1f5f9;
+  --topbar-bg:             rgba(12, 11, 9, 0.72);   /* .topbar adds backdrop-filter: blur(14px) saturate(1.4) */
+  --topbar-border:         #26231D;
+  --topbar-text:           #F4F1EA;
+
+  /* Scrollbar / Table */
+  --scrollbar-bg: transparent;  --scrollbar-thumb: #36322A;
+  --table-header-bg: #1C1A16;  --table-row-hover: #232019;  --table-border: #26231D;  --table-stripe: #191713;
 
   /* Shadows (deeper alpha on dark bg) */
   --shadow-xs:  0 1px 2px rgba(0, 0, 0, 0.30);
@@ -71,11 +83,12 @@ The runtime can override `--color-primary` / `--color-primary-hover` / `--color-
   --shadow-xl:  0 20px 40px rgba(0, 0, 0, 0.60), 0 8px 16px rgba(0, 0, 0, 0.35);
   --shadow-glow-primary: 0 0 20px rgba(249, 115, 22, 0.18);
 
-  /* Radius */
+  /* Radius (S-LUX-1: lg 8→10, xl 12→14, 2xl NEW) */
   --radius-sm:   4px;
   --radius-md:   6px;
-  --radius-lg:   8px;
-  --radius-xl:  12px;
+  --radius-lg:  10px;
+  --radius-xl:  14px;
+  --radius-2xl: 20px;
   --radius-full: 9999px;
 
   /* Transitions */
@@ -96,10 +109,11 @@ The runtime can override `--color-primary` / `--color-primary-hover` / `--color-
   --input-height-lg:   48px;
   --input-bg:          rgba(140, 130, 115, 0.18);
   --input-bg-focus:    rgba(140, 130, 115, 0.32);
-  --input-border:      #2a3347;
+  --input-focus-bg:    rgba(140, 130, 115, 0.32);
+  --input-border:      #36322A;
   --input-text:        rgba(255, 255, 255, 0.96);
   --input-placeholder: rgba(235, 230, 220, 0.40);
-  --label-text:        rgba(235, 230, 220, 0.60);
+  --label-text:        rgba(235, 230, 220, 0.66);   /* S-LUX-1: 0.60→0.66 headroom on new surfaces */
   --label-text-strong: rgba(255, 255, 255, 0.85);
 
   /* Spec-name aliases (FIX #28) — keep both conventions working */
@@ -110,11 +124,13 @@ The runtime can override `--color-primary` / `--color-primary-hover` / `--color-
   --text-muted:   var(--text-tertiary);
   --text-inverse: var(--text-on-primary);
   --border-strong: var(--border-color-strong);
-  --bg-selected:  rgba(249, 115, 22, 0.12);   /* FIX #35 */
+  --bg-selected:  color-mix(in srgb, var(--color-primary) 12%, transparent);   /* FIX #35; brand-derived since S-LUX-1 */
+
+  /* Atelier material tokens — see §1.7 */
 }
 ```
 
-### 1.2 [data-theme="light"]
+### 1.2 [data-theme="light"] (Atelier warm paper — S-LUX-1)
 
 ```css
 [data-theme="light"] {
@@ -128,22 +144,29 @@ The runtime can override `--color-primary` / `--color-primary-hover` / `--color-
   --color-danger:          #dc2626;   --color-danger-light:    #fee2e2;   --color-danger-text:     #b91c1c;
   --color-info:            #0891b2;   --color-info-light:      #cffafe;   --color-info-text:       #0e7490;
 
-  --bg-body:               #f8fafc;
+  /* Warm paper (replaced the cool slate palette) */
+  --bg-body:               #F7F5F1;
   --bg-surface:            #ffffff;
-  --bg-surface-2:          #f1f5f9;
-  --bg-surface-hover:      #f8fafc;
+  --bg-surface-2:          #F1EEE8;
+  --bg-surface-hover:      #F1EEE8;
+  --bg-muted:              #F1EEE8;   --bg-hover: #E9E5DD;   --bg-secondary: #F1EEE8;   --bg-input: #F1EEE8;
+  --bg-selected:           color-mix(in srgb, var(--color-primary) 10%, transparent);
 
-  --text-primary:          #0f172a;
-  --text-secondary:        #475569;
-  --text-tertiary:         #94a3b8;
+  --text-primary:          #1A1815;
+  --text-secondary:        #57534A;
+  --text-tertiary:         #8A857A;
+  --text-disabled:         #A8A296;
 
-  --border-color:          #e2e8f0;
-  --border-color-strong:   #cbd5e1;
-  --border-focus:          #ea6f00;
+  --border-color:          #E7E3DB;
+  --border-color-strong:   #D6D1C6;
+  --border-focus:          var(--color-primary);
 
-  --topbar-bg:             #ffffff;
-  --topbar-border:         #e2e8f0;
-  --topbar-text:           #0f172a;
+  --topbar-bg:             rgba(247, 245, 241, 0.72);   /* glass, same blur as dark */
+  --topbar-border:         #E7E3DB;
+  --topbar-text:           #1A1815;
+
+  --scrollbar-bg: transparent;  --scrollbar-thumb: #D6D1C6;
+  --table-header-bg: #F1EEE8;  --table-row-hover: #F1EEE8;  --table-border: #E7E3DB;  --table-stripe: #FAF8F4;
 
   --shadow-xs:  0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -154,30 +177,24 @@ The runtime can override `--color-primary` / `--color-primary-hover` / `--color-
   /* Apple cool gray (118,118,128) for light-mode inputs */
   --input-bg:          rgba(118, 118, 128, 0.12);
   --input-bg-focus:    rgba(118, 118, 128, 0.22);
-  --input-border:      #cbd5e1;
+  --input-focus-bg:    rgba(118, 118, 128, 0.22);
+  --input-border:      #D6D1C6;
   --input-text:        rgba(0, 0, 0, 0.92);
   --input-placeholder: rgba(60, 60, 67, 0.40);
-  --label-text:        rgba(60, 60, 67, 0.72);   /* bumped from Apple 0.60 for WCAG AA */
+  --label-text:        rgba(60, 60, 67, 0.76);   /* 0.72→0.76 for WCAG AA on #F1EEE8 wells (S-LUX-1) */
   --label-text-strong: rgba(0, 0, 0, 0.85);
+
+  /* Atelier material tokens — light variants (see §1.7) */
+  --card-sheen:     inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --shadow-ambient: 0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 32px -16px rgba(0, 0, 0, 0.14);
 }
 ```
 
-### 1.3 [data-theme="dark"] (explicit refresh — THEME-1, 2026-04-08)
+### 1.3 [data-theme="dark"] (D-LUX-1 mirror — S-LUX-1, 2026-07-11; supersedes THEME-1)
 
-A warm brownish-black palette overlays the `:root` defaults when the user explicitly toggles dark mode. Strictly scoped to `[data-theme="dark"]`; light is untouched. Variable NAMES match `:root` so the rest of the codebase keeps rendering — only VALUES are rebased onto the warm palette. New spec names (`--bg-card`, `--bg-page`, `--bg-muted`, `--bg-hover`, `--bg-input`, `--bg-secondary`, `--text-disabled`, `--input-focus-bg`, `--scrollbar-*`, `--table-*`, `--sidebar-text-muted`, `--sidebar-hover`, `--sidebar-active`, `--sidebar-icon`) are added so spec selectors work without rewriting every existing rule. `--bg-card` + `--bg-page` are *redefined* (overriding the `:root` aliases) so cards get the deep `#141413` instead of the fall-through `var(--bg-surface)`. `--color-accent` / `--color-success` / `--color-warning` / `--color-danger` / `--color-info` are NEVER touched — they stay theme-agnostic.
+Since S-LUX-1 the explicit dark toggle and the `:root` default are ONE palette: every value in the `[data-theme="dark"]` block is a **verbatim copy** of the `:root` token above it. Change them in both places or not at all. The block still exists (rather than being deleted) because users carry `data-theme="dark"` in their profile and page-level rules target the attribute for specificity. `--bg-page`/`--bg-card` are NOT redefined there anymore — the `:root` aliases re-resolve correctly under the scope. Semantic `--color-*` tokens are never redefined.
 
-```css
-[data-theme="dark"] {
-  --bg-body:               #262624;
-  --bg-page:               #262624;
-  --bg-surface:            #141413;
-  --bg-card:               #141413;
-  --bg-surface-2:          #1f1e1d;
-  /* … plus the spec-name aliases listed above … */
-}
-```
-
-See `public/assets/css/app.css:418-497` for the full block.
+See `public/assets/css/app.css` (search "S-LUX-1 (2026-07-11) — Atelier dark ≡ default") for the block.
 
 ### 1.4 Status badge palette (theme-aware)
 
@@ -344,6 +361,32 @@ Used at [app/admin/leases/edit.php:215-233](app/admin/leases/edit.php:215). Visi
 - Pill slides via CSS `transform` not by re-rendering — single transition, no Alpine `x-transition` needed.
 - Two-option only. A 3+ option control would need recalculating `width: calc(33.33% - …)` and a new `--right2` modifier; not implemented because no current product surface needs it.
 - Mobile uses `width: 100%` rather than scaling down — the 14px font and 44px height stay constant for tap-target accessibility.
+
+---
+
+## 1.7 ATELIER MATERIAL TOKENS (S-LUX-1, 2026-07-11)
+
+New tokens defined in `:root` (dark values) with light variants in `[data-theme="light"]`:
+
+| Token | Dark value | Light value | Consumed by |
+|---|---|---|---|
+| `--card-sheen` | `inset 0 1px 0 rgba(255,255,255,0.05)` | `inset 0 1px 0 rgba(255,255,255,0.9)` | `.card` box-shadow (1px inner top highlight — the "machined edge") |
+| `--shadow-ambient` | `0 1px 2px rgba(0,0,0,0.5), 0 12px 32px -16px rgba(0,0,0,0.6)` | `0 1px 2px rgba(0,0,0,0.06), 0 12px 32px -16px rgba(0,0,0,0.14)` | `.card` (contact shadow + long soft falloff, stacked with the sheen) |
+| `--gradient-brand` | `linear-gradient(135deg, #FB923C 0%, #EA580C 100%)` | same | reserved for hero/accent moments (no consumer yet — S-LUX-2+) |
+| `--tracking-tight` | `-0.02em` | same | h1, h2, `.page-title` |
+| `--tracking-label` | `0.08em` | same | `.badge`, `.form-label`, `.card-title`, `.form-section-title`, `.section-title`, `.dashboard-section-title`, `.nav-section-label`, `.perm-section-title` |
+| `--grain-opacity` | `0.025` | same | `body::after` film grain (SVG fractal noise, fixed full-viewport, `pointer-events:none`, z-index 1 — under all positioned chrome; `display:none` under `@media print`). **Kill-switch: set to 0.** |
+
+Component treatments that ride these tokens (all in `app.css`, CSS-only):
+- **Cards**: `box-shadow: var(--card-sheen), var(--shadow-ambient)`; radius `var(--radius-xl)` (now 14px).
+- **`.btn-primary`**: `inset 0 1px 0 rgba(255,255,255,0.15)` top highlight + `:active { transform: scale(0.985) }`.
+- **`.btn-secondary`/`.btn-ghost`** hover fill: `--bg-surface-hover`.
+- **Badges**: 11px / 600 / uppercase / `--tracking-label`.
+- **Topbar glass**: translucent `--topbar-bg` + `backdrop-filter: blur(14px) saturate(1.4)`; `@supports` fallback solid `#111009` dark / `#F7F5F1` light.
+- **Sidebar active rail**: `.nav-item.is-active::before` 2px left bar in `var(--color-primary)`; active bg `color-mix(in srgb, var(--color-primary) 15%, transparent)` — both follow the brand override.
+- **`::selection`**: `rgba(249,115,22,0.30)` background (element text color inherited).
+- **Fonts**: Geist + Geist Mono variable WOFF2 self-hosted at `public/assets/fonts/` (OFL.txt alongside); preloaded (crossorigin) in `includes/header.php`, `app/portal/includes/header.php`, `app/auth/login.php`. All stacks resolve through `--font-sans`/`--font-mono` — do not hardcode.
+- **Numerals**: `font-variant-numeric: tabular-nums` on `.table`/`.data-table`/`.stat-value`/`.font-mono`/`.text-mono` + opt-in `.tabular-nums` utility.
 
 ---
 
