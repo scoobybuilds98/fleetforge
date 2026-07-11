@@ -231,19 +231,58 @@ Form inputs render as borderless tinted-gray pills with a 2px brand-orange focus
 }
 ```
 
-**Component rules** (see `public/assets/css/app.css` lines ~2167-2240):
+**Component rules** (see `public/assets/css/app.css` §10 Forms):
 - `.form-control / .form-input / .form-select` — `border:none; border-radius:8px; height:40px; background:var(--input-bg)`
+- Hover (S-LUX-2.5) — `background:color-mix(in srgb, var(--input-bg-focus) 60%, var(--input-bg))`, suppressed on `:focus`/`:disabled` (quiet pre-commit responsiveness, no border/jump)
 - Focus — `background:var(--input-bg-focus); box-shadow:0 0 0 2px var(--color-primary)` (no border so no layout shift)
 - Disabled — `opacity:0.5; cursor:not-allowed`
-- Invalid (`.is-invalid` / `.ff-invalid`) — `box-shadow:0 0 0 2px var(--color-danger)`
-- `.form-label` — `color:var(--label-text); font-size:0.8125rem; font-weight:500; letter-spacing:0.01em`
+- Invalid (`.is-invalid` / `.ff-invalid`) — `box-shadow:0 0 0 2px var(--color-danger)` (also on checkbox/picker/segment outer boxes since S-LUX-2.5)
+- `.form-label` — uppercase micro-label (S-LUX-1): `color:var(--label-text); font-size:0.6875rem; font-weight:600; text-transform:uppercase; letter-spacing:var(--tracking-label)`
+- **Select chevron (S-LUX-2.5)** — warm `--text-tertiary` SVG data-URI (`#736D61` dark / `#8A857A` light via a `[data-theme="light"]` override; was cool `#94a3b8`). Applies to `.form-select` AND `select.form-control:not([multiple])` — the base `.form-control` sets `appearance:none`, which strips the browser arrow, so a bare `.form-control` select would otherwise have no dropdown affordance.
+- **Textarea (S-LUX-2.5)** — `min-height:80px; resize:vertical; border-radius:8px`.
+- **Date/time (S-LUX-2.5)** — `::-webkit-calendar-picker-indicator` `filter:invert(1) brightness(0.85)` on the dark theme (the black glyph reads on the warm-dark pill); normal on light.
+- **Money number inputs (S-LUX-2.5)** — spinner buttons removed on `.form-control.font-mono` only (plain count fields keep them); tabular figures via the `.font-mono` group.
 
 **Decisions:**
-- Warm dark-mode tints (140,130,115) chosen over Apple's cool (118,118,128) for palette coherence with the brownish-black FleetForge dark theme (`#262624` page / `#141413` cards).
-- Light-mode label alpha bumped 0.60 → 0.72 to pass WCAG AA contrast (4.5:1) for 13px labels over white.
+- Warm dark-mode tints (140,130,115) chosen over Apple's cool (118,118,128) for palette coherence with the Atelier dark theme.
+- Light-mode label alpha bumped 0.60 → 0.76 (S-LUX-1) for WCAG AA over the warm surfaces.
 - `--input-border` retained — `.form-check-input` (checkboxes) intentionally keep their bordered look.
-- All `input[type=*]` types (text/email/number/password/search/tel/url/date/datetime-local/time/select/textarea) cascade through the `.form-control/.form-input/.form-select` selector set. No per-type rules needed.
+- All `input[type=*]` types cascade through the `.form-control/.form-input/.form-select` selector set.
 - Specialized inputs retain custom treatments: `.search-input` (cmd-K palette), `.search-wrapper .search-input` (topbar pill), `.chat-search-input`, `.portal-search-input`.
+
+### 1.5.1 CHOICE CONTROLS — CHECKBOX / RADIO (S-LUX-2.5, 2026-07-11)
+
+Checkboxes and radios keep their border (the S-DESIGN-INPUTS carve-out) but get a full custom Atelier pass — the native `accent-color` was replaced with `appearance:none` + an inline-SVG glyph so the checked fill and glyph are fully controllable and consume `var(--color-primary)` (white-label brand-override recolors them).
+
+```css
+.form-check-input {                 /* 16px box, border kept */
+  appearance: none;
+  width: 16px; height: 16px;
+  border: 1.5px solid var(--border-color-strong);
+  border-radius: var(--radius-sm);  /* checkbox; radio → 50% */
+  background: var(--input-bg);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+.form-check-input:checked {         /* brand fill + white check-path glyph */
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  background-image: url("…white ✓ SVG…");
+}
+.form-check-input[type="radio"]:checked { background-image: url("…white ● dot SVG…"); }
+.form-check-input:indeterminate    { …white — bar SVG…; background-color: var(--color-primary); }
+.form-check-input:focus-visible    { box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--color-primary); }
+.form-check-input:disabled         { opacity: 0.5; }
+.form-check-label                  { color: var(--text-secondary); }   /* quiet by default */
+.form-check:has(.form-check-input:checked) .form-check-label { color: var(--text-primary); }  /* subtle confirm */
+```
+
+- Checked/indeterminate fills consume `var(--color-primary)` → white-label chain recolors them (verified: on the dev brand the box fills `#2596be`, not orange).
+- Label brightens `--text-secondary` → `--text-primary` on check via `:has()` — a quiet confirmation, no colour shout.
+- Error ring (`.is-invalid`/`.ff-invalid`) puts the same 2px `--color-danger` ring + danger border on the box; no motion (D-LUX25-4).
+
+### 1.5.2 TOGGLE SWITCH (existing components only, D-LUX25-3)
+
+No new switch component was introduced. The one real switch is `.perm-ios-toggle` (permissions matrix) — a **tri-state semantic control** (`is-on` green = inherited-on / `ovr-allow` brand / `ovr-deny` danger). S-LUX-2.5 warm-aligned only its **off-track** (`rgba(100,116,139,.32)` → `rgba(140,130,115,.28)`); the semantic on-colours are deliberately kept (it is NOT flattened to one brand colour). Booleans rendered as plain checkboxes are left as checkboxes — converting them to switches is a markup change deferred to S-LUX-5.
 
 ---
 
@@ -251,27 +290,29 @@ Form inputs render as borderless tinted-gray pills with a 2px brand-orange focus
 
 A two-option toggle that slides a grayscale "active pill" between options. Used in lease forms for the km/miles primary-unit picker (D-D from S-LEASE-UNITS: no brand orange — the active pill is a neutral elevated surface). Component CSS lives at `public/assets/css/app.css` lines 8402-8484, plus the responsive override at line 8564.
 
+S-LUX-2.5 warm-rechecked these tokens against the Atelier surfaces — the cool `rgba(118,118,128)` track became a warm neutral matching the input pills, and the active-pill shadow was re-tuned to the `--shadow-sm` language. The active pill stays **grayscale-elevated (no brand orange, D-D)**.
+
 ```css
-/* DARK MODE (default at :root) — mid-gray pill on translucent track */
+/* DARK MODE (default at :root) — mid-gray pill on warm translucent track */
 :root {
-  --segment-track-bg:     rgba(118, 118, 128, 0.24);
-  --segment-active-bg:    #636366;
+  --segment-track-bg:     rgba(140, 130, 115, 0.20);  /* S-LUX-2.5: warm (was cool 118,118,128 @0.24) */
+  --segment-active-bg:    #6B6660;                    /* S-LUX-2.5: warm-neutral (was #636366) */
   --segment-active-shadow:
-      0 3px 8px rgba(0, 0, 0, 0.32),
-      0 1px 2px rgba(0, 0, 0, 0.18);
+      0 1px 4px rgba(0, 0, 0, 0.40),                  /* S-LUX-2.5: --shadow-sm language */
+      0 1px 2px rgba(0, 0, 0, 0.25);
   --segment-active-text:  rgba(255, 255, 255, 1);
-  --segment-inactive-text: rgba(235, 235, 245, 0.6);
+  --segment-inactive-text: rgba(235, 230, 220, 0.62);
 }
 
-/* LIGHT MODE — white pill on lighter translucent track (Apple iOS spec) */
+/* LIGHT MODE — white pill on warm translucent track */
 [data-theme="light"] {
-  --segment-track-bg:     rgba(118, 118, 128, 0.12);
+  --segment-track-bg:     rgba(140, 130, 115, 0.14);
   --segment-active-bg:    #FFFFFF;
   --segment-active-shadow:
-      0 3px 8px rgba(0, 0, 0, 0.12),
-      0 1px 2px rgba(0, 0, 0, 0.04);
-  --segment-active-text:  rgba(0, 0, 0, 1);
-  --segment-inactive-text: rgba(60, 60, 67, 0.6);
+      0 1px 3px rgba(0, 0, 0, 0.10),
+      0 1px 2px rgba(0, 0, 0, 0.05);
+  --segment-active-text:  rgba(26, 24, 21, 1);
+  --segment-inactive-text: rgba(60, 60, 67, 0.62);
 }
 ```
 
