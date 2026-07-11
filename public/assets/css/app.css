@@ -150,43 +150,63 @@ hr {
     --color-info-light:      rgba(6, 182, 212, 0.12);
     --color-info-text:       #22d3ee;
 
-    /* ── Dark Surfaces (default theme) ──────────── */
-    --bg-body:               #0a0b0e;
-    --bg-surface:            #111318;
-    --bg-surface-2:          #181b23;
-    --bg-surface-hover:      #1e2230;
+    /* ── Atelier Dark Surfaces (S-LUX-1, default theme) ──
+       D-LUX-1: these values are duplicated VERBATIM in the
+       [data-theme="dark"] block below — default and explicit dark
+       are one palette. Change them in BOTH places or not at all. */
+    --bg-body:               #0C0B09;
+    --bg-surface:            #151310;
+    --bg-surface-2:          #1C1A16;
+    --bg-surface-hover:      #232019;
+    --bg-muted:              #1C1A16;
+    --bg-secondary:          #1C1A16;
+    --bg-input:              #1C1A16;
+    --bg-hover:              #232019;
 
     /* ── Text ────────────────────────────────────── */
-    --text-primary:          #f1f5f9;
-    --text-secondary:        #94a3b8;
-    --text-tertiary:         #64748b;
+    --text-primary:          #F4F1EA;
+    --text-secondary:        #A6A094;
+    --text-tertiary:         #736D61;
+    --text-disabled:         #5C564B;
     --text-on-primary:       #ffffff;
     --text-on-danger:        #ffffff;
 
     /* ── Borders ─────────────────────────────────── */
-    --border-color:          #1d2133;
-    --border-color-strong:   #2a3347;
-    --border-focus:          #f97316;
+    --border-color:          #26231D;
+    --border-color-strong:   #36322A;
+    --border-focus:          var(--color-primary);
 
     /* ── Sidebar ─────────────────────────────────── */
     --sidebar-width:         240px;
     --sidebar-width-collapsed: 64px;
-    --sidebar-bg:            #0d0e12;
+    --sidebar-bg:            #0A0908;
     --sidebar-border:        rgba(255, 255, 255, 0.06);
-    --sidebar-text:          #6b7280;
-    --sidebar-text-hover:    #f9fafb;
+    --sidebar-text:          #A6A094;
+    --sidebar-text-muted:    #736D61;
+    --sidebar-text-hover:    #F4F1EA;
     --sidebar-text-active:   #ffffff;
     --sidebar-item-hover-bg: rgba(255, 255, 255, 0.05);
     --sidebar-item-active-bg: rgba(249, 115, 22, 0.15);
-    --sidebar-icon-active:   #f97316;
-    --sidebar-section-text:  #4b5563;
-    --sidebar-brand-text:    #f9fafb;
+    --sidebar-hover:         rgba(255, 255, 255, 0.05);
+    --sidebar-active:        rgba(249, 115, 22, 0.15);
+    --sidebar-icon:          #736D61;
+    --sidebar-icon-active:   var(--color-primary);
+    --sidebar-section-text:  #8A8478;
+    --sidebar-brand-text:    #F4F1EA;
 
-    /* ── Topbar ──────────────────────────────────── */
+    /* ── Topbar (glass — see chrome section) ─────── */
     --topbar-height:         60px;
-    --topbar-bg:             #111318;
-    --topbar-border:         #1d2133;
-    --topbar-text:           #f1f5f9;
+    --topbar-bg:             rgba(12, 11, 9, 0.72);
+    --topbar-border:         #26231D;
+    --topbar-text:           #F4F1EA;
+
+    /* ── Scrollbar / Table ───────────────────────── */
+    --scrollbar-bg:          transparent;
+    --scrollbar-thumb:       #36322A;
+    --table-header-bg:       #1C1A16;
+    --table-row-hover:       #232019;
+    --table-border:          #26231D;
+    --table-stripe:          #191713;
 
     /* ── Shadows (deeper on dark bg) ─────────────── */
     --shadow-xs:  0 1px 2px rgba(0, 0, 0, 0.30);
@@ -196,11 +216,12 @@ hr {
     --shadow-xl:  0 20px 40px rgba(0, 0, 0, 0.60), 0 8px 16px rgba(0, 0, 0, 0.35);
     --shadow-glow-primary: 0 0 20px rgba(249, 115, 22, 0.18);
 
-    /* ── Radius ──────────────────────────────────── */
+    /* ── Radius (S-LUX-1: lg/xl bumped, 2xl new) ─── */
     --radius-sm:   4px;
     --radius-md:   6px;
-    --radius-lg:   8px;
-    --radius-xl:   12px;
+    --radius-lg:   10px;
+    --radius-xl:   14px;
+    --radius-2xl:  20px;
     --radius-full: 9999px;
 
     /* ── Transitions ─────────────────────────────── */
@@ -229,10 +250,11 @@ hr {
     --input-height-lg:   48px;
     --input-bg:          rgba(140, 130, 115, 0.18);
     --input-bg-focus:    rgba(140, 130, 115, 0.32);
-    --input-border:      #2a3347;
+    --input-focus-bg:    rgba(140, 130, 115, 0.32);
+    --input-border:      #36322A;
     --input-text:        rgba(255, 255, 255, 0.96);
     --input-placeholder: rgba(235, 230, 220, 0.40);
-    --label-text:        rgba(235, 230, 220, 0.60);
+    --label-text:        rgba(235, 230, 220, 0.66);
     --label-text-strong: rgba(255, 255, 255, 0.85);
 
     /* ── FIX #28: Spec-name aliases (both conventions work) ─── */
@@ -245,6 +267,20 @@ hr {
     --text-inverse: var(--text-on-primary);
     --border-strong: var(--border-color-strong);
     --bg-selected:  rgba(249, 115, 22, 0.12);  /* FIX #35: --bg-selected */
+
+    /* ── Atelier material tokens (S-LUX-1) ────────────────────
+       --card-sheen: 1px inner top highlight — the "machined edge"
+         that separates a card from the void without a heavy border.
+       --shadow-ambient: contact shadow + long soft falloff; pairs
+         with --card-sheen on every raised surface.
+       --gradient-brand: reserved for hero/accent moments only.
+       --grain-opacity: film-grain intensity (body::after). 0 = off. */
+    --card-sheen:      inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    --shadow-ambient:  0 1px 2px rgba(0, 0, 0, 0.5), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
+    --gradient-brand:  linear-gradient(135deg, #FB923C 0%, #EA580C 100%);
+    --tracking-tight:  -0.02em;
+    --tracking-label:  0.08em;
+    --grain-opacity:   0.025;
 }
 
 /* Light mode override (opt-in via data-theme="light") */
@@ -270,10 +306,12 @@ hr {
     --color-info-light:      #cffafe;
     --color-info-text:       #0e7490;
 
-    --bg-body:               #f8fafc;
+    /* ── Atelier warm paper (S-LUX-1) — light parity for the warm
+       dark palette; slate/cool grays replaced with warm neutrals. */
+    --bg-body:               #F7F5F1;
     --bg-surface:            #ffffff;
-    --bg-surface-2:          #f1f5f9;
-    --bg-surface-hover:      #f8fafc;
+    --bg-surface-2:          #F1EEE8;
+    --bg-surface-hover:      #F1EEE8;
 
     /* S-NOTIF-LIGHT-HOVER (2026-06-23): the light palette was missing
        --bg-muted / --bg-hover — they were defined ONLY under
@@ -284,20 +322,31 @@ hr {
        rendered a near-black box with dark text in DAY mode. Mirror the
        dark-theme relationship (muted == surface-2; hover one step beyond) with
        on-palette slate values so all hover surfaces resolve light. */
-    --bg-muted:              #f1f5f9;  /* slate-100, mirrors --bg-surface-2 */
-    --bg-hover:              #e2e8f0;  /* slate-200, perceptible row/item hover */
+    --bg-muted:              #F1EEE8;  /* mirrors --bg-surface-2 */
+    --bg-hover:              #E9E5DD;  /* one step beyond, perceptible row/item hover */
+    --bg-secondary:          #F1EEE8;
+    --bg-input:              #F1EEE8;
+    --bg-selected:           rgba(234, 111, 0, 0.10);
 
-    --text-primary:          #0f172a;
-    --text-secondary:        #475569;
-    --text-tertiary:         #94a3b8;
+    --text-primary:          #1A1815;
+    --text-secondary:        #57534A;
+    --text-tertiary:         #8A857A;
+    --text-disabled:         #A8A296;
 
-    --border-color:          #e2e8f0;
-    --border-color-strong:   #cbd5e1;
-    --border-focus:          #ea6f00;
+    --border-color:          #E7E3DB;
+    --border-color-strong:   #D6D1C6;
+    --border-focus:          var(--color-primary);
 
-    --topbar-bg:             #ffffff;
-    --topbar-border:         #e2e8f0;
-    --topbar-text:           #0f172a;
+    --topbar-bg:             rgba(247, 245, 241, 0.72);
+    --topbar-border:         #E7E3DB;
+    --topbar-text:           #1A1815;
+
+    --scrollbar-bg:          transparent;
+    --scrollbar-thumb:       #D6D1C6;
+    --table-header-bg:       #F1EEE8;
+    --table-row-hover:       #F1EEE8;
+    --table-border:          #E7E3DB;
+    --table-stripe:          #FAF8F4;
 
     --shadow-xs:  0 1px 2px rgba(0, 0, 0, 0.05);
     --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -306,115 +355,101 @@ hr {
     --shadow-xl:  0 20px 25px -5px rgba(0, 0, 0, 0.10), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 
     /* S-DESIGN-INPUTS: light-mode Apple input tokens (cool gray tints).
-       --label-text bumped from Apple's 0.60 to 0.72 to pass WCAG AA
-       contrast (4.5:1) for 13px label text on white. */
+       --label-text bumped from Apple's 0.60 to 0.76 to pass WCAG AA
+       contrast (4.5:1) for 13px label text on white AND on the warm
+       --bg-surface-2 (#F1EEE8) card wells (S-LUX-1: 0.72 was 4.38:1 there). */
     --input-bg:          rgba(118, 118, 128, 0.12);
     --input-bg-focus:    rgba(118, 118, 128, 0.22);
-    --input-border:      #cbd5e1;
+    --input-focus-bg:    rgba(118, 118, 128, 0.22);
+    --input-border:      #D6D1C6;
     --input-text:        rgba(0, 0, 0, 0.92);
     --input-placeholder: rgba(60, 60, 67, 0.40);
-    --label-text:        rgba(60, 60, 67, 0.72);
+    --label-text:        rgba(60, 60, 67, 0.76);
     --label-text-strong: rgba(0, 0, 0, 0.85);
+
+    /* ── Atelier material tokens — light variants (S-LUX-1) ── */
+    --card-sheen:      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    --shadow-ambient:  0 1px 2px rgba(0, 0, 0, 0.06), 0 12px 32px -16px rgba(0, 0, 0, 0.14);
 }
 
-/* Dark mode — deeper blacks for explicit dark-mode toggle */
 /* ============================================================
-   THEME-1 (2026-04-08) — Dark theme refresh
-   Warm brownish-black palette replaces the previous cool blue-black.
-   STRICTLY scoped to [data-theme="dark"]; light theme is untouched.
-
-   Why every variable lives here:
-   - Existing names (--bg-body, --bg-surface, --topbar-bg, etc.) keep
-     their meaning so the rest of the codebase rendering doesn't move.
-     Their VALUES are simply rebased onto the warm palette.
-   - The new spec names (--bg-card, --bg-page, --bg-muted, --bg-hover,
-     --bg-input, --bg-secondary, --text-disabled, --input-focus-bg,
-     --scrollbar-*, --table-*, --sidebar-text-muted, --sidebar-hover,
-     --sidebar-active, --sidebar-icon) are added so the spec selectors
-     work without rewriting every existing rule.
-   - --bg-card and --bg-page are *redefined* here (overriding the
-     :root aliases) so cards get the deep #141413 instead of the
-     fall-through default of var(--bg-surface).
-   - We never touch --color-accent / --color-success / --color-warning
-     / --color-danger / --color-info — those stay theme-agnostic.
+   S-LUX-1 (2026-07-11) — Atelier dark ≡ default (D-LUX-1)
+   Supersedes THEME-1 (2026-04-08). The explicit dark toggle and
+   the :root default are now ONE palette: every value below is a
+   VERBATIM copy of the :root token above it. The block still
+   exists (rather than being deleted) because users carry
+   data-theme="dark" in their profile and third-party/page-level
+   rules target [data-theme="dark"] for specificity.
+   --bg-page/--bg-card stay :root aliases of --bg-body/--bg-surface,
+   which re-resolve correctly under this scope — no literal needed.
+   Semantic --color-* tokens are never redefined here.
    ============================================================ */
 [data-theme="dark"] {
     /* ── Page backgrounds ─────────────────────────── */
-    --bg-body:               #262624;
-    --bg-page:               #262624;
-    --bg-surface:            #141413;
-    --bg-card:               #141413;
-    --bg-surface-2:          #1f1e1d;
-    --bg-muted:              #1f1e1d;
-    --bg-secondary:          #1f1e1d;
-    --bg-input:              #1f1e1d;
-    --bg-surface-hover:      #2a2927;
-    --bg-hover:              #2a2927;
-    --bg-selected:           #2e2d2b;
+    --bg-body:               #0C0B09;
+    --bg-surface:            #151310;
+    --bg-surface-2:          #1C1A16;
+    --bg-muted:              #1C1A16;
+    --bg-secondary:          #1C1A16;
+    --bg-input:              #1C1A16;
+    --bg-surface-hover:      #232019;
+    --bg-hover:              #232019;
+    --bg-selected:           rgba(249, 115, 22, 0.12);
 
     /* ── Sidebar — always dark regardless of theme ── */
-    --sidebar-bg:            #1f1e1d;
-    --sidebar-text:          #c2c0b6;
-    --sidebar-text-muted:    #8a8880;
-    --sidebar-section-text:  #8a8880;
-    --sidebar-text-hover:    #ffffff;
+    --sidebar-bg:            #0A0908;
+    --sidebar-border:        rgba(255, 255, 255, 0.06);
+    --sidebar-text:          #A6A094;
+    --sidebar-text-muted:    #736D61;
+    --sidebar-section-text:  #8A8478;
+    --sidebar-text-hover:    #F4F1EA;
     --sidebar-text-active:   #ffffff;
-    --sidebar-brand-text:    #ffffff;
-    --sidebar-hover:         #2a2927;
-    --sidebar-active:        #2e2d2b;
-    --sidebar-item-hover-bg: #2a2927;
-    --sidebar-item-active-bg: #2e2d2b;
-    --sidebar-border:        #333330;
-    --sidebar-icon:          #8a8880;
-    --sidebar-icon-active:   #ffffff;
+    --sidebar-hover:         rgba(255, 255, 255, 0.05);
+    --sidebar-active:        rgba(249, 115, 22, 0.15);
+    --sidebar-item-hover-bg: rgba(255, 255, 255, 0.05);
+    --sidebar-item-active-bg: rgba(249, 115, 22, 0.15);
+    --sidebar-icon:          #736D61;
+    --sidebar-icon-active:   var(--color-primary);
+    --sidebar-brand-text:    #F4F1EA;
 
     /* ── Text colors ─────────────────────────────── */
-    --text-primary:          #ffffff;
-    --text-secondary:        #c2c0b6;
-    --text-tertiary:         #8a8880;
-    --text-muted:            #8a8880;
-    --text-inverse:          #141413;
-    --text-disabled:         #5a5855;
+    --text-primary:          #F4F1EA;
+    --text-secondary:        #A6A094;
+    --text-tertiary:         #736D61;
+    --text-muted:            #736D61;
+    --text-inverse:          var(--text-on-primary);
+    --text-disabled:         #5C564B;
 
     /* ── Border colors ───────────────────────────── */
-    --border-color:          #333330;
-    --border-color-strong:   #4a4845;
-    --border-strong:         #4a4845;
-    --border-focus:          var(--color-accent);
+    --border-color:          #26231D;
+    --border-color-strong:   #36322A;
+    --border-strong:         #36322A;
+    --border-focus:          var(--color-primary);
 
-    /* ── Topbar ──────────────────────────────────── */
-    --topbar-bg:             #1f1e1d;
-    --topbar-border:         #333330;
-    --topbar-text:           #c2c0b6;
+    /* ── Topbar (glass) ──────────────────────────── */
+    --topbar-bg:             rgba(12, 11, 9, 0.72);
+    --topbar-border:         #26231D;
+    --topbar-text:           #F4F1EA;
 
     /* ── Input fields ────────────────────────────── */
-    /* S-DESIGN-INPUTS: warm-tinted Apple-style alphas, palette-matched
-       to the brownish-black dark theme (#262624/#141413). */
     --input-bg:              rgba(140, 130, 115, 0.18);
     --input-bg-focus:        rgba(140, 130, 115, 0.32);
-    --input-border:          #333330;
+    --input-border:          #36322A;
     --input-text:            rgba(255, 255, 255, 0.96);
     --input-placeholder:     rgba(235, 230, 220, 0.40);
     --input-focus-bg:        rgba(140, 130, 115, 0.32);
-    --label-text:            rgba(235, 230, 220, 0.60);
+    --label-text:            rgba(235, 230, 220, 0.66);
     --label-text-strong:     rgba(255, 255, 255, 0.85);
 
-    /* ── Shadows — warmer tones ──────────────────── */
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.4),
-                 0 1px 3px rgba(0,0,0,0.3);
-    --shadow-lg: 0 10px 15px rgba(0,0,0,0.5),
-                 0 4px 6px rgba(0,0,0,0.4);
-
     /* ── Scrollbar ───────────────────────────────── */
-    --scrollbar-bg:          #1f1e1d;
-    --scrollbar-thumb:       #4a4845;
+    --scrollbar-bg:          transparent;
+    --scrollbar-thumb:       #36322A;
 
     /* ── Table ───────────────────────────────────── */
-    --table-header-bg:       #1f1e1d;
-    --table-row-hover:       #2a2927;
-    --table-border:          #333330;
-    --table-stripe:          #1a1918;
+    --table-header-bg:       #1C1A16;
+    --table-row-hover:       #232019;
+    --table-border:          #26231D;
+    --table-stripe:          #191713;
 }
 
 
