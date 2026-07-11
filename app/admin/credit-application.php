@@ -612,8 +612,8 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         body {
             margin: 0;
             min-height: 100vh;
-            background: var(--bg-body, #0a0b0e);
-            color: var(--text-primary, #f1f5f9);
+            background: var(--bg-body);
+            color: var(--text-primary);
             font-family: var(--font-sans, system-ui, sans-serif);
             font-size: 15px;
             line-height: 1.6;
@@ -621,8 +621,8 @@ $pageTitle = 'Credit Application — ' . e($companyName);
 
         /* Header bar */
         .cca-header {
-            background: var(--bg-surface, #111318);
-            border-bottom: 1px solid var(--border-color, #1d2133);
+            background: var(--bg-surface);
+            border-bottom: 1px solid var(--border-color);
             padding: 0 24px;
             display: flex;
             align-items: center;
@@ -647,8 +647,8 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         .cca-header-label {
             font-size: 13px;
             color: var(--text-secondary);
-            background: var(--color-primary-light, rgba(249,115,22,.14));
-            color: var(--color-primary-text, #fb923c);
+            background: var(--color-primary-light);
+            color: var(--color-primary-text);
             border-radius: 4px;
             padding: 3px 10px;
         }
@@ -662,8 +662,8 @@ $pageTitle = 'Credit Application — ' . e($companyName);
 
         /* State pages (invalid / expired / submitted / confirmed) */
         .cca-state-card {
-            background: var(--bg-surface, #111318);
-            border: 1px solid var(--border-color, #1d2133);
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 56px 40px;
             text-align: center;
@@ -695,8 +695,8 @@ $pageTitle = 'Credit Application — ' . e($companyName);
 
         /* Form section cards */
         .cca-section {
-            background: var(--bg-surface, #111318);
-            border: 1px solid var(--border-color, #1d2133);
+            background: var(--bg-surface);
+            border: 1px solid var(--border-color);
             border-radius: 10px;
             padding: 28px 32px;
             margin-bottom: 20px;
@@ -706,10 +706,10 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             font-weight: 700;
             text-transform: uppercase;
             letter-spacing: .07em;
-            color: var(--color-primary-text, #fb923c);
+            color: var(--color-primary-text);
             margin: 0 0 20px;
             padding-bottom: 12px;
-            border-bottom: 1px solid var(--border-color, #1d2133);
+            border-bottom: 1px solid var(--border-color);
         }
 
         /* Grid layouts */
@@ -729,29 +729,29 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             display: block;
             font-size: 12.5px;
             font-weight: 500;
-            color: var(--label-text-strong, rgba(255,255,255,.85));
+            color: var(--label-text-strong);
             margin-bottom: 6px;
         }
-        .cca-label .req { color: var(--color-primary-text, #fb923c); margin-left: 2px; }
+        .cca-label .req { color: var(--color-primary-text); margin-left: 2px; }
 
         .cca-input {
             width: 100%;
             padding: 9px 13px;
-            background: var(--input-bg, rgba(140,130,115,.18));
-            border: 1px solid var(--input-border, #2a3347);
+            background: var(--input-bg);
+            border: 1px solid var(--input-border);
             border-radius: 7px;
-            color: var(--input-text, rgba(255,255,255,.96));
+            color: var(--input-text);
             font-size: 14px;
             line-height: 1.5;
             outline: none;
             transition: border-color .15s, box-shadow .15s;
         }
         .cca-input:focus {
-            border-color: var(--color-primary, #f97316);
+            border-color: var(--color-primary);
             box-shadow: 0 0 0 3px rgba(249,115,22,.18);
-            background: var(--input-bg-focus, rgba(140,130,115,.32));
+            background: var(--input-bg-focus);
         }
-        .cca-input::placeholder { color: var(--input-placeholder, rgba(235,230,220,.4)); }
+        .cca-input::placeholder { color: var(--input-placeholder); }
         .cca-input:disabled {
             opacity: .45;
             cursor: not-allowed;
@@ -766,10 +766,10 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         }
 
         /* Validation error states */
-        .cca-input.has-error { border-color: var(--color-danger, #ef4444); }
+        .cca-input.has-error { border-color: var(--color-danger); }
         .cca-error-msg {
             font-size: 12px;
-            color: var(--color-danger-text, #f87171);
+            color: var(--color-danger-text);
             margin-top: 4px;
         }
 
@@ -789,7 +789,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         }
         .cca-radio-label input[type="radio"],
         .cca-radio-label input[type="checkbox"] {
-            accent-color: var(--color-primary, #f97316);
+            accent-color: var(--color-primary);
             width: 16px;
             height: 16px;
             cursor: pointer;
@@ -798,7 +798,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         /* Info note box */
         .cca-note {
             background: rgba(249,115,22,.07);
-            border-left: 3px solid var(--color-primary, #f97316);
+            border-left: 3px solid var(--color-primary);
             border-radius: 0 6px 6px 0;
             padding: 12px 16px;
             font-size: 13.5px;
@@ -806,11 +806,11 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             margin: 12px 0 16px;
             line-height: 1.55;
         }
-        .cca-note a { color: var(--color-primary-text, #fb923c); }
+        .cca-note a { color: var(--color-primary-text); }
 
         /* Signature canvas */
         .cca-sig-wrap {
-            border: 1px solid var(--input-border, #2a3347);
+            border: 1px solid var(--input-border);
             border-radius: 8px;
             background: #ffffff;
             cursor: crosshair;
@@ -818,7 +818,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             overflow: hidden;
             margin-top: 8px;
         }
-        .cca-sig-wrap.has-error { border-color: var(--color-danger, #ef4444); }
+        .cca-sig-wrap.has-error { border-color: var(--color-danger); }
         .cca-sig-canvas {
             display: block;
             width: 100%;
@@ -845,17 +845,17 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             font-size: 12.5px;
             color: var(--text-secondary);
             background: none;
-            border: 1px solid var(--border-color-strong, #2a3347);
+            border: 1px solid var(--border-color-strong);
             border-radius: 5px;
             padding: 4px 12px;
             cursor: pointer;
             transition: color .12s, border-color .12s;
         }
-        .cca-btn-ghost:hover { color: var(--text-primary); border-color: var(--text-muted, #64748b); }
+        .cca-btn-ghost:hover { color: var(--text-primary); border-color: var(--text-muted); }
 
         /* File upload */
         .cca-file-input-wrap {
-            border: 1.5px dashed var(--border-color-strong, #2a3347);
+            border: 1.5px dashed var(--border-color-strong);
             border-radius: 8px;
             padding: 20px;
             text-align: center;
@@ -863,7 +863,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             cursor: pointer;
             position: relative;
         }
-        .cca-file-input-wrap:hover { border-color: var(--color-primary, #f97316); }
+        .cca-file-input-wrap:hover { border-color: var(--color-primary); }
         .cca-file-input-wrap input[type="file"] {
             position: absolute;
             inset: 0;
@@ -874,7 +874,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         }
         .cca-file-icon { color: var(--text-secondary); margin-bottom: 6px; }
         .cca-file-text { font-size: 13.5px; color: var(--text-secondary); }
-        .cca-file-text strong { color: var(--color-primary-text, #fb923c); }
+        .cca-file-text strong { color: var(--color-primary-text); }
         .cca-file-list { list-style: none; padding: 0; margin: 10px 0 0; text-align: left; }
         .cca-file-list li {
             display: flex;
@@ -884,12 +884,12 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             color: var(--text-secondary);
             padding: 4px 0;
         }
-        .cca-file-list li svg { color: var(--color-success-text, #4ade80); flex-shrink: 0; }
+        .cca-file-list li svg { color: var(--color-success-text); flex-shrink: 0; }
 
         /* Disclaimer */
         .cca-disclaimer {
-            background: var(--bg-surface-2, #181b23);
-            border: 1px solid var(--border-color, #1d2133);
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 18px 20px;
             font-size: 13px;
@@ -911,7 +911,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         .cca-terms-row input[type="checkbox"] {
             margin-top: 2px;
             flex-shrink: 0;
-            accent-color: var(--color-primary, #f97316);
+            accent-color: var(--color-primary);
             width: 17px;
             height: 17px;
             cursor: pointer;
@@ -922,15 +922,15 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             line-height: 1.5;
         }
         .cca-terms-text a {
-            color: var(--color-primary-text, #fb923c);
+            color: var(--color-primary-text);
             text-decoration: underline;
             text-underline-offset: 2px;
         }
 
         /* Min requirements (§9) */
         .cca-min-req {
-            background: var(--bg-surface-2, #181b23);
-            border: 1px solid var(--border-color, #1d2133);
+            background: var(--bg-surface-2);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 20px 24px;
             font-size: 14px;
@@ -946,7 +946,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         .cca-submit-btn {
             width: 100%;
             padding: 14px 20px;
-            background: var(--color-primary, #f97316);
+            background: var(--color-primary);
             color: #ffffff;
             font-size: 16px;
             font-weight: 700;
@@ -956,7 +956,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             transition: background .14s, transform .1s;
             margin-top: 8px;
         }
-        .cca-submit-btn:hover  { background: var(--color-primary-hover, #ea6f00); }
+        .cca-submit-btn:hover  { background: var(--color-primary-hover); }
         .cca-submit-btn:active { transform: scale(.99); }
 
         /* Global error alert */
@@ -965,7 +965,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             border: 1px solid rgba(239,68,68,.3);
             border-radius: 8px;
             padding: 14px 18px;
-            color: var(--color-danger-text, #f87171);
+            color: var(--color-danger-text);
             font-size: 14px;
             margin-bottom: 20px;
             display: flex;
@@ -987,11 +987,11 @@ $pageTitle = 'Credit Application — ' . e($companyName);
 
         /* Reference group divider */
         .cca-ref-block {
-            border: 1px solid var(--border-color, #1d2133);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 12px;
-            background: var(--bg-surface-2, #181b23);
+            background: var(--bg-surface-2);
         }
         .cca-ref-label {
             font-size: 12px;
@@ -1023,8 +1023,8 @@ $pageTitle = 'Credit Application — ' . e($companyName);
         <img src="<?= e($logoUrl) ?>" alt="<?= e($companyName) ?>" class="cca-header-logo">
     <?php else: ?>
         <svg class="cca-header-logo" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 40 28" aria-hidden="true">
-            <rect width="40" height="28" rx="4" fill="var(--color-primary,#f97316)" opacity=".15"/>
-            <path fill="var(--color-primary,#f97316)" d="M6 18l6-10 5 7 3-4 6 7H6z"/>
+            <rect width="40" height="28" rx="4" fill="var(--color-primary)" opacity=".15"/>
+            <path fill="var(--color-primary)" d="M6 18l6-10 5 7 3-4 6 7H6z"/>
         </svg>
     <?php endif; ?>
     <span class="cca-header-company"><?= e($companyName) ?></span>
