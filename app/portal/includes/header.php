@@ -104,6 +104,14 @@ $_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
     <link rel="preload" href="<?= asset_url('assets/fonts/Geist[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="<?= asset_url('assets/fonts/GeistMono[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <?php
+    // S-LUX-4: mirror the admin/login brand-colour override so the customer
+    // portal honours the white-label chain (was default-orange while admin +
+    // login rendered the operator's brand). Read-only settings → CSS vars.
+    $_ffBrand = (string) (settings_get('brand.primary_color') ?: '');
+    if ($_ffBrand !== ''): ?>
+    <style id="ff-brand-override">:root{--color-primary:<?= e($_ffBrand) ?>;--color-primary-hover:<?= e((string)(settings_get('brand.primary_hover') ?: '#1e7ea0')) ?>;--color-primary-light:<?= e((string)(settings_get('brand.primary_light') ?: '#e0f4fb')) ?>;}</style>
+    <?php endif; ?>
     <script>
         window.FF_TIMEZONE  = <?= json_encode(settings_get('company.timezone', APP_TIMEZONE)) ?>;
         window.FF_BASE_PATH = <?= json_encode(FF_BASE_PATH) ?>;
