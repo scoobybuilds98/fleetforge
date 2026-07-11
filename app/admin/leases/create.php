@@ -704,25 +704,14 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-LEASE-HOURLY-BILLING + S-HOURS-EST-DAILY (S-FORM-LAYOUT): starting
-                     engine hours + estimated engine hours per day share one responsive
-                     row. Shown only when this lease has an hourly rate (the billing gate). -->
-                <div class="form-row-2" style="margin-top:1rem;" x-show="parseFloat(form.hourly_rate) > 0">
-                <div class="form-group">
-                    <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
-                    <input type="number" id="engine_hours_at_start" class="form-control font-mono"
-                           x-model="form.engine_hours_at_start" step="0.01" min="0"
-                           placeholder="e.g. 1240.50">
-                    <div class="form-hint" style="margin-top:0.5rem;">
-                        Manual reading at lease start. Engine hours are billed at $<span x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr on the closing invoice (or a manually-created invoice).
-                    </div>
-                    <div class="form-error" x-show="errors.engine_hours_at_start" x-text="errors.engine_hours_at_start"></div>
-                </div>
-
-                <!-- Estimated engine hours per day (S-HOURS-EST-DAILY) — the engine-hours
-                     parallel of "estimated mileage per day": each invoice bills days × this
-                     × rate as an estimate, trued up at close against actual (end − start). -->
-                <div class="form-group">
+                <!-- ── Estimated engine hours per day (S-HOURS-EST-DAILY) ──
+                     ALWAYS VISIBLE — the engine-hours parallel of "estimated mileage per
+                     day", which is also always shown. Discoverability fix (S-HOURS-EST-VIS):
+                     it was previously gated behind hourly_rate>0, so operators who hadn't
+                     yet entered an hourly rate never saw the feature. Now it's always on
+                     the form; the rate-completeness check (api create.php) still requires
+                     an Hourly Rate before a per-day value can save, so it can't mis-bill. -->
+                <div class="form-group" style="max-width:320px;margin-top:1rem;">
                     <label class="form-label" for="estimated_engine_hours_per_day">Estimated engine hours per day (hrs/day)</label>
                     <div class="input-group">
                         <input type="number"
@@ -737,13 +726,28 @@ require_once FF_ROOT . '/includes/header.php';
                         <span class="input-group-suffix">hrs/day</span>
                     </div>
                     <div class="form-hint" style="margin-top:0.5rem;">
-                        Each invoice bills an <strong>estimate</strong> (days &times; this &times; $<span x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr), then trues up against the
-                        <strong>actual</strong> engine hours (end &minus; start) at close &mdash; adding a charge or credit for the difference.
+                        For reefer / hourly-billed units. Each invoice bills an <strong>estimate</strong> (days &times; this &times; your
+                        <strong>Hourly Rate</strong>), then trues up against the <strong>actual</strong> engine hours (end &minus; start) at close.
+                        <span x-show="!(parseFloat(form.hourly_rate) > 0)" style="color:var(--color-warning,#c47f17);">Set an <strong>Hourly Rate</strong> (Rental Rates section above) to bill it.</span>
                         Leave at 0 to bill only actual hours entered at close.
                     </div>
                     <div class="form-error" x-show="errors.estimated_engine_hours_per_day" x-text="errors.estimated_engine_hours_per_day"></div>
                 </div>
-                </div><!-- /form-row-2 engine-hours -->
+
+                <!-- S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours (meter
+                     reading). Shown only when this lease has an hourly rate (the billing
+                     gate) — a reading is only meaningful once hourly billing is on. -->
+                <div class="form-group" style="max-width:320px;margin-top:1rem;"
+                     x-show="parseFloat(form.hourly_rate) > 0">
+                    <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
+                    <input type="number" id="engine_hours_at_start" class="form-control font-mono"
+                           x-model="form.engine_hours_at_start" step="0.01" min="0"
+                           placeholder="e.g. 1240.50">
+                    <div class="form-hint" style="margin-top:0.5rem;">
+                        Manual reading at lease start. Engine hours are billed at $<span x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr on the closing invoice (or a manually-created invoice).
+                    </div>
+                    <div class="form-error" x-show="errors.engine_hours_at_start" x-text="errors.engine_hours_at_start"></div>
+                </div>
 
                 <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
                      Manual amount — entered only when we deliver the unit; bills
