@@ -4329,6 +4329,11 @@ textarea.form-input {
 @media (min-width: 768px) and (max-width: 1023px) {
     .form-row-2 { grid-template-columns: 1fr 1fr; }
     .grid-2     { grid-template-columns: 1fr 1fr; }
+    /* S-FORM-LAYOUT: 3/4-up rows degrade to 2-up on tablet rather than collapsing
+       straight to one column, so the multi-column layout is visible below the
+       1024px desktop breakpoint (short number/rate fields fit fine two-up here). */
+    .form-row-3,
+    .form-row-4 { grid-template-columns: 1fr 1fr; }
 }
 
 /* Mac-only shortcut hints */
