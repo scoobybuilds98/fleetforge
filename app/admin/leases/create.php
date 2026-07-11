@@ -716,6 +716,34 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-error" x-show="errors.engine_hours_at_start" x-text="errors.engine_hours_at_start"></div>
                 </div>
 
+                <!-- ── Estimated engine hours per day (S-HOURS-EST-DAILY) ──
+                     The engine-hours parallel of "estimated mileage per day".
+                     Only shown when this lease has an hourly rate. Each invoice
+                     bills days × this × rate as an estimate, then trues up at
+                     close against actual (end − start) engine hours. -->
+                <div class="form-group" style="max-width:320px;margin-top:1rem;"
+                     x-show="parseFloat(form.hourly_rate) > 0">
+                    <label class="form-label" for="estimated_engine_hours_per_day">Estimated engine hours per day (hrs/day)</label>
+                    <div class="input-group">
+                        <input type="number"
+                               id="estimated_engine_hours_per_day"
+                               class="form-control font-mono"
+                               step="0.01"
+                               min="0"
+                               name="estimated_engine_hours_per_day"
+                               x-model="form.estimated_engine_hours_per_day"
+                               aria-label="Estimated engine hours per day"
+                               placeholder="0">
+                        <span class="input-group-suffix">hrs/day</span>
+                    </div>
+                    <div class="form-hint" style="margin-top:0.5rem;">
+                        Each invoice bills an <strong>estimate</strong> (days &times; this &times; $<span x-text="parseFloat(form.hourly_rate || 0).toFixed(4)"></span>/hr), then trues up against the
+                        <strong>actual</strong> engine hours (end &minus; start) at close &mdash; adding a charge or credit for the difference.
+                        Leave at 0 to bill only actual hours entered at close.
+                    </div>
+                    <div class="form-error" x-show="errors.estimated_engine_hours_per_day" x-text="errors.estimated_engine_hours_per_day"></div>
+                </div>
+
                 <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
                      Manual amount — entered only when we deliver the unit; bills
                      once on the first invoice. No default. -->
@@ -1169,6 +1197,8 @@ function FF_CreateLease() {
             hourly_rate:        '',
             // S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours.
             engine_hours_at_start: '',
+            // S-HOURS-EST-DAILY: estimated engine hours per day (0 = off).
+            estimated_engine_hours_per_day: '',
             // S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
             cartage_amount:     '',
             gst_exempt:         false,
@@ -1635,6 +1665,7 @@ function FF_CreateLease() {
                 ['mileage_rate',      'Mileage rate',      'Mileage rate cannot be negative.'],
                 ['estimated_mileage', 'Estimated mileage', 'Estimated mileage cannot be negative.'],
                 ['estimated_mileage_per_day', 'Estimated mileage per day', 'Estimated mileage per day cannot be negative.'],
+                ['estimated_engine_hours_per_day', 'Estimated engine hours per day', 'Estimated engine hours per day cannot be negative.'],
                 ['discount_value',    'Discount',          'Discount value cannot be negative.'],
                 ['insurance_cost',    'Insurance cost',    'Insurance cost cannot be negative.'],
                 ['warranty_cost',     'Warranty cost',     'Warranty cost cannot be negative.'],

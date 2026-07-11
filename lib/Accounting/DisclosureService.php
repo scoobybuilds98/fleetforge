@@ -248,7 +248,7 @@ class DisclosureService
             $policyLines[] = "Operating lease rentals are recognized on a straight-line basis "
                 . "over the lease term, in accordance with ASPE 3065.";
         }
-        if (array_intersect(['mileage_usage', 'mileage_overage', 'mileage_adjustment', 'mileage_estimate', 'mileage_credit'], $types)) {
+        if (array_intersect(['mileage_usage', 'mileage_overage', 'mileage_adjustment', 'mileage_estimate', 'mileage_credit', 'hours_estimate', 'hours_adjustment', 'hours_credit', 'hourly_usage'], $types)) {
             $policyLines[] = "Mileage revenue is recognized as a contingent rental, billed as a "
                 . "per-day estimate and trued up against actual distance driven as it becomes determinable.";
         }
@@ -617,19 +617,22 @@ class DisclosureService
                   . " as at " . self::fiscalYearEndLabel($fiscalYear) . ".\n\n";
         }
 
-        // Contingent rentals (mileage overage) recognized in the period
+        // Contingent rentals (mileage + engine-hours usage) recognized in the period.
+        // S-HOURS-EST-DAILY: estimated engine-hours revenue (billed as an estimate
+        // and trued up against actual) is definitionally a contingent rental, so the
+        // hours_* line types join the mileage_* types in the disclosed figure.
         $contingent = \db_row(
             "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.amount ELSE li.amount END), 0) AS total
                FROM invoice_line_items li
                JOIN invoices i ON i.id = li.invoice_id
               WHERE i.invoice_date BETWEEN ? AND ?
                 AND i.status NOT IN ('void','draft')
-                AND li.item_type IN ('mileage_usage','mileage_estimate','mileage_adjustment','mileage_credit')",
+                AND li.item_type IN ('mileage_usage','mileage_estimate','mileage_adjustment','mileage_credit','hours_estimate','hours_adjustment','hours_credit','hourly_usage')",
             [$fyStart, $fyEnd]
         );
         $contingentAmt = (string) ($contingent['total'] ?? '0.00');
 
-        $out .= "Contingent rentals (mileage overage) included in rental income for the "
+        $out .= "Contingent rentals (mileage and engine-hours usage) included in rental income for the "
               . "year ended " . self::fiscalYearEndLabel($fiscalYear) . ": "
               . self::money($contingentAmt) . ".\n";
 

@@ -99,6 +99,7 @@ $lease = db_row(
         l.gps_opt_in,
         l.gps_cost,
         l.hourly_rate,
+        l.estimated_engine_hours_per_day,
         -- S-LEASE-HOURLY-BILLING: manual engine-hours readings for display/edit.
         l.engine_hours_at_start,
         l.engine_hours_at_end,
@@ -190,6 +191,8 @@ $lease['estimated_mileage_miles']     = $lease['estimated_mileage_miles']     !=
 $lease['estimated_mileage_per_day']       = $lease['estimated_mileage_per_day']       !== null ? (float) $lease['estimated_mileage_per_day']       : null;
 $lease['estimated_mileage_per_day_km']    = $lease['estimated_mileage_per_day_km']    !== null ? (float) $lease['estimated_mileage_per_day_km']    : null;
 $lease['estimated_mileage_per_day_miles'] = $lease['estimated_mileage_per_day_miles'] !== null ? (float) $lease['estimated_mileage_per_day_miles'] : null;
+// S-HOURS-EST-DAILY: per-day engine-hours estimate (NOT NULL DEFAULT 0.00).
+$lease['estimated_engine_hours_per_day']  = $lease['estimated_engine_hours_per_day']  !== null ? (float) $lease['estimated_engine_hours_per_day']  : null;
 $lease['mileage_rate_km']             = $lease['mileage_rate_km']             !== null ? (float) $lease['mileage_rate_km']             : null;
 // S-LEASE-MIN-DAYS: cast the TINYINT short-lease floor so the Alpine UI gets a
 // typed int (not a numeric string); null stays null when no per-lease minimum.

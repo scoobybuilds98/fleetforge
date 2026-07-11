@@ -96,6 +96,7 @@ class CreditMemoPusher
         'mileage_overpayment'                => 'mileage_credit',
         'precharge_refund'                   => 'mileage_drawdown_credit',
         'base_rental_reconciliation_overflow'=> 'base_rental_reconciliation_credit',
+        'hours_overpayment'                  => 'hours_credit',
         'invoice_adjustment'                 => 'manual_adjustment',
         'damage_resolution'                  => 'damage',
         'goodwill'                           => 'discount',

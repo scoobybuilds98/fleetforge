@@ -522,6 +522,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 l.start_date, l.start_time, l.end_date, l.last_billed_date, l.odometer_start_km,
                 l.mileage_tracking_mode,
                 l.hourly_rate, l.engine_hours_at_start,
+                l.estimated_engine_hours_per_day,
                 l.estimated_mileage_km, l.estimated_mileage_miles,
                 l.estimated_mileage_per_day, l.estimated_mileage_per_day_km,
                 l.mileage_rate_km, l.mileage_rate_miles, l.km_to_miles_conversion,
@@ -876,6 +877,25 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         }
     }
 
+    // ── S-HOURS-EST-DAILY: does this lease bill via the estimated-daily engine-
+    // hours model? When it does, the generator's running true-up owns ALL hours
+    // reconciliation at close: the legacy S-LEASE-HOURLY-RECON append below is
+    // suppressed (it would double-bill against the estimate lines already on prior
+    // invoices), and the lifetime actual hours are fed to the true-up via the
+    // cumulative_actual_hours param on the final-invoice generator call(s).
+    $usesEstimateHours = bccomp((string) ($lease['estimated_engine_hours_per_day'] ?? '0'), '0', 2) > 0;
+
+    // Lifetime actual engine hours to hand the generator's hours true-up:
+    // engine_hours_at_close − engine_hours_at_start (clamped >= 0). NULL when
+    // either reading is missing → the estimate lines stand un-reconciled and the
+    // true-up defers (same posture as a mileage close with no reading).
+    $cumulativeActualHoursOverride = null;
+    if ($usesEstimateHours && $hoursAtClose !== null
+        && ($lease['engine_hours_at_start'] ?? null) !== null) {
+        $hDiff = bcsub((string) $hoursAtClose, (string) $lease['engine_hours_at_start'], 2);
+        $cumulativeActualHoursOverride = bccomp($hDiff, '0', 2) >= 0 ? $hDiff : '0.00';
+    }
+
     // Legacy mileage overage final-invoice line item (pre-odometer
     // leases). Preserved for backwards compat; no priorExcessKm
     // subtraction (D-F retired). Suppressed for estimate-model leases
@@ -1030,6 +1050,46 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         }
     }
 
+    // S-HOURS-EST-DAILY (parity with S-CLOSE-MANUAL-MILEAGE-WARN): an estimate-hours
+    // lease that closes with NO usable engine-hours pair (no engine_hours_at_close,
+    // or the lease never captured engine_hours_at_start) leaves $cumulativeActualHoursOverride
+    // NULL → no hours true-up books, and the customer keeps paying the running
+    // estimate un-reconciled to actual. Surface it non-blockingly (audit + Sentry +
+    // response field) exactly like the mileage case so the operator notices the
+    // missing reading instead of discovering it on the invoice. Never blocks close.
+    $hoursWarning = null;
+    if ($usesEstimateHours && $cumulativeActualHoursOverride === null) {
+        $hoursWarning = sprintf(
+            'Lease %s bills estimated engine hours (%s hrs/day at $%s/hr) but no closing engine-hours reading was available (engine_hours_at_close and/or engine_hours_at_start missing) — the running estimate was NOT trued up to actual on this close.',
+            (string) ($lease['contract_number'] ?? ''),
+            rtrim(rtrim((string) ($lease['estimated_engine_hours_per_day'] ?? '0'), '0'), '.'),
+            (string) ($lease['hourly_rate'] ?? '0')
+        );
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => $changedBy,
+            'action'       => 'update',
+            'module'       => 'billing',
+            'entity_type'  => 'lease',
+            'entity_id'    => $id,
+            'entity_label' => $lease['contract_number'] ?? null,
+            'notes'        => '[FLEETFORGE_BILLING_WARNING] ' . $hoursWarning,
+            'old_values'   => null,
+            'new_values'   => json_encode([
+                'estimated_engine_hours_per_day' => (string) ($lease['estimated_engine_hours_per_day'] ?? '0'),
+                'hourly_rate'                    => (string) ($lease['hourly_rate'] ?? '0'),
+                'engine_hours_at_start'          => $lease['engine_hours_at_start'],
+                'engine_hours_at_close'          => $hoursAtClose,
+            ]),
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+        try {
+            \FleetForge\Observability\Sentry::captureMessage($hoursWarning, 'warning');
+        } catch (\Throwable) {
+            // Observability must never block the close path.
+        }
+    }
+
     // S-LEASE-HOURLY-BILLING: derive the period-start engine hours for the final
     // invoice. Same priority as odometer: latest prior invoice's period-end
     // hours → lease start hours.
@@ -1138,7 +1198,11 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         // partial_end final invoice, so mileage needs its own home here.
         $needsEstimateTrueUp = $usesEstimateMileage
             && ($cumulativeActualKmOverride !== null || $odoAtClose !== null);
-        if ($hasMileageLine || $needsEstimateTrueUp) {
+        // S-HOURS-EST-DAILY: the same mileage_only carrier reconciles engine hours
+        // for an advance-billed estimate-hours lease (the engine emits the hours
+        // true-up on mileage_only when cumulative_actual_hours is supplied).
+        $needsEstimateHoursTrueUp = $usesEstimateHours && $cumulativeActualHoursOverride !== null;
+        if ($hasMileageLine || $needsEstimateTrueUp || $needsEstimateHoursTrueUp) {
             $finalInv = $generator->createFromLease([
                 'lease_id'          => $id,
                 'period_start'      => $actualReturnDate,
@@ -1155,6 +1219,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 'odometer_source'             => $odoSource,
                 'odometer_fetched_at'         => $odoFetchedAt,
                 'cumulative_actual_km'        => $cumulativeActualKmOverride,
+                'cumulative_actual_hours'     => $cumulativeActualHoursOverride,
             ]);
             $finalInvoiceId = $finalInv['invoice_id'] ?? null;
         }
@@ -1317,6 +1382,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     // S-LEASE-HOURLY-BILLING: bill the closing period's engine hours.
                     'engine_hours_at_period_start' => $hoursPeriodStart,
                     'engine_hours_at_period_end'   => $hoursAtClose,
+                    // S-HOURS-EST-DAILY: lifetime actual hours for the estimate-model
+                    // true-up (ignored by the engine when perDayHours == 0).
+                    'cumulative_actual_hours'     => $cumulativeActualHoursOverride,
                 ]);
                 $finalInvoiceId = $invoiceResult['invoice_id'];
                 // S-CLOSE-NO-ESTIMATE: this engine run carried the estimate
@@ -1339,7 +1407,12 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // reusing the same append+recompute helper the mileage fold uses. The
     // "none exists" guard makes this idempotent with the partial_end / reissue
     // paths — it can never double-bill.
-    if ($hoursAtClose !== null && $hoursPeriodStart !== null
+    // S-HOURS-EST-DAILY: suppressed for estimate-model leases — the generator's
+    // running true-up (fed cumulative_actual_hours on the final invoice / carrier)
+    // owns hours reconciliation there; a raw hourly_usage append would double-bill
+    // on top of the estimate lines already on prior invoices.
+    if (!$usesEstimateHours
+        && $hoursAtClose !== null && $hoursPeriodStart !== null
         && bccomp((string) ($lease['hourly_rate'] ?? '0'), '0', 4) > 0) {
         // $hrsDue is the FINAL still-unbilled segment: hoursAtClose minus the latest
         // prior invoice's period-end hours (derived above). It is > 0 only when no
@@ -1450,9 +1523,16 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // If billing already equals actual the true-up is $0 and this emits a
     // line-less draft — rare (estimates virtually never equal actual exactly)
     // and visible, not silent.
-    if (!$isAdvanceClose && !$legacyTrueUpRan && $usesEstimateMileage
+    // S-HOURS-EST-DAILY: the SAME carrier reconciles engine hours — the engine
+    // emits the hours true-up on a mileage_only invoice when cumulative_actual_hours
+    // is supplied. A hours-only estimate lease (no mileage estimate) still needs the
+    // carrier, so the gate fires for either model. $legacyTrueUpRan (set by the
+    // partial_end run, which carries BOTH true-ups) suppresses it when that ran.
+    $carrierNeedsMileage = $usesEstimateMileage
         && ($lease['mileage_tracking_mode'] ?? '') !== 'off'
-        && ($cumulativeActualKmOverride !== null || $odoAtClose !== null)) {
+        && ($cumulativeActualKmOverride !== null || $odoAtClose !== null);
+    $carrierNeedsHours = $usesEstimateHours && $cumulativeActualHoursOverride !== null;
+    if (!$isAdvanceClose && !$legacyTrueUpRan && ($carrierNeedsMileage || $carrierNeedsHours)) {
         $carrierInv = $generator->createFromLease([
             'lease_id'          => $id,
             'period_start'      => $actualReturnDate,
@@ -1468,14 +1548,19 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             'odometer_at_period_end_km'   => $odoAtClose,
             'odometer_source'             => $odoSource,
             'odometer_fetched_at'         => $odoFetchedAt,
-            'cumulative_actual_km'        => $cumulativeActualKmOverride,
+            // Pass each override only for the model that needs it — a hours-only
+            // lease passes null km (the engine's mileage branch stays idle).
+            'cumulative_actual_km'        => $carrierNeedsMileage ? $cumulativeActualKmOverride : null,
+            'cumulative_actual_hours'     => $carrierNeedsHours ? $cumulativeActualHoursOverride : null,
         ]);
         if ($finalInvoiceId === null) {
             $finalInvoiceId = $carrierInv['invoice_id'] ?? null;
         }
+        $reconWhat = $carrierNeedsMileage && $carrierNeedsHours ? 'mileage + engine hours'
+            : ($carrierNeedsHours ? 'engine hours' : 'mileage');
         $advanceActions[] = [
             'action' => 'estimate_trueup_carrier',
-            'reason' => 'estimate-model mileage reconciled on a standalone mileage_only invoice (the rental final invoice was skipped/folded, so no engine run carried the true-up).',
+            'reason' => "estimate-model {$reconWhat} reconciled on a standalone mileage_only invoice (the rental final invoice was skipped/folded, so no engine run carried the true-up).",
         ];
     }
 
@@ -1705,6 +1790,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         // mileage rate closed without any billable mileage (gap a). The UI
         // surfaces it so the operator can correct the draft before sending.
         'mileage_warning'   => $mileageWarning,
+        // S-HOURS-EST-DAILY: non-null when an estimate-hours lease closed with no
+        // usable engine-hours reading (the estimate was not trued up to actual).
+        'hours_warning'     => $hoursWarning,
     ];
 
     // ── In-app notifications (NOTIF-1) ─────────────────────────

@@ -372,6 +372,28 @@ if (array_key_exists('estimated_mileage_per_day', $body)) {
     $data['estimated_mileage_per_day'] = ($d !== null && bccomp($d, '0', 4) >= 0) ? bcround($d, 2) : '0.00';
 }
 
+// S-HOURS-EST-DAILY: per-day engine-hours estimate (>= 0; blank/0 clears it).
+if (array_key_exists('estimated_engine_hours_per_day', $body)) {
+    $d = clean_decimal($body['estimated_engine_hours_per_day']);
+    if ($d !== null && bccomp($d, '0', 2) < 0) {
+        $fields['estimated_engine_hours_per_day'] = 'Estimated engine hours per day cannot be negative.';
+    }
+    $newPerDayHours = ($d !== null && bccomp($d, '0', 2) >= 0) ? bcround($d, 2) : '0.00';
+    // Rate-completeness (parallel to create): a per-day estimate needs a rate to
+    // price it. The effective rate is this request's hourly_rate if being set,
+    // else the lease's current value.
+    if (bccomp($newPerDayHours, '0', 2) > 0) {
+        $effRate = array_key_exists('hourly_rate', $data)
+            ? $data['hourly_rate']
+            : ($existing['hourly_rate'] ?? null);
+        if ($effRate === null || bccomp((string) $effRate, '0', 4) <= 0) {
+            $fields['estimated_engine_hours_per_day'] =
+                'Set an hourly rate to bill estimated engine hours per day.';
+        }
+    }
+    $data['estimated_engine_hours_per_day'] = $newPerDayHours;
+}
+
 if (array_key_exists('insurance_opt_in', $body))
     $data['insurance_opt_in'] = (bool) $body['insurance_opt_in'] ? 1 : 0;
 

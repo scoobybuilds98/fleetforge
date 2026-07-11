@@ -610,6 +610,18 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- ── Estimated engine hours per day (S-HOURS-EST-DAILY) ── -->
+                <div class="form-group" x-show="parseFloat(form.hourly_rate) > 0" style="margin-top:0.75rem;">
+                    <label class="form-label" for="estimated_engine_hours_per_day">Estimated engine hours per day (hrs/day)</label>
+                    <div class="input-group" style="max-width:320px;">
+                        <input type="number" id="estimated_engine_hours_per_day" class="form-control font-mono"
+                               x-model="form.estimated_engine_hours_per_day" step="0.01" min="0" placeholder="0">
+                        <span class="input-group-suffix">hrs/day</span>
+                    </div>
+                    <div class="form-hint">Each invoice bills days &times; this &times; the hourly rate as an estimate, then trues up against actual (end &minus; start) engine hours at close. 0 = bill only actual hours.</div>
+                    <div class="form-error" x-show="errors.estimated_engine_hours_per_day" x-text="errors.estimated_engine_hours_per_day"></div>
+                </div>
+
                 <!-- S-MILEAGE-1 Model B — Mileage precharge subsection
                      S-LEASE-EDIT-ACTIVE-UNLOCK: editable on active leases too; the
                      `prechargeFrozen` flag still disables the inputs (and shows a
@@ -843,6 +855,8 @@ function FF_EditLease() {
             estimated_mileage_miles: <?= json_encode($lease['estimated_mileage_miles'] ?? '') ?>,
             // S-MILEAGE-EST-DAILY: per-day estimate in the lease's primary unit (API derives mirrors).
             estimated_mileage_per_day: <?= json_encode(rtrim(rtrim((string)($lease['estimated_mileage_per_day'] ?? ''), '0'), '.')) ?>,
+            // S-HOURS-EST-DAILY: per-day engine-hours estimate (0 = off).
+            estimated_engine_hours_per_day: <?= json_encode(rtrim(rtrim((string)($lease['estimated_engine_hours_per_day'] ?? ''), '0'), '.')) ?>,
             km_to_miles_conversion:  <?= (float)($lease['km_to_miles_conversion'] ?? 0.621371) ?>,
             miles_to_km_conversion:  <?= (float)($lease['miles_to_km_conversion'] ?? 1.609344) ?>,
             // S-LEASE-MILEAGE-MODE: per-lease mileage data source (manual/off/samsara).
@@ -996,6 +1010,7 @@ function FF_EditLease() {
                 ['estimated_mileage_km',    'KM allowance cannot be negative.'],
                 ['estimated_mileage_miles', 'Mile allowance cannot be negative.'],
                 ['estimated_mileage_per_day', 'Estimated mileage per day cannot be negative.'],
+                ['estimated_engine_hours_per_day', 'Estimated engine hours per day cannot be negative.'],
             ];
             distanceChecks.forEach(([k, msg]) => {
                 const v = this.form[k];

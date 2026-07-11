@@ -189,10 +189,24 @@ if ($oldEst && bccomp((string) $oldEst['quantity'], '0', 4) > 0) {
     }
 }
 
+// S-HOURS-EST-DAILY: same carry-forward for the engine-hours estimate. Hours
+// have no unit duality, so the old line's quantity IS the billed estimate hours.
+// Preserves a historical hours_estimate line's amount when the per-day was raised
+// after this draft was billed (and keeps the final true-up's billed-to-date right).
+$estHoursOverride = null;
+$oldEstHours = db_row(
+    "SELECT quantity FROM invoice_line_items
+      WHERE invoice_id = ? AND item_type = 'hours_estimate' LIMIT 1",
+    [$id]
+);
+if ($oldEstHours && bccomp((string) $oldEstHours['quantity'], '0', 2) > 0) {
+    $estHoursOverride = (string) $oldEstHours['quantity'];
+}
+
 $voidedCns = [];
 
 try {
-$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, $estKmOverride, &$voidedCns) {
+$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, $estKmOverride, $estHoursOverride, &$voidedCns) {
     // S-AUDIT-LIFECYCLE-1 #21: re-check draft status UNDER LOCK — the gate
     // ran on an unlocked pre-txn read; a racing send could have flipped the
     // row to 'sent' before the hard DELETEs below destroy an issued record.
@@ -257,6 +271,8 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
         // S-REGEN-PRESERVE-ESTIMATE: keep the billed estimate distance (km);
         // null when the old draft had no estimate line (engine derives normally).
         'estimate_distance_km_override' => $estKmOverride,
+        // S-HOURS-EST-DAILY: same, for the engine-hours estimate line.
+        'estimate_hours_override'       => $estHoursOverride,
     ]);
 
     $newId = (int) $created['invoice_id'];

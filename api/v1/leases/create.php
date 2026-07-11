@@ -442,6 +442,26 @@ if ($ehsRaw !== null && $ehsRaw !== '') {
     }
 }
 
+// ── S-HOURS-EST-DAILY: estimated engine hours per day ────────────────
+// Drives the recurring hours estimate line (days × per-day × hourly_rate) +
+// running true-up in InvoiceGenerator. Validated non-negative; defaults to
+// 0.00 (NOT NULL column). The hourly_rate completeness check below enforces
+// that a per-day estimate requires an hourly rate (parallel to mileage).
+$estimatedHoursPerDayIn = clean_decimal($body['estimated_engine_hours_per_day'] ?? null);
+if ($estimatedHoursPerDayIn !== null && bccomp($estimatedHoursPerDayIn, '0', 2) < 0) {
+    $fields['estimated_engine_hours_per_day'] = 'Estimated engine hours per day cannot be negative.';
+}
+$estimatedHoursPerDay = ($estimatedHoursPerDayIn !== null && bccomp($estimatedHoursPerDayIn, '0', 2) >= 0)
+    ? $estimatedHoursPerDayIn : '0.00';
+// Rate-completeness: a per-day hours estimate is meaningless without a rate to
+// price it (mirrors the mileage per-day → mileage_rate gate). Fail closed at
+// create so the billing-time HARD guard in InvoiceGenerator never fires.
+if (bccomp($estimatedHoursPerDay, '0', 2) > 0
+    && ($hourlyCost === null || bccomp((string) $hourlyCost, '0', 4) <= 0)) {
+    $fields['estimated_engine_hours_per_day'] =
+        'Set an hourly rate to bill estimated engine hours per day.';
+}
+
 // ── S-LEASE-SERVICE-CHARGES: cartage (one-time delivery charge) ──────
 // Manual amount entered when delivering a unit; no global default. Bills once
 // on the first invoice. NULL when not supplied.
@@ -696,7 +716,9 @@ $createLease = function () use (
     // S-LEASE-MILEAGE-MODE / S-LEASE-HOURLY-BILLING / S-LEASE-SERVICE-CHARGES:
     // these are referenced in the db_insert below and MUST be captured, or they
     // resolve to undefined → NULL. mileage_tracking_mode is NOT NULL → 1048 abort.
-    $hourlyCost, $mileageTrackingMode, $engineHoursAtStart, $cartageAmount,
+    // S-HOURS-EST-DAILY: estimated_engine_hours_per_day is NOT NULL DEFAULT 0.00 —
+    // omit from use() and the insert writes NULL → 1048 abort (closure-trap).
+    $hourlyCost, $mileageTrackingMode, $engineHoursAtStart, $estimatedHoursPerDay, $cartageAmount,
     &$leaseId
 ) {
     // D20: FOR UPDATE — lock the unit row before status check
@@ -823,6 +845,9 @@ $createLease = function () use (
         'odometer_start_fetched_at'=> $odometerStartFetchedAt,
         // S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours baseline.
         'engine_hours_at_start'    => $engineHoursAtStart,
+        // S-HOURS-EST-DAILY: per-day engine-hours estimate (drives the hours
+        // estimate line + close-time true-up). NOT NULL DEFAULT 0.00.
+        'estimated_engine_hours_per_day' => $estimatedHoursPerDay,
         // S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
         'cartage_amount'           => $cartageAmount,
         // S-MILEAGE-1 Model B: precharge toggle + amount captured at create.
@@ -887,6 +912,7 @@ $createLease = function () use (
             'estimated_mileage_miles' => $allowMilesFinal,
             'estimated_mileage_per_day'    => $estimatedPerDay,
             'estimated_mileage_per_day_km' => $perDayKmFinal,
+            'estimated_engine_hours_per_day' => $estimatedHoursPerDay,
             'km_to_miles_conversion'  => $kmToMilesFinal,
             'miles_to_km_conversion'  => $milesToKmFinal,
             'precharge_enabled'     => $prechargeEnabled,

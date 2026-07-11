@@ -428,6 +428,8 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                     <div class="ff-rate-cell" x-show="lease.hourly_rate && parseFloat(lease.hourly_rate) > 0"><div class="ff-rate-label">Hourly</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.hourly_rate).toFixed(4) + '/hr'"></div></div>
                                     <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (only when billed hourly) -->
                                     <div class="ff-rate-cell" x-show="parseFloat(lease.hourly_rate) > 0"><div class="ff-rate-label">Engine hours</div><div class="ff-rate-value ff-rate-value--sm" x-text="(lease.engine_hours_at_start != null ? parseFloat(lease.engine_hours_at_start).toFixed(2) : '—') + ' → ' + (lease.engine_hours_at_end != null ? parseFloat(lease.engine_hours_at_end).toFixed(2) : '—') + ' hrs'"></div></div>
+                                    <!-- S-HOURS-EST-DAILY: estimated engine hours per day (estimate + true-up model) -->
+                                    <div class="ff-rate-cell" x-show="parseFloat(lease.estimated_engine_hours_per_day) > 0"><div class="ff-rate-label">Est. hours/day</div><div class="ff-rate-value ff-rate-value--sm" x-text="parseFloat(lease.estimated_engine_hours_per_day).toLocaleString('en-CA', {maximumFractionDigits:2}) + ' hrs/day'"></div></div>
                                     <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) — only when set -->
                                     <div class="ff-rate-cell" x-show="parseFloat(lease.cartage_amount) > 0">
                                         <div class="ff-rate-label">Cartage</div>

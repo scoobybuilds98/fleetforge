@@ -213,6 +213,15 @@ function complianceDelta(?int $days): string {
             Edit Unit
         </a>
         <?php endif; ?>
+        <?php
+        // S-UNIT-DECOMMISSION-UI: retire a unit (write-off / sold / scrapped) out
+        // of the rentable fleet while KEEPING all history. Shown only for statuses
+        // the state machine can move to 'decommissioned' (available/inactive/
+        // maintenance) — never on_lease (close the lease first), reserved, or an
+        // already-decommissioned unit.
+        if (can('equipment', 'edit') && in_array($unit['status'], ['available', 'inactive', 'maintenance'], true)): ?>
+        <button class="btn btn-warning btn-sm" onclick="decommissionUnit()" title="Retire this unit out of the fleet (keeps history)">Decommission</button>
+        <?php endif; ?>
         <?php if (can('equipment', 'delete') && $unit['status'] !== 'on_lease'): ?>
         <button class="btn btn-danger btn-sm" onclick="deleteUnit()">Delete Unit</button>
         <?php endif; ?>
@@ -3271,6 +3280,37 @@ async function deleteUnit() {
                 FF_Toast.error(r.error?.message || 'Failed to delete unit.');
             }
         });
+}
+
+// S-UNIT-DECOMMISSION-UI: retire a unit out of the rentable fleet while keeping
+// its full lease / invoice / mileage history. Reason-required (stamps
+// decommission_reason + decommissioned_date). Terminal — no way back.
+async function decommissionUnit() {
+    // json_encode (not e()) — this string is rendered via Alpine x-text (textContent),
+    // NOT HTML, so HTML-entity-escaping would show mojibake for &/</'. JSON_HEX_* keeps
+    // it safe inside this inline <script>.
+    const unitLabel = <?= json_encode((string) $unit['unit_number'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) ?>;
+    const reason = await FF_Confirm.askText({
+        title: 'Decommission / retire unit',
+        message: 'Permanently retire ' + unitLabel + ' from the rentable fleet. '
+               + 'All lease, invoice and mileage history is kept, but the unit can no longer be booked and this cannot be undone. '
+               + 'Enter a reason (e.g. "Write-off — collision", "Sold", "Scrapped"):',
+        confirmLabel: 'Decommission',
+        placeholder: 'Reason for decommissioning',
+    });
+    if (reason === null) return;                       // cancelled
+    if (!reason.trim()) { FF_Toast.error('A reason is required to decommission a unit.'); return; }
+    // FF_Api.post resolves (not rejects) on 4xx — gate on r.success (D-FFAPI).
+    FF_Api.post('<?= base_url('api/v1/equipment/units/update_status') ?>', {
+        id: <?= $unitId ?>, new_status: 'decommissioned', reason: reason.trim(),
+    }).then(r => {
+        if (r.success) {
+            FF_Toast.success('Unit decommissioned', 'Retired from the fleet — history kept.');
+            setTimeout(() => window.location.reload(), 700);
+        } else {
+            FF_Toast.error(r.error?.message || 'Failed to decommission unit.');
+        }
+    });
 }
 </script>
 

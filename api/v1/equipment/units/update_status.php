@@ -9,13 +9,15 @@ declare(strict_types=1);
  *              Implicit status changes (via lease activate/close) bypass this
  *              endpoint. This handles all operator-initiated changes.
  *
- *              Valid transitions (spec §11):
- *                available   → reserved, on_lease, maintenance, inactive
- *                reserved    → on_lease, available
+ *              Valid transitions (canonical: StatusActions::UNIT_STATUS_TRANSITIONS):
+ *                available   → reserved, maintenance, inactive, decommissioned
+ *                reserved    → available
  *                on_lease    → available, maintenance
- *                maintenance → available, inactive
- *                inactive    → available
+ *                maintenance → available, inactive, decommissioned
+ *                inactive    → available, decommissioned
  *                decommissioned → TERMINAL (no transitions out)
+ *              (S-UNIT-DECOMMISSION-UI: available→decommissioned is a direct,
+ *               confirm+reason gated retire path; still excluded from bulk.)
  *
  *              All transitions: validate, FOR UPDATE, write equipment_status_log + audit_log.
  *

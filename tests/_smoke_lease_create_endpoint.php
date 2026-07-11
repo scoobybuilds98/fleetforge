@@ -141,21 +141,28 @@ try {
         'mileage_tracking_mode' => 'samsara',
         'engine_hours_at_start' => '100.50',
         'cartage_amount'        => '175.00',
+        // S-HOURS-EST-DAILY: hourly_rate + per-day estimate exercise the new
+        // closure use() capture ($estimatedHoursPerDay) — a missing capture
+        // would NULL a NOT NULL column and 500 the insert.
+        'hourly_rate'                    => '15.00',
+        'estimated_engine_hours_per_day' => '6.50',
     ]);
     if (($r['success'] ?? null) === true && !empty($r['data']['id'])) {
         $lid = (int) $r['data']['id'];
         $createdIds[] = $lid;
-        $row = db_row("SELECT mileage_tracking_mode, engine_hours_at_start, cartage_amount FROM leases WHERE id=?", [$lid]);
+        $row = db_row("SELECT mileage_tracking_mode, engine_hours_at_start, cartage_amount, estimated_engine_hours_per_day FROM leases WHERE id=?", [$lid]);
         $modeOk  = ($row['mileage_tracking_mode'] ?? null) === 'samsara';
         $hoursOk = $row && $row['engine_hours_at_start'] !== null && bccomp((string) $row['engine_hours_at_start'], '100.50', 2) === 0;
         $cartOk  = $row && $row['cartage_amount'] !== null && bccomp((string) $row['cartage_amount'], '175.00', 2) === 0;
-        if ($modeOk && $hoursOk && $cartOk) {
-            ok("T1 valid create persists all closure-captured columns (mode=samsara, hours=100.50, cartage=175.00)");
+        $estHrsOk = $row && $row['estimated_engine_hours_per_day'] !== null && bccomp((string) $row['estimated_engine_hours_per_day'], '6.50', 2) === 0;
+        if ($modeOk && $hoursOk && $cartOk && $estHrsOk) {
+            ok("T1 valid create persists all closure-captured columns (mode=samsara, hours=100.50, cartage=175.00, est_hrs/day=6.50)");
         } else {
             no("T1 created but a closure-captured column was dropped to NULL/default — "
                . "mode=" . json_encode($row['mileage_tracking_mode'] ?? null)
                . " hours=" . json_encode($row['engine_hours_at_start'] ?? null)
                . " cartage=" . json_encode($row['cartage_amount'] ?? null)
+               . " est_hrs/day=" . json_encode($row['estimated_engine_hours_per_day'] ?? null)
                . " (a missing use() capture). ");
         }
     } else {

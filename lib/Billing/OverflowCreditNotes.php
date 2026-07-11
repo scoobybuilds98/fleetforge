@@ -7,7 +7,8 @@ declare(strict_types=1);
  * Lifecycle management for the AUTO-CREATED overflow credit notes that
  * InvoiceGenerator emits when a final invoice's credit lines exceed its
  * charges (sources 'mileage_overpayment' / 'base_rental_reconciliation_
- * overflow' — the $0-floor cap, see InvoiceGenerator ~step 5).
+ * overflow' / 'hours_overpayment' — the $0-floor cap, see InvoiceGenerator
+ * ~step 5).
  *
  * WHY THIS EXISTS (S-ORPHAN-OVERFLOW-CN): the mileage true-up subtracts
  * *live* overflow credit_notes from "mileage billed to date" so a reclose /
@@ -39,7 +40,7 @@ use FleetForge\Accounting\AutoEntryBridge;
 class OverflowCreditNotes
 {
     /** credit_notes.source values the invoice cap auto-creates. */
-    public const SOURCES = ['mileage_overpayment', 'base_rental_reconciliation_overflow'];
+    public const SOURCES = ['mileage_overpayment', 'base_rental_reconciliation_overflow', 'hours_overpayment'];
 
     /**
      * Live (not void, not deleted) overflow CNs created from an invoice.

@@ -20,8 +20,13 @@ namespace FleetForge\AI\Actions;
 class StatusActions
 {
     /** Equipment state machine (canonical — mirrors update_status.php spec §11). */
+    // S-UNIT-DECOMMISSION-UI: 'available' → 'decommissioned' is a direct,
+    // deliberate retire path (write-offs, sold/scrapped units). It is a
+    // reason-required, confirm-gated single-unit action in the UI and is still
+    // EXCLUDED from bulk (bulk_update_status BULK_STATUS_ALLOWED_TARGETS) so a
+    // terminal move can never happen accidentally across many rows at once.
     public const UNIT_STATUS_TRANSITIONS = [
-        'available'      => ['reserved', 'maintenance', 'inactive'],
+        'available'      => ['reserved', 'maintenance', 'inactive', 'decommissioned'],
         'reserved'       => ['available'],
         'on_lease'       => ['available', 'maintenance'],
         'maintenance'    => ['available', 'inactive', 'decommissioned'],

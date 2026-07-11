@@ -329,7 +329,21 @@ try {
     $hdrI  = db_row("SELECT subtotal FROM invoices WHERE id=?", [$ivI['invoice_id']]);
     $reconI = $line($ivI['invoice_id'], 'base_rental_reconciliation_credit');
     $mileI  = $line($ivI['invoice_id'], 'mileage_credit');
-    $cnI    = db_row("SELECT amount FROM credit_notes WHERE source_invoice_id=? AND source='mileage_overpayment'", [$ivI['invoice_id']]);
+    // S-HOURS-EST-DAILY per-source split: the mileage overflow and the reconciliation
+    // overflow now route to SEPARATE credit_notes (mileage_overpayment /
+    // base_rental_reconciliation_overflow) so each family's running true-up subtracts
+    // only its OWN overflow (the old consolidation gave the recon portion a
+    // mileage_overpayment source → the mileage true-up over-subtracted it). Conservation
+    // therefore checks the SUM across both overflow CNs on this invoice.
+    $cnSumRow = db_row(
+        "SELECT COALESCE(SUM(amount),0) s FROM credit_notes
+          WHERE source_invoice_id=? AND source IN ('mileage_overpayment','base_rental_reconciliation_overflow','hours_overpayment')",
+        [$ivI['invoice_id']]
+    );
+    $cnI    = ['amount' => (string) ($cnSumRow['s'] ?? '0.00')];
+    // Per-source amounts, to assert the split is clean (not consolidated).
+    $mCnI   = db_row("SELECT COALESCE(SUM(amount),0) s FROM credit_notes WHERE source_invoice_id=? AND source='mileage_overpayment'", [$ivI['invoice_id']]);
+    $rCnI   = db_row("SELECT COALESCE(SUM(amount),0) s FROM credit_notes WHERE source_invoice_id=? AND source='base_rental_reconciliation_overflow'", [$ivI['invoice_id']]);
     // Both credit lines present, overflow spilled from mileage into reconciliation.
     ck('I1 (subtotal floor)', $hdrI !== null && bccomp((string) $hdrI['subtotal'], '0.00', 2) === 0,
         "combined-credit-overflow final invoice floors subtotal at \$" . ($hdrI['subtotal'] ?? 'none') . " (expect 0.00 — was NEGATIVE pre-fix)");
@@ -351,7 +365,10 @@ try {
         }
     }
     ck('I3 (conservation)', $cnI !== null && bccomp((string) $cnI['amount'], $sumRemoved, 2) === 0,
-        "account-credit CN (\$" . ($cnI['amount'] ?? 'none') . ") == total removed from capped lines (\$" . $sumRemoved . ") — no over-routing");
+        "sum of per-source overflow CNs (\$" . ($cnI['amount'] ?? 'none') . ") == total removed from capped lines (\$" . $sumRemoved . ") — no over/under-routing");
+    ck('I4 (per-source split)',
+        bccomp((string) ($mCnI['s'] ?? '0'), '0', 2) > 0 && bccomp((string) ($rCnI['s'] ?? '0'), '0', 2) > 0,
+        "mixed overflow routed to SEPARATE CNs — mileage_overpayment=\$" . ($mCnI['s'] ?? '?') . " + base_rental_reconciliation_overflow=\$" . ($rCnI['s'] ?? '?') . " (not consolidated into one mileage CN)");
 
     db_execute("ROLLBACK");
 } catch (\Throwable $e) {

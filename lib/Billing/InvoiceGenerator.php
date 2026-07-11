@@ -1368,17 +1368,230 @@ class InvoiceGenerator
                 }
             }
 
-            // --- Step 2b: Engine/reefer-hours usage (S-LEASE-HOURLY-BILLING) ---
-            // Gate: lease has an hourly rate AND positive period hours AND this
-            // is a normal billing run. Independent of mileage — a lease may bill
-            // both. Plain usage line (no precharge/drawdown); rate_method omitted
-            // like mileage_usage to avoid the rate_method ENUM clamp trap.
-            if (bccomp((string) ($lease['hourly_rate'] ?? '0'), '0', 4) > 0
+            // ════════════════════════════════════════════════════════════════
+            // Step 2b — S-HOURS-EST-DAILY: estimated daily engine hours + true-up.
+            //
+            // The engine-hours parallel of the S-MILEAGE-EST-DAILY block above,
+            // but simpler: hours have no unit duality (no km/miles) and no
+            // precharge. Two mutually-exclusive models, selected per lease:
+            //   • estimated_engine_hours_per_day > 0 → estimate + running true-up
+            //     (this branch): a `hours_estimate` line = days × per-day × rate
+            //     on every rental invoice, then a cumulative true-up
+            //     (`hours_adjustment` charge / `hours_credit` credit) against the
+            //     actual hours (engine_hours_at_end − engine_hours_at_start) once
+            //     a closing reading is available (close.php passes it via the
+            //     `cumulative_actual_hours` param; regenerate reads it off the
+            //     completed lease). Independent of mileage — a lease may bill both.
+            //   • estimated_engine_hours_per_day == 0 → legacy per-period
+            //     `hourly_usage` line (period hours × rate), unchanged (elseif).
+            //
+            // Cutover parity mirrors mileage: the true-up's billed-to-date SUM
+            // includes legacy `hourly_usage` lines, so an in-flight lease that
+            // opts into estimates keeps reconciling to actual. Net lifetime hours
+            // revenue = actual hours × rate; the estimate is a cash-flow smoother
+            // the true-up always corrects. rate_method is omitted on every line
+            // (like mileage_usage) to avoid the rate_method ENUM clamp trap.
+            // ════════════════════════════════════════════════════════════════
+            $hourlyRate       = (string) ($lease['hourly_rate'] ?? '0');
+            $perDayHours      = (string) ($lease['estimated_engine_hours_per_day'] ?? '0');
+            $hourlyRateActive = bccomp($hourlyRate, '0', 4) > 0;
+
+            // The recurring ESTIMATE line rides regular rental invoices only.
+            $hoursEmitAllowed = (
+                $hourlyRateActive
+                && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
+            );
+            // The TRUE-UP additionally runs on the close-time `mileage_only`
+            // reconciliation carrier (parallel to the mileage $trueUpAllowed) so an
+            // advance-billed lease reconciles hours on the same carrier it
+            // reconciles mileage. Only adjustment / credit_note utility invoices
+            // are excluded.
+            $hoursTrueUpAllowed = (
+                $hourlyRateActive
+                && !in_array($billingType, ['adjustment', 'credit_note'], true)
+            );
+
+            // HARD guard (per-day arm): a per-day hours estimate with no rate is a
+            // data hole — we cannot price the estimate line. Mirrors the mileage
+            // per-day guard; create.php's rate-completeness gate is the primary
+            // guard, this is the billing-time net.
+            if ($billingType !== 'mileage_only'
+                && bccomp($perDayHours, '0', 2) > 0
+                && !$hourlyRateActive
+            ) {
+                throw new BillingRateException(
+                    sprintf(
+                        'InvoiceGenerator refused to bill estimated engine hours: lease_id=%d, period=%s..%s (%d days), '
+                        . 'estimated_engine_hours_per_day=%s configured but hourly_rate=%s. '
+                        . 'Set an hourly rate at lease create.',
+                        $leaseId, $periodStart, $periodEnd, $days, $perDayHours, $hourlyRate
+                    ),
+                    'hours_excess', $days,
+                    (string) ($lease['daily_rate']   ?? '0'),
+                    (string) ($lease['weekly_rate']  ?? '0'),
+                    (string) ($lease['monthly_rate'] ?? '0'),
+                    [
+                        'lease_id'                       => $leaseId,
+                        'period_start'                   => $periodStart,
+                        'period_end'                     => $periodEnd,
+                        'estimated_engine_hours_per_day' => $perDayHours,
+                        'hourly_rate'                    => $hourlyRate,
+                        'billing_type'                   => $billingType,
+                    ]
+                );
+            }
+
+            if ($hoursTrueUpAllowed && bccomp($perDayHours, '0', 2) > 0) {
+                // ── (0) Cumulative actual engine hours through this period end ──
+                // Priority (NO per-period-sum arm: engine hours are manual-only
+                // with no telemetry feed, so interim invoices never carry a real
+                // reading — reconciling only from the closing reading avoids a
+                // spurious true-up on a reissued interim invoice):
+                //   • caller override cumulative_actual_hours (close.php:
+                //     engine_hours_at_close − engine_hours_at_start), else
+                //   • a COMPLETED lease's own engine_hours_at_end − _at_start on
+                //     its final invoice (post-close regenerate parity — mirrors the
+                //     mileage_at_end fallback; nobody passes the override on a bare
+                //     generateForLease re-run), else
+                //   • null → no reading yet; only the estimate bills this period and
+                //     the true-up defers to the close invoice.
+                $cumActualHours = null;
+                if (isset($params['cumulative_actual_hours'])
+                    && $params['cumulative_actual_hours'] !== ''
+                    && $params['cumulative_actual_hours'] !== null) {
+                    $ovrH = (string) $params['cumulative_actual_hours'];
+                    $cumActualHours = bccomp($ovrH, '0', 2) >= 0 ? $ovrH : '0';
+                } elseif ($invoiceType === 'final'
+                    && ($lease['actual_return_date'] ?? null) !== null
+                    && ($lease['engine_hours_at_end'] ?? null) !== null
+                    && ($lease['engine_hours_at_start'] ?? null) !== null) {
+                    $hDiffLife = bcsub((string) $lease['engine_hours_at_end'], (string) $lease['engine_hours_at_start'], 2);
+                    $cumActualHours = bccomp($hDiffLife, '0', 2) >= 0 ? $hDiffLife : '0';
+                }
+
+                // Final-settlement invoices skip the estimate line when a lifetime
+                // actual reading is available (mirrors $suppressEstimate for
+                // mileage): the true-up bills the exact delta, so an estimate here
+                // would only inflate both sides of that subtraction on the same
+                // invoice. Without a reading, the estimate still bills the stub.
+                $suppressHoursEstimate = ($invoiceType === 'final' && $cumActualHours !== null);
+
+                // ── (1) Estimate line: billable days × per-day × rate ─────────
+                // quantity × unit_price == amount (QBO invariant) — the hours
+                // quantity carries the estimate, the hourly rate is unit_price.
+                $hoursEstAmount = '0.00';
+                // S-REGEN-PRESERVE-ESTIMATE parity: an explicit hours override (the
+                // OLD draft's billed estimate hours) wins over days × current
+                // per-day, so a per-day edit made after billing doesn't silently
+                // re-price a historical line on regenerate (which would also distort
+                // the final true-up's billed-to-date side).
+                $hoursEstOverride = (isset($params['estimate_hours_override'])
+                        && $params['estimate_hours_override'] !== null
+                        && $params['estimate_hours_override'] !== ''
+                        && bccomp((string) $params['estimate_hours_override'], '0', 2) > 0)
+                    ? (string) $params['estimate_hours_override']
+                    : null;
+                if ($hoursEmitAllowed && !$suppressHoursEstimate && $days > 0
+                    && (bccomp($perDayHours, '0', 2) > 0 || $hoursEstOverride !== null)) {
+                    $estHours       = $hoursEstOverride ?? bcmul($perDayHours, (string) $days, 2);
+                    $hoursEstAmount = bcround(bcmul($estHours, $hourlyRate, 6), 2);
+                    if (bccomp($hoursEstAmount, '0', 2) > 0) {
+                        // Per-day value (exact: total ÷ days) for the description.
+                        $perDayHrsDisp = bcdiv($estHours, (string) $days, 2);
+                        $lineItems[] = [
+                            'sort_order'   => $sortOrder++,
+                            'item_type'    => 'hours_estimate',
+                            'description'  => "Estimated engine hours: {$days} days × " . rtrim(rtrim($perDayHrsDisp, '0'), '.') . " hrs/day × \$" . $hourlyRate . "/hr",
+                            'quantity'     => $estHours,
+                            'unit'         => 'hours',
+                            'unit_price'   => $hourlyRate,
+                            'amount'       => $hoursEstAmount,
+                            'is_credit'    => 0,
+                            'taxable'      => 1,
+                            'period_start' => $periodStart,
+                            'period_end'   => $periodEnd,
+                        ];
+                    } else {
+                        $hoursEstAmount = '0.00';
+                    }
+                }
+
+                // ── (2) Running cumulative true-up against actual ────────────
+                if ($cumActualHours !== null) {
+                    // Everything billed for hours so far (prior non-void invoices),
+                    // signed: credits subtract. Legacy hourly_usage lines are
+                    // included so an in-flight lease trues up across the cutover.
+                    $billedHRow = db_row(
+                        "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.amount ELSE li.amount END), 0) AS billed
+                           FROM invoice_line_items li
+                           JOIN invoices i ON i.id = li.invoice_id
+                          WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+                            AND li.item_type IN ('hours_estimate','hours_adjustment','hours_credit','hourly_usage')",
+                        [$leaseId]
+                    );
+                    // Overflow credit_notes are hours ALREADY credited (a prior
+                    // hours_credit that exceeded its invoice subtotal → capped, the
+                    // excess routed to a credit_notes row source 'hours_overpayment').
+                    // Invisible to the line SUM above, so subtract it or the true-up
+                    // re-credits the same overflow on every settlement invoice.
+                    $cnHRow = db_row(
+                        "SELECT COALESCE(SUM(amount), 0) AS credited
+                           FROM credit_notes
+                          WHERE lease_id = ? AND source = 'hours_overpayment'
+                            AND deleted_at IS NULL AND voided_at IS NULL",
+                        [$leaseId]
+                    );
+                    // Include this invoice's estimate line (not yet persisted).
+                    $billedHToDate = bcadd((string) ($billedHRow['billed'] ?? '0'), $hoursEstAmount, 2);
+                    $billedHToDate = bcsub($billedHToDate, (string) ($cnHRow['credited'] ?? '0'), 2);
+
+                    $cumActualHoursCharge = bcround(bcmul($cumActualHours, $hourlyRate, 6), 2);
+                    $trueUpH              = bcsub($cumActualHoursCharge, $billedHToDate, 2);
+
+                    if (bccomp($trueUpH, '0', 2) > 0) {
+                        // Under-billed vs actual → additional charge.
+                        $lineItems[] = [
+                            'sort_order'   => $sortOrder++,
+                            'item_type'    => 'hours_adjustment',
+                            'description'  => 'Engine-hours true-up: ' . number_format((float) $cumActualHours, 2) . " hrs actual × \$" . $hourlyRate . "/hr = \${$cumActualHoursCharge}, less \${$billedHToDate} hours billed to date — additional charge",
+                            'quantity'     => '1.0000',
+                            'unit'         => 'adjustment',
+                            'unit_price'   => $trueUpH,
+                            'amount'       => $trueUpH,
+                            'is_credit'    => 0,
+                            'taxable'      => 1,
+                            'period_start' => $periodStart,
+                            'period_end'   => $periodEnd,
+                        ];
+                    } elseif (bccomp($trueUpH, '0', 2) < 0) {
+                        // Over-billed vs actual → credit back the difference.
+                        $creditH = bcsub('0', $trueUpH, 2);
+                        $lineItems[] = [
+                            'sort_order'   => $sortOrder++,
+                            'item_type'    => 'hours_credit',
+                            'description'  => 'Engine-hours true-up credit: ' . number_format((float) $cumActualHours, 2) . " hrs actual × \$" . $hourlyRate . "/hr = \${$cumActualHoursCharge}, less \${$billedHToDate} hours billed to date — refund of over-estimated hours",
+                            'quantity'     => '1.0000',
+                            'unit'         => 'adjustment',
+                            'unit_price'   => $creditH,
+                            'amount'       => $creditH,
+                            'is_credit'    => 1,  // POSITIVE amount + is_credit=1 → aggregator subtracts
+                            'taxable'      => 1,
+                            'period_start' => $periodStart,
+                            'period_end'   => $periodEnd,
+                        ];
+                    }
+                }
+            } elseif (bccomp($hourlyRate, '0', 4) > 0
                 && $periodEngineHours !== null
                 && bccomp((string) $periodEngineHours, '0', 2) > 0
                 && !in_array($billingType, ['mileage_only', 'adjustment', 'credit_note'], true)
             ) {
-                $rateHr      = (string) $lease['hourly_rate'];
+                // ═══ Legacy per-period engine-hours usage (per-day == 0) ═══
+                // Unchanged pre-S-HOURS-EST-DAILY behaviour: one `hourly_usage`
+                // line = period hours × rate (no precharge/drawdown). Never runs
+                // when the estimate model is active (perDayHours > 0 selects the
+                // true-up branch above).
+                $rateHr      = $hourlyRate;
                 $hoursCharge = bcround(bcmul((string) $periodEngineHours, $rateHr, 6), 2);
                 $lineItems[] = [
                     'sort_order'   => $sortOrder++,
@@ -1558,8 +1771,14 @@ class InvoiceGenerator
             // The cap mechanism is identical to the mileage_credit path —
             // only the credit_notes.source differs so reports can
             // distinguish the two overflow sources.
-            $mileageOverflow         = '0.00';   // total actually stripped from credit lines → routed to the credit_note (legacy name kept for blast-radius minimality)
-            $mileageOverflowSource   = null;     // null | 'mileage_overpayment' | 'base_rental_reconciliation_overflow'
+            $mileageOverflow         = '0.00';   // TOTAL stripped from credit lines (invariant message + return value; legacy name kept for blast-radius minimality)
+            // S-HOURS-EST-DAILY: overflow accumulated PER credit_notes.source so
+            // each cappable family gets its OWN credit_note. A mixed mileage+hours
+            // (or +reconciliation) overflow must NOT consolidate into one CN — each
+            // family's running true-up subtracts CNs filtered by its own source, so a
+            // consolidated CN would break the other family's reconciliation on a
+            // later reclose/settlement.  Map: source => amount.
+            $overflowBySource        = [];
             if (bccomp($subtotal, '0', 2) < 0) {
                 // How much credit we must strip to floor the subtotal at $0.
                 $remainingOverflow = bcmul($subtotal, '-1', 2); // abs($subtotal)
@@ -1583,7 +1802,17 @@ class InvoiceGenerator
                 // was removed from the invoice). Draining across all
                 // cappable lines and routing only what is actually removed
                 // fixes both.
-                $cappableTypes = ['mileage_credit', 'base_rental_reconciliation_credit'];
+                // S-HOURS-EST-DAILY: hours_credit joins the cappable set — an
+                // over-estimated engine-hours true-up credit can exceed a low
+                // final-stub subtotal exactly like a mileage credit; without this
+                // it would hit the "no cappable line" refusal and block the close.
+                $cappableTypes = ['mileage_credit', 'base_rental_reconciliation_credit', 'hours_credit'];
+                // Each cappable type → its credit_notes.source for the overflow row.
+                $overflowSourceByType = [
+                    'mileage_credit'                    => 'mileage_overpayment',
+                    'base_rental_reconciliation_credit' => 'base_rental_reconciliation_overflow',
+                    'hours_credit'                      => 'hours_overpayment',
+                ];
 
                 foreach ($cappableTypes as $cappableType) {
                     if (bccomp($remainingOverflow, '0', 2) <= 0) {
@@ -1617,16 +1846,12 @@ class InvoiceGenerator
 
                             $remainingOverflow = bcsub($remainingOverflow, $removed, 2);
                             $mileageOverflow   = bcadd($mileageOverflow, $removed, 2);
-                            // Source: prefer the mileage wording whenever any
-                            // mileage credit was capped; otherwise the
-                            // reconciliation wording. (A mixed overflow is
-                            // consolidated into one credit_note — rare in
-                            // practice, and the reason text names the invoice.)
-                            if ($mileageOverflowSource === null || $cappableType === 'mileage_credit') {
-                                $mileageOverflowSource = $cappableType === 'mileage_credit'
-                                    ? 'mileage_overpayment'
-                                    : 'base_rental_reconciliation_overflow';
-                            }
+                            // Accumulate PER SOURCE (see $overflowBySource note above):
+                            // each cappable family routes its stripped credit to its
+                            // own credit_note so downstream per-source true-up
+                            // subtraction stays correct.
+                            $src = $overflowSourceByType[$cappableType];
+                            $overflowBySource[$src] = bcadd($overflowBySource[$src] ?? '0', $removed, 2);
                         }
                     }
                     unset($capItem);
@@ -2137,31 +2362,36 @@ class InvoiceGenerator
             // (Historical comment "Trap 6 customer outstanding_balance" removed —
             //  the customer counter now follows Path B canonical truth.)
 
-            // S-FIX-2 Bug #3 + S-BILLING-HOLISTIC-ENGINE: route the credit
-            // overflow (if any) to a credit_notes row. The source is chosen
-            // above by the cap loop:
+            // S-FIX-2 Bug #3 + S-BILLING-HOLISTIC-ENGINE + S-HOURS-EST-DAILY: route the
+            // credit overflow (if any) to credit_notes rows — ONE PER SOURCE:
             //   'mileage_overpayment'                  — mileage_credit cap
             //   'base_rental_reconciliation_overflow'  — holistic reconciliation cap
+            //   'hours_overpayment'                    — engine-hours_credit cap
             //
-            // Created after the invoice INSERT so source_invoice_id can
-            // reference the new invoice. Same db_transaction → JE rolls
-            // back if either fails. No tax: a customer credit liability
-            // is not a billable line.
-            if (bccomp($mileageOverflow ?? '0', '0', 2) > 0) {
-                // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper
-                // (was one of four verbatim copies).
+            // Per-source (not a single consolidated CN) because each family's running
+            // true-up subtracts CNs filtered by its OWN source; a mixed overflow folded
+            // into one source would leave the other family's reconciliation double-
+            // counting on a later reclose. Created after the invoice INSERT so
+            // source_invoice_id can reference the new invoice. Same db_transaction → JE
+            // rolls back if any fails. No tax: a customer credit liability is not a
+            // billable line.
+            foreach ($overflowBySource as $effectiveSource => $srcAmount) {
+                if (bccomp((string) $srcAmount, '0', 2) <= 0) {
+                    continue;
+                }
+                // S-AUDIT-LIFECYCLE-1 #24e: shared gap-free minting helper.
                 $cnNumber = ff_next_credit_note_number();
 
-                // Branch the human-readable reason on the source. Defaults
-                // to the legacy mileage wording when source wasn't set
-                // (paranoia — the cap loop always sets it when overflow > 0).
-                $effectiveSource = $mileageOverflowSource ?? 'mileage_overpayment';
-                $cnReason = $effectiveSource === 'base_rental_reconciliation_overflow'
-                    ? "Base rental reconciliation credit exceeded invoice subtotal — overflow routed to account credit (S-BILLING-HOLISTIC-ENGINE, invoice {$invoiceNumber})."
-                    : "Mileage credit exceeded final invoice subtotal — overflow routed to account credit (S-FIX-2 Bug #3, invoice {$invoiceNumber}).";
-                $cnAuditNote = $effectiveSource === 'base_rental_reconciliation_overflow'
-                    ? "Auto-created from base_rental_reconciliation_credit overflow (S-BILLING-HOLISTIC-ENGINE) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}."
-                    : "Auto-created from mileage credit overflow (S-FIX-2 Bug #3) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$mileageOverflow}.";
+                if ($effectiveSource === 'base_rental_reconciliation_overflow') {
+                    $cnReason    = "Base rental reconciliation credit exceeded invoice subtotal — overflow routed to account credit (S-BILLING-HOLISTIC-ENGINE, invoice {$invoiceNumber}).";
+                    $cnAuditNote = "Auto-created from base_rental_reconciliation_credit overflow (S-BILLING-HOLISTIC-ENGINE) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$srcAmount}.";
+                } elseif ($effectiveSource === 'hours_overpayment') {
+                    $cnReason    = "Engine-hours credit exceeded final invoice subtotal — overflow routed to account credit (S-HOURS-EST-DAILY, invoice {$invoiceNumber}).";
+                    $cnAuditNote = "Auto-created from engine-hours credit overflow (S-HOURS-EST-DAILY) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$srcAmount}.";
+                } else {
+                    $cnReason    = "Mileage credit exceeded final invoice subtotal — overflow routed to account credit (S-FIX-2 Bug #3, invoice {$invoiceNumber}).";
+                    $cnAuditNote = "Auto-created from mileage credit overflow (S-FIX-2 Bug #3) — invoice {$invoiceNumber}, overflow {$lease['currency']} {$srcAmount}.";
+                }
 
                 $cnId = db_insert('credit_notes', [
                     'credit_note_number'      => $cnNumber,
@@ -2174,12 +2404,12 @@ class InvoiceGenerator
                     'lease_id'                => $leaseId,
                     'source'                  => $effectiveSource,
                     'source_invoice_id'       => $invoiceId,
-                    'amount'                  => $mileageOverflow,
+                    'amount'                  => $srcAmount,
                     'currency'                => $lease['currency'],
                     // S-AUDIT-BILLING-ENGINE-1 #21: freeze the CAD rate from
                     // the lease so the bridge converts the CN's liability.
                     'exchange_rate_to_cad'    => ($lease['currency'] ?? 'CAD') === 'USD' ? ($lease['exchange_rate_to_cad'] ?? null) : null,
-                    'amount_remaining'        => $mileageOverflow,
+                    'amount_remaining'        => $srcAmount,
                     'status'                  => 'active',
                     'reason'                  => $cnReason,
                     'created_by'              => $params['created_by'] ?? null,
