@@ -691,6 +691,12 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                     <span class="user-trigger-name"><?= e($_me['name'] ?? 'User') ?></span>
                     <span class="user-trigger-role"><?= e($_roleLabel) ?></span>
                 </span>
+                <!-- S-LUX-3: chevron rotates 180° when the menu opens (CSS keyed
+                     on the button's own aria-expanded — no extra Alpine binding). -->
+                <svg class="user-trigger-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="m6 9 6 6 6-6"/>
+                </svg>
             </button>
 
             <div class="user-dropdown"

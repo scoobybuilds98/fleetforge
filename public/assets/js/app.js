@@ -720,7 +720,13 @@ const FF_Toast = {
             (message ? `<div class="toast-message">${ffEsc(message)}</div>` : '') +
             `</div>` +
             `<button class="toast-close btn-icon" aria-label="Dismiss notification" type="button">` +
-            `${_TOAST_ICONS.close}</button>`;
+            `${_TOAST_ICONS.close}</button>` +
+            // S-LUX-3: auto-dismiss progress hairline — only for auto-dismissing
+            // toasts (duration > 0); animation-duration is set to the real
+            // dismiss time so the bar stays in sync. Sticky toasts get no bar.
+            (duration > 0
+                ? `<div class="toast-progress" style="animation-duration:${duration}ms"></div>`
+                : '');
 
         toast.querySelector('.toast-close').addEventListener('click', () => {
             this._dismiss(toast);

@@ -95,6 +95,7 @@ img, svg { display: block; max-width: 100%; }
 a {
     color: var(--color-primary);
     text-decoration: none;
+    transition: color var(--transition-fast);   /* S-LUX-3: smooth link colour */
 }
 a:hover { text-decoration: underline; }
 
@@ -116,6 +117,28 @@ hr {
     border: none;
     border-top: 1px solid var(--border-color);
     margin: 1.5rem 0;
+}
+
+/* ============================================================
+   S-LUX-3 MOTION DOCTRINE (D-LUX3-1) — reduced-motion kill switch
+   ============================================================
+   When the OS/browser asks for reduced motion, collapse every
+   transition + animation to a near-instant, single-frame change and
+   disable smooth-scroll. Uses 0.01ms (not 0) so animationend/
+   transitionend listeners still fire and JS state machines that wait
+   on them (toast dismiss, Alpine x-transition) don't hang. Scoped
+   broadly on purpose — this is the one place motion is globally
+   governed; the app's decorative-only reduced-motion block in
+   animations.css remains and is a strict subset of this. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+    /* Film grain is static already, but make sure nothing lingers. */
+    body::after { animation: none !important; }
 }
 
 
@@ -228,6 +251,10 @@ hr {
     --transition-fast:   120ms ease;
     --transition-base:   200ms ease;
     --transition-slow:   280ms ease;
+    /* S-LUX-3 motion doctrine (D-LUX3-1): one decisive ease for chrome
+       motion — panels, modals, toasts, sidebar collapse. Transform/opacity
+       only. Durations reuse the tokens above. */
+    --ease-out-quart:    cubic-bezier(0.25, 1, 0.5, 1);
 
     /* ── Z-index Stack ───────────────────────────── */
     --z-sidebar:   40;
@@ -588,7 +615,8 @@ kbd {
        header off-screen on short viewports. Now .sidebar-brand + .sidebar-footer
        stay pinned and only the middle .sidebar-nav scrolls. */
     overflow: hidden;
-    transition: width var(--transition-slow);
+    /* S-LUX-3: decisive ease on the collapse/expand width transition */
+    transition: width 280ms var(--ease-out-quart);
     z-index: var(--z-sidebar);
 }
 
@@ -658,6 +686,7 @@ kbd {
 .sidebar-brand-name {
     font-size: 0.9375rem;
     font-weight: 600;
+    letter-spacing: var(--tracking-tight);   /* S-LUX-3: tighten the wordmark */
     color: var(--sidebar-brand-text);
     white-space: nowrap;
     overflow: hidden;
@@ -708,6 +737,11 @@ kbd {
     scroll-behavior: smooth;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
+    /* S-LUX-3: soft fade masks top + bottom so overflowing nav content
+       dissolves into the sidebar rather than hard-cutting at the edges.
+       12px feathers; the middle 100% stays fully opaque. */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
 }
 
 /* SIDEBAR-SCROLL-1: lock direct children to their natural size. When the
@@ -745,10 +779,13 @@ kbd {
     text-transform: uppercase;
     color: var(--sidebar-section-text);
     padding: 12px 8px 4px;
+    /* S-LUX-3: more air above each section group (except the first). */
+    margin-top: 8px;
     white-space: nowrap;
     overflow: hidden;
     transition: opacity var(--transition-base);
 }
+.sidebar-nav > .nav-section-label:first-child { margin-top: 0; }
 
 .nav-item {
     display: flex;
@@ -812,7 +849,8 @@ kbd {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: opacity var(--transition-base);
+    /* S-LUX-3: labels fade + slide (transform/opacity only) on collapse. */
+    transition: opacity var(--transition-base), transform var(--transition-base);
 }
 
 .nav-badge {
@@ -983,6 +1021,11 @@ kbd {
         opacity: 0;
         pointer-events: none;
         max-width: 0;
+    }
+    /* S-LUX-3: the nav label also slides left 4px as it fades (transform
+       only — no layout cost; max-width above handles the reflow). */
+    .sidebar:not(.is-open) .nav-item-label {
+        transform: translateX(-4px);
     }
 
     /* Elements that must FULLY collapse out of layout in icons-only
@@ -1303,10 +1346,12 @@ kbd {
     top: calc(100% + 8px);
     right: 0;
     width: 360px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-xl);
+    /* S-LUX-3 panel recipe (see .user-dropdown). */
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--card-sheen), var(--shadow-lg);
+    transform-origin: top right;
     z-index: var(--z-dropdown);
     overflow: hidden;
 }
@@ -1686,6 +1731,19 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     background: var(--bg-surface-hover, var(--bg-muted));
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
 }
+
+/* S-LUX-3: account-menu chevron — muted, and flips 180° when the menu is
+   open (keyed on the trigger's own aria-expanded, so no Alpine binding). */
+.user-trigger-chevron {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    transition: transform var(--transition-base) var(--ease-out-quart);
+}
+.user-trigger[aria-expanded="true"] .user-trigger-chevron {
+    transform: rotate(180deg);
+}
 .user-trigger:focus-visible {
     outline: 2px solid var(--border-focus, var(--color-primary));
     outline-offset: 2px;
@@ -1756,10 +1814,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     top: calc(100% + 10px);
     right: 0;
     width: 240px;
-    background: var(--bg-surface);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-xl);
+    /* S-LUX-3 panel recipe: raised surface-2 + strong hairline + radius-lg +
+       shadow-lg + card sheen; transform-origin top for the enter animation. */
+    background: var(--bg-surface-2);
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--card-sheen), var(--shadow-lg);
+    transform-origin: top right;
     z-index: var(--z-dropdown);
     overflow: hidden;
 }
@@ -1810,21 +1871,26 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     margin: 4px 0;
 }
 
-/* Menu items */
+/* Menu items — S-LUX-3: inset hover surface with a 6px radius (breathes 6px
+   from the panel edge) instead of a full-bleed bar. */
 .user-dropdown-item {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 9px 16px;
+    padding: 9px 10px;
+    margin: 0 6px;
+    border-radius: var(--radius-md);
     font-size: 0.875rem;
     color: var(--text-primary);
     text-decoration: none;
     transition: background var(--transition-fast);
 }
-.user-dropdown-item:hover {
+.user-dropdown-item:hover,
+.user-dropdown-item:focus-visible {
     background: var(--bg-surface-hover);
     text-decoration: none;
     color: var(--text-primary);
+    outline: none;
 }
 .user-dropdown-item svg,
 .user-dropdown-item .nav-icon {
@@ -1982,6 +2048,9 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 
 .page-header-title {
     margin: 0;
+    /* S-LUX-3: canonical page title — tight display tracking, weight 600. */
+    letter-spacing: var(--tracking-tight);
+    font-weight: 600;
     background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -2468,10 +2537,16 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     white-space: nowrap;
     transition: background var(--transition-fast), color var(--transition-fast),
                 border-color var(--transition-fast), box-shadow var(--transition-fast),
-                opacity var(--transition-fast);
+                transform var(--transition-fast), opacity var(--transition-fast);
     line-height: 1;
     vertical-align: middle;
     user-select: none;
+}
+
+/* S-LUX-3: every button springs on press (transform only), not just
+   .btn-primary. Disabled buttons stay still. */
+.btn:not(:disabled):not([disabled]):not(.is-disabled):active {
+    transform: scale(0.985);
 }
 
 .btn:focus-visible {
@@ -2650,18 +2725,31 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     border: none;
     background: transparent;
     cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
+    /* S-LUX-3: add transform so :active can spring (transform/opacity only). */
+    transition: background var(--transition-fast), color var(--transition-fast),
+                transform var(--transition-fast);
     flex-shrink: 0;
 }
 
 .btn-icon:hover {
-    background: var(--bg-surface-2);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
+}
+
+/* S-LUX-3: tactile press on every icon button. */
+.btn-icon:active {
+    transform: scale(0.94);
 }
 
 .btn-icon:focus-visible {
     outline: 2px solid var(--border-focus);
     outline-offset: 2px;
+}
+
+/* S-LUX-3: topbar icon buttons read as circular hit areas (36px pills). */
+.topbar-right .btn-icon,
+.topbar-left .btn-icon {
+    border-radius: var(--radius-full);
 }
 
 .btn-icon .nav-icon {
@@ -3522,7 +3610,7 @@ textarea.form-input {
 .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.70);
+    background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
     z-index: var(--z-modal);
@@ -3534,10 +3622,11 @@ textarea.form-input {
 
 .modal {
     position: relative;
+    /* S-LUX-3: Atelier card recipe at modal scale — radius-2xl + sheen + xl shadow. */
     background: var(--bg-surface);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-2xl);
     border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-xl);
+    box-shadow: var(--card-sheen), var(--shadow-xl);
     width: 100%;
     max-width: 560px;
     max-height: calc(100vh - 48px);
@@ -3630,28 +3719,28 @@ textarea.form-input {
     flex-shrink: 0;
 }
 
-/* Modal entry animation (used by Alpine x-transition) */
+/* Modal entry animation (used by Alpine x-transition) — S-LUX-3:
+   enter = fade + rise 6px + scale up from 0.97, 200ms ease-out-quart;
+   exit = quick fade, 120ms. Transform/opacity only. */
 .modal-enter {
-    transition: opacity 180ms ease, transform 180ms ease;
+    transition: opacity 200ms var(--ease-out-quart), transform 200ms var(--ease-out-quart);
 }
 .modal-enter-start {
     opacity: 0;
-    transform: scale(0.96) translateY(8px);
+    transform: scale(0.97) translateY(6px);
 }
 .modal-enter-end {
     opacity: 1;
     transform: scale(1) translateY(0);
 }
 .modal-leave {
-    transition: opacity 130ms ease, transform 130ms ease;
+    transition: opacity 120ms ease;
 }
 .modal-leave-start {
     opacity: 1;
-    transform: scale(1);
 }
 .modal-leave-end {
     opacity: 0;
-    transform: scale(0.96);
 }
 
 
@@ -3674,31 +3763,55 @@ textarea.form-input {
 }
 
 .toast {
+    position: relative;
     display: flex;
     align-items: flex-start;
     gap: 12px;
     padding: 14px 16px;
+    /* S-LUX-3: Atelier card recipe + slide-in from 16px with the chrome ease. */
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--card-sheen), var(--shadow-lg);
+    overflow: hidden;   /* clip the bottom progress hairline to the rounded corners */
     pointer-events: all;
-    transition: opacity 250ms ease, transform 250ms ease;
-    animation: toast-in 250ms ease forwards;
+    transition: opacity 200ms var(--ease-out-quart), transform 200ms var(--ease-out-quart);
+    animation: toast-in 200ms var(--ease-out-quart) forwards;
 }
 
 @keyframes toast-in {
-    from { opacity: 0; transform: translateX(24px); }
+    from { opacity: 0; transform: translateX(16px); }
     to   { opacity: 1; transform: translateX(0); }
 }
 
 .toast.is-leaving {
-    animation: toast-out 200ms ease forwards;
+    animation: toast-out 160ms var(--ease-out-quart) forwards;
 }
 
 @keyframes toast-out {
     from { opacity: 1; transform: translateX(0); max-height: 100px; }
-    to   { opacity: 0; transform: translateX(24px); max-height: 0; margin: 0; padding: 0; }
+    to   { opacity: 0; transform: translateX(16px); max-height: 0; margin: 0; padding: 0; }
+}
+
+/* S-LUX-3: auto-dismiss progress — a 2px hairline pinned to the bottom that
+   shrinks over the toast's lifetime. The JS sets `animation-duration` inline
+   to the real dismiss time (added only when duration > 0), so it stays in sync;
+   the semantic colour comes from the toast-* variant below. */
+.toast-progress {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 2px;
+    width: 100%;
+    transform-origin: left center;
+    background: var(--color-info);
+    animation-name: toast-progress;
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+}
+@keyframes toast-progress {
+    from { transform: scaleX(1); }
+    to   { transform: scaleX(0); }
 }
 
 .toast-icon {
@@ -3737,43 +3850,49 @@ textarea.form-input {
 
 .toast-close:hover { opacity: 1; }
 
-/* Colour variants — left border accent */
-.toast-success { border-left: 3px solid var(--color-success); }
-.toast-warning { border-left: 3px solid var(--color-warning); }
-.toast-danger  { border-left: 3px solid var(--color-danger);  }
-.toast-info    { border-left: 3px solid var(--color-info);    }
+/* Colour variants — S-LUX-3: 4px semantic left rail + matching icon + the
+   progress hairline picks up the same semantic colour. */
+.toast-success { border-left: 4px solid var(--color-success); }
+.toast-warning { border-left: 4px solid var(--color-warning); }
+.toast-danger  { border-left: 4px solid var(--color-danger);  }
+.toast-info    { border-left: 4px solid var(--color-info);    }
 
 .toast-success .toast-icon { color: var(--color-success); }
 .toast-warning .toast-icon { color: var(--color-warning); }
 .toast-danger  .toast-icon { color: var(--color-danger);  }
 .toast-info    .toast-icon { color: var(--color-info);    }
 
+.toast-success .toast-progress { background: var(--color-success); }
+.toast-warning .toast-progress { background: var(--color-warning); }
+.toast-danger  .toast-progress { background: var(--color-danger);  }
+.toast-info    .toast-progress { background: var(--color-info);    }
+
 
 /* ============================================================
    14. Notification Dropdown Transitions (Alpine x-transition)
    ============================================================ */
 
+/* S-LUX-3: enter = fade + drop 4px + scale up from 0.98, 120ms ease-out-quart
+   from the top; exit = quick fade only, 80ms. Transform/opacity only. */
 .dropdown-enter {
-    transition: opacity 150ms ease, transform 150ms ease;
+    transition: opacity 120ms var(--ease-out-quart), transform 120ms var(--ease-out-quart);
 }
 .dropdown-enter-start {
     opacity: 0;
-    transform: translateY(-6px) scale(0.98);
+    transform: translateY(-4px) scale(0.98);
 }
 .dropdown-enter-end {
     opacity: 1;
     transform: translateY(0) scale(1);
 }
 .dropdown-leave {
-    transition: opacity 100ms ease, transform 100ms ease;
+    transition: opacity 80ms ease;
 }
 .dropdown-leave-start {
     opacity: 1;
-    transform: translateY(0) scale(1);
 }
 .dropdown-leave-end {
     opacity: 0;
-    transform: translateY(-6px) scale(0.98);
 }
 
 
@@ -4097,19 +4216,22 @@ textarea.form-input {
 .search-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
+    /* S-LUX-3: deeper scrim + 4px blur, matching the modal backdrop. */
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
 }
 
 .search-panel {
     position: relative;
     width: 100%;
     max-width: 600px;
-    background: var(--bg-surface);
+    /* S-LUX-3 panel recipe at modal scale — raised surface-2 + strong
+       hairline + shadow-xl + sheen. */
+    background: var(--bg-surface-2);
     border-radius: var(--radius-xl);
-    border: 1px solid var(--border-color);
-    box-shadow: var(--shadow-xl);
+    border: 1px solid var(--border-color-strong);
+    box-shadow: var(--card-sheen), var(--shadow-xl);
     overflow: hidden;
     z-index: 1;
 }
@@ -4173,13 +4295,16 @@ textarea.form-input {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 16px;
+    padding: 10px 10px;
+    margin: 0 8px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     text-decoration: none;
     color: var(--text-primary);
     transition: background var(--transition-fast);
 }
 
+/* S-LUX-3: keyboard-focused row matches the hover surface (inset 6px radius). */
 .search-result-item:hover,
 .search-result-item.is-focused {
     background: var(--bg-surface-hover);
@@ -5103,7 +5228,7 @@ html.is-mac .non-mac-only { display: none; }
     display: flex;
     align-items: center;
     gap: 2px;
-    font-size: 0.8125rem;
+    font-size: 0.75rem;   /* S-LUX-3: 12px breadcrumb */
     color: var(--text-tertiary);
     margin-bottom: 10px;
     flex-wrap: wrap;
