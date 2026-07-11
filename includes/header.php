@@ -102,7 +102,11 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
 
     <?= ff_favicon_tags() ?>
 
-    <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
+    <!-- S-LUX-1: Geist variable fonts — self-hosted (@font-face in app.css), preloaded to avoid FOUT.
+         crossorigin is required even same-origin: font fetches are CORS-mode, and a preload whose
+         mode mismatches the real request is discarded (double download). -->
+    <link rel="preload" href="<?= asset_url('assets/fonts/Geist[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="<?= asset_url('assets/fonts/GeistMono[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
 
     <!-- Application stylesheet -->
     <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
