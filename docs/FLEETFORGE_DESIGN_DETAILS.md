@@ -688,6 +688,37 @@ The customer portal (`app/portal/`) inherits the admin Atelier token cascade (S-
 
 ---
 
+## 6.10 SEMANTIC BANNERS / ALERTS — the ONE idiom (S-LUX-5)
+
+**Never hardcode banner colours inline.** Use the `.alert` component; it is theme-adaptive.
+
+```html
+<div class="alert alert-warning">…</div>   <!-- amber / caution -->
+<div class="alert alert-danger">…</div>     <!-- red / error -->
+<div class="alert alert-success">…</div>    <!-- green / done -->
+<div class="alert alert-info">…</div>       <!-- blue / note -->
+```
+
+- `.alert-*` were rebased in S-LUX-5 onto the real `--color-{warning,danger,success,info}-light` (bg) + `--color-*-text` (text) token pairs with a `color-mix` border. They had referenced **undefined** `--badge-*-bg`/`--badge-*-text` tokens, so every alert rendered transparent — which is why accounting screens hardcoded `#fff7d6`/`#ffe6e6` inline (a light box that broke dark mode). That idiom was swept to `.alert-*`.
+- For an **Alpine `:style` row highlight** where you can't add a class, use the token directly: `:style="cond ? 'background:var(--color-warning-light);' : ''"` (never `#fff7d6`).
+- **Undefined-token aliases** (S-LUX-5): legacy views reference `--border-default` / `--bg-elev` / `--bg-elevated` / `--bg-subtle` (with light hex fallbacks). These are now aliased in `:root` to `--border-color` / `--bg-surface-2`, so those references resolve theme-correctly. Prefer the canonical token names in new code.
+
+---
+
+## 6.11 ATELIER ARC — COMPLETE (S-LUX-1 → S-LUX-5, 2026-07-11)
+
+The five-session design-elevation arc is done:
+- **S-LUX-1** Foundation — Geist fonts, warm-dark token rebase (`:root` ≡ `[data-theme="dark"]`), material tokens, brand-override chain (§1).
+- **S-LUX-2** Data surfaces — global ApexCharts theme, tables, KPI tiles (§1.8).
+- **S-LUX-2.5** Forms — pills, custom checkbox/radio, validation, choice controls (§1.5.1/1.5.2).
+- **S-LUX-3** Chrome & motion — sidebar/topbar/panels/modals/toasts + motion doctrine (§6.5) + page-header recipe (§6.6).
+- **S-LUX-4** Front door — login/auth (§6.7), empty-state recipe (§6.8), portal (§6.9).
+- **S-LUX-5** Closer — semantic-banner idiom (§6.10), CCA form audit, last cream light-island (`.rate-item-card`) retired.
+
+**No hardcoded cream light-islands remain** (stat-card retired in S-LUX-2, rate-item-card in S-LUX-5); **no old cool-palette hex in app.css**; the white-label brand chain reaches admin + login + aux-auth + portal. **Deferred (accepted debt, NOT part of the arc):** `S-LUX-HEADER-SWEEP` (page-header markup unification, ~150 files), `S-LUX-COPY-PASS` (empty-state copy, 80+ views), `S-LUX-INLINE-DEBT` (~7,400 benign layout inline styles).
+
+---
+
 ## 7. LOADING SKELETON PATTERN
 
 ```html
