@@ -4480,30 +4480,63 @@ textarea.form-input {
 }
 
 /* Empty state */
-.empty-state {
+/* ============================================================
+   S-LUX-4 (D-LUX4-6) — ONE canonical empty-state recipe.
+   icon (48px, --text-tertiary, 1.5px stroke) → title (15px/600) →
+   body (13px, --text-secondary) → optional action. Vertically
+   centered, max-width 360px. `.empty-state` is the dominant class
+   (90+ admin uses) so rebasing it here reaches them all CSS-only;
+   `.ff-empty*` are aliases for the same recipe on new markup, and
+   `.portal-empty*` (below) inherit the same values. */
+.empty-state,
+.ff-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-align: center;
+    max-width: 360px;
+    margin-inline: auto;
     padding: 48px 24px;
     color: var(--text-tertiary);
 }
+/* Table-context sits inside a card/row — tighter; page-context is the
+   default roomy version above. */
+.ff-empty--table { padding: 32px 24px; }
+.ff-empty--page  { padding: 64px 24px; }
 
-.empty-state-icon {
+.empty-state-icon,
+.ff-empty-icon {
     width: 48px;
     height: 48px;
     margin: 0 auto 16px;
-    opacity: 0.4;
+    color: var(--text-tertiary);
+    opacity: 0.9;
+}
+/* CSS stroke-width reaches inline heroicon SVGs (stroke=currentColor). */
+.empty-state-icon svg,
+.ff-empty-icon svg {
+    width: 100%;
+    height: 100%;
+    stroke-width: 1.5;
 }
 
-.empty-state-title {
-    font-size: 1rem;
+.empty-state-title,
+.ff-empty-title {
+    font-size: 0.9375rem;   /* 15px */
     font-weight: 600;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     margin-bottom: 6px;
 }
 
-.empty-state-text {
-    font-size: 0.875rem;
+.empty-state-text,
+.ff-empty-text {
+    font-size: 0.8125rem;   /* 13px */
+    color: var(--text-secondary);
     margin-bottom: 20px;
+    line-height: 1.5;
 }
+.empty-state-text:last-child,
+.ff-empty-text:last-child { margin-bottom: 0; }
 
 /* Focus visible — global accessible focus ring */
 :focus-visible {
@@ -5510,13 +5543,31 @@ dl.detail-grid dd {
     background: var(--bg-hover);
     color: var(--text-primary);
 }
+/* S-LUX-4: active portal nav adopts the admin-sidebar language — a brand
+   tint + 2px left rail instead of a solid orange block. Consumes
+   var(--color-primary) so the white-label chain recolours it. */
+.portal-nav-item {
+    position: relative;
+}
 .portal-nav-item.is-active {
-    background: var(--color-accent);
-    color: #fff;
+    background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+    color: var(--text-primary);
     font-weight: 600;
 }
-.portal-nav-item.is-active svg {
+.portal-nav-item.is-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--color-primary);
+}
+.portal-nav-item.is-active svg,
+.portal-nav-item.is-active .portal-nav-icon {
     opacity: 1;
+    color: var(--color-primary);
 }
 .portal-nav-icon {
     width: 20px;
@@ -5538,10 +5589,8 @@ dl.detail-grid dd {
     min-width: 18px;
     text-align: center;
 }
-.portal-nav-item.is-active .portal-nav-badge {
-    background: rgba(255,255,255,0.2);
-    color: #fff;
-}
+/* S-LUX-4: active nav is now tinted (not a solid block), so the badge keeps
+   its normal danger colours — the old white-on-fill override is dropped. */
 .portal-nav-divider {
     height: 1px;
     background: var(--border-color);
@@ -5601,8 +5650,14 @@ dl.detail-grid dd {
     justify-content: space-between;
     padding: 0 24px;
     height: 56px;
-    background: var(--bg-card);
+    /* S-LUX-4: glass header matching the admin topbar recipe. */
+    background: var(--topbar-bg);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    backdrop-filter: blur(14px) saturate(1.4);
     border-bottom: 1px solid var(--border-color);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .portal-topbar { background: var(--bg-card); }
 }
 .portal-topbar-left {
     display: flex;
@@ -5705,9 +5760,21 @@ dl.detail-grid dd {
     font-size: 0.6875rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
+    letter-spacing: var(--tracking-label);   /* S-LUX-4: token */
+    color: var(--text-tertiary);
     margin: 0 0 4px;
+}
+/* S-LUX-4: version reads as a hairline mono chip, not plain text. */
+.portal-footer-version {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--text-tertiary);
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-full);
+    background: var(--bg-surface);
 }
 .portal-footer-col a   {
     font-size: 0.875rem;
@@ -6257,15 +6324,23 @@ dl.detail-grid dd {
 }
 
 /* ── Portal Empty State ─────────────────────────────────────── */
+/* S-LUX-4: portal empty state aligned to the canonical D-LUX4-6 recipe. */
 .portal-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     text-align: center;
+    max-width: 360px;
+    margin-inline: auto;
     padding: 48px 20px;
 }
 .portal-empty svg {
     width: 48px;
     height: 48px;
-    color: var(--text-muted);
-    margin-bottom: 12px;
+    color: var(--text-tertiary);
+    stroke-width: 1.5;
+    margin-bottom: 16px;
+    opacity: 0.9;
 }
 .portal-empty-title {
     font-size: 0.9375rem;

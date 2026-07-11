@@ -80,7 +80,7 @@ $_companyName = settings_get('company.name') ?: legal_config('company.brand_name
 
             <div class="portal-footer-bottom">
                 <span>&copy; <?= date('Y') ?> <?= e($_companyName) ?>. All rights reserved.</span>
-                <span><?= e(legal_config('company.product_name')) ?> <?= e(FF_VERSION) ?></span>
+                <span class="portal-footer-version"><?= e(legal_config('company.product_name')) ?> <?= e(FF_VERSION) ?></span>
             </div>
         </footer>
 
