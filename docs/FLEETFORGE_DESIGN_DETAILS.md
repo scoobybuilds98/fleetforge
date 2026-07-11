@@ -644,6 +644,50 @@ Canonical CSS-first page header. Where a page's markup already uses these classe
 
 ---
 
+## 6.7 AUTH FRONT DOOR — login stage + auth-card recipe (S-LUX-4)
+
+The auth family is `app/auth/{login, mfa_challenge, mfa_required, forgot_password, reset_password}.php` — each a standalone page that loads `app.css` and carries a small scoped `<style>`.
+
+- **Login** (`login.php`): a glass `.auth-card` (radius-2xl + specular top edge + `backdrop-filter: blur(40px)`) floating over a blurred **background video** (`media/video1.mp4`). The video is an **operator choice (kept, S-LUX-4)** — the restrained dark stage below is for the video-less screens. Card composition: logo (3-source chain: `brand.logo_path` → `public/media/login-logo.{ext}` → inline SVG truck) → "Welcome back" / "Sign in to {company.name}" → pill inputs → full-width brand CTA → forgot link → `.login-footer` legal links.
+- **Aux screens** (mfa/forgot/reset): the **restrained dark stage** — `radial-gradient(600px circle at 50% 22%, color-mix(in srgb, var(--color-primary) 6%, transparent), transparent 70%)` over `var(--bg-body)` — plus the Atelier card recipe (`--radius-2xl` + `--card-sheen` + `--shadow-xl`). MFA TOTP input: a **single** input styled for a 6-slot feel (`font-family: var(--font-mono)`, `letter-spacing: 0.35em`, `font-variant-numeric: tabular-nums`, 24px, centered) — never split into 6 inputs (no logic change).
+- **Card entrance:** `@keyframes auth-card-in { opacity 0→1; translateY(8px)→0 }`, 280ms `--ease-out-quart`, once; each screen guards it with `@media (prefers-reduced-motion: reduce) { .auth-card { animation: none } }`.
+- **White-label chain (S-LUX-4):** EVERY auth screen AND the customer portal now inject `<style id="ff-brand-override">` from `brand.primary_color` — before S-LUX-4 only `login.php` did, so the aux screens + portal rendered default-orange while a branded login was blue. All accents/glow read `var(--color-primary)`.
+- Login is dark-always (`data-theme="dark"` hardcoded); the aux screens respect the stored `ff-theme`.
+
+---
+
+## 6.8 EMPTY-STATE RECIPE (S-LUX-4, D-LUX4-6)
+
+ONE canonical empty state. The dominant `.empty-state` class (90+ admin uses) was rebased to this recipe so every existing empty state adopts it CSS-only; `.ff-empty*` are aliases for new markup, and `.portal-empty*` shares the same values.
+
+```css
+.empty-state, .ff-empty {
+  display: flex; flex-direction: column; align-items: center; text-align: center;
+  max-width: 360px; margin-inline: auto; padding: 48px 24px; color: var(--text-tertiary);
+}
+.ff-empty--table { padding: 32px 24px; }   /* inside a card/row */
+.ff-empty--page  { padding: 64px 24px; }   /* full-page */
+.empty-state-icon, .ff-empty-icon { width: 48px; height: 48px; color: var(--text-tertiary); }
+.empty-state-icon svg { stroke-width: 1.5; }          /* reaches inline heroicons */
+.empty-state-title, .ff-empty-title { font-size: 0.9375rem; font-weight: 600; color: var(--text-primary); }
+.empty-state-text,  .ff-empty-text  { font-size: 0.8125rem; color: var(--text-secondary); }
+```
+
+- Structure: icon (48px, `--text-tertiary`, 1.5px stroke) → title (15px/600, `--text-primary`) → body (13px, `--text-secondary`) → optional primary action. Vertically centered, `max-width: 360px`.
+- Human-copy pass ("No records found" → "No invoices yet") is per-view (80+ files) — an S-LUX-5 follow-up, not done in the recipe rebase.
+
+---
+
+## 6.9 PORTAL NOTES (S-LUX-4)
+
+The customer portal (`app/portal/`) inherits the admin Atelier token cascade (S-LUX-1) — cards/tables/forms already resolve to the warm palette. S-LUX-4 chrome refinements:
+- `.portal-topbar` → glass (`--topbar-bg` + `backdrop-filter: blur(14px) saturate(1.4)` + `@supports` solid fallback), matching the admin topbar.
+- `.portal-nav-item.is-active` → admin-sidebar language: brand **tint** (`color-mix(var(--color-primary) 14%)`) + a 2px left `::before` **rail** + brand-coloured icon, replacing the old solid-brand-fill block (all `var(--color-primary)` → white-label-safe).
+- 2-column footer: column headers use `--tracking-label`; the version string is a mono hairline chip (`.portal-footer-version`).
+- Portal follows the stored theme (`data-theme` from the user preference) — preserved, no portal-specific toggle invented.
+
+---
+
 ## 7. LOADING SKELETON PATTERN
 
 ```html
