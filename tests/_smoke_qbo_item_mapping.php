@@ -14,7 +14,7 @@ declare(strict_types=1);
  * Self-cleaning: synthetic rows use sentinel qbo_ids
  * ('TEST-SMOKE-I-*') + sentinel ff_item_type values are skipped
  * (we only insert qbo_only sentinel rows + variant verification rows;
- * never mutate the 18-tuple FF iteration baseline because the live
+ * never mutate the 28-tuple FF iteration baseline because the live
  * mapping rows belong to operator workflow).
  *
  * 18 sub-checks:
@@ -25,7 +25,7 @@ declare(strict_types=1);
  *        + ffItemTypes + normalizeName public static
  *   C4   ItemCreator class + createMissingItem + resolveIncomeAccount
  *        public static
- *   C5   ffItemTypes() returns 18 tuples sourced from
+ *   C5   ffItemTypes() returns 28 tuples sourced from
  *        INFORMATION_SCHEMA (NOT hardcoded — verifies the actual ENUM
  *        is what we iterate; future ENUM additions auto-flow)
  *   C6   displayNameFor mapping correctness for representative tuples
@@ -56,7 +56,7 @@ declare(strict_types=1);
  *        Tax Codes and Settings
  *  C17   ItemPuller::normalize maps representative QBO Item JSON to
  *        the expected flat shape (offline; no HTTP)
- *  C18   ItemMatcher::UI_CATEGORIES covers all 17 FF ENUM values
+ *  C18   ItemMatcher::UI_CATEGORIES covers all 27 FF ENUM values
  *        (every item_type appears in exactly one category — no
  *        orphans, no duplicates)
  *
@@ -179,12 +179,13 @@ else { echo "FAIL C4 " . implode('; ', $c4Errors) . "\n"; $failures[] = 'C4'; }
 $c5Errors = [];
 try {
     $tuples = ItemMatcher::ffItemTypes();
-    if (count($tuples) !== 19) {
-        $c5Errors[] = 'expected 19 tuples (17 non-variant + 2 GPS variants), got ' . count($tuples);
+    if (count($tuples) !== 28) {
+        $c5Errors[] = 'expected 28 tuples (26 non-variant + 2 GPS variants), got ' . count($tuples);
     }
-    // Verify a few canonical ENUM values are present.
+    // Verify a few canonical ENUM values are present (incl. the
+    // service-charge + engine-hours additions, 2026-07-11).
     $itemTypes = array_column($tuples, 'ff_item_type');
-    foreach (['base_rental', 'base_rental_reconciliation_credit', 'gps', 'mileage_precharge', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit', 'other'] as $expected) {
+    foreach (['base_rental', 'base_rental_reconciliation_credit', 'gps', 'mileage_precharge', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit', 'hourly_usage', 'hours_estimate', 'hours_adjustment', 'hours_credit', 'cartage', 'sweep', 'wash', 'fuel', 'other'] as $expected) {
         if (!in_array($expected, $itemTypes, true)) {
             $c5Errors[] = "expected ff_item_type '{$expected}' in ffItemTypes() output";
         }
@@ -203,7 +204,7 @@ try {
 } catch (Throwable $e) {
     $c5Errors[] = 'exception: ' . $e->getMessage();
 }
-if (empty($c5Errors)) { echo "PASS C5 ffItemTypes() introspects ENUM and yields 19 tuples\n"; $pass++; }
+if (empty($c5Errors)) { echo "PASS C5 ffItemTypes() introspects ENUM and yields 28 tuples\n"; $pass++; }
 else { echo "FAIL C5 " . implode('; ', $c5Errors) . "\n"; $failures[] = 'C5'; }
 
 // ── C6: displayNameFor mapping correctness ──────────────────
@@ -596,13 +597,13 @@ foreach ($enumTypes as $t) {
         $c18Errors[] = "item_type '{$t}' missing from UI_CATEGORIES";
     }
 }
-if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 18 ENUM values exactly once\n"; $pass++; }
+if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 27 ENUM values exactly once\n"; $pass++; }
 else { echo "FAIL C18 " . implode('; ', $c18Errors) . "\n"; $failures[] = 'C18'; }
 
 // ── C19: S-QBO-MATCHER-WEDGE-RECOVERY — item wedge rescue ──
 // Item map has no FK on ff_item_type (ENUM column; MySQL doesn't FK ENUMs),
 // so we use an existing valid ff_item_type value + variant pairing that
-// won't collide with the live 19 tuples. base_rental with a unique variant
+// won't collide with the live 28 tuples. base_rental with a unique variant
 // (smoke-only sentinel) is safe.
 $c19Errors = [];
 try {

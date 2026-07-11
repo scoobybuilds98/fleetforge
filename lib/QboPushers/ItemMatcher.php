@@ -61,9 +61,13 @@ class ItemMatcher
     public const MIN_TOKEN_LENGTH = 4;
 
     /**
-     * Display-name mapping for the 18 actual FF item_type ENUM values
+     * Display-name mapping for the 27 actual FF item_type ENUM values
      * (verified at S-QBO-10 pre-flight against invoice_line_items.item_type;
-     * 'mileage' added when the ENUM was extended).
+     * 'mileage' added when the ENUM was extended; service charges
+     * cartage/sweep/wash/fuel + engine-hours types hourly_usage/
+     * hours_estimate/hours_adjustment/hours_credit added 2026-07-11
+     * to catch up with the service-charge and S-HOURS-EST-DAILY ENUM
+     * extensions).
      * Used as:
      *   - the auto-match comparison key (normalized) against QBO Item.Name
      *   - the default Name when ItemCreator authors a new QBO Item
@@ -82,6 +86,14 @@ class ItemMatcher
         'mileage_usage'                    => 'Mileage Usage',
         'mileage_drawdown_credit'          => 'Mileage Drawdown Credit',
         'mileage'                          => 'Mileage',
+        'hourly_usage'                     => 'Engine Hours Usage',
+        'hours_estimate'                   => 'Estimated Engine Hours',
+        'hours_adjustment'                 => 'Engine Hours Adjustment',
+        'hours_credit'                     => 'Engine Hours Credit',
+        'cartage'                          => 'Cartage',
+        'sweep'                            => 'Sweep Service',
+        'wash'                             => 'Wash Service',
+        'fuel'                             => 'Fuel Charge',
         'damage'                           => 'Damage Recovery',
         'late_fee'                         => 'Late Fee',
         'early_return_credit'              => 'Early Return Credit',
@@ -111,6 +123,18 @@ class ItemMatcher
             'mileage_usage',
             'mileage_drawdown_credit',
             'mileage',
+        ],
+        'Engine Hours' => [
+            'hourly_usage',
+            'hours_estimate',
+            'hours_adjustment',
+            'hours_credit',
+        ],
+        'Service Charges' => [
+            'cartage',
+            'sweep',
+            'wash',
+            'fuel',
         ],
         'Fees' => [
             'late_fee',
