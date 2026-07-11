@@ -484,8 +484,10 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
 
+                    <!-- ── Rate / est-per-day / allowance — one responsive row (S-FORM-LAYOUT) ── -->
+                    <div class="form-row-3">
                     <!-- ── Single rate input ── -->
-                    <div class="form-group" style="max-width:320px;margin-bottom:1.25rem;">
+                    <div class="form-group">
                         <label class="form-label" for="mileage_rate">
                             Mileage rate (per <span x-text="form.mileage_unit === 'km' ? 'km' : 'mile'"></span>)
                         </label>
@@ -509,7 +511,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
 
                     <!-- ── Estimated mileage per day (S-MILEAGE-EST-DAILY) ── -->
-                    <div class="form-group" style="max-width:320px;margin-bottom:1.25rem;">
+                    <div class="form-group">
                         <label class="form-label" for="estimated_mileage_per_day">
                             Estimated mileage per day (<span x-text="form.mileage_unit === 'km' ? 'km' : 'miles'"></span>/day)
                         </label>
@@ -534,7 +536,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
 
                     <!-- ── Single allowance input (with inline km/miles toggle) ── -->
-                    <div class="form-group" style="max-width:320px;margin-bottom:1.25rem;">
+                    <div class="form-group">
                         <label class="form-label" for="estimated_mileage">Estimated mileage</label>
                         <div class="input-group">
                             <input type="number"
@@ -570,6 +572,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="form-hint" style="margin-top:4px;">Total distance included in the lease (same unit as the rate). Leave at 0 with a rate to bill every unit from 0.</div>
                         <div class="form-error" x-show="errors.estimated_mileage" x-text="errors.estimated_mileage"></div>
                     </div>
+                    </div><!-- /form-row-3 rate+per-day+allowance -->
 
                     <!-- ══════════════════════════════════════════════════════════
                          S-MILEAGE-1 Model B — Mileage precharge subsection
@@ -701,11 +704,11 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-LEASE-HOURLY-BILLING: manual starting engine/reefer hours.
-                     Only shown when this lease has an hourly rate (the billing
-                     gate); the engine bills (end − start) × hourly_rate. -->
-                <div class="form-group" style="max-width:320px;margin-top:1rem;"
-                     x-show="parseFloat(form.hourly_rate) > 0">
+                <!-- S-LEASE-HOURLY-BILLING + S-HOURS-EST-DAILY (S-FORM-LAYOUT): starting
+                     engine hours + estimated engine hours per day share one responsive
+                     row. Shown only when this lease has an hourly rate (the billing gate). -->
+                <div class="form-row-2" style="margin-top:1rem;" x-show="parseFloat(form.hourly_rate) > 0">
+                <div class="form-group">
                     <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
                     <input type="number" id="engine_hours_at_start" class="form-control font-mono"
                            x-model="form.engine_hours_at_start" step="0.01" min="0"
@@ -716,13 +719,10 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="form-error" x-show="errors.engine_hours_at_start" x-text="errors.engine_hours_at_start"></div>
                 </div>
 
-                <!-- ── Estimated engine hours per day (S-HOURS-EST-DAILY) ──
-                     The engine-hours parallel of "estimated mileage per day".
-                     Only shown when this lease has an hourly rate. Each invoice
-                     bills days × this × rate as an estimate, then trues up at
-                     close against actual (end − start) engine hours. -->
-                <div class="form-group" style="max-width:320px;margin-top:1rem;"
-                     x-show="parseFloat(form.hourly_rate) > 0">
+                <!-- Estimated engine hours per day (S-HOURS-EST-DAILY) — the engine-hours
+                     parallel of "estimated mileage per day": each invoice bills days × this
+                     × rate as an estimate, trued up at close against actual (end − start). -->
+                <div class="form-group">
                     <label class="form-label" for="estimated_engine_hours_per_day">Estimated engine hours per day (hrs/day)</label>
                     <div class="input-group">
                         <input type="number"
@@ -743,6 +743,7 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                     <div class="form-error" x-show="errors.estimated_engine_hours_per_day" x-text="errors.estimated_engine_hours_per_day"></div>
                 </div>
+                </div><!-- /form-row-2 engine-hours -->
 
                 <!-- S-LEASE-SERVICE-CHARGES: one-time cartage (delivery) charge.
                      Manual amount — entered only when we deliver the unit; bills

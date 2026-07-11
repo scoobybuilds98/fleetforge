@@ -134,6 +134,7 @@ require_once FF_ROOT . '/includes/header.php';
 
         <template x-if="showLinks">
             <div style="display:flex; flex-direction:column; gap:1rem; margin-bottom:1.25rem; padding:1rem; background:var(--bg-subtle); border-radius:6px;">
+                <div class="form-row-3">
                 <!-- Lease picker (optional) -->
                 <div class="form-group">
                     <label class="form-label">Lease <span style="color:var(--text-tertiary);">(optional)</span></label>
@@ -187,6 +188,7 @@ require_once FF_ROOT . '/includes/header.php';
                     require FF_ROOT . '/includes/partials/record-picker.php';
                     ?>
                 </div>
+                </div><!-- /form-row-3 -->
             </div>
         </template>
 

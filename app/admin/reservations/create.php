@@ -110,6 +110,8 @@ require_once FF_ROOT . '/includes/header.php';
             <!-- ── Two-column form grid ──────────────────────────── -->
             <div class="form-grid-2">
 
+                <!-- Row: Status + Contact Name -->
+                <div class="form-row-2">
                 <!-- LEFT: Status -->
                 <div class="form-group">
                     <label class="form-label" for="res-status">Status:</label>
@@ -129,6 +131,7 @@ require_once FF_ROOT . '/includes/header.php';
                            :readonly="mode === 'customer' && form.customer_id">
                     <p class="form-error" x-show="errors.contact_name" x-text="errors.contact_name"></p>
                 </div>
+                </div><!-- /form-row-2 -->
 
                 <!-- LEFT: Customer selector (existing mode) -->
                 <div class="form-group" x-show="mode === 'customer'">
@@ -163,6 +166,8 @@ require_once FF_ROOT . '/includes/header.php';
                     <p class="form-error" x-show="errors.company_name" x-text="errors.company_name"></p>
                 </div>
 
+                <!-- Row: Trailer Type + Quantity -->
+                <div class="form-row-2">
                 <!-- RIGHT: Trailer Type -->
                 <div class="form-group">
                     <label class="form-label" for="res-trailer-type">Trailer Type:</label>
@@ -183,6 +188,7 @@ require_once FF_ROOT . '/includes/header.php';
                            x-model.number="form.quantity">
                     <p class="form-error" x-show="errors.quantity" x-text="errors.quantity"></p>
                 </div>
+                </div><!-- /form-row-2 -->
 
                 <!-- RIGHT: Unit# selector -->
                 <div class="form-group">
@@ -335,6 +341,8 @@ require_once FF_ROOT . '/includes/header.php';
                 </summary>
                 <div class="form-grid-2" style="margin-top:12px;">
 
+                    <!-- Row: Priority + Contact Phone -->
+                    <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="res-priority">Priority:</label>
                         <select id="res-priority" class="form-select" x-model="form.priority">
@@ -351,7 +359,10 @@ require_once FF_ROOT . '/includes/header.php';
                                placeholder="e.g. 604-555-0100"
                                x-model="form.contact_phone">
                     </div>
+                    </div><!-- /form-row-2 -->
 
+                    <!-- Row: Contact Email + Purpose -->
+                    <div class="form-row-2">
                     <div class="form-group">
                         <label class="form-label" for="res-email">Contact Email:</label>
                         <input id="res-email" type="email" class="form-input"
@@ -367,6 +378,7 @@ require_once FF_ROOT . '/includes/header.php';
                                placeholder="e.g. Container import run"
                                x-model="form.purpose">
                     </div>
+                    </div><!-- /form-row-2 -->
 
                     <div class="form-group" style="grid-column:1/-1;">
                         <label class="form-label" for="res-internal">Internal Notes:</label>

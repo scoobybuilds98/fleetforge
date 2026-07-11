@@ -588,10 +588,10 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
-                <!-- S-LEASE-HOURLY-BILLING: engine-hours readings (shown once an hourly
-                     rate is set — reacts to the editable rate above). Start editable;
-                     end is set at close (read-only on active leases). -->
-                <div class="form-row-2" x-show="parseFloat(form.hourly_rate) > 0">
+                <!-- S-LEASE-HOURLY-BILLING + S-HOURS-EST-DAILY (S-FORM-LAYOUT): engine-hours
+                     readings + estimated hours/day, one responsive row (shown once an hourly
+                     rate is set). Start editable; end is set at close (read-only on active leases). -->
+                <div class="form-row-3" x-show="parseFloat(form.hourly_rate) > 0">
                     <div class="form-group">
                         <label class="form-label" for="engine_hours_at_start">Starting Engine Hours</label>
                         <input type="number" id="engine_hours_at_start" class="form-control font-mono"
@@ -608,19 +608,18 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.engine_hours_at_end" step="0.01" min="0">
                         <?php endif; ?>
                     </div>
-                </div>
-
-                <!-- ── Estimated engine hours per day (S-HOURS-EST-DAILY) ── -->
-                <div class="form-group" x-show="parseFloat(form.hourly_rate) > 0" style="margin-top:0.75rem;">
-                    <label class="form-label" for="estimated_engine_hours_per_day">Estimated engine hours per day (hrs/day)</label>
-                    <div class="input-group" style="max-width:320px;">
-                        <input type="number" id="estimated_engine_hours_per_day" class="form-control font-mono"
-                               x-model="form.estimated_engine_hours_per_day" step="0.01" min="0" placeholder="0">
-                        <span class="input-group-suffix">hrs/day</span>
+                    <!-- ── Estimated engine hours per day (S-HOURS-EST-DAILY) ── -->
+                    <div class="form-group">
+                        <label class="form-label" for="estimated_engine_hours_per_day">Estimated engine hours per day (hrs/day)</label>
+                        <div class="input-group">
+                            <input type="number" id="estimated_engine_hours_per_day" class="form-control font-mono"
+                                   x-model="form.estimated_engine_hours_per_day" step="0.01" min="0" placeholder="0">
+                            <span class="input-group-suffix">hrs/day</span>
+                        </div>
+                        <div class="form-hint">Each invoice bills days &times; this &times; the hourly rate as an estimate, then trues up against actual (end &minus; start) engine hours at close. 0 = bill only actual hours.</div>
+                        <div class="form-error" x-show="errors.estimated_engine_hours_per_day" x-text="errors.estimated_engine_hours_per_day"></div>
                     </div>
-                    <div class="form-hint">Each invoice bills days &times; this &times; the hourly rate as an estimate, then trues up against actual (end &minus; start) engine hours at close. 0 = bill only actual hours.</div>
-                    <div class="form-error" x-show="errors.estimated_engine_hours_per_day" x-text="errors.estimated_engine_hours_per_day"></div>
-                </div>
+                </div><!-- /form-row-3 engine-hours -->
 
                 <!-- S-MILEAGE-1 Model B — Mileage precharge subsection
                      S-LEASE-EDIT-ACTIVE-UNLOCK: editable on active leases too; the
