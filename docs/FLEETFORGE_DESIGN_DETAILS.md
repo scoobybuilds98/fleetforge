@@ -390,6 +390,28 @@ Component treatments that ride these tokens (all in `app.css`, CSS-only):
 
 ---
 
+## 1.8 CHART THEME — ff-chart-theme.js (S-LUX-2, 2026-07-11)
+
+All ApexCharts charts render through ONE global theme so the brand override + light/dark toggle propagate to charts with zero per-chart edits. File: `public/assets/js/ff-chart-theme.js` (loaded in `includes/footer.php` AFTER the ApexCharts lib, BEFORE `app.js` + any chart init).
+
+**API**
+- `window.FF_CHART_THEME(overrides)` → a full ApexCharts options object: an Atelier **base** deep-merged with `overrides` (arrays + functions REPLACE wholesale; plain objects merge key-by-key). Every chart init is `new ApexCharts(el, FF_CHART_THEME(pageOptions))` where `pageOptions` carries ONLY that chart's data/intent (series, labels, categories, chart.type/height, formatters, deliberate semantic-colour overrides).
+- `window.FF_CHART_TOKENS()` → the resolved token values `{primary,info,success,warning,danger,textPrimary,textSecondary,textTertiary,border,borderStrong,surface,surface2,fontSans}` read from `getComputedStyle(document.documentElement)` at call time.
+
+**Base object** (what a chart no longer needs to set):
+- `chart`: `background:'transparent'`, `fontFamily:` `--font-sans` (Geist), `foreColor:` `--text-secondary`, `animations` 400ms, `toolbar:{show:false}`, `parentHeightOffset:0`, `redrawOn*:true`
+- `theme.mode` auto from `data-theme`; `colors:` `[--color-primary, --color-info, --color-success, --color-warning, --color-danger, --text-tertiary]`
+- `grid.borderColor:` `--border-color`, `strokeDashArray:0`; `xaxis/yaxis` label colours `--text-tertiary` 11px Geist, axisBorder/ticks hidden
+- `stroke {width:2, curve:'smooth'}`; area `fill` gradient (opacityFrom .28 → opacityTo .02); `dataLabels {enabled:false}`
+- `legend` bottom, 11px, `--text-secondary`, radius-12 markers; `tooltip.theme` auto + Geist 12px (the tooltip SURFACE is themed in app.css via `.apexcharts-tooltip*` tokens)
+- `plotOptions.bar {borderRadius:4, columnWidth:'48%', barHeight:'55%'}`, `plotOptions.pie.donut{size:'68%'}`
+
+**Token-read pattern / theme reactivity (D-LUX2-2):** the app.js ApexCharts monkey-patch registers every instance into `window.FF_ChartInstances` via `FF_CHART_REGISTER`. `FF_Theme.set()` dispatches a `ff:theme-changed` CustomEvent; ff-chart-theme.js listens and `chart.updateOptions(themeSubset, false, false)` on each live instance — re-reading tokens for `colors`, `chart.foreColor`, `grid.borderColor`, `legend`, `tooltip.theme`, `theme.mode`. **The subset deliberately omits `xaxis`/`yaxis`** — ApexCharts normalises yaxis to an array internally, and pushing a `{labels:{style}}` object through `updateOptions` drops the per-chart formatter (money/percent/days). `chart.foreColor` recolors axis text without touching the formatter-bearing axis config. Brand-override recolor happens at build time (charts read `--color-primary` on construct) — proven live with the operator's `#2596be`.
+
+**Coexistence with the app.js patch** (`patchApexChartsForResponsive`): the patch only fills keys the options don't set (a mobile `responsive` breakpoint, `tooltip.theme`, `dataLabels.dropShadow`). FF_CHART_THEME sets `tooltip.theme` (patch inert there) and deliberately leaves `responsive` + `dropShadow` to the patch. FF_CHART_THEME is a pure options transformer — never re-wrap the constructor.
+
+---
+
 ## 2. BUTTON VARIANTS — The 8 × 5 matrix
 
 ### 8 variants:
