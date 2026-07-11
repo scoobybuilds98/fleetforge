@@ -592,10 +592,10 @@ Mobile (<768px): single column, KPIs 2 per row
 |----------|-------|
 | Position | Top-right, 16px from edges |
 | Duration | Success: 4s, Info: 5s, Warning: 6s, Error: 8s |
-| Auto-dismiss | Yes, with progress bar at bottom of toast |
+| Auto-dismiss | Yes. **S-LUX-3:** a 2px semantic progress hairline pinned to the bottom (`.toast-progress`) shrinks `scaleX(1)→0` over the toast's life. `FF_Toast.show()` appends it only when `duration>0`, with `style="animation-duration:{duration}ms"` so it stays exactly in sync; **sticky toasts (`duration=0`) get NO bar.** |
 | Dismiss on click | Yes — clicking the × or the toast itself |
 | Stacking | Newest on top, max 5 visible, older ones pushed down |
-| Animation | Slide in from right (200ms), fade out (300ms) |
+| Animation | **S-LUX-3:** slide in `translateX(16px)`+fade **200ms `--ease-out-quart`**; leave 160ms. Card recipe: `--card-sheen` + `--shadow-lg`, **4px** semantic left rail (`.toast-{success,warning,danger,info}`). |
 | Width | 360px fixed |
 | Content | Icon (left) + Title (bold 13px) + Message (12px, up to 2 lines) + × button |
 
@@ -610,12 +610,37 @@ Mobile (<768px): single column, KPIs 2 per row
 | Large | `modal-lg` | 720px | Complex forms, multi-section |
 | Full | `modal-full` | 90vw, max 1100px | Data-heavy views, editors |
 
-- Overlay: rgba(0,0,0,0.5) — click outside closes (unless `data-persistent`)
-- Animation: fade overlay 200ms + scale content from 95% to 100% (200ms)
+- Overlay: **S-LUX-3:** `rgba(0,0,0,0.6)` + `backdrop-filter: blur(4px)` — click outside closes (unless `data-persistent`)
+- Panel: **S-LUX-3:** Atelier card recipe — `--radius-2xl` (20px) + `--card-sheen` + `--shadow-xl`
+- Animation: **S-LUX-3:** enter = fade + `scale(0.97)`→1 + `translateY(6px)`→0, **200ms `--ease-out-quart`**; exit = fade-only **120ms** (`.modal-enter*` / `.modal-leave*`, driven by Alpine x-transition)
 - Focus trap: Tab cycles within modal
 - Escape key: closes (unless persistent)
 - Scroll: modal body scrolls, header/footer fixed
 - Stacking: only 1 modal at a time. Opening a second closes the first.
+
+---
+
+## 6.5 MOTION DOCTRINE (S-LUX-3, D-LUX3-1)
+
+The one place chrome motion is governed. **Transform + opacity only** (GPU-safe — never animate layout/paint properties like width/height/top on interactive paths). Durations come from the existing tokens (`--transition-fast` 120ms / `--transition-base` 200ms / `--transition-slow` 280ms). One easing carries all chrome motion: **`--ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1)`**.
+
+- **Dropdowns / menus / cmd-K:** enter fade + `translateY(-4px)` + `scale(0.98)`, 120ms ease-out-quart, `transform-origin` top; exit opacity-only 80ms.
+- **Modals:** enter fade + `scale(0.97)` + `translateY(6px)`, 200ms ease-out-quart; exit fade 120ms.
+- **Toasts:** slide `translateX(16px)` + fade, 200ms ease-out-quart.
+- **Buttons / icon buttons:** `:active` spring (`scale(0.985)` / icon `scale(0.94)`).
+- **Data-critical elements do NOT animate in** — table rows never fade/slide (avoids reflow jank on large lists); charts are handled by their own theme (§1.8).
+- **Reduced motion:** a global `@media (prefers-reduced-motion: reduce)` block collapses every `animation-duration`/`transition-duration` to `0.01ms !important` and forces `scroll-behavior:auto`. It is 0.01ms (not 0) so `transitionend`/`animationend` still fire — the toast dismiss + Alpine x-transition state machines rely on those events and would hang at 0. The decorative-only reduced-motion block in `animations.css` remains and is a strict subset.
+
+---
+
+## 6.6 PAGE-HEADER RECIPE (S-LUX-3, D-LUX3-2)
+
+Canonical CSS-first page header. Where a page's markup already uses these classes it gets the treatment for free; **pages that hand-roll a header (a `.breadcrumb` + bare `<h1>` + inline `flex-end` action row) are the majority today and are NOT restructured in this session — converting them is an S-LUX-5 markup pass.**
+
+- **Breadcrumb** (`.breadcrumb`): 12px, `--text-tertiary`, `/`-style separators at 0.4 opacity; links `--text-secondary` → `--text-primary` on hover with a `--bg-surface-2` chip.
+- **Title** (`.page-header-title`): `--tracking-tight`, weight 600, gradient text-clip (`--text-primary`→`--text-secondary`).
+- **Actions** (`.page-header-actions`): right-aligned flex, `gap: 8px`, wraps on overflow.
+- **Container** (`.page-header`): sticky under the topbar, bottom hairline, `--bg-body` fill.
 
 ---
 
