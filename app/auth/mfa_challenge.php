@@ -237,6 +237,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?= ff_favicon_tags() ?>
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <?php
+    // S-LUX-4: mirror the login brand-colour override so the whole auth family
+    // honours the white-label chain (these screens rendered default-orange while
+    // a branded login was blue). Read-only settings → CSS var injection.
+    $_ffBrand = (string) (settings_get('brand.primary_color') ?: '');
+    if ($_ffBrand !== ''): ?>
+    <style id="ff-brand-override">:root{--color-primary:<?= e($_ffBrand) ?>;--color-primary-hover:<?= e((string)(settings_get('brand.primary_hover') ?: '#1e7ea0')) ?>;--color-primary-light:<?= e((string)(settings_get('brand.primary_light') ?: '#e0f4fb')) ?>;}</style>
+    <?php endif; ?>
     <script>try{var t=localStorage.getItem('ff-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
     <style>
         /* S-LUX-4: restrained dark stage — a single very subtle radial brand
