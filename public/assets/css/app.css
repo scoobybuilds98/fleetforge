@@ -463,8 +463,10 @@ h1, h2, h3, h4, h5, h6 {
     color: var(--text-primary);
 }
 
-h1 { font-size: 1.5rem;    }   /* 24px */
-h2 { font-size: 1.25rem;   }   /* 20px */
+/* S-LUX-1: page-level headings get tight tracking (display sizes read
+   looser than they should at default spacing; -0.02em snaps them in) */
+h1 { font-size: 1.5rem;  letter-spacing: var(--tracking-tight); }   /* 24px */
+h2 { font-size: 1.25rem; letter-spacing: var(--tracking-tight); }   /* 20px */
 h3 { font-size: 1.125rem;  }   /* 18px */
 h4 { font-size: 1rem;      }   /* 16px */
 h5 { font-size: 0.9375rem; }   /* 15px */
@@ -739,7 +741,7 @@ kbd {
 .nav-section-label {
     font-size: 0.6875rem;  /* 11px */
     font-weight: 600;
-    letter-spacing: 0.07em;
+    letter-spacing: var(--tracking-label);
     text-transform: uppercase;
     color: var(--sidebar-section-text);
     padding: 12px 8px 4px;
@@ -773,6 +775,19 @@ kbd {
 .nav-item.is-active {
     background: var(--sidebar-item-active-bg);
     color: var(--sidebar-text-active);
+}
+
+/* S-LUX-1: 2px brand rail on the active nav item — the tinted bg says
+   "here-ish", the rail says exactly here. Rides the item's own
+   overflow:hidden so it clips to the rounded corners. */
+.nav-item.is-active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--color-primary);
 }
 
 .nav-item-icon {
@@ -1097,14 +1112,25 @@ kbd {
     top: 0;
     z-index: var(--z-topbar);
     height: var(--topbar-height);
+    /* S-LUX-1 chrome glass: --topbar-bg is translucent; blur+saturate
+       frosts whatever scrolls beneath (solid fallback in @supports below) */
     background: var(--topbar-bg);
-    border-bottom: 1px solid var(--topbar-border);
+    -webkit-backdrop-filter: blur(14px) saturate(1.4);
+    backdrop-filter: blur(14px) saturate(1.4);
+    border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 0 20px 0 24px;
     gap: 16px;
     flex-shrink: 0;
+}
+
+/* Glass fallback — no backdrop-filter support means the translucent
+   --topbar-bg would ghost page content through the bar; go solid. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .topbar { background: #111009; }
+    [data-theme="light"] .topbar { background: #F7F5F1; }
 }
 
 .topbar-left {
@@ -1974,13 +2000,14 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     overflow: hidden;
-    box-shadow: var(--shadow-sm);
+    /* S-LUX-1 Atelier material: 1px inner top sheen + ambient falloff */
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
     transition: box-shadow var(--transition-base), border-color var(--transition-base);
 }
 
 .card:hover {
     border-color: var(--border-color-strong);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--card-sheen), var(--shadow-ambient), var(--shadow-md);
 }
 
 .card-header {
@@ -1994,9 +2021,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 }
 
 .card-title {
-    font-size: 0.9375rem;
+    /* S-LUX-1: card headers read as section micro-labels (matches the
+       uppercase table-header treatment) rather than competing with data */
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
+    color: var(--text-secondary);
     margin: 0;
 }
 
@@ -2104,7 +2135,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     font-size: 0.75rem;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: var(--tracking-label);
     color: var(--text-secondary);
     margin: 0;
 }
@@ -2444,12 +2475,19 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     background: var(--color-primary);
     color: #ffffff;
     border-color: var(--color-primary);
+    /* S-LUX-1: subtle top inner highlight — "lit from above" */
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transition: background var(--transition-fast), border-color var(--transition-fast),
+                transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 .btn-primary:hover {
     background: var(--color-primary-hover);
     border-color: var(--color-primary-hover);
     text-decoration: none;
     color: #ffffff;
+}
+.btn-primary:active {
+    transform: scale(0.985);
 }
 
 .btn-secondary {
@@ -2458,7 +2496,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     border-color: var(--border-color-strong);
 }
 .btn-secondary:hover {
-    background: var(--bg-surface-2);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
     border-color: var(--border-color-strong);
     text-decoration: none;
@@ -2505,7 +2543,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     border-color: var(--border-color);
 }
 .btn-ghost:hover {
-    background: var(--bg-surface-2);
+    background: var(--bg-surface-hover);
     color: var(--text-primary);
     border-color: var(--border-color-strong);
     text-decoration: none;
@@ -2648,10 +2686,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     gap: 4px;
     padding: 2px 8px;
     border-radius: var(--radius-full);
-    font-size: 0.75rem;
+    /* S-LUX-1: tightened micro-label — 11px caps with wide tracking */
+    font-size: 0.6875rem;
     font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
     white-space: nowrap;
-    line-height: 1.5;
+    line-height: 1.6;
 }
 
 .badge-primary  { background: var(--color-primary-light);  color: var(--color-primary-text);  }
@@ -2701,11 +2742,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
    ring via box-shadow (no border, so no layout shift on focus). */
 .form-label {
     display: block;
-    font-size: 0.8125rem;
-    font-weight: 500;
+    /* S-LUX-1: uppercase micro-label — 11px caps, wide tracking */
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
     color: var(--label-text);
     margin-bottom: 6px;
-    letter-spacing: 0.01em;
+    letter-spacing: var(--tracking-label);
 }
 
 .form-label .required {
@@ -9706,9 +9749,12 @@ body:has(.chat-page-content) #ff-chat-widget {
     margin-bottom: 0;
 }
 .form-section-title {
-    font-size: 0.9375rem;
+    /* S-LUX-1: micro-label treatment — matches .card-title / table headers */
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-label);
+    color: var(--text-secondary);
     margin: 0 0 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border-color);
@@ -10145,6 +10191,7 @@ tr.ff-row-selected > td {
 .page-title {
     font-size: 1.25rem;
     font-weight: 700;
+    letter-spacing: var(--tracking-tight);
     color: var(--text-primary);
     margin: 0 0 8px;
 }
@@ -10629,7 +10676,7 @@ tr.ff-row-selected > td {
 .dashboard-section-title {
     font-size: 0.8125rem;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: var(--tracking-label);
     text-transform: uppercase;
     color: var(--text-secondary);
     margin: 0;
@@ -11557,7 +11604,7 @@ tr.ff-row-selected > td {
     background:var(--bg-surface-2); border-bottom:1px solid var(--border-color);
     border-top:1px solid var(--border-color); position:sticky; top:0; z-index:2;
 }
-.perm-section-title { display:flex; align-items:center; gap:7px; font-size:0.6875rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.07em; }
+.perm-section-title { display:flex; align-items:center; gap:7px; font-size:0.6875rem; font-weight:600; color:var(--text-secondary); text-transform:uppercase; letter-spacing:var(--tracking-label); }
 .perm-section-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
 .perm-section-bulk-actions { display:flex; align-items:center; gap:4px; flex-shrink:0; }
 .perm-bulk-btn {
@@ -12187,4 +12234,39 @@ tr.ff-row-selected > td {
 @media (max-width: 767px) {
     .ai-panel { width: 100vw; }
     .ai-panel__body { padding: 16px 16px 28px; }
+}
+
+
+/* ============================================================
+   S-LUX-1 (2026-07-11) — Atelier finish layer
+   ::selection tint + film grain. Lives at end-of-file so it wins
+   source-order ties against everything above.
+   ============================================================ */
+
+/* Brand-tinted text selection. Background only — inheriting the
+   element's own text color keeps selected text readable in both
+   themes (the 30% orange tint reads over dark and light). */
+::selection {
+    background: rgba(249, 115, 22, 0.30);
+}
+
+/* Film grain — full-viewport SVG fractal noise at --grain-opacity
+   (kill-switch: set --grain-opacity: 0). pointer-events:none so it
+   never eats clicks; z-index 1 sits above static page content but
+   below all positioned chrome (sidebar 40 / topbar 30 / modal 60 /
+   toast 70). At 0.025 it reads as material texture, not dirt. */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-repeat: repeat;
+}
+
+/* Grain must never reach paper (PRINT-DARK-FIX companion) */
+@media print {
+    body::after { display: none; }
 }
