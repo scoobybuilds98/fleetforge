@@ -177,14 +177,14 @@ hr {
        D-LUX-1: these values are duplicated VERBATIM in the
        [data-theme="dark"] block below — default and explicit dark
        are one palette. Change them in BOTH places or not at all. */
-    --bg-body:               #0C0B09;
-    --bg-surface:            #151310;
-    --bg-surface-2:          #1C1A16;
-    --bg-surface-hover:      #232019;
-    --bg-muted:              #1C1A16;
-    --bg-secondary:          #1C1A16;
-    --bg-input:              #1C1A16;
-    --bg-hover:              #232019;
+    --bg-body:               #080605;
+    --bg-surface:            #1A1611;
+    --bg-surface-2:          #241F18;
+    --bg-surface-hover:      #2E2820;
+    --bg-muted:              #241F18;
+    --bg-secondary:          #241F18;
+    --bg-input:              #241F18;
+    --bg-hover:              #2E2820;
 
     /* ── Text ────────────────────────────────────── */
     --text-primary:          #F4F1EA;
@@ -195,8 +195,8 @@ hr {
     --text-on-danger:        #ffffff;
 
     /* ── Borders ─────────────────────────────────── */
-    --border-color:          #26231D;
-    --border-color-strong:   #36322A;
+    --border-color:          #322D24;
+    --border-color-strong:   #4A4438;
     --border-focus:          var(--color-primary);
 
     /* ── Sidebar ─────────────────────────────────── */
@@ -209,9 +209,9 @@ hr {
     --sidebar-text-hover:    #F4F1EA;
     --sidebar-text-active:   #ffffff;
     --sidebar-item-hover-bg: rgba(255, 255, 255, 0.05);
-    --sidebar-item-active-bg: color-mix(in srgb, var(--color-primary) 15%, transparent);
+    --sidebar-item-active-bg: color-mix(in srgb, var(--color-primary) 22%, transparent);
     --sidebar-hover:         rgba(255, 255, 255, 0.05);
-    --sidebar-active:        color-mix(in srgb, var(--color-primary) 15%, transparent);
+    --sidebar-active:        color-mix(in srgb, var(--color-primary) 22%, transparent);
     --sidebar-icon:          #736D61;
     --sidebar-icon-active:   var(--color-primary);
     --sidebar-section-text:  #8A8478;
@@ -219,7 +219,7 @@ hr {
 
     /* ── Topbar (glass — see chrome section) ─────── */
     --topbar-height:         60px;
-    --topbar-bg:             rgba(12, 11, 9, 0.72);
+    --topbar-bg:             rgba(8, 6, 5, 0.72);
     --topbar-border:         #26231D;
     --topbar-text:           #F4F1EA;
 
@@ -423,14 +423,14 @@ hr {
    ============================================================ */
 [data-theme="dark"] {
     /* ── Page backgrounds ─────────────────────────── */
-    --bg-body:               #0C0B09;
-    --bg-surface:            #151310;
-    --bg-surface-2:          #1C1A16;
-    --bg-muted:              #1C1A16;
-    --bg-secondary:          #1C1A16;
-    --bg-input:              #1C1A16;
-    --bg-surface-hover:      #232019;
-    --bg-hover:              #232019;
+    --bg-body:               #080605;
+    --bg-surface:            #1A1611;
+    --bg-surface-2:          #241F18;
+    --bg-muted:              #241F18;
+    --bg-secondary:          #241F18;
+    --bg-input:              #241F18;
+    --bg-surface-hover:      #2E2820;
+    --bg-hover:              #2E2820;
     --bg-selected:           color-mix(in srgb, var(--color-primary) 12%, transparent);
 
     /* ── Sidebar — always dark regardless of theme ── */
@@ -442,9 +442,9 @@ hr {
     --sidebar-text-hover:    #F4F1EA;
     --sidebar-text-active:   #ffffff;
     --sidebar-hover:         rgba(255, 255, 255, 0.05);
-    --sidebar-active:        color-mix(in srgb, var(--color-primary) 15%, transparent);
+    --sidebar-active:        color-mix(in srgb, var(--color-primary) 22%, transparent);
     --sidebar-item-hover-bg: rgba(255, 255, 255, 0.05);
-    --sidebar-item-active-bg: color-mix(in srgb, var(--color-primary) 15%, transparent);
+    --sidebar-item-active-bg: color-mix(in srgb, var(--color-primary) 22%, transparent);
     --sidebar-icon:          #736D61;
     --sidebar-icon-active:   var(--color-primary);
     --sidebar-brand-text:    #F4F1EA;
@@ -458,13 +458,13 @@ hr {
     --text-disabled:         #5C564B;
 
     /* ── Border colors ───────────────────────────── */
-    --border-color:          #26231D;
-    --border-color-strong:   #36322A;
+    --border-color:          #322D24;
+    --border-color-strong:   #4A4438;
     --border-strong:         #36322A;
     --border-focus:          var(--color-primary);
 
     /* ── Topbar (glass) ──────────────────────────── */
-    --topbar-bg:             rgba(12, 11, 9, 0.72);
+    --topbar-bg:             rgba(8, 6, 5, 0.72);
     --topbar-border:         #26231D;
     --topbar-text:           #F4F1EA;
 
@@ -833,7 +833,7 @@ kbd {
     left: 0;
     top: 0;
     bottom: 0;
-    width: 2px;
+    width: 3px;   /* S-LUX-LOUD: thicker, more assertive brand rail */
     background: var(--color-primary);
 }
 
@@ -1170,7 +1170,9 @@ kbd {
     background: var(--topbar-bg);
     -webkit-backdrop-filter: blur(14px) saturate(1.4);
     backdrop-filter: blur(14px) saturate(1.4);
-    border-bottom: 1px solid var(--border-color);
+    /* S-LUX-LOUD: brand-tinted 2px underline — a signature stroke of colour on
+       every page (follows the white-label chain via color-mix). */
+    border-bottom: 2px solid color-mix(in srgb, var(--color-primary) 45%, var(--border-color));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1739,7 +1741,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .user-trigger:hover {
     border-color: var(--color-primary);
     background: var(--bg-surface-hover, var(--bg-muted));
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 15%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
 }
 
 /* S-LUX-3: account-menu chevron — muted, and flips 180° when the menu is
@@ -2058,13 +2060,13 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 
 .page-header-title {
     margin: 0;
-    /* S-LUX-3: canonical page title — tight display tracking, weight 600. */
+    /* S-LUX-LOUD: bigger, heavier, solid-bright page title — the gradient-fade
+       to --text-secondary was softening it; a solid --text-primary at 700 reads
+       as a confident headline. */
+    font-size: 1.75rem;          /* 28px — S-LUX-LOUD confident headline */
+    font-weight: 700;
     letter-spacing: var(--tracking-tight);
-    font-weight: 600;
-    background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    color: var(--text-primary);
 }
 
 .page-header-actions {
@@ -2297,9 +2299,17 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     transition: box-shadow var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
-/* Left accent bar removed — accent colour now lives in the icon only */
+/* S-LUX-LOUD: colored top accent bar restored — each tile shows its semantic
+   accent (--stat-accent set by .stat-card--green/blue/amber/etc) or the brand
+   colour, so the dashboard reads with real colour again. */
 .stat-card::before {
-    display: none;
+    content: '';
+    display: block;
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: var(--stat-accent, var(--color-primary));
+    z-index: 1;
 }
 
 .stat-card:hover {
@@ -10645,7 +10655,7 @@ tr.ff-row-selected > td:first-child {
 
 /* ── Page title helper ─────────────────────────────────────── */
 .page-title {
-    font-size: 1.25rem;
+    font-size: 1.5rem;   /* S-LUX-LOUD: bigger */
     font-weight: 700;
     letter-spacing: var(--tracking-tight);
     color: var(--text-primary);
