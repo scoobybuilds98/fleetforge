@@ -11191,14 +11191,14 @@ tr.ff-row-selected > td:first-child {
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x mandatory;
     scrollbar-width: none;      /* Firefox */
-    /* Scrollable lane: prominent track background signals "swipe here".
-       Dark themes: lighter tint on dark body so cards (darker) pop off the track.
-       Light theme override below flips to a darker tint. */
-    background: rgba(255, 255, 255, 0.09);
-    border: 1.5px solid rgba(255, 255, 255, 0.13);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
-    border-radius: 18px;
-    padding: 14px;
+    /* S-LUX-LOUD: no frosted track panel — the cards sit directly on the page
+       background (operator ask). Scroll still works; the half-card "peek" on
+       the right still signals swipe-ability. */
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 6px 0;
     /* Right padding ≈ half a card — next card always peeking through */
     padding-right: calc(var(--carousel-card-w, 300px) / 2);
     cursor: grab;
@@ -11420,9 +11420,10 @@ tr.ff-row-selected > td:first-child {
 /* Light theme: flip to a darker tint so the track is a distinct sunken lane
    (white body → slightly gray track → white cards pop off it). */
 [data-theme="light"] .dashboard-carousel {
-    background: rgba(0, 0, 0, 0.07);
-    border-color: rgba(0, 0, 0, 0.14);
-    box-shadow: inset 0 1px 0 rgba(0,0,0,0.04);
+    /* S-LUX-LOUD: track panel removed in both themes — cards on the page bg. */
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
 }
 /* ════════════════════════════════════════════════════════════════════
    S-DASHBOARD-MOBILE-CAROUSEL END
