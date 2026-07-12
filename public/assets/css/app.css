@@ -177,14 +177,14 @@ hr {
        D-LUX-1: these values are duplicated VERBATIM in the
        [data-theme="dark"] block below — default and explicit dark
        are one palette. Change them in BOTH places or not at all. */
-    --bg-body:               #080605;
-    --bg-surface:            #1A1611;
-    --bg-surface-2:          #241F18;
-    --bg-surface-hover:      #2E2820;
-    --bg-muted:              #241F18;
-    --bg-secondary:          #241F18;
-    --bg-input:              #241F18;
-    --bg-hover:              #2E2820;
+    --bg-body:               #060403;
+    --bg-surface:            #1E1913;
+    --bg-surface-2:          #2A241B;
+    --bg-surface-hover:      #342D22;
+    --bg-muted:              #2A241B;
+    --bg-secondary:          #2A241B;
+    --bg-input:              #2A241B;
+    --bg-hover:              #342D22;
 
     /* ── Text ────────────────────────────────────── */
     --text-primary:          #F4F1EA;
@@ -219,7 +219,7 @@ hr {
 
     /* ── Topbar (glass — see chrome section) ─────── */
     --topbar-height:         60px;
-    --topbar-bg:             rgba(8, 6, 5, 0.72);
+    --topbar-bg:             rgba(6, 4, 3, 0.72);
     --topbar-border:         #26231D;
     --topbar-text:           #F4F1EA;
 
@@ -423,14 +423,14 @@ hr {
    ============================================================ */
 [data-theme="dark"] {
     /* ── Page backgrounds ─────────────────────────── */
-    --bg-body:               #080605;
-    --bg-surface:            #1A1611;
-    --bg-surface-2:          #241F18;
-    --bg-muted:              #241F18;
-    --bg-secondary:          #241F18;
-    --bg-input:              #241F18;
-    --bg-surface-hover:      #2E2820;
-    --bg-hover:              #2E2820;
+    --bg-body:               #060403;
+    --bg-surface:            #1E1913;
+    --bg-surface-2:          #2A241B;
+    --bg-muted:              #2A241B;
+    --bg-secondary:          #2A241B;
+    --bg-input:              #2A241B;
+    --bg-surface-hover:      #342D22;
+    --bg-hover:              #342D22;
     --bg-selected:           color-mix(in srgb, var(--color-primary) 12%, transparent);
 
     /* ── Sidebar — always dark regardless of theme ── */
@@ -464,7 +464,7 @@ hr {
     --border-focus:          var(--color-primary);
 
     /* ── Topbar (glass) ──────────────────────────── */
-    --topbar-bg:             rgba(8, 6, 5, 0.72);
+    --topbar-bg:             rgba(6, 4, 3, 0.72);
     --topbar-border:         #26231D;
     --topbar-text:           #F4F1EA;
 
@@ -1172,7 +1172,7 @@ kbd {
     backdrop-filter: blur(14px) saturate(1.4);
     /* S-LUX-LOUD: brand-tinted 2px underline — a signature stroke of colour on
        every page (follows the white-label chain via color-mix). */
-    border-bottom: 2px solid color-mix(in srgb, var(--color-primary) 45%, var(--border-color));
+    border-bottom: 2px solid color-mix(in srgb, var(--color-primary) 55%, var(--border-color));
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2063,7 +2063,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     /* S-LUX-LOUD: bigger, heavier, solid-bright page title — the gradient-fade
        to --text-secondary was softening it; a solid --text-primary at 700 reads
        as a confident headline. */
-    font-size: 1.75rem;          /* 28px — S-LUX-LOUD confident headline */
+    font-size: 2rem;             /* 32px — S-LUX-LOUD louder headline */
     font-weight: 700;
     letter-spacing: var(--tracking-tight);
     color: var(--text-primary);
@@ -2307,7 +2307,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     display: block;
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 3px;
+    height: 4px;
     background: var(--stat-accent, var(--color-primary));
     z-index: 1;
 }
@@ -4910,13 +4910,19 @@ html.is-mac .non-mac-only { display: none; }
     display: flex;
     flex-direction: column;
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    background: var(--bg-card);
-    box-shadow: var(--shadow-sm);
+    /* S-LUX-LOUD: align dashboard chart cards to the full Atelier card recipe
+       (sheen + ambient + radius-xl) so they lift off the deeper background like
+       the KPI tiles. */
+    border-radius: var(--radius-xl);
+    background: var(--bg-surface);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
     overflow: hidden;
 }
+/* S-LUX-LOUD: no header "band" — the title sits on the card surface, so the
+   card reads as one clean panel on the page background (operator ask). */
 .chart-card .card-header {
     padding: 16px 20px 12px;
+    background: transparent;
     border-bottom: 1px solid var(--border-color);
     display: flex;
     align-items: center;
