@@ -2299,17 +2299,10 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     transition: box-shadow var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
 }
 
-/* S-LUX-LOUD: colored top accent bar restored — each tile shows its semantic
-   accent (--stat-accent set by .stat-card--green/blue/amber/etc) or the brand
-   colour, so the dashboard reads with real colour again. */
+/* S-LUX-LOUD: the coloured top accent bar was removed per operator feedback
+   ("looks tacky") — tiles carry their accent via the icon only. */
 .stat-card::before {
-    content: '';
-    display: block;
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 4px;
-    background: var(--stat-accent, var(--color-primary));
-    z-index: 1;
+    display: none;
 }
 
 .stat-card:hover {
