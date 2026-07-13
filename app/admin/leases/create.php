@@ -422,6 +422,38 @@ require_once FF_ROOT . '/includes/header.php';
                     </div>
                 </div>
 
+                <!-- S-HOURLY-ONLY: proactive billing-basis guidance. Shown only after a
+                     rate lookup has run (rateSource !== null, i.e. customer + unit chosen).
+                     A lease may leave daily/weekly/monthly at 0 as long as an hourly (or
+                     mileage) rate carries the billing — these banners confirm that shape
+                     or guide the operator to fix a unit that has no billing basis at all.
+                     Rate fields are read DIRECTLY here (as an additive sum, not via a
+                     getter) so Alpine tracks every field for reactivity: a getter that
+                     short-circuits (.some()/||) hides some fields from the dependency
+                     tracker, leaving the banner stale when the operator edits a rate.
+                     All rate inputs are min=0, so sum <= 0 ⇔ every tier is zero. -->
+                <div class="alert alert-success" x-cloak style="margin:-2px 0 14px;"
+                     x-show="rateSource !== null && (parseFloat(form.daily_rate||0)+parseFloat(form.weekly_rate||0)+parseFloat(form.monthly_rate||0)) <= 0 && parseFloat(form.hourly_rate||0) > 0">
+                    ✓ This lease bills by <strong>engine hours</strong> at
+                    $<span x-text="parseFloat(form.hourly_rate||0).toFixed(2)"></span>/hr —
+                    daily, weekly &amp; monthly rates aren't required.
+                </div>
+                <div class="alert alert-warning" x-cloak style="margin:-2px 0 14px;"
+                     x-show="rateSource !== null && (parseFloat(form.daily_rate||0)+parseFloat(form.weekly_rate||0)+parseFloat(form.monthly_rate||0)+parseFloat(form.hourly_rate||0)+parseFloat(form.mileage_rate||0)) <= 0">
+                    <div style="font-weight:600;margin-bottom:4px;">⚠ This lease can’t be billed yet</div>
+                    <div style="margin-bottom:10px;">
+                        It has no daily, weekly, monthly, hourly or mileage rate. If you only charge
+                        <strong>engine hours</strong> for this equipment type, add an <strong>hourly rate</strong>
+                        to its rate card and it’ll pre-fill here — or type one into the Hourly Rate field above.
+                    </div>
+                    <a :href="rateCardId ? (ratesShowUrl + '?id=' + rateCardId) : ratesCreateUrl"
+                       target="_blank" rel="noopener"
+                       style="display:inline-block;padding:5px 12px;border-radius:var(--radius-md);font-weight:600;
+                              text-decoration:none;border:1px solid currentColor;color:inherit;">
+                        <span x-text="rateCardId ? 'Open this rate card' : 'Set up a rate card'"></span> ↗
+                    </a>
+                </div>
+
                 <!-- S-LEASE-MIN-DAYS — short-lease minimum billing floor.
                      WHY: when a lease's total billable duration is shorter than N
                      days, billing replaces the daily/weekly/monthly tier ladder with
@@ -1268,6 +1300,13 @@ function FF_CreateLease() {
         //      contracted rates. User must explicitly click Unlock to override.
         ratesLocked:     false,
 
+        // S-HOURLY-ONLY: id of the rate card the current rates were resolved from
+        // (null for template/none sources) — powers the "open this rate card" deep
+        // link in the billing-basis guidance banner.
+        rateCardId:      null,
+        ratesShowUrl:    '<?= base_url('rates/show') ?>',
+        ratesCreateUrl:  '<?= base_url('rates/create') ?>',
+
         init() {
             // Default start date to today
             this.form.start_date = new Date().toISOString().slice(0, 10);
@@ -1617,6 +1656,8 @@ function FF_CreateLease() {
                 // Set banner state
                 this.rateSource      = d.source;       // 'customer' | 'rate_card' | 'template' | 'none'
                 this.rateSourceLabel = d.source_label;
+                // S-HOURLY-ONLY: card id for the "open this rate card" deep link.
+                this.rateCardId      = d.rate_card_id ?? null;
 
                 // WHY: lock fields when source=customer so contracted rates can't be
                 //      accidentally overwritten. Unlock/Re-lock buttons let staff override.
@@ -1686,11 +1727,14 @@ function FF_CreateLease() {
                 fail('discount_value', 'Discount', 'Discount cannot exceed 100%.');
             }
 
-            // At least one rate must be > 0.
-            const anyRate = ['daily_rate','weekly_rate','monthly_rate','mileage_rate']
+            // At least one rate must be > 0. S-HOURLY-ONLY: an hourly rate counts —
+            // equipment billed only by engine hours legitimately has d/w/m/mileage 0
+            // (matches the server gate in api/v1/leases/create.php). The proactive
+            // rate-basis banner above already guides the operator here before Save.
+            const anyRate = ['daily_rate','weekly_rate','monthly_rate','mileage_rate','hourly_rate']
                 .some(k => Number(this.form[k] || 0) > 0);
             if (!anyRate) {
-                fail('daily_rate', 'A rate (daily, weekly, monthly, or mileage)',
+                fail('daily_rate', 'A rate (daily, weekly, monthly, mileage, or hourly)',
                     'Enter at least one rate greater than zero.');
             }
 

@@ -127,7 +127,7 @@ $rateCardItem = db_row(
     "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
             rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price, rci.currency,
             rci.minimum_days,
-            rc.name AS card_name, rc.customer_id
+            rc.id AS rate_card_id, rc.name AS card_name, rc.customer_id
      FROM rate_card_items rci
      JOIN rate_cards rc ON rc.id = rci.rate_card_id
      WHERE (
@@ -163,6 +163,11 @@ if ($rateCardItem) {
         'hourly_rate'  => $rateCardItem['hourly_rate'],
         'currency'     => $rateCardItem['currency'],
         'gps_price'    => $rateCardItem['gps_price'],
+        // S-HOURLY-ONLY: the resolved card id so the lease form can deep-link an
+        // operator to THIS card ("add an hourly rate here") when a unit has no
+        // billing basis yet. Only rate-card sources carry an id; template/none
+        // sources return null (no card to open — the form offers "create a card").
+        'rate_card_id' => (int) $rateCardItem['rate_card_id'],
         // S-LEASE-MIN-DAYS: per-item short-lease floor (Config Layer 1, highest
         // priority). NULL when this rate-card item sets no minimum. The lease
         // create form pre-fills minimum_billing_days from this when present.
@@ -198,6 +203,8 @@ if ($hasTemplateRates) {
         'hourly_rate'  => $template['default_hourly_rate'],
         'currency'     => $template['default_currency'] ?? 'CAD',
         'gps_price'    => null,
+        // S-HOURLY-ONLY: template defaults are not a card — no id to deep-link to.
+        'rate_card_id' => null,
         // S-LEASE-MIN-DAYS: templates carry no per-item minimum (Config Layer 1
         // lives on rate_card_items only). Always null here so the response shape
         // is consistent across all branches; the lease falls back to its frozen
@@ -220,6 +227,8 @@ json_success([
     'hourly_rate'  => null,
     'currency'     => 'CAD',
     'gps_price'    => null,
+    // S-HOURLY-ONLY: no source resolved → no card to deep-link to.
+    'rate_card_id' => null,
     // S-LEASE-MIN-DAYS: no rate source resolved → no per-item minimum. Keep the
     // key present (null) so every lookup_rates response has an identical shape.
     'minimum_days' => null,

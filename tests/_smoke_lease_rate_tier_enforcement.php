@@ -100,6 +100,13 @@ $post = static function (string $endpoint, array $payload) use ($harnessFile, &$
 
 $leaseId = null;
 $tplUpdId = null;
+// S-HOURLY-ONLY: available units used for the create SUCCESS cases; a successful
+// create flips a unit to 'leased', so we restore each in the finally block
+// (mirrors _smoke_lease_create_endpoint.php).
+$freeUnitId     = 0;
+$freeUnitPrior  = 'available';
+$freeUnit2Id    = 0;
+$freeUnit2Prior = 'available';
 
 $cleanup = static function () use (&$leaseId, &$tplUpdId, $CTOK, $TTOK) {
     if ($leaseId) {
@@ -119,6 +126,14 @@ try {
 
     $custId = (int) (db_row("SELECT id FROM customers WHERE deleted_at IS NULL ORDER BY id LIMIT 1")['id'] ?? 0);
     $unitId = (int) (db_row("SELECT id FROM equipment_units WHERE deleted_at IS NULL LIMIT 1")['id'] ?? 0);
+    // S-HOURLY-ONLY: genuinely available units for the SUCCESS cases — create.php
+    // rejects a lease on a non-available unit (status guard) before the rate gate,
+    // so a success assertion needs a clean unit. Two are needed (cases 7 + 10).
+    $freeUnits      = db_select("SELECT id, status FROM equipment_units WHERE status='available' AND deleted_at IS NULL ORDER BY id LIMIT 2");
+    $freeUnitId     = (int) ($freeUnits[0]['id'] ?? 0);
+    $freeUnitPrior  = (string) ($freeUnits[0]['status'] ?? 'available');
+    $freeUnit2Id    = (int) ($freeUnits[1]['id'] ?? 0);
+    $freeUnit2Prior = (string) ($freeUnits[1]['status'] ?? 'available');
 
     $cleanup();
 
@@ -276,11 +291,131 @@ try {
         $skip("6 lease create — no customer/unit available to attempt create");
     }
 
+    // ── 7. leases/create.php — S-HOURLY-ONLY: hourly-only lease CREATES ──────
+    // Equipment billed purely by engine hours: daily/weekly/monthly/mileage all 0,
+    // hourly_rate > 0. This is a legitimate shape (the InvoiceGenerator all-zero
+    // backstop + amend_rate accept it); create must now allow it too. Non-vacuous:
+    // asserts a real row is written AND no rate-basis field error is raised.
+    if ($custId && $freeUnitId) {
+        $r = $post('api/v1/leases/create.php', [
+            'customer_id'       => $custId,
+            'equipment_unit_id' => $freeUnitId,
+            'contract_number'   => $CTOK . '-HRLY',
+            'start_date'        => date('Y-m-d'),
+            'start_time'        => '08:00',
+            'billing_cycle'     => 'monthly',
+            'daily_rate'        => '0',
+            'weekly_rate'       => '0',
+            'monthly_rate'      => '0',
+            'mileage_rate'      => '0',
+            'hourly_rate'       => '5.0000',
+        ]);
+        $f = $r['error']['fields'] ?? [];
+        if (($r['success'] ?? null) === true && !empty($r['data']['id']) && !isset($f['daily_rate'])) {
+            $pass("7 lease create — hourly-only lease created (d/w/m/mileage=0, hourly=5.00) #" . $r['data']['id']);
+        } else {
+            $fail("7 lease create — hourly-only REJECTED: success=" . json_encode($r['success'] ?? null)
+                . " fields=" . json_encode($f) . " err=" . json_encode($r['error']['message'] ?? null));
+        }
+    } else {
+        $skip("7 lease create — no available unit for hourly-only success case");
+    }
+
+    // ── 8. leases/create.php — hourly=0 does NOT count as a basis (safety net) ─
+    // The one hard rule survives: a lease with NO basis at all (every rate incl.
+    // hourly = 0) is still rejected, so an hourly-only allowance can't degrade
+    // into a zero-rate lease that mints empty $0 invoices.
+    if ($custId && $unitId) {
+        $r = $post('api/v1/leases/create.php', [
+            'customer_id'       => $custId,
+            'equipment_unit_id' => $unitId,
+            'start_date'        => date('Y-m-d'),
+            'billing_cycle'     => 'monthly',
+            'daily_rate'        => '0',
+            'weekly_rate'       => '0',
+            'monthly_rate'      => '0',
+            'mileage_rate'      => '0',
+            'hourly_rate'       => '0',
+        ]);
+        $f = $r['error']['fields'] ?? [];
+        if (($r['success'] ?? null) === false && isset($f['daily_rate'])) {
+            $pass("8 lease create — all-zero incl. hourly still rejected (no billing basis)");
+        } else {
+            $fail("8 lease create — expected 422 rate-basis error; got success="
+                . json_encode($r['success'] ?? null) . " fields=" . json_encode(array_keys($f)));
+        }
+    } else {
+        $skip("8 lease create — no customer/unit available to attempt create");
+    }
+
+    // ── 9. S-ONCLOSE-RATE-HOLE: on_close_only + PARTIAL trio is now rejected ──
+    // A single-tier lease (daily-only here) bills $0 base once the duration
+    // outgrows that tier (>7 days → weekly=0). Previously only 'monthly' leases
+    // were gated for completeness; 'on_close_only' bills through the same ladder
+    // at close and slipped through → silent $0 under-bill. The completeness rule
+    // now runs for every cycle, so this create is rejected. Validation fires
+    // before the unit-availability check, so $unitId is fine.
+    if ($custId && $unitId) {
+        $r = $post('api/v1/leases/create.php', [
+            'customer_id'       => $custId,
+            'equipment_unit_id' => $unitId,
+            'start_date'        => date('Y-m-d'),
+            'start_time'        => '08:00',
+            'billing_cycle'     => 'on_close_only',
+            'daily_rate'        => '100',   // ONLY daily set — weekly/monthly 0 → $0 base past 7 days
+            'weekly_rate'       => '0',
+            'monthly_rate'      => '0',
+        ]);
+        $f = $r['error']['fields'] ?? [];
+        // completeness flags the ZERO siblings (weekly/monthly), not daily
+        if (($r['success'] ?? null) === false && (isset($f['weekly_rate']) || isset($f['monthly_rate']))) {
+            $pass("9 lease create — on_close_only partial trio (daily-only) REJECTED (silent-\$0 hole closed)");
+        } else {
+            $fail("9 lease create — expected 422 tier-hole error on on_close_only; got success="
+                . json_encode($r['success'] ?? null) . " fields=" . json_encode(array_keys($f)));
+        }
+    } else {
+        $skip("9 lease create — no customer/unit to attempt create");
+    }
+
+    // ── 10. Guard against over-blocking: on_close_only hourly-only still OK ───
+    // The completeness rule must fire only when a period tier is > 0; an all-zero
+    // trio + hourly rate (hourly-only shape) is legitimate on on_close_only too.
+    if ($custId && $freeUnit2Id) {
+        $r = $post('api/v1/leases/create.php', [
+            'customer_id'       => $custId,
+            'equipment_unit_id' => $freeUnit2Id,
+            'contract_number'   => $CTOK . '-OC-HRLY',
+            'start_date'        => date('Y-m-d'),
+            'start_time'        => '08:00',
+            'billing_cycle'     => 'on_close_only',
+            'daily_rate'        => '0',
+            'weekly_rate'       => '0',
+            'monthly_rate'      => '0',
+            'mileage_rate'      => '0',
+            'hourly_rate'       => '5.0000',
+        ]);
+        $f = $r['error']['fields'] ?? [];
+        if (($r['success'] ?? null) === true && !empty($r['data']['id'])
+            && !isset($f['daily_rate']) && !isset($f['weekly_rate']) && !isset($f['monthly_rate'])) {
+            $pass("10 lease create — on_close_only hourly-only still allowed (completeness not over-blocking) #" . $r['data']['id']);
+        } else {
+            $fail("10 lease create — hourly-only on_close_only wrongly blocked: success="
+                . json_encode($r['success'] ?? null) . " fields=" . json_encode($f));
+        }
+    } else {
+        $skip("10 lease create — no second available unit for on_close_only hourly-only case");
+    }
+
 } finally {
     echo "\n=== CLEANUP ===\n";
     $_SESSION = [];
     if ($tplUpdId) { db_execute("DELETE FROM equipment_templates WHERE id = ?", [$tplUpdId]); }
     $cleanup();
+    // S-HOURLY-ONLY: successful creates (cases 7, 10) flip a unit to 'leased'; the
+    // lease rows are deleted by $cleanup (LIKE $CTOK%), so restore each unit status.
+    if ($freeUnitId)  { db_execute("UPDATE equipment_units SET status=? WHERE id=?", [$freeUnitPrior,  $freeUnitId]); }
+    if ($freeUnit2Id) { db_execute("UPDATE equipment_units SET status=? WHERE id=?", [$freeUnit2Prior, $freeUnit2Id]); }
     if (isset($harnessFile) && file_exists($harnessFile)) @unlink($harnessFile);
     echo "  cleaned lease + template smoke rows\n";
 }

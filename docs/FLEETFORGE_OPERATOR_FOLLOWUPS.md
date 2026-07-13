@@ -35,6 +35,14 @@
 
 ---
 
+### F58 — Deploy S-HOURLY-ONLY (engine-hours-only leases + on-close $0-underbill fix) 🟢 DEFERRED (non-blocking; PHP only, no schema/asset)
+
+**Surfaced by:** S-HOURLY-ONLY (2026-07-14).
+**Affects:** `api/v1/leases/{create,lookup_rates,amend_rate}.php`, `app/admin/leases/create.php`. No schema, no migration, no `app.css`/asset-version change (guidance banners reuse the existing `.alert` classes).
+**Operator action:**
+1. `git pull` + `ff-deploy`. No `FF_ASSET_VERSION` bump needed.
+2. After deploy: engine-hours-only leases (0 daily/weekly/monthly + an hourly rate) are creatable, and a partial period-rate set on an "on close only" lease is now rejected at create/amend (was a silent `$0` base under-bill). No data remediation needed (0 prod leases known exposed; confirm with the exposed-shape query in the session notes if desired).
+
 ### F57 — Deploy S-LUX-LOUD (bolder look) + bump prod FF_ASSET_VERSION 🟢 DEFERRED (non-blocking; this is the visibly-different one)
 
 **Surfaced by:** S-LUX-LOUD (2026-07-12) — response to "the redesign looks the same / too subtle."

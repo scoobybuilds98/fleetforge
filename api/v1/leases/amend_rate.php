@@ -281,17 +281,20 @@ db_transaction(function () use (
     }
 
     // ── D132 rate-tier completeness (mirror of leases/create.php) ────
-    // An amendment must not leave a monthly lease with a rate-tier hole:
-    // when any of daily/weekly/monthly is > 0, ALL must be > 0. The
-    // holistic engine prorates partial periods (partial_start/partial_end)
-    // off the daily/weekly tiers, so a zero tier silently yields $0
-    // base_rental and a bogus reconciliation credit. create.php already
-    // enforces this; update.php blocks rate edits and routes here — so
-    // amend_rate.php was the one remaining path that could re-open the
-    // hole. Evaluate the EFFECTIVE post-amendment tiers (merged old +
-    // provided), not just the fields this request touched, so amending a
-    // single tier is validated against the resulting row.
-    if (($lease['billing_cycle'] ?? 'monthly') === 'monthly') {
+    // An amendment must not leave a lease with a rate-tier hole: when any of
+    // daily/weekly/monthly is > 0, ALL must be > 0. The holistic engine's tier
+    // ladder picks a tier by duration and yields $0 base_rental (+ a bogus
+    // reconciliation credit) when the chosen tier's rate is 0. create.php
+    // enforces this at creation; update.php blocks rate edits and routes here —
+    // so amend_rate.php is the one remaining path that could re-open the hole.
+    // Evaluate the EFFECTIVE post-amendment tiers (merged old + provided), not
+    // just the fields this request touched, so amending a single tier is
+    // validated against the resulting row.
+    // S-ONCLOSE-RATE-HOLE (2026-07-14): runs for on_close_only too, not just
+    // monthly — those leases bill through the SAME ladder at close and were the
+    // one shape that could still be amended into a silent $0 under-bill.
+    $leaseCycle = $lease['billing_cycle'] ?? 'monthly';
+    if ($leaseCycle === 'monthly' || $leaseCycle === 'on_close_only') {
         $effectiveTiers = [
             'daily_rate'   => (string) $newRates['daily_rate'],
             'weekly_rate'  => (string) $newRates['weekly_rate'],
@@ -323,13 +326,13 @@ db_transaction(function () use (
             }
             if ($holes !== []) {
                 json_error('RATE_TIER_INCOMPLETE',
-                    'Monthly leases require all three rate tiers (daily, weekly, monthly) '
-                    . 'to be greater than zero when any tier is set (D132). This amendment '
+                    'All three rate tiers (daily, weekly, monthly) must be greater than '
+                    . 'zero when any tier is set (D132). This amendment '
                     . 'would leave these at zero: ' . implode(', ', $holes) . '.',
                     422,
                     ['fields' => array_fill_keys(
                         array_map(static fn(string $c): string => 'new_' . $c, $holes),
-                        'Must be > 0 for a monthly lease when other rate tiers are set.'
+                        'Must be > 0 when other rate tiers are set.'
                     )]
                 );
             }

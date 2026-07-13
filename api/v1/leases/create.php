@@ -135,27 +135,46 @@ $mileageRate = ($mileageRateIn !== null && bccomp($mileageRateIn, '0', 4) >= 0) 
 // Enforce: at least one rate must be positive (spec §7.5 docblock)
 $anyMileageRate = bccomp($mileageRate, '0', 4) > 0;
 
+// S-HOURLY-ONLY: an hourly (engine/reefer-hours) rate is a legitimate STANDALONE
+// billing basis. Equipment types billed purely by engine hours have daily/weekly/
+// monthly (and mileage) all 0 — the InvoiceGenerator all-zero backstop
+// (lib/Billing/InvoiceGenerator.php:365) and amend_rate.php already accept this
+// exact shape; create must not be stricter, or an hourly-only lease can't be made
+// here at all. We read the raw hourly input just for this gate; the authoritative
+// parse + negative check is $hourlyCostIn below (kept as the single source of truth).
+$anyHourlyRate = (($hourlyRateGate = clean_decimal($body['hourly_rate'] ?? null)) !== null
+    && bccomp($hourlyRateGate, '0', 4) > 0);
+
 if (
     !isset($fields['daily_rate']) && !isset($fields['weekly_rate']) &&
     !isset($fields['monthly_rate']) && !isset($fields['mileage_rate']) &&
     bccomp($dailyRate, '0', 4) <= 0 &&
     bccomp($weeklyRate, '0', 4) <= 0 &&
     bccomp($monthlyRate, '0', 4) <= 0 &&
-    !$anyMileageRate
+    !$anyMileageRate &&
+    !$anyHourlyRate
 ) {
-    $fields['daily_rate'] = 'At least one rate (daily, weekly, monthly, or mileage) must be greater than zero.';
+    $fields['daily_rate'] = 'At least one rate (daily, weekly, monthly, mileage, or hourly) must be greater than zero.';
 }
 
 // ════════════════════════════════════════════════════════════════════════
 // S-BILLING-RATE-FIX D-D / D132 — rate-tier completeness invariant
 //
-// When billing_cycle='monthly', all three rate tiers (daily/weekly/monthly)
-// must be present in the request body AND form a complete set: if any one
-// is > 0, all must be > 0. Closes the upstream hole that allowed leases to
+// All three rate tiers (daily/weekly/monthly) must form a COMPLETE set: if any
+// one is > 0, all must be > 0. Closes the upstream hole that allowed leases to
 // be created with weekly_rate=0 while other tiers were populated, which
 // silently produced $0 base_rental for 8-29 day periods (the weekly-math
-// branch of ProRateCalculator computed full_weeks*0 + remainder*0/7 = 0
-// without triggering the "exceeds monthly" cap).
+// branch computed full_weeks*0 + remainder*0/7 = 0 without triggering the
+// "exceeds monthly" cap).
+//
+// S-ONCLOSE-RATE-HOLE (2026-07-14): the completeness rule now runs for EVERY
+// billing cycle, not just 'monthly'. The holistic engine's tier ladder picks a
+// tier by DURATION (≤7d→daily, >7d→weekly, ~month→monthly) and bills $0 when
+// the chosen tier's rate is 0 — so a single-tier lease (daily-only run >7 days,
+// or monthly-only at any length) silently bills $0 base. 'on_close_only' leases
+// bill through the SAME ladder at close, yet previously skipped this gate — a
+// silent $0 under-bill (verified via HolisticLeaseEngine::cumulativeCorrect).
+// An all-zero trio stays allowed (hourly-only / mileage-only shapes — S-HOURLY-ONLY).
 //
 // Origin: 2026-05-06 audit of INV-2026-00086, locked as D132.
 // ════════════════════════════════════════════════════════════════════════
@@ -163,29 +182,31 @@ $billingCycleRaw = (string)($body['billing_cycle'] ?? 'monthly');
 if ($billingCycleRaw === 'monthly') {
     // Required-key check — relies on the form sending '0' for blank rate
     // inputs (Layer 1). A missing key would have been silently coerced to
-    // '0.00' by the legacy clean_decimal path, hiding the defect.
+    // '0.00' by the legacy clean_decimal path, hiding the defect. Kept
+    // monthly-only: on_close_only forms need not send the period tiers.
     foreach (['daily_rate', 'weekly_rate', 'monthly_rate'] as $rateKey) {
         if (!array_key_exists($rateKey, $body) && !isset($fields[$rateKey])) {
             $fields[$rateKey] = "{$rateKey} is required when billing cycle is monthly.";
         }
     }
+}
 
-    // Zero-with-siblings rule. Skip if a per-field error already exists so
-    // the user sees the most specific message (e.g. "cannot be negative").
-    $rateValuesByField = [
-        'daily_rate'   => $dailyRate,
-        'weekly_rate'  => $weeklyRate,
-        'monthly_rate' => $monthlyRate,
-    ];
-    $anyTierPositive = false;
-    foreach ($rateValuesByField as $v) {
-        if (bccomp((string)$v, '0', 4) > 0) { $anyTierPositive = true; break; }
-    }
-    if ($anyTierPositive) {
-        foreach ($rateValuesByField as $rateKey => $v) {
-            if (!isset($fields[$rateKey]) && bccomp((string)$v, '0', 4) <= 0) {
-                $fields[$rateKey] = "Rate tier {$rateKey} must be > 0 when other rate tiers are populated. Use 0 explicitly only if this rate tier is intentionally not offered for this lease.";
-            }
+// Zero-with-siblings (completeness) rule — ALL billing cycles. Skip a field if a
+// per-field error already exists so the user sees the most specific message
+// (e.g. "cannot be negative").
+$rateValuesByField = [
+    'daily_rate'   => $dailyRate,
+    'weekly_rate'  => $weeklyRate,
+    'monthly_rate' => $monthlyRate,
+];
+$anyTierPositive = false;
+foreach ($rateValuesByField as $v) {
+    if (bccomp((string)$v, '0', 4) > 0) { $anyTierPositive = true; break; }
+}
+if ($anyTierPositive) {
+    foreach ($rateValuesByField as $rateKey => $v) {
+        if (!isset($fields[$rateKey]) && bccomp((string)$v, '0', 4) <= 0) {
+            $fields[$rateKey] = "Rate tier {$rateKey} must be > 0 when other rate tiers are populated. Use 0 explicitly only if this rate tier is intentionally not offered for this lease.";
         }
     }
 }
