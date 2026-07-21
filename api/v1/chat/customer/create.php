@@ -80,7 +80,9 @@ db_transaction(function() use ($userId, $user, $customerId, $customer, $subject,
         $msgId = db_insert('chat_messages', [
             'channel_id'          => $channelId,
             'user_id'             => $userId,
-            'sender_display_name' => 'Mainland Truck & Trailer',
+            // PERSISTED at insert — frozen forever, so read the configured
+            // name rather than hardcode a tenant literal (S-NORTHLAND-P0).
+            'sender_display_name' => ff_company_short_name(),
             'message'             => $initMsg,
             'type'                => 'text',
         ]);

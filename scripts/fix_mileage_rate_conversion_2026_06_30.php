@@ -26,7 +26,13 @@ declare(strict_types=1);
  * @session S-MILEAGE-RATE-CONVERT-FIX
  */
 
-$appRoot = is_file(dirname(__DIR__) . '/config/app.php') ? dirname(__DIR__) : (getenv('FF_APP_ROOT') ?: '/var/www/fleetforge');
+// S-NORTHLAND-P0: dropped the '/var/www/fleetforge' last resort — this script
+// REWRITES mileage rates, so a wrong root corrupts the wrong company's billing.
+$appRoot = is_file(dirname(__DIR__) . '/config/app.php') ? dirname(__DIR__) : (string) getenv('FF_APP_ROOT');
+if ($appRoot === '' || !is_file($appRoot . '/config/app.php')) {
+    fwrite(STDERR, "FATAL: cannot locate config/app.php — export FF_APP_ROOT=/path/to/deployment.\n");
+    exit(1);
+}
 require_once $appRoot . '/config/app.php';
 require_once FF_ROOT . '/includes/db.php';
 require_once FF_ROOT . '/includes/functions.php';

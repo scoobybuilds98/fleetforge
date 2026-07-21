@@ -70,7 +70,13 @@ try {
         $hourPath  = $now->format('H');
         $timestamp = $now->format('YmdHis');
         $s3Key     = "backups/db/{$datePath}/{$hourPath}/fleetforge_{$timestamp}.sql.gz";
-        $tmpFile   = sys_get_temp_dir() . "/ff_backup_{$timestamp}.sql.gz";
+        // PID-qualified (S-NORTHLAND-P0): the timestamp is YmdHis, so two runs
+        // starting in the same SECOND — a manual run racing the cron, or two
+        // deployments sharing a box — collided on this path and interleaved
+        // their mysqldump streams. The truncated file then uploaded and
+        // reported success: a backup that silently restores the wrong data.
+        // (backup_storage.php:92 already did this for its stage dir.)
+        $tmpFile   = sys_get_temp_dir() . '/ff_backup_' . getmypid() . "_{$timestamp}.sql.gz";
 
         // ── mysqldump via proc_open array form (no shell — no injection risk) ─
         // Credentials read from constants defined in config/app.php (sourced from .env).

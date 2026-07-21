@@ -71,7 +71,10 @@ try {
     $monthDir = $now->format('Y-m');
     $dateStr  = $now->format('Y-m-d');
     $s3Key    = "backups/storage/{$monthDir}/storage_{$dateStr}.tar.gz";
-    $tmpFile  = sys_get_temp_dir() . "/ff_storage_{$now->format('YmdHis')}.tar.gz";
+    // PID-qualified (S-NORTHLAND-P0) — same-second collision risk as
+    // backup_db.php. The stage dir below already included getmypid(); the
+    // archive itself did not, which is the half that actually gets uploaded.
+    $tmpFile  = sys_get_temp_dir() . '/ff_storage_' . getmypid() . '_' . $now->format('YmdHis') . '.tar.gz';
 
     // ── Gather user content via StorageClient (D-BACKUP-6, driver-agnostic) ───
     // List EVERY key under the storage root, then keep only user content —

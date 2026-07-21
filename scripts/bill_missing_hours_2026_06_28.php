@@ -45,9 +45,16 @@ declare(strict_types=1);
 // Locate the app root whether this script runs from the repo's scripts/ dir or
 // from an arbitrary location on prod (it may be copied to a writable home dir if
 // the deploy-owned scripts/ dir is read-only to the operator's shell user).
+// S-NORTHLAND-P0: the last-resort '/var/www/fleetforge' made this DATA-MUTATING
+// script default to one specific deployment when run from a copied location.
+// Fail loudly instead — a wrong root here rewrites the wrong company's invoices.
 $appRoot = is_file(dirname(__DIR__) . '/config/app.php')
     ? dirname(__DIR__)
-    : (getenv('FF_APP_ROOT') ?: '/var/www/fleetforge');
+    : (string) getenv('FF_APP_ROOT');
+if ($appRoot === '' || !is_file($appRoot . '/config/app.php')) {
+    fwrite(STDERR, "FATAL: cannot locate config/app.php — export FF_APP_ROOT=/path/to/deployment.\n");
+    exit(1);
+}
 require_once $appRoot . '/config/app.php';
 require_once FF_ROOT . '/includes/db.php';
 require_once FF_ROOT . '/includes/functions.php';

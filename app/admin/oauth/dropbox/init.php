@@ -18,9 +18,13 @@ declare(strict_types=1);
  * are correct here. The callback is intentionally public (state token IS
  * the auth proof per D-QBO-OAUTH-FIX-2, same principle applied to Dropbox).
  *
- * CANONICAL REDIRECT URI: https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php
- * — register this exact string in the Dropbox Developer Console (App Console
- *   → your app → OAuth 2 → Redirect URIs).
+ * CANONICAL REDIRECT URI: base_url('oauth/dropbox/callback.php')
+ * — i.e. APP_URL + FF_BASE_PATH + /oauth/dropbox/callback.php.
+ *   For Mainland that resolves to
+ *   https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php.
+ *   Register the RESOLVED string for THIS deployment in the Dropbox Developer
+ *   Console (App Console → your app → OAuth 2 → Redirect URIs). Each
+ *   deployment needs its own Dropbox app; the URI cannot be shared.
  *
  * Session: S-BACKUP-2
  */
@@ -56,7 +60,8 @@ $state = StateManager::generate(
 $authorizeUrl = 'https://www.dropbox.com/oauth2/authorize?' . http_build_query([
     'client_id'         => $appKey,
     'response_type'     => 'code',
-    'redirect_uri'      => 'https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php',
+    // Derived from APP_URL (S-NORTHLAND-P0) — must byte-match callback.php.
+    'redirect_uri'      => base_url('oauth/dropbox/callback.php'),
     'state'             => $state,
     'token_access_type' => 'offline',
 ]);

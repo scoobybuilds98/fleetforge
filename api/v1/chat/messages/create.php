@@ -56,9 +56,12 @@ if ($replyToId) {
     }
 }
 
-// sender_display_name: for customer channels show company name
+// sender_display_name: for customer channels show company name.
+// PERSISTED at insert (not resolved at render), so this value is frozen into
+// chat_messages forever — a later settings change does NOT repair old rows.
+// Hence it reads company.name rather than a hardcoded literal (S-NORTHLAND-P0).
 $senderDisplayName = match($channel['type']) {
-    'customer' => 'Mainland Truck & Trailer',
+    'customer' => ff_company_short_name(),
     default    => $user['name'] ?? 'Unknown',
 };
 

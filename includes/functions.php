@@ -772,6 +772,28 @@ function settings_get(string $key, mixed $default = null): mixed
 }
 }
 
+// ff_company_short_name() — compact company name for space-constrained UI.
+//
+// WHY a helper and not two settings_get() calls at each site: the fallback is
+// the contract. `company.short_name` ships EMPTY (S-NORTHLAND-P0 migration) so
+// it is tenant-neutral, and every reader must degrade to the full
+// `company.name`. Centralising that means a new call site cannot get it wrong.
+//
+// Callers persisting this value (chat sender_display_name is written at INSERT,
+// not resolved at render) freeze whatever this returns — so it must never
+// return '' just because the operator has not filled the short name in.
+if (!function_exists('ff_company_short_name')) {
+function ff_company_short_name(): string
+{
+    $short = trim((string) settings_get('company.short_name', ''));
+    if ($short !== '') {
+        return $short;
+    }
+    $full = trim((string) settings_get('company.name', ''));
+    return $full !== '' ? $full : 'Unknown';
+}
+}
+
 // cron_enabled() — operator on/off switch for a business-automation cron.
 // Reads cron.<name>_enabled (seeded by the S-CRON-TOGGLES migration, toggled in
 // Settings → Intelligence → Scheduled Jobs), falling back to the registry default

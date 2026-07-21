@@ -42,12 +42,18 @@ if ($clientId === '') {
 }
 
 // ── Build the redirect_uri ─────────────────────────────────────
-// Production: hard-coded canonical URL (must match Intuit Developer
-// dashboard exactly — any mismatch produces redirect_uri_mismatch).
+// Production: derived from APP_URL via base_url() so a second
+// deployment (different company, different domain) is correct without
+// a code edit. This MUST still match the Intuit Developer dashboard
+// entry exactly — any mismatch produces redirect_uri_mismatch — so
+// APP_URL is the single value that has to be right.
+// (Was a hardcoded mainlandrentals.com literal until S-NORTHLAND-P0;
+// base_url() already computed the identical string, so the literal was
+// pure duplication.)
 // Sandbox: read the operator-supplied ngrok URL from settings so a
 // dev environment can point at a tunnel without code changes.
 if ($environment === 'production') {
-    $redirectUri = 'https://mainlandrentals.com/fleetforge/oauth/qbo/callback.php';
+    $redirectUri = base_url('oauth/qbo/callback.php');
 } else {
     $redirectUri = (string) settings_get('quickbooks.sandbox_redirect_uri', '');
     if ($redirectUri === '') {

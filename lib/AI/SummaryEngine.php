@@ -863,8 +863,15 @@ PROMPT,
     // ────────────────────────────────────────────────────────────
     public static function getSystemPrompt(): string
     {
-        return <<<'PROMPT'
-You are FleetForge AI — the built-in fleet intelligence assistant for Mainland Truck & Trailer Sales & Leasing, a Canadian commercial trailer and equipment leasing company.
+        // The company name is tenant-specific: a second deployment must not
+        // have its AI introduce itself as, or reason about, the wrong company
+        // (S-NORTHLAND-P0). Only the opening line is interpolated — the body
+        // stays a NOWDOC on purpose, because it contains bare `$` characters
+        // ("Format monetary values with $ and the currency") that heredoc
+        // interpolation would try to parse as variables.
+        $company = (string) settings_get('company.name', 'this company');
+
+        $body = <<<'PROMPT'
 
 You have deep expertise in:
 - Commercial trailer and equipment leasing (dry vans, reefers, flatbeds, chassis, combos, etc.)
@@ -887,5 +894,9 @@ When responding:
 - Do NOT use emoji characters — use plain text only
 - Do NOT use coloured circle indicators (🔴🟡🟢) — describe urgency in words instead
 PROMPT;
+
+        return "You are FleetForge AI — the built-in fleet intelligence assistant for {$company}, "
+             . "a Canadian commercial trailer and equipment leasing company.\n"
+             . $body;
     }
 }

@@ -69,7 +69,22 @@ if (!function_exists('cca_render_html')) {
             $submittedAt = $ts ? date('F j, Y \a\t g:i A', $ts) : $submittedAt;
         }
 
-        $brandColor  = '#f97316';
+        // Brand colour (S-NORTHLAND-P0). This was hardcoded orange (#f97316)
+        // while the HTML form at app/admin/credit-application.php:39 already
+        // read brand.primary_color — so the PDF rendered OFF-BRAND relative to
+        // the app it was generated from (Mainland's brand is #2596be teal).
+        // Reading the setting fixes that inconsistency and stops a second
+        // deployment's credit applications inheriting the wrong accent.
+        // Precedence: explicit param > brand.primary_color > legacy default.
+        // Only affects NEW renders; submitted applications keep their
+        // snapshotted rendered_html, which is the legal record.
+        $brandColor = trim((string) ($p['brand_color'] ?? ''));
+        if ($brandColor === '' && function_exists('settings_get')) {
+            $brandColor = trim((string) settings_get('brand.primary_color', ''));
+        }
+        if ($brandColor === '') {
+            $brandColor = '#f97316';
+        }
         $headerBg    = '#1a1a1a';
         $sectionBg   = '#f8fafc';
         $borderColor = '#e2e8f0';

@@ -9,7 +9,8 @@ declare(strict_types=1);
  * the code for access + refresh tokens, encrypts and persists them, then
  * sets dropbox.enabled='1'.
  *
- * URL: https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php
+ * URL: base_url('oauth/dropbox/callback.php') — for Mainland that resolves to
+ * https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php.
  * — must match the Redirect URI registered in the Dropbox App Console exactly.
  *
  * On success: flash_success → redirect to admin/settings.
@@ -83,7 +84,9 @@ if ($code === '') {
     ff_dropbox_redirect('error', 'OAuth callback missing code — please retry.');
 }
 
-$redirectUri = 'https://mainlandrentals.com/fleetforge/oauth/dropbox/callback.php';
+// Derived from APP_URL (S-NORTHLAND-P0). Dropbox requires the token-exchange
+// redirect_uri to byte-match the one init.php sent, so both call base_url().
+$redirectUri = base_url('oauth/dropbox/callback.php');
 
 // ── Exchange the auth code for tokens ────────────────────────────────────────
 try {

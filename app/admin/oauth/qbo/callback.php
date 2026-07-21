@@ -116,7 +116,9 @@ if ($code === '' || $realmId === '') {
 // Intuit returns invalid_grant. Same rules as init.php.
 $environment = (string) settings_get('quickbooks.environment', 'sandbox');
 if ($environment === 'production') {
-    $redirectUri = 'https://mainlandrentals.com/fleetforge/oauth/qbo/callback.php';
+    // base_url() — see init.php. Both sites derive from APP_URL so they
+    // cannot drift apart, which is what invalid_grant would look like.
+    $redirectUri = base_url('oauth/qbo/callback.php');
 } else {
     $redirectUri = (string) settings_get('quickbooks.sandbox_redirect_uri', '');
 }

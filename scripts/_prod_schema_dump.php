@@ -12,7 +12,21 @@ declare(strict_types=1);
  * Intended to be piped to prod PHP over stdin via ssh; safe on prod.
  */
 
-require_once '/var/www/fleetforge/config/app.php';
+// S-NORTHLAND-P0: was hardcoded to /var/www/fleetforge, which silently bound
+// this to one deployment. It is usually piped over stdin (php < script.php), so
+// __DIR__ is the CWD rather than the script's home and cannot be trusted alone
+// — hence FF_APP_ROOT first, then the on-disk location, then CWD. Fails loudly
+// rather than guessing, because guessing means dumping the wrong company's schema.
+$appRoot = (string) getenv('FF_APP_ROOT');
+if ($appRoot === '') {
+    $appRoot = is_file(dirname(__DIR__) . '/config/app.php') ? dirname(__DIR__) : (string) getcwd();
+}
+if (!is_file($appRoot . '/config/app.php')) {
+    fwrite(STDERR, "FATAL: cannot locate config/app.php (looked in '{$appRoot}').\n"
+                 . "       Run from the repo, or export FF_APP_ROOT=/path/to/deployment.\n");
+    exit(1);
+}
+require_once $appRoot . '/config/app.php';
 
 $tableRows = db_select(
     "SELECT table_name AS t FROM information_schema.tables

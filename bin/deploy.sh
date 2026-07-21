@@ -49,10 +49,34 @@
 set -euo pipefail
 
 # ── Parameterized constants (env-overridable — D-DEPLOY-3) ────
-REPO_DIR="${FF_DEPLOY_REPO_DIR:-/var/www/fleetforge}"
+#
+# S-NORTHLAND-P0: REPO_DIR and BASE_URL used to default to Mainland's literal
+# values (/var/www/fleetforge, https://mainlandrentals.com/fleetforge). On a
+# second deployment that made an un-exported run silently redeploy — or
+# health-check — the WRONG company, and pass green while doing it.
+#
+# They are now DERIVED instead of hardcoded, which is both tenant-agnostic and
+# operationally identical for Mainland (no exports needed, same values):
+#   REPO_DIR ← the parent of the directory this script lives in
+#   BASE_URL ← APP_URL from that repo's .env, + FF_BASE_PATH
+# Explicit FF_DEPLOY_* env vars still win, so staging overrides are unchanged.
+_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="${FF_DEPLOY_REPO_DIR:-$(dirname "$_SCRIPT_DIR")}"
 WEB_USER="${FF_DEPLOY_WEB_USER:-www-data}"
 FPM_UNIT="${FF_DEPLOY_FPM_UNIT:-php8.2-fpm}"
-BASE_URL="${FF_DEPLOY_BASE_URL:-https://mainlandrentals.com/fleetforge}"
+
+if [ -n "${FF_DEPLOY_BASE_URL:-}" ]; then
+    BASE_URL="$FF_DEPLOY_BASE_URL"
+else
+    # FF_BASE_PATH is locked to /fleetforge (D7, config/app.php).
+    _APP_URL="$(grep -E '^APP_URL=' "${REPO_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'\''' | tr -d '\r' | xargs)"
+    if [ -z "$_APP_URL" ]; then
+        echo "FATAL: cannot derive BASE_URL — APP_URL is unset or unreadable in ${REPO_DIR}/.env." >&2
+        echo "       Set APP_URL there, or export FF_DEPLOY_BASE_URL before running." >&2
+        exit 1
+    fi
+    BASE_URL="${_APP_URL%/}/fleetforge"
+fi
 HEALTH_URL="${FF_DEPLOY_HEALTH_URL:-${BASE_URL}/api/v1/health}"
 LOGIN_URL="${FF_DEPLOY_LOGIN_URL:-${BASE_URL}/auth/login}"
 ERROR_LOG="${FF_DEPLOY_ERROR_LOG:-/var/log/php8.2-fpm.log}"

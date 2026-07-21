@@ -35,6 +35,12 @@ storage/branding/
 storage/maintenance.flag
 # mPDF runtime font-metrics cache (regenerated on demand; never source)
 storage/tmp/
+# Generated per-customer artifacts. These were TRACKED until S-NORTHLAND-P0
+# (adding an ignore rule never untracks an already-tracked file — they had to
+# be `git rm --cached`ed). Generated output, and on a second deployment they
+# would ship one company's documents into the other's repo.
+storage/dunning/
+storage/inspections/
 
 # --- Office documents (specs / references kept locally, not in repo) ---
 *.docx

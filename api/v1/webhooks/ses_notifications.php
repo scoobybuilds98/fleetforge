@@ -9,10 +9,15 @@ declare(strict_types=1);
  *
  * This endpoint is publicly accessible — SNS delivers HTTPS POST
  * requests from AWS infrastructure, not from authenticated users.
- * Authentication is via SNS message signature verification ONLY.
+ * Authentication is TWO checks, and both are required:
+ *   1. SNS message signature verification (proves AWS sent it), and
+ *   2. TopicArn allowlist (proves OUR topic sent it) — S-NORTHLAND-P0.
+ * The signature alone is NOT sufficient: AWS signs SNS messages for every
+ * account, so without (2) any AWS customer can forge bounce notifications
+ * against our address list. See the allowlist block below.
  *
  * Message types handled:
- *   SubscriptionConfirmation — auto-confirms the SNS subscription
+ *   SubscriptionConfirmation — confirms the subscription, allowlisted topics only
  *   Notification             — processes SES bounce/complaint payloads
  *   UnsubscribeConfirmation  — logged and ignored (do not re-confirm)
  *
@@ -71,6 +76,56 @@ try {
 }
 
 $msgType = $msg['Type'] ?? '';
+
+// ── Topic allowlist (S-NORTHLAND-P0) ─────────────────────────
+// A valid SNS signature proves the message came from AWS — NOT that it came
+// from OUR topic. AWS signs SNS messages for every account, so on its own the
+// signature check above lets anyone with an AWS account:
+//   1. create their own SNS topic,
+//   2. subscribe this endpoint to it (auto-confirmed below),
+//   3. publish forged "permanent bounce" notifications,
+//   4. and have us set email_disabled=1 on arbitrary customer addresses.
+// That is a denial-of-email attack against our own customers. Pinning the
+// TopicArn is what actually authenticates the sender.
+//
+// Configure via the `aws.sns_topic_arn` setting, or AWS_SNS_TOPIC_ARN in .env
+// (which was declared in .env.example but read nowhere until now).
+$expectedTopicArn = trim((string) settings_get('aws.sns_topic_arn', ''));
+if ($expectedTopicArn === '') {
+    $expectedTopicArn = trim((string) env('AWS_SNS_TOPIC_ARN', ''));
+}
+$incomingTopicArn = trim((string) ($msg['TopicArn'] ?? ''));
+
+if ($expectedTopicArn !== '') {
+    // Configured: enforce strictly on EVERY message type.
+    if (!hash_equals($expectedTopicArn, $incomingTopicArn)) {
+        error_log(
+            '[ses_webhook] REJECTED: TopicArn not allowlisted. got=' . $incomingTopicArn
+            . ' expected=' . $expectedTopicArn
+        );
+        http_response_code(403);
+        exit;
+    }
+} else {
+    // Unconfigured. Deliberately asymmetric so that adding this check cannot
+    // silently break an already-working deployment:
+    //   - SubscriptionConfirmation is REFUSED. That is the actual attack entry
+    //     point, and refusing it only blocks NEW subscriptions, which are rare
+    //     and operator-initiated.
+    //   - Notification is ALLOWED, so an existing confirmed subscription keeps
+    //     processing real bounces instead of silently going dark.
+    // Set the ARN to close this gap completely.
+    error_log(
+        '[ses_webhook] WARNING: no SNS topic allowlist configured — set the '
+        . '`aws.sns_topic_arn` setting or AWS_SNS_TOPIC_ARN in .env. '
+        . 'Incoming TopicArn=' . $incomingTopicArn
+    );
+    if ($msgType === 'SubscriptionConfirmation') {
+        error_log('[ses_webhook] REFUSED SubscriptionConfirmation: allowlist unconfigured.');
+        http_response_code(403);
+        exit;
+    }
+}
 
 // ── SubscriptionConfirmation ─────────────────────────────────
 if ($msgType === 'SubscriptionConfirmation') {
