@@ -327,7 +327,11 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
         <!-- ── Theme toggle ──────────────────────────────────────────── -->
         <!-- Initialises from <html data-theme>; tracks state locally so  -->
         <!-- the icon flips immediately without waiting for a DOM read.    -->
-        <div x-data="{
+        <!-- S-TOPBAR-FIT: `topbar-theme` class added so the responsive blocks
+             can hide the WRAPPER. Hiding only the inner button left this div
+             in the flex row as a zero-width item still consuming an 8px gap. -->
+        <div class="topbar-theme"
+             x-data="{
                 dark: document.documentElement.getAttribute('data-theme') === 'dark',
                 toggle() {
                     FF_Theme.toggle();
@@ -507,7 +511,10 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
           (e.g. user lacks ai:view, AI not configured).
         -->
         <?php if (can('ai', 'view')): ?>
-        <div class="chat-topbar">
+        <!-- S-TOPBAR-FIT: `topbar-ai` distinguishes this wrapper from the team-chat
+             one above (both were bare `chat-topbar`), so the responsive blocks can
+             hide the AI wrapper without taking team chat down with it. -->
+        <div class="chat-topbar topbar-ai">
             <a href="<?= base_url('ai') ?>"
                class="chat-topbar-btn topbar-ai-btn"
                @click.prevent="window.FF_OpenAiChat ? window.FF_OpenAiChat() : (window.location.href = '<?= base_url('ai') ?>')"

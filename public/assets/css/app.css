@@ -1199,7 +1199,17 @@ kbd {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-shrink: 0;
+    /* S-TOPBAR-FIT: was `flex-shrink: 0`, which made this group resolve to
+       its max-content width no matter how narrow the bar got. Its children's
+       own `min-width: 0` was therefore inert — they never saw negative free
+       space — and the whole deficit escaped past .topbar (which has no
+       overflow) into the document, giving EVERY admin page a horizontal
+       scrollbar between ~1024-1170px and below ~890px.
+       `min-width: 0` lets the group shrink; the shrink then lands on the
+       two children that can absorb it gracefully (.search-wrapper, already
+       flex:1 1 auto, and .user-trigger-name, already ellipsis-capable)
+       because every other child is pinned flex-shrink:0. */
+    min-width: 0;
 }
 
 .topbar-title {
@@ -1271,8 +1281,18 @@ kbd {
 /* S-MOBILE-CHROME-CLEANUP — mobile-only search icon button.
    Hidden on desktop+tablet where .search-wrapper renders inline;
    revealed at <768px (see the mobile media block) where it opens
-   the existing ⌘K global search modal. */
-.topbar-search-icon-btn {
+   the existing ⌘K global search modal.
+
+   S-TOPBAR-FIT: scoped to `.topbar-right` so it BEATS `.btn-icon
+   { display: inline-flex }` (~line 2737). The markup is
+   `class="btn-icon topbar-search-icon-btn"`, so an unscoped
+   `.topbar-search-icon-btn` (0,1,0) tied `.btn-icon` (0,1,0) and lost
+   on source order — the magnifier was rendering at EVERY width, a
+   duplicate of the inline search box beside it, costing 44px of a
+   topbar that had none to spare. Same specificity trap already
+   documented for the double hamburger below. Do not use !important
+   here: the ≤767px reveal is scoped to match, not to out-shout. */
+.topbar-right .topbar-search-icon-btn {
     display: none;
 }
 
@@ -1466,6 +1486,10 @@ kbd {
 /* ── Quick-create "+" dropdown ──────────────────────────────────────────────── */
 .topbar-create {
     position: relative;
+    /* S-TOPBAR-FIT: now that .topbar-right can shrink, pin the fixed-size
+       controls so the deficit is absorbed by the search box and the user
+       name (both designed for it) instead of squashing a button. */
+    flex-shrink: 0;
 }
 
 .topbar-create-btn {
@@ -1548,6 +1572,7 @@ kbd {
     position: relative;
     display: flex;
     align-items: center;
+    flex-shrink: 0;   /* S-TOPBAR-FIT — see .topbar-create */
 }
 
 .topbar-display-btn {
@@ -1677,6 +1702,11 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 /* ── User avatar + dropdown ─────────────────────────────────────────────────── */
 .topbar-user {
     position: relative;
+    /* S-TOPBAR-FIT: without this the chip is stuck at its max-content width
+       (up to 242px — the name/role meta is capped at 160px), so it cannot
+       give ground when the bar is tight. The ellipsis on .user-trigger-name
+       only engages once this can actually narrow. */
+    min-width: 0;
 }
 
 /* Base avatar circle — initials badge */
@@ -1686,6 +1716,7 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     justify-content: center;
     width: 34px;
     height: 34px;
+    flex-shrink: 0;   /* S-TOPBAR-FIT: keep the circle round when the chip narrows */
     border-radius: var(--radius-full);
     background: var(--color-primary);
     color: #fff;
@@ -1737,6 +1768,16 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
                 background var(--transition-fast);
     font-family: inherit;
     line-height: 1;
+    /* S-TOPBAR-FIT: every link in the chain has to be able to shrink —
+       .topbar-right → .topbar-user → .user-trigger → -meta → -name — or the
+       ellipsis on .user-trigger-name never engages and the chip punches out
+       of the bar as document-wide overflow.
+       `max-width: 100%` is the load-bearing half: .topbar-user is a BLOCK, so
+       once it narrows nothing constrains this inline-flex child to it — the
+       button just overflowed its own parent at its 242px max-content width.
+       `min-width: 0` then lets the button's own flex children give ground. */
+    min-width: 0;
+    max-width: 100%;
 }
 .user-trigger:hover {
     border-color: var(--color-primary);
@@ -1788,6 +1829,26 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+}
+
+/* S-TOPBAR-FIT — avatar-only account chip below 1280px.
+   Between 1024 and ~1170 the sidebar is in flow at 240px, so .topbar-right
+   had ~110px less room than it needed. The flex-shrink repair alone stopped
+   the overflow but paid for it out of the two elastic children: at 1024 the
+   search box collapsed to 125px and the name ellipsised to a useless 40px
+   stub. Dropping the name/role label instead frees up to 160px in one step
+   and keeps the search box usable — the avatar still shows who is signed in,
+   and the full name + role are in the dropdown it opens.
+
+   MUST sit AFTER the .user-trigger-meta base rule above: a media query adds
+   no specificity, so an earlier-placed copy of this loses the source-order
+   tie to `display: flex` and silently does nothing.
+   NOT a min-width on .search-wrapper — that would re-block the shrink and
+   reintroduce the document overflow. */
+@media (max-width: 1279px) {
+    .user-trigger-meta {
+        display: none;
+    }
 }
 .user-trigger-role {
     font-size: 0.6875rem;
@@ -6938,6 +6999,30 @@ dl.detail-grid dd {
         display: none;
     }
 
+    /* S-TOPBAR-FIT — one rung up from the ≤767px S-MOBILE-CHROME-CLEANUP block.
+       The topbar previously had only TWO tablet rules in the whole file (the
+       hamburger hide above and a search max-width), so every icon rendered at
+       desktop size from 768px up: .topbar-right asked for ~852px against a
+       ~776px ceiling and the excess became a document-wide scrollbar.
+
+       Drop the same once-set preference controls the mobile block drops.
+       KEPT deliberately: ＋New, search, team chat (its unread badge has no
+       other always-visible home), the bell, and the avatar. The text-size /
+       density control also lives on the profile page, so hiding it here
+       strands nothing. */
+    .topbar-theme,
+    .topbar-theme-btn,
+    .topbar-display,
+    .topbar-display-btn,
+    .sound-toggle-btn,
+    .topbar-ai,
+    .topbar-ai-btn {
+        display: none !important;
+    }
+
+    /* (The avatar-only account chip is handled by the ≤1279px rule below,
+       which spans this band too.) */
+
     /* KPI + stat grids collapse to 2 columns */
     .kpi-grid,
     .stat-grid--5,
@@ -7025,16 +7110,19 @@ dl.detail-grid dd {
     /* Hide the inline search input; show the magnifying-glass icon
        that opens the existing ⌘K global search modal. */
     .search-wrapper { display: none; }
-    .topbar-search-icon-btn { display: inline-flex; }
+    /* S-TOPBAR-FIT: scoped to match the base hide's new specificity. */
+    .topbar-right .topbar-search-icon-btn { display: inline-flex; }
 
     /* Hide secondary topbar controls — they live elsewhere or are
        once-set preferences not needed on every page-load on mobile. */
     .topbar-home-btn,
-    .topbar-theme-btn,
+    .topbar-theme,          /* S-TOPBAR-FIT: wrapper too, not just the button — */
+    .topbar-theme-btn,      /* an empty wrapper still consumes a flex gap.       */
     .topbar-display,
     .topbar-display-btn,
     .sound-toggle-btn,
     .topbar-chat-btn,
+    .topbar-ai,             /* S-TOPBAR-FIT */
     .topbar-ai-btn,
     .topbar-company-name,
     .topbar-breadcrumb-sep {
@@ -7803,6 +7891,7 @@ table td {
 
 .notif-wrapper {
     position: relative;
+    flex-shrink: 0;   /* S-TOPBAR-FIT — see .topbar-create */
 }
 
 .notif-bell-btn {
