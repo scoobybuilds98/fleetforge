@@ -1197,6 +1197,109 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 
     <!-- ── TAB: Lease History ────────────────────────────────────── -->
     <div x-show="activeTab === 'leases'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
+
+        <!-- ── Days on Rent (S-DAYS-ON-RENT) ──────────────────────────
+             Calendar occupancy over a chosen window, served by
+             api/v1/equipment/units/days-on-rent.php. NOT derived from
+             leaseHistory below: that array is paginated (50/page) and
+             status-filtered, so a client-side sum would under-count and
+             would shift when the operator changed an unrelated filter.
+
+             Year labels are rendered by PHP, not JS, so the button text
+             and the server-resolved window are computed in the same
+             timezone (config/app.php pins America/Vancouver) — a JS
+             label could disagree with the data on New Year's Eve. -->
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header">
+                <div class="card-title">Days on Rent</div>
+            </div>
+
+            <div class="tab-filter-bar" role="group" aria-label="Days on rent date range">
+                <button type="button" class="btn btn-sm"
+                        :class="dorPreset === 'since_added' ? 'btn-primary' : 'btn-secondary'"
+                        :aria-pressed="dorPreset === 'since_added'"
+                        @click="setDorPreset('since_added')">Since added</button>
+                <button type="button" class="btn btn-sm"
+                        :class="dorPreset === 'last_year' ? 'btn-primary' : 'btn-secondary'"
+                        :aria-pressed="dorPreset === 'last_year'"
+                        @click="setDorPreset('last_year')"><?= (int) date('Y') - 1 ?></button>
+                <button type="button" class="btn btn-sm"
+                        :class="dorPreset === 'this_year' ? 'btn-primary' : 'btn-secondary'"
+                        :aria-pressed="dorPreset === 'this_year'"
+                        @click="setDorPreset('this_year')"><?= (int) date('Y') ?></button>
+                <button type="button" class="btn btn-sm"
+                        :class="dorPreset === 'custom' ? 'btn-primary' : 'btn-secondary'"
+                        :aria-pressed="dorPreset === 'custom'"
+                        @click="setDorPreset('custom')">Custom</button>
+
+                <template x-if="dorPreset === 'custom'">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <input type="date" class="form-control" x-model="dorFrom" :max="dorTo || ''"
+                               aria-label="Start date"
+                               style="width:150px;font-size:0.8125rem;padding:5px 10px;">
+                        <span style="color:var(--text-muted);font-size:0.8125rem;">→</span>
+                        <input type="date" class="form-control" x-model="dorTo" :min="dorFrom || ''"
+                               aria-label="End date"
+                               style="width:150px;font-size:0.8125rem;padding:5px 10px;">
+                        <button type="button" class="btn btn-primary btn-sm"
+                                :disabled="dorLoading || !dorFrom || !dorTo"
+                                @click="loadDaysOnRent()">Go</button>
+                    </div>
+                </template>
+
+                <span x-show="dor && !dorLoading" style="margin-left:auto;font-size:0.75rem;color:var(--text-muted);"
+                      x-text="dor ? dor.date_from + ' → ' + dor.date_to : ''"></span>
+            </div>
+
+            <div class="card-body">
+                <div x-show="dorLoading" class="stat-grid" aria-busy="true" aria-label="Loading days on rent">
+                    <template x-for="i in 4" :key="i">
+                        <div class="stat-card">
+                            <div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div>
+                            <div class="skeleton-bar" style="width:80%;height:24px;"></div>
+                        </div>
+                    </template>
+                </div>
+
+                <div x-show="dor && !dorLoading" class="stat-grid dor-stats">
+                    <div class="stat-card stat-card--blue">
+                        <div class="stat-label">Days on Rent</div>
+                        <div class="stat-value font-mono" x-text="dor?.days_on_rent ?? '—'"></div>
+                        <div class="stat-delta" x-text="'of ' + (dor?.window_days ?? 0) + ' days in range'"></div>
+                    </div>
+                    <div class="stat-card stat-card--green">
+                        <div class="stat-label">Utilization</div>
+                        <div class="stat-value font-mono" x-text="(dor?.utilization_pct ?? 0) + '%'"></div>
+                    </div>
+                    <div class="stat-card stat-card--slate">
+                        <div class="stat-label">Idle Days</div>
+                        <div class="stat-value font-mono" x-text="dor?.idle_days ?? '—'"></div>
+                    </div>
+                    <div class="stat-card stat-card--teal">
+                        <div class="stat-label">Leases</div>
+                        <div class="stat-value font-mono" x-text="dor?.lease_count ?? '—'"></div>
+                        <div class="stat-delta">in this range</div>
+                    </div>
+                </div>
+
+                <!-- Only shows when leases overlap. Full-width rather than inside
+                     a tile: the text clips at tile width, and without it the
+                     merged total looks wrong against the table below — which an
+                     operator can add up by hand. -->
+                <div x-show="dor && !dorLoading && dor.overlap_adjusted"
+                     style="margin-top:12px;font-size:0.75rem;color:var(--text-muted);line-height:1.5;">
+                    Overlapping leases were merged — this unit has leases booked on the same days,
+                    so the per-lease total (<span x-text="(dor?.raw_lease_day_sum ?? 0) + ' days'"></span>)
+                    is higher than the days it was actually out.
+                </div>
+
+                <div x-show="dorLoaded && !dorLoading && dor && dor.lease_count === 0" class="empty-state">
+                    <p class="empty-state-title">Never on rent in this range</p>
+                    <p class="empty-state-text">No active or completed leases overlap the selected dates.</p>
+                </div>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-header">
                 <div class="card-title">Lease History</div>
@@ -2322,6 +2425,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         overflow-x: auto;
     }
 }
+
+/* S-DAYS-ON-RENT: app.css reserves a 38px right gutter on .stat-label for
+   the icon used by the .stat-card__header variant. These tiles carry no
+   icon, so the gutter only wraps "Days on Rent" onto two lines and pushes
+   that tile's value out of line with its three neighbours. */
+.dor-stats .stat-label { padding-right: 0; }
 </style>
 
 <script>
@@ -2340,6 +2449,16 @@ function FF_UnitDetail() {
         leasesLoading:       false,
         leasesLoaded:        false,
         leasesFilters:       { status: '', sort: 'start_date', dir: 'DESC' },
+
+        // ── Days on Rent (S-DAYS-ON-RENT) ─────────────────────────
+        // Independent of leaseHistory above — served by its own
+        // endpoint so the figure is window-scoped, not page-scoped.
+        dor:                 null,
+        dorLoading:          false,
+        dorLoaded:           false,
+        dorPreset:           'since_added',
+        dorFrom:             '',
+        dorTo:               '',
 
         // ── Damage Claims ─────────────────────────────────────────
         damageClaims:        [],
@@ -2445,6 +2564,7 @@ function FF_UnitDetail() {
             const _onTabEnter = (tab) => {
                 if (tab === 'status_log'    && !this.statusLog.length)       this.loadStatusLog();
                 if (tab === 'leases'        && !this.leasesLoaded)           this.loadLeaseHistory();
+                if (tab === 'leases'        && !this.dorLoaded)              this.loadDaysOnRent();
                 if (tab === 'damage_claims' && !this.damageClaimsLoaded)     this.loadDamageClaims();
                 if (tab === 'mileage_logs'  && !this.mileageLogsLoaded)      this.loadMileageLogs();
                 if (tab === 'maintenance'   && !this.workOrdersLoaded)       this.loadWorkOrders();
@@ -2517,6 +2637,28 @@ function FF_UnitDetail() {
         },
         loadMoreLeaseHistory()  { this.leasesPage++; this.loadLeaseHistory(true); },
         applyLeasesFilters()    { this.leaseHistory = []; this.leasesPage = 1; this.leasesTotal = 0; this.leasesLoaded = false; this.loadLeaseHistory(); },
+
+        // ── Days on Rent (S-DAYS-ON-RENT) ─────────────────────────
+        // Deliberately NOT re-run by applyLeasesFilters(): the status
+        // dropdown filters the table below, but "days on rent" is
+        // always active+completed by definition. Tying them together
+        // would silently change the headline number.
+        async loadDaysOnRent() {
+            if (this.dorLoading) return;   // init() runs twice — keep idempotent
+            this.dorLoading = true;
+            try {
+                const p = new URLSearchParams({ unit_id: <?= $unitId ?>, preset: this.dorPreset });
+                if (this.dorPreset === 'custom') { p.set('date_from', this.dorFrom); p.set('date_to', this.dorTo); }
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/days-on-rent') ?>?' + p);
+                if (r.success) { this.dor = r.data; this.dorLoaded = true; }
+            } catch(e) { /* non-fatal */ }
+            this.dorLoading = false;
+        },
+        setDorPreset(p) {
+            this.dorPreset = p;
+            // Custom waits for "Go" — the two date inputs start empty.
+            if (p !== 'custom') this.loadDaysOnRent();
+        },
 
         // ── Damage Claims ─────────────────────────────────────────
         async loadDamageClaims(append = false) {
