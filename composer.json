@@ -9,6 +9,7 @@
         "ext-gd": "*",
         "ext-mbstring": "*",
         "ext-pdo": "*",
+        "aws/aws-php-sns-message-validator": "^1.10",
         "aws/aws-sdk-php": "^3.300",
         "bacon/bacon-qr-code": "^3.1",
         "erusev/parsedown": "^1.8",

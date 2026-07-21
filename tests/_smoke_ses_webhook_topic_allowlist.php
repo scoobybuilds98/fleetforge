@@ -53,6 +53,27 @@ if ($src === '') {
 } else {
     $pass('0 endpoint — source readable');
 
+    // 0b. THE DEPENDENCY GUARD. \Aws\Sns\MessageValidator is NOT part of
+    //     aws/aws-sdk-php — it ships in the separate
+    //     aws/aws-php-sns-message-validator package. That package was missing
+    //     from composer.json, so EVERY SNS delivery threw "Class not found",
+    //     was swallowed by the endpoint's catch (\Throwable), and 403'd:
+    //     bounce/complaint auto-disable was silently dead in production from
+    //     the day it shipped (confirmed in prod's nginx error log).
+    //     Complaints that never disable email are how an account loses SES
+    //     production access — so this guard is load-bearing, not cosmetic.
+    foreach ([
+        '\Aws\Sns\MessageValidator',
+        '\Aws\Sns\Message',
+        '\Aws\Sns\Exception\InvalidSnsMessageException',
+    ] as $cls) {
+        if (class_exists($cls)) {
+            $pass("0b dependency — {$cls} is installed");
+        } else {
+            $fail("0b dependency — {$cls} MISSING (composer require aws/aws-php-sns-message-validator) — every SNS message will 403");
+        }
+    }
+
     // 1. wiring — both the settings key and the .env fallback are read
     $hasSetting = str_contains($src, "settings_get('aws.sns_topic_arn'");
     $hasEnv     = str_contains($src, "AWS_SNS_TOPIC_ARN");

@@ -35,14 +35,19 @@
 
 ---
 
-### F61 — Deploy S-NORTHLAND-P0 to activate the SES/SNS TopicArn allowlist 🔴 BLOCKING (security; prod `.env` already set)
+### F61 — Deploy S-NORTHLAND-P0: bounce/complaint processing has NEVER worked, plus a TopicArn allowlist 🔴 BLOCKING
 
 **Surfaced by:** S-NORTHLAND-P0 (2026-07-22), during the Northland Equipment clone audit.
 **Affects:** `api/v1/webhooks/ses_notifications.php`. No schema. One migration ships alongside (`202607220001`, additive settings row).
+**⚠️ BIGGER THAN FIRST WRITTEN — found by the post-commit adversarial review, confirmed on live prod.** `\Aws\Sns\MessageValidator` is **not part of `aws/aws-sdk-php`** — it ships in a separate package, `aws/aws-php-sns-message-validator`, which was never in `composer.json`. So the endpoint's signature check threw `Class not found` on **every** SNS delivery, the `catch (\Throwable)` swallowed it, and the request 403'd. **SES bounce and complaint auto-disable has been silently dead in production since it shipped.** Live evidence from prod's nginx error log:
+`2026/07/21 20:30:36 [error] [ses_webhook] Unexpected error during signature check: Class "Aws\Sns\MessageValidator" not found ... client: 15.221.164.95` (an AWS SNS sender).
+**Why this is urgent, not cosmetic:** complaints (recipients hitting "spam") never set `email_disabled=1`, so the system keeps emailing people who reported it. A rising complaint rate is the single fastest way to lose SES production access — and this AWS account's production access is what the Northland deployment will also depend on. The missing package is now in `composer.json`/`composer.lock`, and `_smoke_ses_webhook_topic_allowlist.php` gained a dependency guard so it cannot silently regress.
+
 **The hole:** the bounce webhook authenticated callers by **SNS signature alone**. AWS signs SNS messages for *every* AWS account, so a valid signature proves "AWS sent this", never "OUR topic sent this". Any AWS customer could create their own SNS topic, subscribe this endpoint (it auto-confirmed), publish forged permanent-bounce notifications, and have us set `email_disabled=1` on arbitrary customer addresses — a **denial-of-email attack against our own customers**, no credentials required.
 **Already done for you:** `AWS_SNS_TOPIC_ARN=arn:aws:sns:us-west-2:035837222410:fleetforge-ses-bounces` was appended to prod's `/var/www/fleetforge/.env` on 2026-07-21 under a one-time operator write grant (backup: `.env.bak.20260721_200552`). It is **inert until this code deploys** — which is the correct order, since it means the allowlist is enforced the instant the deploy lands, with no unconfigured window.
 **Operator action:**
-1. `git pull` + `ff-deploy` on prod.
+1. `git pull` + `ff-deploy` on prod. **`composer install --no-dev` must run** (step 6 of `bin/deploy.sh` does this) so the new `aws/aws-php-sns-message-validator` package lands — without it the webhook keeps 403ing.
+1b. Confirm the class resolves on prod: `sudo -u www-data php -r 'require "vendor/autoload.php"; var_dump(class_exists("\\Aws\\Sns\\MessageValidator"));'` → expect `bool(true)`.
 2. Confirm enforcement — the log should be silent, NOT warning:
    `sudo grep -c "no SNS topic allowlist configured" /var/log/nginx/error.log` → expect **0** after the deploy.
 3. Confirm bounce processing still works end-to-end: the existing subscription is unchanged and its ARN matches, so real bounces should continue to land. Watch for any `[ses_webhook] REJECTED` line — that would mean the ARN does not match and needs correcting.

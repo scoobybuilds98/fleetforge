@@ -65,22 +65,12 @@ REPO_DIR="${FF_DEPLOY_REPO_DIR:-$(dirname "$_SCRIPT_DIR")}"
 WEB_USER="${FF_DEPLOY_WEB_USER:-www-data}"
 FPM_UNIT="${FF_DEPLOY_FPM_UNIT:-php8.2-fpm}"
 
-if [ -n "${FF_DEPLOY_BASE_URL:-}" ]; then
-    BASE_URL="$FF_DEPLOY_BASE_URL"
-else
-    # FF_BASE_PATH is locked to /fleetforge (D7, config/app.php).
-    _APP_URL="$(grep -E '^APP_URL=' "${REPO_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'\''' | tr -d '\r' | xargs)"
-    if [ -z "$_APP_URL" ]; then
-        echo "FATAL: cannot derive BASE_URL — APP_URL is unset or unreadable in ${REPO_DIR}/.env." >&2
-        echo "       Set APP_URL there, or export FF_DEPLOY_BASE_URL before running." >&2
-        exit 1
-    fi
-    BASE_URL="${_APP_URL%/}/fleetforge"
-fi
-HEALTH_URL="${FF_DEPLOY_HEALTH_URL:-${BASE_URL}/api/v1/health}"
-LOGIN_URL="${FF_DEPLOY_LOGIN_URL:-${BASE_URL}/auth/login}"
 ERROR_LOG="${FF_DEPLOY_ERROR_LOG:-/var/log/php8.2-fpm.log}"
 DEPLOY_LOG="${FF_DEPLOY_LOG:-${REPO_DIR}/logs/deploy.log}"
+
+# NOTE: BASE_URL derivation deliberately happens AFTER flag parsing (below),
+# so that --help and --dry-run still work on a checkout with no .env yet —
+# e.g. a fresh clone, CI, or a new deployment box before it is configured.
 
 # ── Flags ─────────────────────────────────────────────────────
 ASSUME_YES=0
@@ -99,6 +89,35 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# ── BASE_URL (derived — see the constants block above) ────────
+# Runs after flag parsing so --help/--dry-run survive a missing .env.
+if [ -n "${FF_DEPLOY_BASE_URL:-}" ]; then
+    BASE_URL="$FF_DEPLOY_BASE_URL"
+else
+    # `|| true` is load-bearing. Under `set -euo pipefail` this pipeline
+    # decides the script's exit status: a missing .env makes grep exit 2, an
+    # absent APP_URL line makes it exit 1, and either aborted the ENTIRE script
+    # right here — silently, with no diagnostic, before the check below could
+    # ever print. Never let a probe pipeline terminate the deploy.
+    # FF_BASE_PATH is locked to /fleetforge (D7, config/app.php).
+    _APP_URL="$(grep -E '^APP_URL=' "${REPO_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'\''' | tr -d '\r' | xargs || true)"
+    if [ -n "$_APP_URL" ]; then
+        BASE_URL="${_APP_URL%/}/fleetforge"
+    elif [ "$DRY_RUN" -eq 1 ]; then
+        # Dry-run touches no network, so an underivable URL is not fatal —
+        # but say so loudly, since the health gate is exactly what a real run
+        # would exercise with it.
+        echo "WARNING: cannot derive BASE_URL from ${REPO_DIR}/.env — continuing (--dry-run only)." >&2
+        BASE_URL="(underivable — dry-run)"
+    else
+        echo "FATAL: cannot derive BASE_URL — APP_URL is unset or unreadable in ${REPO_DIR}/.env." >&2
+        echo "       Set APP_URL there, or export FF_DEPLOY_BASE_URL before running." >&2
+        exit 1
+    fi
+fi
+HEALTH_URL="${FF_DEPLOY_HEALTH_URL:-${BASE_URL}/api/v1/health}"
+LOGIN_URL="${FF_DEPLOY_LOGIN_URL:-${BASE_URL}/auth/login}"
 
 # ── Helpers ───────────────────────────────────────────────────
 abort() {
