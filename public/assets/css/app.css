@@ -2412,14 +2412,18 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     text-overflow: unset;
 }
 
-/* WHY: VINs are 17 chars and overflow the tile at 1.5rem bold mono — shrink and allow wrap */
+/* WHY: VINs are 17 chars and overflow the tile at 1.5rem bold — shrink to fit.
+   Kept on ONE line: `word-break: break-all` used to split a VIN mid-string
+   ("...20011 / 66"), which is both ugly and hard to read back against a
+   physical plate. At 0.875rem a 17-char VIN fits every tile width the grid
+   produces down to the 2-column tablet breakpoint; anything longer ellipsises
+   with the full value available on hover (the markup sets a title). */
 .stat-value--vin {
     font-size: 0.875rem;
     font-weight: 600;
-    white-space: normal;
-    overflow: visible;
-    text-overflow: unset;
-    word-break: break-all;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     line-height: 1.4;
 }
 
@@ -6759,6 +6763,16 @@ dl.detail-grid dd {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 16px;
 }
+/* WHY --5: the base .stat-grid is locked to repeat(6,1fr) for the 12-tile
+   dashboard (2 clean rows of 6). A 5-tile row inheriting that leaves a whole
+   empty column and squeezes each tile to 1/6 of the width — enough to wrap a
+   17-char VIN and a brand/model onto a second line. Sizing to the real tile
+   count reclaims ~26% width per tile. */
+.stat-grid--5 {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 16px;
+}
 .stat-grid--3 {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6926,6 +6940,7 @@ dl.detail-grid dd {
 
     /* KPI + stat grids collapse to 2 columns */
     .kpi-grid,
+    .stat-grid--5,
     .stat-grid--4,
     .stat-grid--3 {
         grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7043,6 +7058,7 @@ dl.detail-grid dd {
 
     /* KPI + stat grids collapse to single column */
     .kpi-grid,
+    .stat-grid--5,
     .stat-grid--4,
     .stat-grid--3,
     .stat-grid--2 {
@@ -7748,6 +7764,7 @@ dl.detail-grid dd {
     margin-top: var(--section-gap);
 }
 .kpi-grid,
+.stat-grid--5,
 .stat-grid--4,
 .stat-grid--3,
 .stat-grid--2 {

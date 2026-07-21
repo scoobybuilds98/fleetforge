@@ -240,7 +240,23 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 <!-- ============================================================
      Hero stat row
      ============================================================ -->
-<div class="stat-grid" style="margin-bottom:1.5rem;">
+<?php
+// The AI tile is conditional, so the row is 4 or 5 tiles wide. The count
+// has to be known BEFORE the grid opens: the base .stat-grid is locked to
+// 6 columns for the dashboard, and inheriting that here left an empty
+// column and squeezed the VIN / brand values onto a second line.
+$_aiCachedUnit = db_row(
+    "SELECT generated_at FROM ai_summaries
+     WHERE entity_type = 'equipment_unit' AND entity_id = ? AND summary_type = 'unit_analysis' AND is_current = 1
+     LIMIT 1",
+    [$unit['id']]
+);
+$_showAiTile = function_exists('can') && can('ai', 'view')
+    && (bool) settings_get('ai.enabled', false)
+    && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
+$_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
+?>
+<div class="stat-grid <?= $_heroGridClass ?>" style="margin-bottom:1.5rem;">
 
     <?php
     $_brandLabel = trim(($unit['template_brand'] ?? '') . ' ' . ($unit['template_model'] ?? ''));
@@ -249,7 +265,11 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <span class="stat-icon stat-icon--slate"><svg><use href="#icon-truck"/></svg></span>
         <div class="stat-label">Brand / Make</div>
         <?php if ($_brandLabel): ?>
-        <div class="stat-value" style="font-size:0.9rem;line-height:1.35;word-break:break-word;overflow-wrap:break-word;white-space:normal;"><?= e($_brandLabel) ?></div>
+        <!-- Single line: the tile is now ~26% wider, so a brand/model fits.
+             An unusually long one ellipsises with the full value on hover
+             rather than wrapping and making the row taller. -->
+        <div class="stat-value" style="font-size:0.9rem;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+             title="<?= e($_brandLabel) ?>"><?= e($_brandLabel) ?></div>
         <?php else: ?>
         <div class="stat-value text-secondary">—</div>
         <?php endif; ?>
@@ -258,7 +278,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     <div class="stat-card stat-card--slate">
         <span class="stat-icon stat-icon--slate"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">VIN</div>
-        <div class="stat-value stat-value--vin"><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
+        <div class="stat-value stat-value--vin"<?= $unit['vin'] ? ' title="' . e($unit['vin']) . '"' : '' ?>><?= $unit['vin'] ? e($unit['vin']) : '<span class="text-secondary">—</span>' ?></div>
     </div>
 
     <div class="stat-card stat-card--blue">
@@ -313,14 +333,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <?php endif; ?>
     </div>
 
-    <?php
-    $_aiCachedUnit = db_row(
-        "SELECT generated_at FROM ai_summaries
-         WHERE entity_type = 'equipment_unit' AND entity_id = ? AND summary_type = 'unit_analysis' AND is_current = 1
-         LIMIT 1",
-        [$unit['id']]
-    );
-    if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
+    <?php if ($_showAiTile): // resolved above — the grid needs the tile count ?>
     <div class="stat-card stat-card--orange"
          style="cursor:pointer;"
          onclick="aiPanel_equipment_unit_<?= (int)$unit['id'] ?>_unit_analysis_open()"
@@ -1252,7 +1265,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             </div>
 
             <div class="card-body">
-                <div x-show="dorLoading" class="stat-grid" aria-busy="true" aria-label="Loading days on rent">
+                <div x-show="dorLoading" class="stat-grid stat-grid--4" aria-busy="true" aria-label="Loading days on rent">
                     <template x-for="i in 4" :key="i">
                         <div class="stat-card">
                             <div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div>
@@ -1261,7 +1274,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                     </template>
                 </div>
 
-                <div x-show="dor && !dorLoading" class="stat-grid dor-stats">
+                <div x-show="dor && !dorLoading" class="stat-grid stat-grid--4 dor-stats">
                     <div class="stat-card stat-card--blue">
                         <div class="stat-label">Days on Rent</div>
                         <div class="stat-value font-mono" x-text="dor?.days_on_rent ?? '—'"></div>
