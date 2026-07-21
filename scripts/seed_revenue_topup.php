@@ -44,9 +44,10 @@ if (!$customers) { fwrite(STDERR, "no CAD customers\n"); exit(1); }
 
 // ── Units by category, with their template rates ─────────────────────────────
 $unitRows = db_select(
-    "SELECT eu.id, eu.unit_number, eu.vin, eu.year, t.id tpl_id, t.category, t.name tname, t.brand, t.model,
+    "SELECT eu.id, eu.unit_number, eu.vin, eu.year, t.id tpl_id, t.category, t.name tname, eb.label AS brand, t.model,
             t.default_daily_rate d, t.default_weekly_rate w, t.default_monthly_rate m
        FROM equipment_units eu JOIN equipment_templates t ON t.id = eu.template_id
+       LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
       WHERE eu.deleted_at IS NULL ORDER BY eu.id", []
 );
 $byCat = [];

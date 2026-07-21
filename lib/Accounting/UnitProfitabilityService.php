@@ -36,8 +36,9 @@ declare(strict_types=1);
  *     AND deleted_at IS NULL.
  *   - invoices.total_amount (Trap 41) + status set with partially_paid
  *     + overdue for active AR (Trap 42)
- *   - equipment_units identity: make/model lives on equipment_templates
- *     (template_id FK on equipment_units); template uses .brand + .model
+ *   - equipment_units identity: model lives on equipment_templates
+ *     (template_id FK on equipment_units, .model); brand lives on the UNIT
+ *     (equipment_units.brand_id -> equipment_brands.label) since S-UNIT-BRAND
  *
  * @session S-ACCT-UNIT
  */
@@ -328,9 +329,10 @@ class UnitProfitabilityService
     ): array {
         $unit = \db_row(
             "SELECT u.id, u.unit_number, u.year, u.status, u.acquisition_cost,
-                    t.name AS template_name, t.brand AS template_brand, t.model AS template_model
+                    t.name AS template_name, eb.label AS template_brand, t.model AS template_model
                FROM equipment_units u
                LEFT JOIN equipment_templates t ON t.id = u.template_id
+               LEFT JOIN equipment_brands eb ON eb.id = u.brand_id
               WHERE u.id = ?",
             [$unitId]
         );

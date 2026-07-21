@@ -50,10 +50,11 @@ $docsExpiring = db_count(
 $leases = db_select(
     "SELECT l.id, l.contract_number, l.start_date, l.status,
             l.monthly_rate,
-            eu.unit_number, et.brand, et.model, et.category
+            eu.unit_number, eb.label AS brand, et.model, et.category
      FROM leases l
      JOIN equipment_units eu ON eu.id = l.equipment_unit_id
      JOIN equipment_templates et ON et.id = eu.template_id
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE l.customer_id = ? AND l.status = 'active' AND l.deleted_at IS NULL
      AND eu.deleted_at IS NULL AND et.deleted_at IS NULL
      ORDER BY l.start_date DESC

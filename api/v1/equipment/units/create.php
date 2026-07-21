@@ -93,14 +93,33 @@ if ($fields) {
 }
 
 // ── Verify template exists ─────────────────────────────────────
-// SAMSARA-3: pull brand/model/category so we can mirror them to Samsara
+// SAMSARA-3: pull model/category so we can mirror them to Samsara.
+// S-UNIT-BRAND: `brand` is no longer on the template — the make now comes from
+// the unit's own brand_id, resolved just below.
 $template = db_row(
-    "SELECT id, brand, model, category FROM equipment_templates WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
+    "SELECT id, model, category FROM equipment_templates WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
     [$templateId]
 );
 if (!$template) {
     json_error('NOT_FOUND', 'Equipment template not found or inactive.', 404,
         ['fields' => ['template_id' => 'Equipment template not found or inactive.']]);
+}
+
+// ── S-UNIT-BRAND: optional per-unit manufacturer ───────────────
+// Optional (the operator expects to fill brands in over time), but when
+// supplied it must resolve to a live, active brand — otherwise a stale or
+// hand-crafted id would write a dangling FK-shaped value.
+$brandId    = clean_int($body['brand_id'] ?? null) ?: null;
+$brandLabel = null;
+if ($brandId !== null) {
+    $brandRow = db_row(
+        "SELECT id, label FROM equipment_brands WHERE id = ? AND deleted_at IS NULL AND is_active = 1",
+        [$brandId]
+    );
+    if (!$brandRow) {
+        json_validation_error(['brand_id' => 'That brand is not available. Pick one from the list.']);
+    }
+    $brandLabel = $brandRow['label'];
 }
 
 // ── Unique unit_number check ───────────────────────────────────
@@ -206,7 +225,10 @@ $newId  = null;
 try {
 db_transaction(function () use (
     &$newId, $userId,
-    $templateId, $unitNumber, $vin, $year,
+    // S-UNIT-BRAND: $brandId MUST be in this use() list as well as the insert
+    // array below — a variable referenced in the insert but missing here
+    // resolves to NULL and silently writes a blank brand (D-CLOSURE-USE).
+    $templateId, $brandId, $unitNumber, $vin, $year,
     $gpsDeviceId, $samsaraUrl, $trackingProvider,
     $ownershipType, $ownerCompanyId, $yardLocation,
     $lengthFt, $heightFt, $widthFt, $weightCap,
@@ -219,6 +241,7 @@ db_transaction(function () use (
 ): void {
     $newId = db_insert('equipment_units', [
         'template_id'                => $templateId,
+        'brand_id'                   => $brandId,
         'unit_number'                => $unitNumber,
         'vin'                        => $vin,
         'year'                       => $year,
@@ -328,7 +351,8 @@ try {
     $created = $samsara->createTrailer($unitNumber, [
         'vin'           => $vin,
         'year'          => $year,
-        'make'          => $template['brand'] ?? null,
+        // S-UNIT-BRAND: the make mirrored to Samsara is now the UNIT's brand.
+        'make'          => $brandLabel,
         'model'         => $template['model'] ?? null,
         'license_plate' => $licensePlate,
         'notes'         => 'Created in FleetForge — unit #' . $newId,

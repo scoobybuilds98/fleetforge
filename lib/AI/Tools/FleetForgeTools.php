@@ -424,9 +424,10 @@ class FleetForgeTools
                     eu.health_score, eu.lease_count, eu.total_revenue, eu.total_maintenance_cost,
                     eu.acquired_date, eu.acquisition_cost,
                     eu.notes, eu.created_at,
-                    et.name AS template_name, et.category, et.brand, et.model
+                    et.name AS template_name, et.category, eb.label AS brand, et.model
              FROM equipment_units eu
              LEFT JOIN equipment_templates et ON et.id = eu.template_id
+             LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
              WHERE eu.id = ? AND eu.deleted_at IS NULL",
             [$unitId]
         );

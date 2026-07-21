@@ -32,13 +32,14 @@ $log = db_row(
         ml.recorded_by,
         ml.created_at,
         eu.unit_number,
-        et.brand,
+        eb.label            AS brand,
         et.model,
         et.category         AS unit_category,
         u.name              AS recorded_by_name
      FROM mileage_logs ml
      JOIN equipment_units eu ON eu.id = ml.equipment_unit_id AND eu.deleted_at IS NULL
      JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      LEFT JOIN users u ON u.id = ml.recorded_by
      WHERE ml.id = ?",
     [$id]

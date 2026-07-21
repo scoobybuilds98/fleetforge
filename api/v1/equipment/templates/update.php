@@ -11,7 +11,7 @@ declare(strict_types=1);
  * @method   POST
  * @body     JSON
  * @required id, updated_at
- * @optional name, description, category, brand, model, default_length_ft,
+ * @optional name, description, category, model, default_length_ft,
  *           default_height_ft, default_width_ft, default_weight_capacity_lbs,
  *           default_wheel_size, default_tire_size, default_axle_count,
  *           default_ownership_type, default_yard_location, default_tracking_provider,
@@ -153,7 +153,7 @@ if ($catTouched) {
     }
 }
 
-$stringFields = ['description','brand','model','default_wheel_size','default_tire_size',
+$stringFields = ['description','model','default_wheel_size','default_tire_size',
                  'default_yard_location','default_notes','default_inspection_notes'];
 foreach ($stringFields as $field) {
     if (array_key_exists($field, $body)) {

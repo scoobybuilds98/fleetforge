@@ -95,10 +95,11 @@ $results = match($type) {
     ),
     'equipment' => db_select(
         "SELECT eu.id, eu.unit_number AS title, eu.status AS badge,
-                CONCAT(eu.year, ' ', et.brand, ' ', et.model) AS subtitle
+                CONCAT(eu.year, ' ', eb.label, ' ', et.model) AS subtitle
          FROM equipment_units eu JOIN equipment_templates et ON et.id = eu.template_id
+         LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
          WHERE eu.deleted_at IS NULL AND et.deleted_at IS NULL
-           AND (eu.unit_number LIKE ? OR et.brand LIKE ? OR et.model LIKE ?)
+           AND (eu.unit_number LIKE ? OR eb.label LIKE ? OR et.model LIKE ?)
          ORDER BY eu.unit_number ASC LIMIT ?",
         [$like, $like, $like, $limit]
     ),

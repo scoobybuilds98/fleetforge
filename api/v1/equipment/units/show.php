@@ -101,10 +101,11 @@ $row = db_row(
         u.samsara_tags,
         t.name     AS template_name,
         t.category AS template_category,
-        t.brand    AS template_brand,
+        eb.label   AS template_brand,
         t.model    AS template_model
        FROM equipment_units u
        JOIN equipment_templates t ON t.id = u.template_id
+       LEFT JOIN equipment_brands eb ON eb.id = u.brand_id
       WHERE u.id = ? AND u.deleted_at IS NULL",
     [$id]
 );

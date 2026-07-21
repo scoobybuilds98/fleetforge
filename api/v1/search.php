@@ -148,17 +148,18 @@ if (can('equipment', 'view')) {
                 eu.yard_location,
                 eu.status,
                 et.name  AS template_name,
-                et.brand AS brand,
+                eb.label AS brand,
                 et.model AS model
            FROM equipment_units eu
            LEFT JOIN equipment_templates et ON et.id = eu.template_id
+           LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
           WHERE eu.deleted_at IS NULL
             AND (
                 eu.unit_number   LIKE ?
                 OR eu.vin         LIKE ?
                 OR eu.license_plate LIKE ?
                 OR et.name        LIKE ?
-                OR et.brand       LIKE ?
+                OR eb.label       LIKE ?
                 OR et.model       LIKE ?
             )
           ORDER BY eu.unit_number ASC

@@ -59,6 +59,17 @@ $templates = db_select(
     [$unit['template_id']]
 );
 
+// S-UNIT-BRAND: same "include the current selection even if retired" rule as
+// templates above — otherwise editing (say) the yard on a unit whose brand was
+// since deactivated would silently blank that brand on save, because the
+// option wouldn't exist for x-model to bind to.
+$brands = db_select(
+    "SELECT id, label, is_active FROM equipment_brands
+      WHERE (deleted_at IS NULL AND is_active = 1) OR id = ?
+      ORDER BY sort_order, label",
+    [$unit['brand_id']]
+);
+
 $pageTitle = 'Edit Unit ' . $unit['unit_number'];
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
@@ -92,7 +103,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header"><div class="card-title">Unit Identity</div></div>
             <div class="card-body">
 
-                <div class="form-row-2">
+                <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label required" for="template_id">Equipment Type</label>
                         <select id="template_id" name="template_id" class="form-control form-select"
@@ -104,6 +115,28 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" data-error-for="template_id"></div>
                         <div class="form-hint">Existing leases and their rates are unaffected; new leases will use the selected type's rates.</div>
                     </div>
+
+                    <!-- S-UNIT-BRAND: manufacturer of THIS unit (was on the template).
+                         The unit's own brand is always listed even if since deactivated,
+                         so opening the form can never silently blank it on save. -->
+                    <div class="form-group">
+                        <label class="form-label" for="brand_id">Brand / Make</label>
+                        <select id="brand_id" name="brand_id" class="form-control form-select"
+                                x-model="form.brand_id">
+                            <option value="">— No brand —</option>
+                            <?php foreach ($brands as $b): ?>
+                            <option value="<?= (int) $b['id'] ?>"<?= !((int) $b['is_active']) ? ' data-inactive="1"' : '' ?>>
+                                <?= e($b['label']) ?><?= !((int) $b['is_active']) ? ' (inactive)' : '' ?>
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-hint">
+                            Manage the list on the
+                            <a href="<?= base_url('equipment/brands') ?>" class="link">Brands</a> screen.
+                        </div>
+                        <div class="field-error" data-error-for="brand_id"></div>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label required" for="unit_number">Unit Number</label>
                         <input type="text" id="unit_number" name="unit_number" class="form-control font-mono"
@@ -316,6 +349,9 @@ function FF_EditUnit() {
             id:                  <?= $unitId ?>,
             updated_at:          <?= json_encode($unit['updated_at']) ?>,
             template_id:         <?= (int)$unit['template_id'] ?>,
+            // S-UNIT-BRAND: string (not int) so the "— No brand —" empty option
+            // binds cleanly; coerced back to int in the payload below.
+            brand_id:            <?= json_encode($unit['brand_id'] !== null ? (string) $unit['brand_id'] : '') ?>,
             unit_number:         <?= json_encode($unit['unit_number']) ?>,
             vin:                 <?= json_encode($unit['vin'] ?? '') ?>,
             year:                <?= json_encode($unit['year'] ?? '') ?>,

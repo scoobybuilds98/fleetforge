@@ -2652,6 +2652,20 @@ CREATE TABLE `equipment_status_log` (
   CONSTRAINT `equipment_status_log_ibfk_3` FOREIGN KEY (`reservation_id`) REFERENCES `reservations` (`id`) ON DELETE SET NULL,
   CONSTRAINT `equipment_status_log_ibfk_4` FOREIGN KEY (`changed_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `equipment_brands` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `slug` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Stable identifier. Never edited after create.',
+  `label` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Operator-editable display name shown in the unit brand dropdown.',
+  `is_active` tinyint(1) NOT NULL DEFAULT '1' COMMENT 'Inactive brands stay on existing units but drop out of the picker.',
+  `sort_order` smallint unsigned NOT NULL DEFAULT '0',
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_eqbrand_slug` (`slug`),
+  KEY `idx_eqbrand_active` (`is_active`,`sort_order`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `equipment_categories` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `slug` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'Stable identifier; mirrored into equipment_templates.category. Never edited after create.',
@@ -2691,7 +2705,6 @@ CREATE TABLE `equipment_templates` (
   `category` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `category_id` int unsigned DEFAULT NULL,
   `subcategory_id` int unsigned DEFAULT NULL,
-  `brand` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `model` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `default_length_ft` decimal(6,2) DEFAULT NULL,
   `default_height_ft` decimal(6,2) DEFAULT NULL,
@@ -2734,6 +2747,7 @@ CREATE TABLE `equipment_templates` (
 CREATE TABLE `equipment_units` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `template_id` int unsigned NOT NULL,
+  `brand_id` int unsigned DEFAULT NULL COMMENT 'S-UNIT-BRAND: manufacturer of THIS unit. Was equipment_templates.brand — a template is a TYPE, and one type comes from many brands.',
   `unit_number` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
   `vin` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   `year` smallint unsigned DEFAULT NULL,
@@ -2820,11 +2834,13 @@ CREATE TABLE `equipment_units` (
   KEY `owner_company_id` (`owner_company_id`),
   KEY `created_by` (`created_by`),
   KEY `updated_by` (`updated_by`),
+  KEY `idx_equnit_brand` (`brand_id`),
   FULLTEXT KEY `idx_ft_units` (`unit_number`,`vin`,`gps_device_id`,`license_plate`),
   CONSTRAINT `equipment_units_ibfk_1` FOREIGN KEY (`template_id`) REFERENCES `equipment_templates` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `equipment_units_ibfk_2` FOREIGN KEY (`owner_company_id`) REFERENCES `customers` (`id`) ON DELETE SET NULL,
   CONSTRAINT `equipment_units_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `equipment_units_ibfk_4` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `equipment_units_ibfk_4` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_equnit_brand` FOREIGN KEY (`brand_id`) REFERENCES `equipment_brands` (`id`) ON DELETE SET NULL ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `exchange_rates` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

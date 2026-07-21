@@ -31,9 +31,10 @@ $defaultStart = date('Y') . '-01-01';
 $defaultEnd   = date('Y-m-d');
 
 $activeUnits = db_select(
-    "SELECT u.id, u.unit_number, u.year, t.brand AS template_brand, t.model AS template_model
+    "SELECT u.id, u.unit_number, u.year, eb.label AS template_brand, t.model AS template_model
        FROM equipment_units u
        LEFT JOIN equipment_templates t ON t.id = u.template_id
+       LEFT JOIN equipment_brands eb ON eb.id = u.brand_id
       WHERE u.status NOT IN ('decommissioned','inactive')
         AND u.deleted_at IS NULL
       ORDER BY u.unit_number ASC"

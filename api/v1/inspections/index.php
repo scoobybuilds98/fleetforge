@@ -9,7 +9,8 @@ declare(strict_types=1);
  * Business rules:
  *   - No soft delete on inspections (no deleted_at column) — all records returned.
  *   - Filters: status, inspection_type, equipment_unit_id, lease_id, date_from, date_to, q (notes search).
- *   - JOINs equipment_units + equipment_templates for unit_number/brand/model.
+ *   - JOINs equipment_units + equipment_templates for unit_number/model, and
+ *     equipment_brands (via equipment_units.brand_id) for the brand label.
  *   - JOINs leases for contract_number.
  *   - Sort allowlist: inspection_date, inspection_number, status, inspection_type,
  *     created_at, updated_at, overall_condition, unit_number.
@@ -112,13 +113,14 @@ $rows = db_select(
         i.created_at,
         i.equipment_unit_id,
         eu.unit_number,
-        et.brand,
+        eb.label AS brand,
         et.model,
         i.lease_id,
         l.contract_number
      FROM inspections i
      LEFT JOIN equipment_units eu  ON eu.id = i.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id   AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb    ON eb.id = eu.brand_id
      LEFT JOIN leases l             ON l.id  = i.lease_id         AND l.deleted_at IS NULL
      WHERE $whereSQL
      ORDER BY $orderExpr

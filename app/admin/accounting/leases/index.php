@@ -34,13 +34,14 @@ $capitalLeases = db_select(
         l.initial_fair_value, l.implicit_rate, l.status,
         c.company_name, c.contact_name,
         u.unit_number,
-        t.brand, t.model,
+        eb.label AS brand, t.model,
         signer.name AS signoff_name,
         l.classification_signed_off_at
      FROM leases l
      LEFT JOIN customers          c      ON c.id      = l.customer_id          AND c.deleted_at IS NULL
      LEFT JOIN equipment_units    u      ON u.id      = l.equipment_unit_id    AND u.deleted_at IS NULL
      LEFT JOIN equipment_templates t     ON t.id      = u.template_id          AND t.deleted_at IS NULL
+     LEFT JOIN equipment_brands   eb     ON eb.id     = u.brand_id
      LEFT JOIN users              signer ON signer.id = l.classification_signed_off_by AND signer.deleted_at IS NULL
      WHERE l.classification IN ('sales_type','direct_financing')
        AND l.deleted_at IS NULL

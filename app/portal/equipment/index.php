@@ -18,13 +18,14 @@ $units = db_select(
     "SELECT eu.id, eu.unit_number, eu.vin, eu.license_plate,
             eu.samsara_vehicle_url, eu.mileage,
             eu.cvi_expiry, eu.registration_expiry, eu.mvi_expiry, eu.insurance_expiry,
-            et.brand, et.model, et.category, eu.year,
+            eb.label AS brand, et.model, et.category, eu.year,
             l.id AS lease_id, l.contract_number, l.start_date,
             l.estimated_mileage, l.mileage_at_start, l.mileage_unit,
             eu.yard_location
      FROM equipment_units eu
      JOIN leases l ON eu.id = l.equipment_unit_id
      JOIN equipment_templates et ON et.id = eu.template_id
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE l.customer_id = ? AND l.status = 'active'
      AND l.deleted_at IS NULL AND eu.deleted_at IS NULL AND et.deleted_at IS NULL
      ORDER BY eu.unit_number ASC",

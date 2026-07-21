@@ -36,9 +36,10 @@ $lastGpsSyncDate = $lastGpsSync ? format_date($lastGpsSync['log_date']) : '—';
 //    is a totally legitimate report. The label still includes the
 //    status badge for visual confirmation, but no row is disabled.
 $filterUnits = db_select(
-    "SELECT eu.id, eu.unit_number, eu.status, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, eb.label AS brand, et.model
      FROM equipment_units eu
      JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE eu.deleted_at IS NULL
      ORDER BY eu.unit_number ASC",
     []

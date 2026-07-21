@@ -124,12 +124,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" data-error-for="category_id"></div>
                     </div>
 
+                    <!-- S-UNIT-BRAND: Brand / Make removed from the TEMPLATE — it is
+                         now a per-UNIT field (see the unit create/edit form). -->
                     <div class="form-row-2">
-                        <div class="form-group">
-                            <label class="form-label" for="brand">Brand / Make</label>
-                            <input type="text" id="brand" name="brand" class="form-control"
-                                   x-model="form.brand" maxlength="100" placeholder="e.g. Wabash">
-                        </div>
                         <div class="form-group">
                             <label class="form-label" for="model">Model</label>
                             <input type="text" id="model" name="model" class="form-control"
@@ -372,7 +369,6 @@ function FF_EditTemplate(templateId) {
             name:                               '',
             category_id:                        '',
             description:                        '',
-            brand:                              '',
             model:                              '',
             default_length_ft:                  '',
             default_height_ft:                  '',

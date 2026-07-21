@@ -49,6 +49,10 @@ require_once FF_ROOT . '/includes/header.php';
         <a href="<?= base_url('equipment/categories') ?>" class="btn btn-secondary btn-sm">
             Manage Categories
         </a>
+        <!-- S-UNIT-BRAND: brand is a per-UNIT field now; its list is managed here. -->
+        <a href="<?= base_url('equipment/brands') ?>" class="btn btn-secondary btn-sm">
+            Manage Brands
+        </a>
         <?php if (can('equipment', 'create')): ?>
         <a href="<?= base_url('equipment/templates/create') ?>" class="btn btn-primary btn-sm">
             + Add new equipment type
@@ -142,7 +146,7 @@ require_once FF_ROOT . '/includes/header.php';
                             <tr>
                                 <td>
                                     <div class="font-medium" x-text="tpl.name"></div>
-                                    <div class="text-sm text-secondary" x-text="tpl.brand && tpl.model ? tpl.brand + ' ' + tpl.model : (tpl.brand || tpl.model || '')"></div>
+                                    <div class="text-sm text-secondary" x-text="tpl.model || ''"></div>
                                 </td>
                                 <td>
                                     <span class="badge badge-info badge-no-dot"

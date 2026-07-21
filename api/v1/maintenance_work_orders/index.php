@@ -13,7 +13,8 @@ declare(strict_types=1);
  * Default sort: requested_date DESC.
  *
  * SOFT_DELETE: maintenance_work_orders has deleted_at — always AND mwo.deleted_at IS NULL.
- * JOINs: equipment_units (eu) + equipment_templates (et) for brand/model label.
+ * JOINs: equipment_units (eu) + equipment_templates (et) for the model label,
+ *        equipment_brands (eb) via eu.brand_id for the brand label.
  *        vendors (v) for vendor name. users (u) for assigned_to name.
  *
  * @method  GET
@@ -127,12 +128,13 @@ $rows = db_select(
          mwo.equipment_unit_id, mwo.vendor_id, mwo.assigned_to,
          mwo.created_at, mwo.updated_at,
          eu.unit_number,
-         et.brand, et.model,
+         eb.label AS brand, et.model,
          v.name AS vendor_name,
          u.name AS assigned_to_name
      FROM maintenance_work_orders mwo
      JOIN equipment_units eu ON eu.id = mwo.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      LEFT JOIN vendors v ON v.id = mwo.vendor_id AND v.deleted_at IS NULL
      LEFT JOIN users u ON u.id = mwo.assigned_to AND u.deleted_at IS NULL
      WHERE $whereSQL

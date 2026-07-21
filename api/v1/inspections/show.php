@@ -56,7 +56,7 @@ $insp = db_row(
         i.created_at,
         i.updated_at,
         eu.unit_number,
-        et.brand,
+        eb.label AS brand,
         et.model,
         et.category  AS unit_type,
         l.contract_number,
@@ -66,6 +66,7 @@ $insp = db_row(
      FROM inspections i
      LEFT JOIN equipment_units     eu  ON eu.id = i.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et  ON et.id = eu.template_id      AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands    eb  ON eb.id = eu.brand_id
      LEFT JOIN leases              l   ON l.id  = i.lease_id          AND l.deleted_at IS NULL
      LEFT JOIN customers           c   ON c.id  = l.customer_id       AND c.deleted_at IS NULL
      LEFT JOIN users               u   ON u.id  = i.inspected_by_user_id

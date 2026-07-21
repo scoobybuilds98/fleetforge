@@ -52,7 +52,7 @@ if ($fields) {
 // ── Fetch existing ─────────────────────────────────────────────
 // SAMSARA-3: include samsara_vehicle_id so we can PATCH Samsara after update
 $existing = db_row(
-    "SELECT id, unit_number, status, updated_at, template_id, samsara_vehicle_id, samsara_entity_type
+    "SELECT id, unit_number, status, updated_at, template_id, brand_id, samsara_vehicle_id, samsara_entity_type
        FROM equipment_units WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -273,6 +273,27 @@ if (array_key_exists('template_id', $body)) {
         $fields['template_id'] = 'Selected equipment type is not available.';
     } else {
         $updates['template_id'] = $tplId;
+    }
+}
+
+// S-UNIT-BRAND: brand_id — nullable FK to equipment_brands. An empty value
+// CLEARS the brand ("— No brand —" in the picker), which is a legitimate edit,
+// so '' / null / 0 all resolve to NULL rather than a validation error.
+//
+// Keeping the CURRENT brand is always allowed even if it has since been
+// deactivated or soft-deleted — same rule as template_id above. Without that
+// carve-out, editing any other field on a unit whose brand was retired would
+// be rejected, or worse, silently blank the brand.
+if (array_key_exists('brand_id', $body)) {
+    $bId = clean_int($body['brand_id']) ?: null;
+    if ($bId === null) {
+        $updates['brand_id'] = null;
+    } elseif ($bId === ($existing['brand_id'] !== null ? (int) $existing['brand_id'] : null)) {
+        // Unchanged — no-op, always accepted.
+    } elseif (!db_exists('equipment_brands', 'id = ? AND deleted_at IS NULL AND is_active = 1', [$bId])) {
+        $fields['brand_id'] = 'That brand is not available. Pick one from the list.';
+    } else {
+        $updates['brand_id'] = $bId;
     }
 }
 

@@ -40,6 +40,17 @@ $templates = db_select(
 // Load yards for yard_location dropdown
 $yards = db_select("SELECT name FROM yards WHERE is_active = 1 ORDER BY name", []);
 
+// S-UNIT-BRAND: manufacturer list for the brand <select>. Active only — a
+// retired brand stays on the units that already carry it but must not be
+// offered for new ones. Loaded server-side like $templates so the field paints
+// with the page instead of flickering in.
+$brands = db_select(
+    "SELECT id, label FROM equipment_brands
+      WHERE deleted_at IS NULL AND is_active = 1
+      ORDER BY sort_order, label",
+    []
+);
+
 $helpModuleSlug = 'equipment';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -71,7 +82,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-header"><div class="card-title">Unit Identity</div></div>
             <div class="card-body">
 
-                <div class="form-row-2">
+                <div class="form-row-3">
                     <div class="form-group">
                         <label class="form-label required" for="template_id">Equipment Type</label>
                         <select id="template_id" name="template_id" class="form-control form-select"
@@ -87,6 +98,26 @@ require_once FF_ROOT . '/includes/header.php';
                             <?php endforeach; ?>
                         </select>
                         <div class="field-error" data-error-for="template_id"></div>
+                    </div>
+
+                    <!-- S-UNIT-BRAND: brand lives on the UNIT, not the template —
+                         one equipment type (e.g. a 53' dry van) is built by many
+                         manufacturers. Deliberately NOT pre-filled by
+                         onTemplateChange(): the template no longer carries a brand. -->
+                    <div class="form-group">
+                        <label class="form-label" for="brand_id">Brand / Make</label>
+                        <select id="brand_id" name="brand_id" class="form-control form-select"
+                                x-model="form.brand_id">
+                            <option value="">— Select brand —</option>
+                            <?php foreach ($brands as $b): ?>
+                            <option value="<?= (int) $b['id'] ?>"><?= e($b['label']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-hint">
+                            Manage the list on the
+                            <a href="<?= base_url('equipment/brands') ?>" class="link">Brands</a> screen.
+                        </div>
+                        <div class="field-error" data-error-for="brand_id"></div>
                     </div>
 
                     <div class="form-group">
@@ -384,6 +415,7 @@ function FF_CreateUnit() {
     return {
         form: {
             template_id:        '',
+            brand_id:           '',   // S-UNIT-BRAND — per-unit manufacturer
             unit_number:        '',
             vin:                '',
             year:               '',
@@ -535,6 +567,7 @@ function FF_CreateUnit() {
             Object.entries(this.form).forEach(([k, v]) => {
                 if (v !== '' && v !== null && v !== undefined) payload[k] = v;
             });
+            if (payload.brand_id)           payload.brand_id           = parseInt(payload.brand_id);
             if (payload.year)               payload.year               = parseInt(payload.year);
             if (payload.mileage)            payload.mileage            = parseInt(payload.mileage);
             if (payload.weight_capacity_lbs) payload.weight_capacity_lbs = parseInt(payload.weight_capacity_lbs);

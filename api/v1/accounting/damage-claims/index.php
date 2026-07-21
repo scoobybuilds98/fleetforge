@@ -43,7 +43,10 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
 
 // Pull claims in window, with customer / unit / template / invoice / repair-bill
 // joins. K-22 catches: customers.company_name (not name); equipment_templates
-// brand+model via template_id FK; damage_claims status ENUM has 'invoiced' not
+// model via template_id FK, but brand now lives on the UNIT
+// (equipment_units.brand_id -> equipment_brands, S-UNIT-BRAND); the
+// template_brand output alias is preserved for downstream consumers;
+// damage_claims status ENUM has 'invoiced' not
 // 'billed_to_customer'; invoices uses total_amount + balance_due (not 'total').
 $whereExtra = '';
 $params = [$from, $to];
@@ -59,13 +62,14 @@ $claims = db_select(
             dc.customer_liable_amount, dc.invoice_id,
             c.id AS customer_id, c.company_name,
             u.unit_number, u.year AS unit_year,
-            t.brand AS template_brand, t.model AS template_model,
+            eb.label AS template_brand, t.model AS template_model,
             i.invoice_number, i.total_amount AS invoice_total, i.balance_due AS invoice_balance,
             (i.total_amount - i.balance_due) AS invoice_collected
        FROM damage_claims dc
        LEFT JOIN customers c ON c.id = dc.customer_id
        LEFT JOIN equipment_units u ON u.id = dc.equipment_unit_id
        LEFT JOIN equipment_templates t ON t.id = u.template_id
+       LEFT JOIN equipment_brands eb ON eb.id = u.brand_id
        LEFT JOIN invoices i ON i.id = dc.invoice_id AND i.deleted_at IS NULL
       WHERE dc.deleted_at IS NULL
         AND dc.created_at BETWEEN ? AND ?

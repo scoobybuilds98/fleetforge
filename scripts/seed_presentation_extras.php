@@ -91,9 +91,10 @@ if ($phase === 'assets') {
     $glCost = acctId('1210'); $glAccum = acctId('1220'); $glDepr = acctId('5010');
 
     $units = db_select(
-        "SELECT eu.id, eu.unit_number, eu.vin, eu.year, eu.yard_location, t.category, t.brand, t.model
+        "SELECT eu.id, eu.unit_number, eu.vin, eu.year, eu.yard_location, t.category, eb.label AS brand, t.model
            FROM equipment_units eu
            JOIN equipment_templates t ON t.id = eu.template_id
+           LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
           WHERE eu.deleted_at IS NULL
             AND NOT EXISTS (SELECT 1 FROM acc_fixed_assets fa WHERE fa.equipment_unit_id = eu.id)
           ORDER BY eu.id", []

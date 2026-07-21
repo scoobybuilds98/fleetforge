@@ -77,9 +77,10 @@ $unitWhereSQL = implode(' AND ', $unitWhere);
 
 $units = db_select(
     "SELECT eu.id, eu.unit_number, eu.yard_location, eu.status,
-            et.brand, et.model, et.category AS equipment_type
+            eb.label AS brand, et.model, et.category AS equipment_type
      FROM equipment_units eu
      JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE $unitWhereSQL
      ORDER BY eu.unit_number ASC",
     $unitParams

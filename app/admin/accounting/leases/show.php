@@ -48,13 +48,14 @@ $lease = db_row(
             l.classification_signed_off_at,
             c.company_name, c.contact_name,
             u.unit_number,
-            t.brand, t.model,
+            eb.label AS brand, t.model,
             alc.criterion_b_lease_term_months AS term_months,
             signer.full_name AS signoff_name
        FROM leases l
        LEFT JOIN customers           c      ON c.id     = l.customer_id          AND c.deleted_at IS NULL
        LEFT JOIN equipment_units     u      ON u.id     = l.equipment_unit_id    AND u.deleted_at IS NULL
        LEFT JOIN equipment_templates t      ON t.id     = u.template_id          AND t.deleted_at IS NULL
+       LEFT JOIN equipment_brands    eb     ON eb.id    = u.brand_id
        LEFT JOIN acc_lease_classifications alc ON alc.lease_id = l.id
        LEFT JOIN users               signer ON signer.id = l.classification_signed_off_by AND signer.deleted_at IS NULL
       WHERE l.id = ? AND l.deleted_at IS NULL

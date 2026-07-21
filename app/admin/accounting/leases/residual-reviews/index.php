@@ -31,7 +31,7 @@ if ($fiscalYear < 2000 || $fiscalYear > 2100) $fiscalYear = (int) date('Y');
 $leases = db_select(
     "SELECT l.id, l.contract_number, l.classification,
             l.unguaranteed_residual_value, l.start_date,
-            c.company_name, u.unit_number, t.brand, t.model,
+            c.company_name, u.unit_number, eb.label AS brand, t.model,
             lrr.id AS last_review_id,
             lrr.revised_residual_value AS last_revised,
             lrr.delta AS last_delta,
@@ -42,6 +42,7 @@ $leases = db_select(
        LEFT JOIN customers           c ON c.id = l.customer_id          AND c.deleted_at IS NULL
        LEFT JOIN equipment_units     u ON u.id = l.equipment_unit_id    AND u.deleted_at IS NULL
        LEFT JOIN equipment_templates t ON t.id = u.template_id          AND t.deleted_at IS NULL
+       LEFT JOIN equipment_brands    eb ON eb.id = u.brand_id
        LEFT JOIN acc_lease_residual_reviews lrr
               ON lrr.lease_id = l.id AND lrr.fiscal_year = ?
        LEFT JOIN acc_journal_entries je

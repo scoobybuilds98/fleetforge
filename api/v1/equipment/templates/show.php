@@ -52,7 +52,6 @@ $template = [
     'category'                         => $row['category'],
     'category_id'                      => $row['category_id'] !== null ? (int) $row['category_id'] : null,
     'subcategory_id'                   => $row['subcategory_id'] !== null ? (int) $row['subcategory_id'] : null,
-    'brand'                            => $row['brand'],
     'model'                            => $row['model'],
     'default_length_ft'                => $row['default_length_ft'],
     'default_height_ft'                => $row['default_height_ft'],

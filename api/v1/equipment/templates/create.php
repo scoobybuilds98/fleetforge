@@ -11,7 +11,7 @@ declare(strict_types=1);
  * @method   POST
  * @body     JSON
  * @required name, category
- * @optional description, brand, model, default_length_ft, default_height_ft,
+ * @optional description, model, default_length_ft, default_height_ft,
  *           default_width_ft, default_weight_capacity_lbs, default_wheel_size,
  *           default_tire_size, default_axle_count, default_ownership_type,
  *           default_yard_location, default_tracking_provider,
@@ -114,7 +114,6 @@ $checkPosInt = function ($raw, string $fieldName, string $label) use (&$fields) 
 
 // ── Optional fields ────────────────────────────────────────────
 $description   = clean_string($body['description'] ?? null, 5000);
-$brand         = clean_string($body['brand'] ?? null, 100);
 $model         = clean_string($body['model'] ?? null, 100);
 $lengthFt      = $checkPosDecimal($body['default_length_ft']           ?? null, 'default_length_ft',           'Length');
 $heightFt      = $checkPosDecimal($body['default_height_ft']           ?? null, 'default_height_ft',           'Height');
@@ -242,7 +241,7 @@ $newId = null;
 try {
 db_transaction(function () use (
     &$newId, $userId,
-    $name, $slug, $description, $category, $resolvedCategoryId, $resolvedSubcategoryId, $brand, $model,
+    $name, $slug, $description, $category, $resolvedCategoryId, $resolvedSubcategoryId, $model,
     $lengthFt, $heightFt, $widthFt, $weightCap, $wheelSize, $tireSize, $axleCount,
     $ownershipType, $yardLocation, $trackingProvider,
     $cviInterval, $mviInterval, $regInterval, $insInterval,
@@ -256,7 +255,6 @@ db_transaction(function () use (
         'category'                           => $category,
         'category_id'                        => $resolvedCategoryId,
         'subcategory_id'                     => $resolvedSubcategoryId,
-        'brand'                              => $brand,
         'model'                              => $model,
         'default_length_ft'                  => $lengthFt,
         'default_height_ft'                  => $heightFt,

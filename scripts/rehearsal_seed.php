@@ -228,7 +228,7 @@ function ff_rehearsal_seed_execute(): void
             'slug'                        => $t['slug'],
             'description'                 => $t['name'] . ' — rehearsal fleet template',
             'category'                    => $t['category'],
-            'brand'                       => $t['brand'],
+            // S-UNIT-BRAND: brand moved to the UNIT (set as brand_id below).
             'model'                       => $t['model'],
             'default_length_ft'           => $t['len'],
             'default_width_ft'            => $t['wid'],
@@ -280,6 +280,8 @@ function ff_rehearsal_seed_execute(): void
             $mileage    = $baseMileage + ($i * 3137);            // deterministic spread, never 0
             $unitId = db_insert('equipment_units', [
                 'template_id'         => $templateIds[$tplKey],
+                // S-UNIT-BRAND: manufacturer now lives on the unit.
+                'brand_id'            => ff_demo_brand_id($templateDefs[$tplKey]['brand'] ?? null),
                 'unit_number'         => $unitNumber,
                 'vin'                 => $vin,
                 'year'                => $year,
@@ -755,4 +757,42 @@ function ff_rehearsal_seed_execute(): void
     printf("  Outstanding AP (bills): $%s\n", number_format((float) $ap, 2));
     echo "\n=== Rehearsal seed complete ===\n";
 
+}
+
+/**
+ * S-UNIT-BRAND: resolve a brand LABEL to an equipment_brands id for a unit row.
+ *
+ * Seed data still describes its fleet with brand names, but the column moved
+ * from the template to the unit and is now an FK. Unknown labels are created on
+ * the fly so a rehearsal dataset can name a manufacturer outside the operator's
+ * standard list without tripping the FK. Returns null for an empty label, which
+ * is a valid "no brand" unit. Cached per-process.
+ */
+function ff_demo_brand_id(?string $label): ?int
+{
+    static $map = null;
+    $label = $label !== null ? trim($label) : '';
+    if ($label === '') { return null; }
+
+    if ($map === null) {
+        $map = [];
+        foreach (db_select("SELECT id, label FROM equipment_brands") as $b) {
+            $map[strtolower($b['label'])] = (int) $b['id'];
+        }
+    }
+    $key = strtolower($label);
+    if (isset($map[$key])) { return $map[$key]; }
+
+    $slug = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower($label)) ?? '', '-') ?: 'brand';
+    $try  = $slug; $i = 2;
+    while (db_count("SELECT COUNT(*) FROM equipment_brands WHERE slug = ?", [$try]) > 0) {
+        $try = substr($slug, 0, 46) . '-' . $i; $i++;
+    }
+    $id = db_insert('equipment_brands', [
+        'slug'       => $try,
+        'label'      => $label,
+        'sort_order' => (int) (db_row("SELECT COALESCE(MAX(sort_order),0)+10 n FROM equipment_brands")['n'] ?? 10),
+    ]);
+    $map[$key] = $id;
+    return $id;
 }

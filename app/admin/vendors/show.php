@@ -72,14 +72,15 @@ $woTotal     = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE vend
 
 // Equipment units this vendor has worked on (distinct, from work orders)
 $unitHistory = db_select(
-    "SELECT eu.id, eu.unit_number, eu.year, et.brand, et.model,
+    "SELECT eu.id, eu.unit_number, eu.year, eb.label AS brand, et.model,
             COUNT(mwo.id) AS service_count,
             MAX(mwo.completed_date) AS last_service_date
      FROM maintenance_work_orders mwo
      JOIN equipment_units eu ON eu.id = mwo.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE mwo.vendor_id = ? AND mwo.deleted_at IS NULL
-     GROUP BY eu.id, eu.unit_number, eu.year, et.brand, et.model
+     GROUP BY eu.id, eu.unit_number, eu.year, eb.label, et.model
      ORDER BY last_service_date DESC, eu.unit_number ASC",
     [$vendorId]
 );

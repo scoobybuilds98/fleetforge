@@ -4,7 +4,7 @@ declare(strict_types=1);
 /**
  * app/admin/equipment/templates/create.php
  *
- * New equipment template form. Captures name, category, brand/model,
+ * New equipment template form. Captures name, category, model,
  * default dimensions, default rates, and compliance intervals.
  * Submits to api/v1/equipment/templates/create and redirects to templates list.
  *
@@ -83,12 +83,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="field-error" data-error-for="category_id"></div>
                 </div>
 
+                <!-- S-UNIT-BRAND: Brand / Make removed from the TEMPLATE.
+                     A template is a TYPE ("53' Dry Van") and one type is built by
+                     many manufacturers, so the brand is captured per UNIT on the
+                     unit create/edit form instead. -->
                 <div class="form-row-2">
-                    <div class="form-group">
-                        <label class="form-label" for="brand">Brand / Make</label>
-                        <input type="text" id="brand" name="brand" class="form-control"
-                               x-model="form.brand" maxlength="100" placeholder="e.g. Wabash">
-                    </div>
                     <div class="form-group">
                         <label class="form-label" for="model">Model</label>
                         <input type="text" id="model" name="model" class="form-control"
@@ -300,7 +299,6 @@ function FF_CreateTemplate() {
             name:                            '',
             category_id:                     <?= (int) clean_int($_GET['category_id'] ?? null) ?: "''" ?>,
             description:                     '',
-            brand:                           '',
             model:                           '',
             default_length_ft:               '',
             default_height_ft:               '',

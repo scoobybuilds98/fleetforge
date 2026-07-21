@@ -113,7 +113,7 @@ $rows = db_select(
         dc.equipment_unit_id,
         eu.unit_number,
         eu.year,
-        et.brand,
+        eb.label            AS brand,
         et.model,
         dc.lease_id,
         dc.customer_id,
@@ -130,6 +130,7 @@ $rows = db_select(
      FROM damage_claims dc
      LEFT JOIN equipment_units     eu ON eu.id = dc.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id        AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands    eb ON eb.id = eu.brand_id
      LEFT JOIN customers c            ON c.id  = dc.customer_id        AND c.deleted_at  IS NULL
      WHERE {$whereSQL}
      ORDER BY dc.{$sort} {$dir}

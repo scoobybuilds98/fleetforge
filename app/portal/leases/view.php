@@ -23,10 +23,11 @@ if (!$leaseId) {
 // Fetch lease — MUST filter by customer_id (Trap 8)
 $lease = db_row(
     "SELECT l.*, eu.unit_number, eu.samsara_vehicle_url, eu.yard_location,
-            et.brand, et.model, et.category, eu.year
+            eb.label AS brand, et.model, et.category, eu.year
      FROM leases l
      JOIN equipment_units eu ON eu.id = l.equipment_unit_id
      JOIN equipment_templates et ON et.id = eu.template_id
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE l.id = ? AND l.customer_id = ? AND l.deleted_at IS NULL
      AND eu.deleted_at IS NULL AND et.deleted_at IS NULL",
     [$leaseId, $cid]

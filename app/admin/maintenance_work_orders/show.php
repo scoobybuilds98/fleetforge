@@ -41,7 +41,7 @@ $wo = db_row(
     "SELECT
          mwo.*,
          eu.unit_number, eu.year AS unit_year, eu.status AS unit_status,
-         et.brand, et.model, et.category AS unit_category,
+         eb.label AS brand, et.model, et.category AS unit_category,
          v.name AS vendor_name, v.contact_name AS vendor_contact, v.phone AS vendor_phone,
          uc.name AS created_by_name,
          ua.name AS assigned_to_name,
@@ -49,6 +49,7 @@ $wo = db_row(
      FROM maintenance_work_orders mwo
      JOIN equipment_units eu ON eu.id = mwo.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      LEFT JOIN vendors v ON v.id = mwo.vendor_id AND v.deleted_at IS NULL
      LEFT JOIN users uc ON uc.id = mwo.created_by AND uc.deleted_at IS NULL
      LEFT JOIN users ua ON ua.id = mwo.assigned_to AND ua.deleted_at IS NULL

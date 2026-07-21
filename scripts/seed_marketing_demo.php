@@ -135,6 +135,45 @@ function daysAgo(int $n): string  { return (new DateTime("-{$n} days"))->format(
 function daysFromNow(int $n): string { return (new DateTime("+{$n} days"))->format('Y-m-d'); }
 
 /** Random but readable contract/identifier suffix. */
+/**
+ * S-UNIT-BRAND: resolve a brand LABEL to an equipment_brands id for a unit row.
+ *
+ * Seed data still describes its fleet with brand names, but the column moved
+ * from the template to the unit and is now an FK. Unknown labels are created
+ * on the fly (inactive-safe: they are seeded active) so a demo dataset can name
+ * a manufacturer that is not in the operator's standard list without failing
+ * the FK. Returns null for an empty label, which is a valid "no brand" unit.
+ * Cached per-process — this runs once per unit.
+ */
+function ff_demo_brand_id(?string $label): ?int
+{
+    static $map = null;
+    $label = $label !== null ? trim($label) : '';
+    if ($label === '') { return null; }
+
+    if ($map === null) {
+        $map = [];
+        foreach (db_select("SELECT id, label FROM equipment_brands") as $b) {
+            $map[strtolower($b['label'])] = (int) $b['id'];
+        }
+    }
+    $key = strtolower($label);
+    if (isset($map[$key])) { return $map[$key]; }
+
+    $slug = trim(preg_replace('/[^a-z0-9]+/', '-', strtolower($label)) ?? '', '-') ?: 'brand';
+    $try  = $slug; $i = 2;
+    while (db_count("SELECT COUNT(*) FROM equipment_brands WHERE slug = ?", [$try]) > 0) {
+        $try = substr($slug, 0, 46) . '-' . $i; $i++;
+    }
+    $id = db_insert('equipment_brands', [
+        'slug'       => $try,
+        'label'      => $label,
+        'sort_order' => (int) (db_row("SELECT COALESCE(MAX(sort_order),0)+10 n FROM equipment_brands")['n'] ?? 10),
+    ]);
+    $map[$key] = $id;
+    return $id;
+}
+
 function code6(): string { return strtoupper(substr(bin2hex(random_bytes(4)), 0, 6)); }
 
 /** Tagged internal_notes value — visible marker + human context. */
@@ -359,7 +398,7 @@ foreach ($templateDefs as $i => $t) {
         'slug'                        => DEMO_SLUG_PREFIX . substr(strtolower(preg_replace('/[^a-z0-9]+/i','-',$name)), 0, 70) . '-' . $i,
         'description'                 => tagNote('marketing demo template'),
         'category'                    => $cat,
-        'brand'                       => $brand,
+        // S-UNIT-BRAND: brand moved to the UNIT; set as brand_id on each unit below.
         'model'                       => $model,
         'default_length_ft'           => $len,
         'default_height_ft'           => $ht,
@@ -426,6 +465,8 @@ foreach ($perTemplate as $tplName => $count) {
         $odo    = $isTractor ? (string) random_int(180000, 720000) . '.00' : null;
         $row = [
             'template_id'         => $tpl['id'],
+            // S-UNIT-BRAND: manufacturer now lives on the unit.
+            'brand_id'            => ff_demo_brand_id($tpl['brand'] ?? null),
             'unit_number'         => $unitNo,
             'vin'                 => $vin,
             'year'                => $year,

@@ -101,9 +101,10 @@ if ($fields) {
 //    attribute, in case the user POSTs an id that bypassed the UI.
 // -----------------------------------------------------------------------
 $unit = db_row(
-    "SELECT eu.id, eu.unit_number, eu.status, et.brand, et.model
+    "SELECT eu.id, eu.unit_number, eu.status, eb.label AS brand, et.model
      FROM equipment_units eu
      LEFT JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
      WHERE eu.id = ? AND eu.deleted_at IS NULL",
     [$unitId]
 );

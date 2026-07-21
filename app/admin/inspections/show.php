@@ -36,12 +36,13 @@ if (!$id) {
 // ── Fetch inspection with all joins
 $insp = db_row(
     "SELECT
-        i.*, eu.unit_number, et.brand, et.model, et.category AS unit_type,
+        i.*, eu.unit_number, eb.label AS brand, et.model, et.category AS unit_type,
         l.contract_number, c.company_name AS customer_name,
         u.name AS inspected_by_user_name
      FROM inspections i
      LEFT JOIN equipment_units     eu ON eu.id = i.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id      AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands    eb ON eb.id = eu.brand_id
      LEFT JOIN leases              l  ON l.id  = i.lease_id          AND l.deleted_at IS NULL
      LEFT JOIN customers           c  ON c.id  = l.customer_id       AND c.deleted_at IS NULL
      LEFT JOIN users               u  ON u.id  = i.inspected_by_user_id

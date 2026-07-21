@@ -1513,12 +1513,13 @@ class FixedAssetService
                     wo.completed_date,
                     wo.total_cost,
                     eu.unit_number,
-                    et.brand,
+                    eb.label AS brand,
                     et.model,
                     v.name AS vendor_name
              FROM maintenance_work_orders wo
              LEFT JOIN equipment_units eu     ON eu.id = wo.equipment_unit_id
              LEFT JOIN equipment_templates et ON et.id = eu.template_id
+             LEFT JOIN equipment_brands eb    ON eb.id = eu.brand_id
              LEFT JOIN vendors v              ON v.id  = wo.vendor_id
              LEFT JOIN acc_capex_requests cr  ON cr.work_order_id = wo.id
              WHERE wo.deleted_at IS NULL

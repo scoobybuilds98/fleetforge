@@ -194,10 +194,11 @@ function pickUnit(string $category, bool $needSamsara = false): array
         "SELECT u.id, u.unit_number, u.template_id, u.vin, u.year, u.length_ft, u.width_ft,
                 u.height_ft, u.axle_count, u.weight_capacity_lbs, u.license_plate, u.license_state,
                 u.tracking_provider, u.mileage, u.samsara_vehicle_id, u.samsara_odometer_km,
-                t.name AS template_name, t.category, t.brand, t.model,
+                t.name AS template_name, t.category, eb.label AS brand, t.model,
                 t.default_daily_rate, t.default_weekly_rate, t.default_monthly_rate, t.default_mileage_rate
            FROM equipment_units u
            JOIN equipment_templates t ON t.id = u.template_id AND t.deleted_at IS NULL
+           LEFT JOIN equipment_brands eb ON eb.id = u.brand_id
           WHERE {$where}
           ORDER BY u.id ASC LIMIT 1",
         [$category]

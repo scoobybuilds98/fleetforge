@@ -44,7 +44,7 @@ $claim = db_row(
         dc.equipment_unit_id,
         eu.unit_number,
         eu.year,
-        et.brand,
+        eb.label             AS brand,
         et.model,
         dc.lease_id,
         l.contract_number,
@@ -70,6 +70,7 @@ $claim = db_row(
      FROM damage_claims dc
      LEFT JOIN equipment_units     eu ON eu.id = dc.equipment_unit_id AND eu.deleted_at IS NULL
      LEFT JOIN equipment_templates et ON et.id = eu.template_id        AND et.deleted_at IS NULL
+     LEFT JOIN equipment_brands    eb ON eb.id = eu.brand_id
      LEFT JOIN customers c            ON c.id  = dc.customer_id        AND c.deleted_at  IS NULL
      LEFT JOIN leases l           ON l.id  = dc.lease_id          AND l.deleted_at  IS NULL
      LEFT JOIN users u            ON u.id  = dc.reported_by

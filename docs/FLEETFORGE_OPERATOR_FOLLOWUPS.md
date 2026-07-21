@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-07-22 via S-NORTHLAND-P0 — added **F61** (🔴 BLOCKING: deploy S-NORTHLAND-P0 to activate the SES/SNS TopicArn allowlist; the `.env` key is already set on prod but inert until the code ships) and **F62** (🟡 PARTIAL: the credit-application PDF now follows `brand.primary_color` — confirm the teal accent is wanted before the next application is sent).
+**Last updated:** 2026-07-22 via S-UNIT-BRAND — added **F63** (🟡 PARTIAL: deploy + run migration `202607220002` moving `brand` off the equipment TEMPLATE onto the UNIT — new operator-managed `equipment_brands` table + `equipment_units.brand_id`, drops `equipment_templates.brand`; code and migration MUST land together. The backfill carries each template's brand onto its units so nothing is lost; the "everything but dry vans → Max Atlas" re-assignment is deliberately NOT included and awaits the operator's category list). Previously: 2026-07-22 via S-NORTHLAND-P0 — added **F61** (🔴 BLOCKING: deploy S-NORTHLAND-P0 to activate the SES/SNS TopicArn allowlist; the `.env` key is already set on prod but inert until the code ships) and **F62** (🟡 PARTIAL: the credit-application PDF now follows `brand.primary_color` — confirm the teal accent is wanted before the next application is sent).
 
 ---
 
@@ -34,6 +34,17 @@
 **Note on the prior half-applied state:** prod already has `invoices.province_snapshot` (migration `202606070200` half-applied earlier and died on a bad AFTER-anchor in its credit_notes statement). `202606070200` was fixed to anchor off `credit_note_number`; both migrations are idempotent and were proven via an ordered schema-real test against a prod-shaped scratch DB (35/35) plus adversarial review. The operator does NOT need to clean up the half-applied state — the idempotent guards handle it.
 
 ---
+
+### F63 — Deploy S-UNIT-BRAND + run the prod brand re-assignment script 🟡 PARTIAL (schema change; needs a migration + a data decision)
+
+**Surfaced by:** S-UNIT-BRAND (2026-07-22) — operator: "we can have a 53 feet dry van from 5-6 different brands", so brand had to move off the equipment TYPE and onto the individual unit.
+**Affects:** `db_migrations/202607220002_S-UNIT-BRAND_brands_table_and_unit_fk.sql` (NEW table `equipment_brands` + `equipment_units.brand_id` + **drops `equipment_templates.brand`**), ~40 files, plus the new Brands manage screen.
+**Operator action:**
+1. `git pull` + `ff-deploy`, then run the migration: `php /var/www/fleetforge/bin/migrate.php --dry-run` then `--apply`. **The code and the migration must land together** — the migration drops a column ~34 files used to read, so an app deploy without the migration (or vice-versa) will error on equipment pages.
+2. The migration is safe on your data: it seeds the 27 brands and **carries each template's existing brand down onto its units** before dropping the column, so nothing is lost. On dev this preserved all 49/49 units.
+3. **The re-assignment you asked about is NOT in this migration.** You said "make everything other than the dry vans a Max Atlas unit… we will write a script later" — that is deployment-specific and destructive, so it was deliberately left out. When you're ready, tell me which categories should become Max Atlas and I'll write an idempotent, dry-run-first script. Until then prod units keep whatever brand their template had.
+4. Where to manage the list: **Equipment → Equipment Types → Manage Brands** (or `/equipment/brands`). Add, rename, reorder, deactivate. A brand in use can't be deleted — deactivate it instead and it stays on those units while dropping out of the picker.
+5. Brand is **optional** on a unit, so any unit whose old template had no brand simply shows no brand until someone sets it.
 
 ### F61 — Deploy S-NORTHLAND-P0: bounce/complaint processing has NEVER worked, plus a TopicArn allowlist 🔴 BLOCKING
 
