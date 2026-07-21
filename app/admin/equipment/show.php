@@ -1243,7 +1243,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                style="width:150px;font-size:0.8125rem;padding:5px 10px;">
                         <button type="button" class="btn btn-primary btn-sm"
                                 :disabled="dorLoading || !dorFrom || !dorTo"
-                                @click="loadDaysOnRent()">Go</button>
+                                @click="dorApplyCustom()">Go</button>
                     </div>
                 </template>
 
@@ -1298,6 +1298,73 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                     <p class="empty-state-text">No active or completed leases overlap the selected dates.</p>
                 </div>
             </div>
+
+            <!-- ── Per-lease breakdown (15/page) ──────────────────────
+                 Days here are each lease's CLIPPED contribution to the
+                 selected range, so they sum to the raw per-lease total —
+                 which exceeds "days on rent" whenever leases overlap.
+                 Rows that share days are marked so that gap is traceable
+                 to specific leases rather than just asserted above. -->
+            <template x-if="dor && !dorLoading && dor.leases && dor.leases.length > 0">
+                <div>
+                    <div class="tab-table-container">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Contract #</th>
+                                    <th>Customer</th>
+                                    <th>Status</th>
+                                    <th>Start</th>
+                                    <th>End</th>
+                                    <th class="text-right" title="Days this lease contributed to the selected range">Days in Range</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="ls in dor.leases" :key="ls.id">
+                                    <tr>
+                                        <td class="font-mono">
+                                            <span x-text="ls.contract_number"></span>
+                                            <!-- Explains, per row, why the column can exceed the headline. -->
+                                            <span x-show="ls.overlaps"
+                                                  title="Shares days with another lease on this unit"
+                                                  style="margin-left:6px;font-size:0.6875rem;color:var(--color-warning-text, var(--text-muted));">overlaps</span>
+                                        </td>
+                                        <td x-text="ls.customer_name || '—'"></td>
+                                        <td>
+                                            <span class="badge badge-no-dot"
+                                                  :class="leaseBadgeClass(ls.status)"
+                                                  x-text="ls.status.charAt(0).toUpperCase() + ls.status.slice(1)"></span>
+                                        </td>
+                                        <!-- Effective dates, i.e. what was actually counted. The
+                                             lease's own dates show in the tooltip when clipped. -->
+                                        <td x-text="formatDate(ls.range_start)"
+                                            :title="ls.clipped ? 'Lease runs ' + formatDate(ls.start_date) + ' → ' + (ls.actual_return_date ? formatDate(ls.actual_return_date) : (ls.end_date ? formatDate(ls.end_date) : 'open')) + '; clipped to the selected range' : ''"></td>
+                                        <td x-text="formatDate(ls.range_end)"></td>
+                                        <td class="text-right font-mono" x-text="ls.days_in_range"></td>
+                                        <td>
+                                            <a :href="'<?= base_url('leases/show') ?>?id=' + ls.id"
+                                               class="btn btn-sm btn-secondary">View</a>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="tab-table-footer">
+                        <span x-text="dorRangeLabel()"></span>
+                        <span x-show="dor.pagination && dor.pagination.total_pages > 1" style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn btn-secondary btn-sm"
+                                    :disabled="dorLoading || dor.pagination.page <= 1"
+                                    @click="dorGoToPage(dor.pagination.page - 1)">Previous</button>
+                            <span x-text="'Page ' + dor.pagination.page + ' of ' + dor.pagination.total_pages"></span>
+                            <button class="btn btn-secondary btn-sm"
+                                    :disabled="dorLoading || dor.pagination.page >= dor.pagination.total_pages"
+                                    @click="dorGoToPage(dor.pagination.page + 1)">Next</button>
+                        </span>
+                    </div>
+                </div>
+            </template>
         </div>
 
         <div class="card">
@@ -2459,6 +2526,7 @@ function FF_UnitDetail() {
         dorPreset:           'since_added',
         dorFrom:             '',
         dorTo:               '',
+        dorPage:             1,
 
         // ── Damage Claims ─────────────────────────────────────────
         damageClaims:        [],
@@ -2647,17 +2715,31 @@ function FF_UnitDetail() {
             if (this.dorLoading) return;   // init() runs twice — keep idempotent
             this.dorLoading = true;
             try {
-                const p = new URLSearchParams({ unit_id: <?= $unitId ?>, preset: this.dorPreset });
+                const p = new URLSearchParams({ unit_id: <?= $unitId ?>, preset: this.dorPreset, page: this.dorPage });
                 if (this.dorPreset === 'custom') { p.set('date_from', this.dorFrom); p.set('date_to', this.dorTo); }
                 const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/days-on-rent') ?>?' + p);
-                if (r.success) { this.dor = r.data; this.dorLoaded = true; }
+                // The server clamps `page` into range, so trust its echo over
+                // our request — a stale high page silently lands on the last one.
+                if (r.success) { this.dor = r.data; this.dorPage = r.data.pagination?.page ?? 1; this.dorLoaded = true; }
             } catch(e) { /* non-fatal */ }
             this.dorLoading = false;
         },
+        // Any range change restarts the breakdown at page 1 — page 3 of the
+        // old range is meaningless against a new one.
         setDorPreset(p) {
             this.dorPreset = p;
+            this.dorPage   = 1;
             // Custom waits for "Go" — the two date inputs start empty.
             if (p !== 'custom') this.loadDaysOnRent();
+        },
+        dorApplyCustom() { this.dorPage = 1; this.loadDaysOnRent(); },
+        dorGoToPage(n)   { this.dorPage = n; this.loadDaysOnRent(); },
+        dorRangeLabel() {
+            const pg = this.dor?.pagination;
+            if (!pg || !pg.total) return '';
+            const first = (pg.page - 1) * pg.per_page + 1;
+            const last  = Math.min(pg.page * pg.per_page, pg.total);
+            return `Showing ${first}–${last} of ${pg.total} lease${pg.total === 1 ? '' : 's'}`;
         },
 
         // ── Damage Claims ─────────────────────────────────────────

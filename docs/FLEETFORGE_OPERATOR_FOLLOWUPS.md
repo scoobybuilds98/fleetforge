@@ -38,7 +38,7 @@
 ### F59 — Deploy S-DAYS-ON-RENT + review the overlapping-lease data it exposes 🟢 DEFERRED (non-blocking; PHP only, no schema/asset)
 
 **Surfaced by:** S-DAYS-ON-RENT (2026-07-21).
-**Affects:** NEW `api/v1/equipment/units/days-on-rent.php`, `app/admin/equipment/show.php` (Lease History tab). No schema, no migration, no `app.css` change (the one new rule lives in the page-local `<style>`), so no `FF_ASSET_VERSION` bump.
+**Affects:** NEW `api/v1/equipment/units/days-on-rent.php`, `app/admin/equipment/show.php` (Lease History tab). No schema, no migration, no `app.css` change (the one new rule lives in the page-local `<style>`), so no `FF_ASSET_VERSION` bump. **Also carries S-DAYS-ON-RENT-2** — the per-lease breakdown table under the panel (15 leases/page), same files, same deploy.
 **Operator action:**
 1. `git pull` + `ff-deploy`. Read-only feature — nothing to remediate, nothing changes about billing.
 2. **Worth a look:** the panel merges overlapping leases and says so when it does. If a unit shows that note on prod, it means that unit has leases booked on the same days — nothing validates a new lease's dates against the unit's other leases (`api/v1/leases/create.php` gates on the unit's *current* status, which is date-blind, so a back-dated lease sails through). On dev, units 1/2/3 all have genuine overlaps. If prod shows the same, a double-booking guard at lease create is worth its own session — say the word and it gets one.

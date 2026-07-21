@@ -359,6 +359,120 @@ try {
         ? ok('T24 dispatcher session → 200 (equipment:view, not a financial gate)')
         : no('T24 dispatcher expected 200, got ' . json_encode($r));
 
+    // ══ Per-lease breakdown table (15/page) ═════════════════════════════
+    //    A 38-lease unit: 3 pages at 15/page. Non-overlapping month-long
+    //    leases so the per-lease days are individually predictable.
+    // created_at must predate the earliest lease — it anchors the
+    // since_added window, and anything before it is out of range.
+    $u38 = $mkUnit(($lastYear - 2) . '-01-01');
+    $expectedDays = [];
+    for ($i = 0; $i < 38; $i++) {
+        // One lease per month across 2 years, each running the 1st→10th.
+        $yr = $lastYear - 2 + intdiv($i, 12);
+        $mo = str_pad((string) (($i % 12) + 1), 2, '0', STR_PAD_LEFT);
+        $mkLease($u38, "{$yr}-{$mo}-01", "{$yr}-{$mo}-10", "{$yr}-{$mo}-10");
+        $expectedDays[] = 10;
+    }
+
+    // ── T25: page 1 returns exactly 15 rows and correct pagination meta ──
+    $r = $get(['unit_id' => $u38, 'preset' => 'since_added']);
+    $d = $r['data'] ?? [];
+    $pg = $d['pagination'] ?? [];
+    (count($d['leases'] ?? []) === 15 && ($pg['page'] ?? null) === 1
+        && ($pg['per_page'] ?? null) === 15 && ($pg['total'] ?? null) === 38
+        && ($pg['total_pages'] ?? null) === 3)
+        ? ok('T25 page 1 = 15 rows, pagination {page:1, per_page:15, total:38, total_pages:3}')
+        : no('T25 got ' . json_encode([count($d['leases'] ?? []), $pg]));
+
+    // ── T26: last page returns the remainder (38 - 30 = 8) ──────────────
+    $r = $get(['unit_id' => $u38, 'preset' => 'since_added', 'page' => 3]);
+    $d = $r['data'] ?? [];
+    (count($d['leases'] ?? []) === 8 && ($d['pagination']['page'] ?? null) === 3)
+        ? ok('T26 page 3 returns the 8-row remainder')
+        : no('T26 expected 8 rows on page 3, got ' . json_encode([count($d['leases'] ?? []), $d['pagination'] ?? null]));
+
+    // ── T27: paging NEVER changes the aggregates ────────────────────────
+    //   The slice happens after aggregation; a regression that pushed
+    //   LIMIT into the SQL would shrink days_on_rent per page.
+    $agg = [];
+    foreach ([1, 2, 3] as $pp) {
+        $d = $get(['unit_id' => $u38, 'preset' => 'since_added', 'page' => $pp])['data'] ?? [];
+        $agg[] = [$d['days_on_rent'] ?? null, $d['window_days'] ?? null,
+                  $d['lease_count'] ?? null, $d['utilization_pct'] ?? null];
+    }
+    (count(array_unique(array_map('json_encode', $agg))) === 1 && $agg[0][2] === 38)
+        ? ok('T27 aggregates identical across all 3 pages (lease_count=38, days=' . $agg[0][0] . ')')
+        : no('T27 aggregates drifted across pages: ' . json_encode($agg));
+
+    // ── T28: per-lease days sum to raw_lease_day_sum across all pages ───
+    $sum = 0; $seen = [];
+    foreach ([1, 2, 3] as $pp) {
+        $d = $get(['unit_id' => $u38, 'preset' => 'since_added', 'page' => $pp])['data'] ?? [];
+        foreach ($d['leases'] ?? [] as $ls) { $sum += $ls['days_in_range']; $seen[] = $ls['id']; }
+    }
+    $rawExpected = $get(['unit_id' => $u38, 'preset' => 'since_added'])['data']['raw_lease_day_sum'] ?? -1;
+    ($sum === $rawExpected && $sum === 380 && count(array_unique($seen)) === 38)
+        ? ok('T28 per-lease days sum to raw_lease_day_sum (380) with 38 distinct leases, no dupes/gaps')
+        : no('T28 sum=' . $sum . ' raw=' . $rawExpected . ' distinct=' . count(array_unique($seen)));
+
+    // ── T29: out-of-range page clamps instead of returning an empty page ─
+    $r = $get(['unit_id' => $u38, 'preset' => 'since_added', 'page' => 999]);
+    $d = $r['data'] ?? [];
+    (($d['pagination']['page'] ?? null) === 3 && count($d['leases'] ?? []) === 8)
+        ? ok('T29 page=999 clamps to the last page (3)')
+        : no('T29 expected clamp to page 3, got ' . json_encode($d['pagination'] ?? null));
+
+    $r = $get(['unit_id' => $u38, 'preset' => 'since_added', 'page' => -5]);
+    (($r['data']['pagination']['page'] ?? null) === 1)
+        ? ok('T29b negative page clamps to 1')
+        : no('T29b expected page 1, got ' . json_encode($r['data']['pagination'] ?? null));
+
+    // ── T30: rows are CLIPPED to the window and flagged as such ─────────
+    //   A lease running the full year, viewed through a one-month window,
+    //   must report the month — not the year.
+    $uc = $mkUnit($lastYear . '-01-01');
+    $mkLease($uc, $lastYear . '-01-01', $lastYear . '-12-31', $lastYear . '-12-31');
+    $d = $get(['unit_id' => $uc, 'preset' => 'custom',
+               'date_from' => $lastYear . '-06-01', 'date_to' => $lastYear . '-06-30'])['data'] ?? [];
+    $ls = $d['leases'][0] ?? [];
+    (($ls['days_in_range'] ?? null) === 30 && ($ls['range_start'] ?? null) === $lastYear . '-06-01'
+        && ($ls['range_end'] ?? null) === $lastYear . '-06-30' && ($ls['clipped'] ?? null) === true
+        && ($ls['start_date'] ?? null) === $lastYear . '-01-01')
+        ? ok('T30 clipped row reports 30 days for June, keeps the real lease dates, clipped=true')
+        : no('T30 got ' . json_encode($ls));
+
+    // ── T31: a fully-contained lease is NOT flagged as clipped ──────────
+    $d = $get(['unit_id' => $uc, 'preset' => 'last_year'])['data'] ?? [];
+    $ls = $d['leases'][0] ?? [];
+    (($ls['clipped'] ?? null) === false && ($ls['days_in_range'] ?? null) === 365)
+        ? ok('T31 fully-contained lease: clipped=false, 365 days')
+        : no('T31 got ' . json_encode($ls));
+
+    // ── T32: overlapping leases are BOTH flagged; neighbours are not ────
+    $uo = $mkUnit($lastYear . '-01-01');
+    $mkLease($uo, $lastYear . '-03-01', $lastYear . '-03-20', $lastYear . '-03-20');   // overlaps next
+    $mkLease($uo, $lastYear . '-03-15', $lastYear . '-03-31', $lastYear . '-03-31');   // overlaps prev
+    $mkLease($uo, $lastYear . '-04-01', $lastYear . '-04-30', $lastYear . '-04-30');   // adjacent, NOT overlapping
+    $d = $get(['unit_id' => $uo, 'preset' => 'last_year'])['data'] ?? [];
+    $flags = array_map(static fn($l) => $l['overlaps'], $d['leases'] ?? []);
+    ($flags === [true, true, false])
+        ? ok('T32 both overlapping leases flagged; the back-to-back neighbour is not')
+        : no('T32 expected [true,true,false], got ' . json_encode($flags));
+
+    // ── T33: customer name resolves for the breakdown ───────────────────
+    $d = $get(['unit_id' => $uo, 'preset' => 'last_year'])['data'] ?? [];
+    array_key_exists('customer_name', $d['leases'][0] ?? [])
+        ? ok('T33 breakdown rows carry a customer_name key')
+        : no('T33 customer_name missing from breakdown row: ' . json_encode(array_keys($d['leases'][0] ?? [])));
+
+    // ── T34: empty range returns an empty breakdown, not a broken pager ─
+    $ue = $mkUnit($lastYear . '-01-01');
+    $d = $get(['unit_id' => $ue, 'preset' => 'last_year'])['data'] ?? [];
+    (($d['leases'] ?? null) === [] && ($d['pagination']['total'] ?? null) === 0
+        && ($d['pagination']['total_pages'] ?? null) === 1 && ($d['pagination']['page'] ?? null) === 1)
+        ? ok('T34 no leases → empty list, total 0, total_pages 1 (no divide-by-zero pager)')
+        : no('T34 got ' . json_encode([$d['leases'] ?? null, $d['pagination'] ?? null]));
+
 } finally {
     if ($leaseIds) {
         db_execute("DELETE FROM leases WHERE id IN (" . implode(',', array_map('intval', $leaseIds)) . ")");

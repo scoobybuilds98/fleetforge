@@ -72,11 +72,18 @@ declare(strict_types=1);
  *          preset (optional) — since_added|last_year|this_year|custom,
  *                              default since_added
  *          date_from, date_to (Y-m-d) — required when preset=custom
+ *          page (optional, int) — page of the per-lease breakdown, 15/page.
+ *                              Clamped into range; aggregates are unaffected.
  * @auth    Session required; require_permission('equipment','view')
  * @returns 200 { unit_id, unit_number, preset, date_from, date_to,
  *          window_days, days_on_rent, idle_days, utilization_pct,
  *          lease_count, raw_lease_day_sum, overlap_adjusted,
- *          anchor_date, anchor_source, periods: [{start,end,days}] }
+ *          anchor_date, anchor_source, periods: [{start,end,days}],
+ *          leases: [{id, contract_number, customer_name, status,
+ *                    start_date, end_date, actual_return_date,
+ *                    range_start, range_end, clipped, days_in_range,
+ *                    overlaps}],
+ *          pagination: {page, per_page, total, total_pages} }
  *
  * @depends api/bootstrap.php, lib/Billing/HolisticLeaseEngine.php
  * @session S-DAYS-ON-RENT
@@ -196,12 +203,15 @@ $rows = db_select(
         l.start_date,
         l.end_date,
         l.actual_return_date,
+        COALESCE(c.company_name, l.company_name_snapshot, l.customer_name_snapshot)
+            AS customer_display_name,
         GREATEST(l.start_date, ?) AS eff_start,
         LEAST(
             GREATEST(COALESCE(l.actual_return_date, l.end_date, ?), l.start_date),
             ?
         ) AS eff_end
        FROM leases l
+       LEFT JOIN customers c ON c.id = l.customer_id
       WHERE l.equipment_unit_id = ?
         AND l.deleted_at IS NULL
         AND l.status IN ('active', 'completed')
@@ -223,6 +233,7 @@ $rows = db_select(
 $merged        = [];
 $rawDaySum     = 0;
 $contributing  = 0;
+$leaseRows     = [];
 
 foreach ($rows as $r) {
     $s = (string) $r['eff_start'];
@@ -231,7 +242,28 @@ foreach ($rows as $r) {
         continue; // defensive; SQL already clamps
     }
     $contributing++;
-    $rawDaySum += HolisticLeaseEngine::inclusiveDays($s, $e);
+    $leaseDays  = HolisticLeaseEngine::inclusiveDays($s, $e);
+    $rawDaySum += $leaseDays;
+
+    // Per-lease breakdown row. days_in_range is the CLIPPED contribution,
+    // not the lease's full duration — the whole panel is window-scoped, and
+    // the clipped figure is what sums toward raw_lease_day_sum. The full
+    // lease dates ride along so a clipped row is self-explanatory.
+    $leaseRows[] = [
+        'id'                 => (int) $r['id'],
+        'contract_number'    => $r['contract_number'],
+        'customer_name'      => $r['customer_display_name'],
+        'status'             => $r['status'],
+        'start_date'         => $r['start_date'],
+        'end_date'           => $r['end_date'],
+        'actual_return_date' => $r['actual_return_date'],
+        'range_start'        => $s,
+        'range_end'          => $e,
+        'clipped'            => $s !== $r['start_date']
+                                || $e !== ($r['actual_return_date'] ?? $r['end_date'] ?? $e),
+        'days_in_range'      => $leaseDays,
+        'overlaps'           => false,   // filled in below
+    ];
 
     $n = count($merged);
     if ($n === 0) {
@@ -259,6 +291,37 @@ foreach ($merged as [$s, $e]) {
 
 $windowDays = HolisticLeaseEngine::inclusiveDays($from, $to);
 
+/* ── Flag the leases that actually share days ────────────────────────
+   The panel already discloses that overlapping leases were merged; this
+   marks WHICH rows caused it, so an operator adding up the table can see
+   exactly where the per-lease sum exceeds the merged total. Sharing at
+   least one day is an overlap; back-to-back (Jan 31 → Feb 1) is not.
+
+   Pairwise O(n²): a unit's lease count in a window is small (dozens), and
+   the sweep-line alternative is easy to get subtly wrong for the "mark
+   BOTH sides of the pair" requirement. */
+$lrCount = count($leaseRows);
+for ($i = 0; $i < $lrCount; $i++) {
+    for ($j = $i + 1; $j < $lrCount; $j++) {
+        if ($leaseRows[$i]['range_start'] <= $leaseRows[$j]['range_end']
+            && $leaseRows[$j]['range_start'] <= $leaseRows[$i]['range_end']) {
+            $leaseRows[$i]['overlaps'] = true;
+            $leaseRows[$j]['overlaps'] = true;
+        }
+    }
+}
+
+/* ── Paginate the breakdown ──────────────────────────────────────────
+   Page slicing happens AFTER aggregation, deliberately: every headline
+   figure above is computed over ALL matching leases, so paging through
+   the table never changes the totals. One query serves both. */
+$perPage    = 15;
+$totalPages = (int) max(1, (int) ceil($lrCount / $perPage));
+$page       = clean_int($_GET['page'] ?? null) ?: 1;
+if ($page < 1)           { $page = 1; }
+if ($page > $totalPages) { $page = $totalPages; }
+$pageRows = array_slice($leaseRows, ($page - 1) * $perPage, $perPage);
+
 json_success([
     'unit_id'           => (int) $unit['id'],
     'unit_number'       => $unit['unit_number'],
@@ -277,4 +340,12 @@ json_success([
     'anchor_date'       => $anchorDate,
     'anchor_source'     => $anchorSource,
     'periods'           => $periods,
+    // Per-lease breakdown, page-sliced. Totals above cover ALL leases.
+    'leases'            => $pageRows,
+    'pagination'        => [
+        'page'        => $page,
+        'per_page'    => $perPage,
+        'total'       => $lrCount,
+        'total_pages' => $totalPages,
+    ],
 ]);
