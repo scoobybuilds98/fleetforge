@@ -101,6 +101,7 @@ $row = db_row(
         u.samsara_tags,
         t.name     AS template_name,
         t.category AS template_category,
+        u.brand_id AS brand_id,
         eb.label   AS template_brand,
         t.model    AS template_model
        FROM equipment_units u
@@ -124,6 +125,10 @@ $payload = ([
     'template_category'      => $row['template_category'],
     'template_brand'         => $row['template_brand'],
     'template_model'         => $row['template_model'],
+    // S-UNIT-BRAND: honestly-named per-UNIT brand (same value, aliased for the
+    // Identity section). `template_brand` is kept for the hero-tile consumer.
+    'brand'                  => $row['template_brand'],
+    'brand_id'               => $row['brand_id'] !== null ? (int) $row['brand_id'] : null,
     'unit_number'            => $row['unit_number'],
     'vin'                    => $row['vin'],
     'year'                   => $row['year'] ? (int) $row['year'] : null,

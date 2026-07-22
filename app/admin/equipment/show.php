@@ -415,6 +415,14 @@ $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
                                     <span class="text-secondary text-sm" x-text="unit.template_category ? ' · ' + unit.template_category.replace('_',' ') : ''" style="text-transform:capitalize;"></span>
                                 </td>
                             </tr>
+                            <!-- S-UNIT-BRAND: manufacturer of this unit (was on the template). -->
+                            <tr>
+                                <td class="spec-label">Brand / Make</td>
+                                <td>
+                                    <span x-show="unit.brand" x-text="unit.brand"></span>
+                                    <span x-show="!unit.brand" class="text-secondary">— not set —</span>
+                                </td>
+                            </tr>
                             <tr>
                                 <td class="spec-label">License Plate</td>
                                 <td><span class="font-mono" x-text="unit.license_plate ? unit.license_plate + (unit.license_state ? ' (' + unit.license_state + ')' : '') : '—'"></span></td>

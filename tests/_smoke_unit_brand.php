@@ -304,6 +304,18 @@ try {
         ? ok('U1 create unit PERSISTS brand_id (use()-closure trap covered)')
         : no('U1 brand_id not persisted: ' . json_encode([$u1, $stored]));
 
+    // The unit SHOW API must expose the brand for the profile's Identity row.
+    // Compare against the brand's CURRENT label (it was renamed above), and to
+    // template_brand — the two must agree.
+    $curLabel = db_row("SELECT label FROM equipment_brands WHERE id = ?", [$newBrandId])['label'] ?? '';
+    $showR = $u1 ? $call('api/v1/equipment/units/show.php', 'GET', [], ['id' => $u1]) : [];
+    (($showR['success'] ?? false)
+        && ($showR['data']['brand'] ?? null) === $curLabel
+        && ($showR['data']['brand'] ?? null) === ($showR['data']['template_brand'] ?? null)
+        && (int) ($showR['data']['brand_id'] ?? 0) === (int) $newBrandId)
+        ? ok('U1b unit show API returns brand + brand_id (Identity section source)')
+        : no('U1b show API brand fields wrong: ' . substr(json_encode($showR['data'] ?? $showR), 0, 160));
+
     $r = $call('api/v1/equipment/units/create.php', 'POST', [
         'template_id' => $custTpl, 'unit_number' => $TOKEN . '-U2', 'ownership_type' => 'owned',
     ]);
