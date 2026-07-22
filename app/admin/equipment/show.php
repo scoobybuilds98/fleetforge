@@ -363,17 +363,23 @@ $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
     <!-- Tab bar — modern segmented-pill style -->
     <div class="tab-bar" role="tablist">
         <?php
+        // Tab ORDER is operator-chosen (2026-07-22): the four they reach for
+        // most sit up front; everything after keeps its previous relative order.
+        // This array drives the rendered bar only — the panels below are keyed
+        // by `activeTab`, so reordering here moves the buttons without touching
+        // any panel markup. Keep the JS `_tabs` allowlist in sync (it validates
+        // the URL hash); its order doesn't matter, its membership does.
         $tabs = [
             ['key' => 'overview',       'label' => 'Overview'],
-            ['key' => 'payoff',         'label' => 'Payoff Analysis'],
-            ['key' => 'compliance',     'label' => 'Compliance'],
             ['key' => 'leases',         'label' => 'Lease History'],
+            ['key' => 'compliance',     'label' => 'Compliance'],
+            ['key' => 'documents',      'label' => 'Documents'],
+            ['key' => 'payoff',         'label' => 'Payoff Analysis'],
             ['key' => 'damage_claims',  'label' => 'Damage Claims'],
             ['key' => 'mileage_logs',   'label' => 'Mileage Log'],
             ['key' => 'status_log',     'label' => 'Status Log'],
             ['key' => 'maintenance',    'label' => 'Maintenance'],
             ['key' => 'inspections',    'label' => 'Inspections'],
-            ['key' => 'documents',      'label' => 'Documents'],
             ['key' => 'tracking',       'label' => 'Samsara Mapping'],
             ['key' => 'activity',       'label' => 'Activity'],
         ];
@@ -2676,9 +2682,9 @@ function FF_UnitDetail() {
             };
 
             // Valid tab keys — must match every x-show="activeTab === '...'" above.
-            const _tabs = ['overview','payoff','compliance','leases','damage_claims',
-                           'mileage_logs','status_log','maintenance','inspections',
-                           'documents','tracking','activity'];
+            const _tabs = ['overview','leases','compliance','documents','payoff',
+                           'damage_claims','mileage_logs','status_log','maintenance',
+                           'inspections','tracking','activity'];
 
             // Restore tab from URL hash BEFORE registering $watch so the
             // initial assignment does not trigger the watcher.

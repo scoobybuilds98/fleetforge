@@ -9,7 +9,7 @@
         "APP_URL=http://localhost:8899 '/Users/avi/Library/Application Support/Herd/bin/php' -S localhost:8899 -t public public/index.php"
       ],
       "port": 8899,
-      "url": "http://localhost:8899/fleetforge/auth/login"
+      "url": "http://localhost:8899/"
     }
   ]
 }
