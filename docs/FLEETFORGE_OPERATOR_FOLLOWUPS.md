@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-07-22 via S-UNIT-BRAND — added **F63** (🟡 PARTIAL: deploy + run migration `202607220002` moving `brand` off the equipment TEMPLATE onto the UNIT — new operator-managed `equipment_brands` table + `equipment_units.brand_id`, drops `equipment_templates.brand`; code and migration MUST land together. The backfill carries each template's brand onto its units so nothing is lost; the "everything but dry vans → Max Atlas" re-assignment is deliberately NOT included and awaits the operator's category list). Previously: 2026-07-22 via S-NORTHLAND-P0 — added **F61** (🔴 BLOCKING: deploy S-NORTHLAND-P0 to activate the SES/SNS TopicArn allowlist; the `.env` key is already set on prod but inert until the code ships) and **F62** (🟡 PARTIAL: the credit-application PDF now follows `brand.primary_color` — confirm the teal accent is wanted before the next application is sent).
+**Last updated:** 2026-07-22 via S-NORTHLAND-P0 — **F61 CLOSED** (SES bounce+complaint handling deployed + proven end-to-end on prod: first bounce/complaint rows ever recorded, both `email_disabled`; also wired the previously-absent SES ComplaintTopic). F62 (credit-app PDF teal accent) still open 🟡.
 
 ---
 
@@ -46,7 +46,19 @@
 4. Where to manage the list: **Equipment → Equipment Types → Manage Brands** (or `/equipment/brands`). Add, rename, reorder, deactivate. A brand in use can't be deleted — deactivate it instead and it stays on those units while dropping out of the picker.
 5. Brand is **optional** on a unit, so any unit whose old template had no brand simply shows no brand until someone sets it.
 
-### F61 — Deploy S-NORTHLAND-P0: bounce/complaint processing has NEVER worked, plus a TopicArn allowlist 🔴 BLOCKING
+### F61 — Deploy S-NORTHLAND-P0: bounce/complaint processing has NEVER worked, plus a TopicArn allowlist ✅ CLOSED (2026-07-22)
+
+**✅ RESOLVED 2026-07-22 — deployed and verified end-to-end on live production (agent-run, operator-authorized).**
+- Deployed `44bcf62 → 0ec9323` via `bin/deploy.sh --yes`; all 10 gated steps green (`composer install` pulled `aws/aws-php-sns-message-validator 1.10.0`; migration `202607220001` applied, 0 pending / 0 drift; health `status:ok`, login 200, no fatals).
+- `class_exists('\Aws\Sns\MessageValidator')` on prod → **true**.
+- **Bounce path proven:** sent to `bounce@simulator.amazonses.com`; `email_bounces` id 55 landed ~1s later — Permanent/General, `action_taken=email_disabled`, matching our exact MessageId. **First bounce this system has ever processed** (all bounce tables were literally 0 before).
+- **Complaint path proven — and a second gap fixed:** SES had **no ComplaintTopic** wired at all, so complaints went nowhere regardless of code. Set `ComplaintTopic` = the existing `fleetforge-ses-bounces` topic, then sent to `complaint@simulator.amazonses.com`; `email_bounces` id 56 landed — Complaint/abuse, `action_taken=email_disabled`.
+- **Allowlist proven in prod:** wiring the complaint topic triggered a fresh `SubscriptionConfirmation`, which the endpoint auto-confirmed *because the ARN matched the allowlist* — the intended behaviour; a non-matching ARN would have been refused.
+- Simulator addresses are excluded from reputation metrics; `customer_id`/`user_id` are NULL on both rows — no real account touched.
+
+**Residual operator action (optional):** none required. If you later rotate the SNS topic, update both `AWS_SNS_TOPIC_ARN` in `.env` **and** the SES Bounce+Complaint topic bindings together.
+
+---
 
 **Surfaced by:** S-NORTHLAND-P0 (2026-07-22), during the Northland Equipment clone audit.
 **Affects:** `api/v1/webhooks/ses_notifications.php`. No schema. One migration ships alongside (`202607220001`, additive settings row).
