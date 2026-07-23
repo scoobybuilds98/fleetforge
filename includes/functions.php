@@ -794,6 +794,34 @@ function ff_company_short_name(): string
 }
 }
 
+// ff_switch_identity_hint() — "is this the same person?" marker for the
+// deployment switcher. NOT a credential.
+//
+// The switcher link carries this so the target can tell whether the browser
+// already holds a session belonging to SOMEONE ELSE. Without it, login.php
+// bounces any authenticated visitor straight to the dashboard without checking
+// who — so you could land on the other deployment silently acting as a
+// colleague whose 8-hour session was still alive in that browser, and every
+// action would be written to audit_log under their name.
+//
+// SECURITY POSTURE — read before changing:
+// This value is COMPARED, never TRUSTED. It grants nothing, authenticates
+// nothing, and carries no authority. Forging it can only suppress or trigger a
+// confirmation page; it can never sign anyone in or elevate anyone. That is
+// precisely why no shared secret is needed between deployments — a shared
+// signing key would be a cross-company trust anchor, which we deliberately
+// avoided. Do NOT "upgrade" this into an auth token.
+//
+// Hashed rather than sent as a plain email so the address does not sit in the
+// target's access logs on every switch.
+if (!function_exists('ff_switch_identity_hint')) {
+function ff_switch_identity_hint(?string $email): string
+{
+    $email = strtolower(trim((string) $email));
+    return $email === '' ? '' : substr(hash('sha256', $email), 0, 16);
+}
+}
+
 // ff_sibling_deployment() — the OTHER FleetForge deployment, for the
 // account-menu switcher.
 //

@@ -775,8 +775,18 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                 $_sibling = function_exists('ff_sibling_deployment') ? ff_sibling_deployment() : null;
                 if ($_sibling !== null):
                 ?>
+                    <?php
+                    // Carry an identity hint so the target can detect that this
+                    // browser already holds a DIFFERENT user's session and ask
+                    // before dropping us into it. Compared, never trusted —
+                    // see ff_switch_identity_hint().
+                    $_swHint = ff_switch_identity_hint($_me['email'] ?? '');
+                    $_swUrl  = $_sibling['url']
+                             . (str_contains($_sibling['url'], '?') ? '&' : '?')
+                             . 'sw=' . urlencode($_swHint);
+                    ?>
                     <div class="user-dropdown-divider"></div>
-                    <a href="<?= e($_sibling['url']) ?>"
+                    <a href="<?= e($_swUrl) ?>"
                        class="user-dropdown-item"
                        role="menuitem"
                        rel="noreferrer">

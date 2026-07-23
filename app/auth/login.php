@@ -49,8 +49,24 @@ use FleetForge\Security\RateLimiter;
 
 _ff_session_start();
 
-// Already logged in → bounce to dashboard
+// Already logged in → bounce to dashboard.
+//
+// EXCEPT when arriving from the sibling-deployment switcher (?sw=<hint>) and
+// the session here belongs to a DIFFERENT person. Bouncing then would silently
+// drop the visitor into a colleague's session — whose 8-hour (or 30-day
+// remembered) login was still alive in this browser — and every action they
+// took would be attributed to that colleague in audit_log. Send them to the
+// confirmation page instead. See ff_switch_identity_hint(): the hint is
+// compared, never trusted, and grants nothing.
 if (current_user_id()) {
+    $_sw = trim((string) ($_GET['sw'] ?? ''));
+    if ($_sw !== '') {
+        $_hereHint = ff_switch_identity_hint(current_user()['email'] ?? '');
+        if ($_hereHint !== '' && !hash_equals($_hereHint, $_sw)) {
+            header('Location: ' . base_url('auth/switch?sw=' . urlencode($_sw)));
+            exit;
+        }
+    }
     header('Location: ' . base_url('dashboard'));
     exit;
 }
