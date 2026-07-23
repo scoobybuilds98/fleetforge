@@ -760,6 +760,26 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                     My Profile
                 </a>
 
+                <?php
+                // Sibling-deployment switcher. Same product, different company —
+                // separate server, database and session, so this is a link and
+                // NOT single sign-on. Opens in a new tab so an operator mid-edit
+                // here doesn't lose it; noopener/noreferrer because the target is
+                // a separate origin.
+                $_sibling = function_exists('ff_sibling_deployment') ? ff_sibling_deployment() : null;
+                if ($_sibling !== null):
+                ?>
+                    <div class="user-dropdown-divider"></div>
+                    <a href="<?= e($_sibling['url']) ?>"
+                       class="user-dropdown-item"
+                       role="menuitem"
+                       target="_blank"
+                       rel="noopener noreferrer">
+                        <?= heroicon('building-storefront', 'nav-icon') ?>
+                        Switch to <?= e($_sibling['name']) ?>
+                    </a>
+                <?php endif; ?>
+
                 <div class="user-dropdown-divider"></div>
 
                 <!-- Sign Out — GET accepted by app/auth/logout.php; no CSRF needed -->

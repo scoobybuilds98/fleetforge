@@ -794,6 +794,43 @@ function ff_company_short_name(): string
 }
 }
 
+// ff_sibling_deployment() — the OTHER FleetForge deployment, for the
+// account-menu switcher.
+//
+// FleetForge is the product; each company (Mainland, Northland, …) is its own
+// deployment with its own server, database and secrets. They share no session:
+// the domains are different registrable domains, so a cookie cannot span them
+// even in principle. This is therefore a plain LINK, not single sign-on — the
+// operator signs in on the other side (their password manager makes that one
+// extra click). Nothing is shared, so nothing new can leak.
+//
+// Driven by settings so the same code ships to every deployment; each one names
+// its sibling. Returns null when unconfigured, and the menu item disappears.
+//
+// @return array{name:string,url:string}|null
+if (!function_exists('ff_sibling_deployment')) {
+function ff_sibling_deployment(): ?array
+{
+    $name = trim((string) settings_get('deployment.sibling_name', ''));
+    $url  = trim((string) settings_get('deployment.sibling_url', ''));
+
+    if ($name === '' || $url === '') {
+        return null;
+    }
+
+    // HTTPS only, and validated as a real URL. This value is operator-editable
+    // from Settings, and it is rendered straight into an href — an unchecked
+    // string here would let `javascript:` or `data:` become a click target for
+    // every signed-in user.
+    if (!preg_match('#^https://#i', $url) || filter_var($url, FILTER_VALIDATE_URL) === false) {
+        error_log('[sibling-deployment] ignoring non-HTTPS or malformed deployment.sibling_url');
+        return null;
+    }
+
+    return ['name' => $name, 'url' => rtrim($url, '/')];
+}
+}
+
 // cron_enabled() — operator on/off switch for a business-automation cron.
 // Reads cron.<name>_enabled (seeded by the S-CRON-TOGGLES migration, toggled in
 // Settings → Intelligence → Scheduled Jobs), falling back to the registry default
