@@ -763,9 +763,15 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                 <?php
                 // Sibling-deployment switcher. Same product, different company —
                 // separate server, database and session, so this is a link and
-                // NOT single sign-on. Opens in a new tab so an operator mid-edit
-                // here doesn't lose it; noopener/noreferrer because the target is
-                // a separate origin.
+                // NOT single sign-on.
+                //
+                // Navigates in the CURRENT tab (operator preference): switching
+                // deployments is a mode change, not opening a reference, so
+                // accumulating tabs was the wrong shape. `noopener` is therefore
+                // unnecessary (no new window exists to reach back), but
+                // `noreferrer` stays: without it the full internal URL — which
+                // can carry record ids like /invoices/show?id=42 — is sent to the
+                // other deployment in the Referer header.
                 $_sibling = function_exists('ff_sibling_deployment') ? ff_sibling_deployment() : null;
                 if ($_sibling !== null):
                 ?>
@@ -773,8 +779,7 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                     <a href="<?= e($_sibling['url']) ?>"
                        class="user-dropdown-item"
                        role="menuitem"
-                       target="_blank"
-                       rel="noopener noreferrer">
+                       rel="noreferrer">
                         <?= heroicon('building-storefront', 'nav-icon') ?>
                         Switch to <?= e($_sibling['name']) ?>
                     </a>
