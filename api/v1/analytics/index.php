@@ -417,14 +417,20 @@ function view_seasonal_pattern(): array
         $avgData[] = round($byMonth[$m] ?? 0.0, 2);
     }
 
-    // KPIs: best and worst months
+    // KPIs: best and worst months.
+    // WHY the ?: [0] fallback: "worst month" ignores zero-revenue months, but
+    // when EVERY month is zero (no billable invoices at all — a fresh
+    // deployment, or a company with only drafts/voids) array_filter() returns
+    // an empty array and min() throws. Both call sites need the same guard.
+    $nonZero = array_filter($avgData) ?: [0.0];
+
     $bestIdx  = array_search(max($avgData), $avgData);
-    $worstIdx = array_search(min(array_filter($avgData)), $avgData);
+    $worstIdx = array_search(min($nonZero), $avgData);
     $bestIdx  = $bestIdx  === false ? 0 : $bestIdx;
     $worstIdx = $worstIdx === false ? 0 : $worstIdx;
 
     $maxVal = max($avgData);
-    $minVal = min(array_filter($avgData) ?: [0]);
+    $minVal = min($nonZero);
     $variance = $maxVal > 0 ? round(($maxVal - $minVal) / $maxVal * 100, 1) : 0.0;
 
     return [

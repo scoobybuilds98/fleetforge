@@ -155,7 +155,14 @@ if ((string) env('MAINTENANCE_MODE', 'false') === 'true') {
 // ============================================================
 // PARSE REQUEST PATH
 // ============================================================
-$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/';
+// WHY the is_string() check: parse_url() returns FALSE — not NULL — on a
+// seriously malformed URI (`///admin.php`, `http://:80`), so `?? '/'` does
+// not catch it and str_starts_with() then fatals on a bool haystack. Bot
+// scanners hit these paths constantly, turning 404s into 500s.
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
+if (!is_string($requestPath) || $requestPath === '') {
+    ff_not_found();
+}
 
 // Guard: every request must start with our base path.
 // Under normal operation .htaccess ensures this, but we
