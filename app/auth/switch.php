@@ -63,7 +63,24 @@ $_email   = (string) ($_me['email'] ?? '');
 
     <?= ff_favicon_tags() ?>
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
-    <?= ff_brand_override_css() ?>
+    <?php
+    // Brand override. ff_brand_override_css() is the shared helper, but it was
+    // introduced with the Northland rebrand and is not present on every
+    // deployment — guard it and fall back to the inline block the older aux
+    // auth screens use, so this page renders identically on both.
+    if (function_exists('ff_brand_override_css')) {
+        echo ff_brand_override_css();
+    } else {
+        $_b = (string) (settings_get('brand.primary_color') ?: '');
+        if (preg_match('/^#[0-9a-fA-F]{6}$/', $_b)) {
+            echo '<style id="ff-brand-override">:root{'
+               . '--color-primary:' . e($_b) . ';'
+               . '--color-primary-hover:' . e((string) (settings_get('brand.primary_hover') ?: $_b)) . ';'
+               . '--color-primary-light:' . e((string) (settings_get('brand.primary_light') ?: $_b)) . ';'
+               . '}</style>';
+        }
+    }
+    ?>
     <script>try{var t=localStorage.getItem('ff-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
     <style>
         .auth-page{min-height:100vh;display:flex;align-items:center;justify-content:flex-start;padding:24px 16px;
@@ -78,14 +95,14 @@ $_email   = (string) ($_me['email'] ?? '');
         .sw-who{display:flex;align-items:center;gap:12px;padding:14px 16px;margin:0 0 22px;
             background:var(--bg-surface-2);border:1px solid var(--border-color);border-radius:var(--radius-lg);}
         .sw-avatar{width:40px;height:40px;flex-shrink:0;border-radius:50%;background:var(--color-primary);
-            color:var(--color-on-primary);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9375rem;}
+            color:var(--color-on-primary,#ffffff);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9375rem;}
         .sw-name{font-weight:600;color:var(--text-primary);font-size:.9375rem;line-height:1.3;}
         .sw-email{font-size:.8125rem;color:var(--text-secondary);word-break:break-all;}
         .sw-actions{display:flex;flex-direction:column;gap:10px;}
         .sw-btn{display:block;width:100%;text-align:center;padding:12px 16px;border-radius:10px;
             font-size:.9375rem;font-weight:600;text-decoration:none;border:1px solid transparent;transition:filter 150ms ease;}
         .sw-btn:hover{filter:brightness(1.08);text-decoration:none;}
-        .sw-btn--primary{background:var(--color-primary);color:var(--color-on-primary);}
+        .sw-btn--primary{background:var(--color-primary);color:var(--color-on-primary,#ffffff);}
         .sw-btn--ghost{background:transparent;color:var(--text-primary);border-color:var(--border-color-strong,var(--border-color));}
     </style>
 </head>
