@@ -564,6 +564,71 @@ function clean_date(mixed $val): ?string
 }
 }
 
+// ============================================================
+// ff_billing_period_error() — validate an invoice billing period
+//
+// FLEETFORGE-14. clean_date() only proves a date is a real calendar
+// date: checkdate() happily accepts year 1, so a mistyped '0001-03-02'
+// (year 0001 instead of 2026) passed every validator and was stored.
+// That one bad row then poisoned everything downstream — the lease-close
+// coverage anchor (MAX(billing_period_end)) picked it up, the next
+// period was derived as 0001-04-01 → 2026-03-13, and the resulting
+// 739,708-day count overflowed invoices.billing_period_days
+// (SMALLINT UNSIGNED, 0..65535). The operator saw an opaque PDO 22003
+// raised ~27 frames from the actual cause and the lease could not be
+// closed at all until the bad invoice was hand-deleted.
+//
+// Returns a human-readable problem string, or null when the period is
+// sound. Callers decide the shape of the failure: API endpoints turn it
+// into a 422 field error, InvoiceGenerator throws.
+//
+// WHY a year window rather than only a day-count ceiling: a garbage
+// period can be short enough to fit the column (0001-04-01 → 0001-04-30
+// is 30 days) and still be nonsense. Both checks are needed. The window
+// is deliberately wide — prod has a legitimate lease starting 2005 — it
+// only has to exclude dates no rental contract could carry.
+// ============================================================
+if (!defined('FF_BILLING_YEAR_MIN')) define('FF_BILLING_YEAR_MIN', 1990);
+if (!defined('FF_BILLING_YEAR_MAX')) define('FF_BILLING_YEAR_MAX', 2100);
+// invoices.billing_period_days is SMALLINT UNSIGNED — hard DB ceiling.
+if (!defined('FF_BILLING_PERIOD_MAX_DAYS')) define('FF_BILLING_PERIOD_MAX_DAYS', 65535);
+
+if (!function_exists('ff_billing_period_error')) {
+function ff_billing_period_error(?string $start, ?string $end): ?string
+{
+    $start = clean_date($start);
+    $end   = clean_date($end);
+    if ($start === null || $end === null) {
+        return 'Billing period start and end must both be valid YYYY-MM-DD dates.';
+    }
+
+    foreach (['start' => $start, 'end' => $end] as $label => $d) {
+        $year = (int) substr($d, 0, 4);
+        if ($year < FF_BILLING_YEAR_MIN || $year > FF_BILLING_YEAR_MAX) {
+            return sprintf(
+                'Billing period %s (%s) is outside the plausible range %d-%d — check the year.',
+                $label, $d, FF_BILLING_YEAR_MIN, FF_BILLING_YEAR_MAX
+            );
+        }
+    }
+
+    if ($end < $start) {
+        return sprintf('Billing period end (%s) cannot be before the start (%s).', $end, $start);
+    }
+
+    // Inclusive day count — matches InvoiceGenerator's D14 convention.
+    $days = (int) (new \DateTimeImmutable($start))->diff(new \DateTimeImmutable($end))->days + 1;
+    if ($days > FF_BILLING_PERIOD_MAX_DAYS) {
+        return sprintf(
+            'Billing period %s → %s spans %d days, beyond the %d-day maximum an invoice can record.',
+            $start, $end, $days, FF_BILLING_PERIOD_MAX_DAYS
+        );
+    }
+
+    return null;
+}
+}
+
 // clean_email() — return a valid, normalised email address or null
 if (!function_exists('clean_email')) {
 function clean_email(?string $val): ?string

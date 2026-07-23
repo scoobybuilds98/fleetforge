@@ -290,6 +290,18 @@ $cases = [
         'expect'=> ['period_end'],
     ],
     [
+        // FLEETFORGE-14 regression: clean_date() accepts year 0001 (checkdate()
+        // calls it a real calendar year), so this typo — 0001 for 2026 — was
+        // stored verbatim on prod. The row then won the close-time coverage
+        // anchor on its lease, the derived final period spanned 739,708 days,
+        // and billing_period_days (SMALLINT UNSIGNED) overflowed with a PDO
+        // 22003 that blocked the close entirely. Must be a clean 422 here.
+        'label' => 'Invoice — implausible year in billing period',
+        'url'   => "$baseApi/invoices/create.php",
+        'body'  => ['lease_id' => 1, 'period_start' => '0001-03-02', 'period_end' => '0001-03-31'],
+        'expect'=> ['period_start'],
+    ],
+    [
         'label' => 'Payment — empty body',
         'url'   => "$baseApi/payments/create.php",
         'body'  => [],

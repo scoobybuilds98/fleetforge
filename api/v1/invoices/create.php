@@ -51,6 +51,19 @@ if ($periodStart && $periodEnd && $periodEnd < $periodStart) {
     $fields['period_end'] = 'Due date cannot be before invoice date.';
 }
 
+// FLEETFORGE-14: clean_date() proves the date is a real calendar date but NOT
+// that the year is plausible — checkdate() accepts year 1, so a mistyped
+// '0001-03-02' (for 2026-03-02) was stored verbatim. The row then won the
+// close-time coverage anchor on its lease and the derived final period
+// (0001-04-01 → 2026-03-13) overflowed billing_period_days, blocking the close
+// with an opaque PDO 22003. Reject the typo at the point of entry — this is the
+// only operator-facing path that writes a hand-keyed billing period.
+if ($periodStart && $periodEnd && !isset($fields['period_end'])) {
+    if ($periodErr = ff_billing_period_error($periodStart, $periodEnd)) {
+        $fields['period_start'] = $periodErr;
+    }
+}
+
 if ($fields) {
     json_validation_error($fields);
 }

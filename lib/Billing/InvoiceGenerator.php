@@ -190,6 +190,30 @@ class InvoiceGenerator
                 ));
             }
 
+            // FLEETFORGE-14: refuse an implausible or oversized billing period
+            // BEFORE any line-item math or the INSERT. billing_period_days is
+            // SMALLINT UNSIGNED, so a corrupt period date surfaced as a PDO 22003
+            // ("Out of range value for column 'billing_period_days'") thrown from
+            // db_insert() — ~27 frames from the cause, naming neither the lease nor
+            // the period. Prod repro: a manual invoice was keyed with year 0001
+            // instead of 2026; its billing_period_end then won the close-time
+            // coverage anchor (MAX over non-void invoices), so the final period was
+            // derived as 0001-04-01 → 2026-03-13 (739,708 days) and the close died
+            // 7 times until the bad invoice was deleted by hand.
+            //
+            // Throwing here (rather than clamping) is deliberate: a period this far
+            // out is corrupt input, and silently clamping it would bill a wrong
+            // span. Matches the existing LEASE_STATUS_CHANGED contract above —
+            // callers with per-lease error handling (the cron) skip the lease
+            // instead of dying mid-run.
+            if ($periodErr = ff_billing_period_error($periodStart, $periodEnd)) {
+                throw new \RuntimeException(sprintf(
+                    'INVALID_BILLING_PERIOD: lease #%d — %s Check for an invoice on this '
+                    . 'lease with a mistyped billing period; it may be setting the coverage anchor.',
+                    $leaseId, $periodErr
+                ));
+            }
+
             // Day counting: inclusive (D14)
             $startDt = new \DateTimeImmutable($periodStart);
             $endDt = new \DateTimeImmutable($periodEnd);
