@@ -121,6 +121,7 @@ $labels = [
     'settings_system'     => 'System Settings',
     'settings_integrations' => 'Integration Settings',
     'settings_intelligence' => 'AI/Intelligence Settings',
+    'settings_customer_notifications' => 'Customer Emails Settings',
 ];
 
 $modules = [];

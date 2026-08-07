@@ -126,6 +126,7 @@ $labels = [
     'settings_system'       => '↳ System',
     'settings_integrations' => '↳ Integrations',
     'settings_intelligence' => '↳ Intelligence',
+    'settings_customer_notifications' => '↳ Customer Emails',
     'audit'               => 'Audit Log',
     'ai'                  => 'AI Tools',
     'chart_of_accounts'   => 'Chart of Accounts',

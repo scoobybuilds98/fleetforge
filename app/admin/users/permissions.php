@@ -222,7 +222,7 @@ $moduleGroupDefs = [
     'Maintenance & Compliance' => ['color' => '#f59e0b', 'bulk_group' => null,         'modules' => ['maintenance','inspections','compliance']],
     'Financial'                => ['color' => '#3b82f6', 'bulk_group' => 'accounting', 'modules' => ['invoices','payments','chart_of_accounts','journal_entries','accounts_payable','bank_accounts','fixed_assets','tax_management','financial_reports','budgets','period_management','accounting_settings']],
     'Analytics & Reports'      => ['color' => '#8b5cf6', 'bulk_group' => null,         'modules' => ['reports','analytics','audit']],
-    'System'                   => ['color' => '#64748b', 'bulk_group' => null,         'modules' => ['ai','users','settings','settings_general','settings_design','settings_users','settings_portal','settings_audit','settings_system','settings_integrations','settings_intelligence']],
+    'System'                   => ['color' => '#64748b', 'bulk_group' => null,         'modules' => ['ai','users','settings','settings_general','settings_design','settings_users','settings_portal','settings_audit','settings_system','settings_integrations','settings_intelligence','settings_customer_notifications']],
     'Integrations'             => ['color' => '#14b8a6', 'bulk_group' => 'quickbooks', 'modules' => ['quickbooks']],
 ];
 // Build slug → row lookup for grouped rendering

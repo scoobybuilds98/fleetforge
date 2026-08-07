@@ -97,6 +97,7 @@ return [
         'settings_system'       => ['view', 'edit'],
         'settings_integrations' => ['view', 'edit'],
         'settings_intelligence' => ['view', 'edit'],
+        'settings_customer_notifications' => ['view', 'edit'],
 
         // QuickBooks — reserved key for Phase QBO. Defines the
         // sensitive integration-control vocabulary in advance so
