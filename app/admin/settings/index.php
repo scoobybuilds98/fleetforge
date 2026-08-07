@@ -634,6 +634,7 @@ $tabPermMap = [
     'intelligence'       => 'settings_intelligence',
     'credit_application' => 'settings_general', // same permission as General
     'backup'             => 'settings_system',  // S-BACKUP-3b — backups are a system concern
+    'customer_notifications' => 'settings_customer_notifications', // S-CUSTOMER-NOTIFICATIONS
 ];
 $validTabs = array_keys($tabPermMap);
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
@@ -777,6 +778,13 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
             <?= $_can ? ':class="{ \'is-active\': activeTab === \'credit_application\' }" @click="activeTab = \'credit_application\'"' : '' ?>
             role="tab" <?= $_can ? '' : 'title="You don\'t have access to Credit Application settings"' ?>>
         Credit Application<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$ccaCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
+    </button>
+
+    <?php $_can = can('settings_customer_notifications', 'view'); ?>
+    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
+            <?= $_can ? ':class="{ \'is-active\': activeTab === \'customer_notifications\' }" @click="activeTab = \'customer_notifications\'"' : '' ?>
+            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Customer Emails settings"' ?>>
+        Customer Emails<?= $_can ? '' : $_lockSvg ?>
     </button>
 
 </div>
@@ -1204,6 +1212,15 @@ $_graceMinutes = settings_get('lease.return_grace_minutes', '0') ?? '0';
 <?php if (can('settings_design', 'view')): ?>
 <div x-show="activeTab === 'design'" x-transition:enter class="ff-tab-enter">
     <?php require_once __DIR__ . '/design.php'; ?>
+</div>
+<?php endif; ?>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: CUSTOMER EMAILS (S-CUSTOMER-NOTIFICATIONS)                          -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if (can('settings_customer_notifications', 'view')): ?>
+<div x-show="activeTab === 'customer_notifications'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/customer_notifications.php'; ?>
 </div>
 <?php endif; ?>
 

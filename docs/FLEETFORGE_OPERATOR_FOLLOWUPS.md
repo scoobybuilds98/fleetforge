@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-07-22 via S-NORTHLAND-P0 — **F61 CLOSED** (SES bounce+complaint handling deployed + proven end-to-end on prod: first bounce/complaint rows ever recorded, both `email_disabled`; also wired the previously-absent SES ComplaintTopic). F62 (credit-app PDF teal accent) still open 🟡.
+**Last updated:** 2026-08-07 via S-CUSTOMER-NOTIFICATIONS — added **F64** (deploy + migration `202608070001`; note Task 1 "stop customer compliance emails" is effective on code deploy alone) and **F65** (add `cron/customer_reminders.php` to the prod crontab — no-op until a reminder is enabled). Prior: 2026-07-22 via S-NORTHLAND-P0 — F61 CLOSED (SES bounce+complaint handling proven on prod); F62 (credit-app PDF teal accent) still open 🟡.
 
 ---
 
@@ -410,6 +410,32 @@
 ---
 
 ## 🟢 DEFERRED — queued for follow-up sessions
+
+### F64 — Deploy S-CUSTOMER-NOTIFICATIONS + run migration 202608070001 🟡 PARTIAL (Task 1 already effective on code deploy)
+
+**Surfaced by:** S-CUSTOMER-NOTIFICATIONS (2026-08-07) — operator Task 1: "stop sending customers emails for expiring insurance" (in practice, all compliance-expiry customer emails).
+**What changed:** the compliance cron's customer-email branch is now gated on a `compliance_expiry` reminder that ships **disabled**, and `lib/Notifications/CustomerReminders.php` falls back to that OFF default (like `cron_enabled()`). **So simply DEPLOYING this session's code STOPS the customer compliance emails (incl. insurance) immediately — no migration required for Task 1.** The staff in-app compliance alerts are unaffected.
+**Operator action (prod is read-only for the agent — run these yourself):**
+1. Deploy the latest `main` to prod. ← this alone satisfies Task 1.
+2. Run the migration (adds `customer_notification_audience` + seeds the editable settings rows for Settings → Customer Emails):
+   ```
+   php /var/www/fleetforge/bin/migrate.php --dry-run
+   php /var/www/fleetforge/bin/migrate.php --apply
+   php /var/www/fleetforge/bin/migrate.php --status   # expect pending: 0
+   ```
+**Without the migration:** Task 1 still holds (code default), and the settings tab still renders (engine registry fallback), but the audience/suppression table is absent so "Only selected / All-except / do-not-email" degrade to no-op until it runs. Every reminder type is OFF regardless, so nothing sends unexpectedly.
+
+### F65 — Add the customer-reminders cron to the prod crontab 🟢 DEFERRED (no-op until a reminder is enabled)
+
+**Surfaced by:** S-CUSTOMER-NOTIFICATIONS (2026-08-07).
+**What:** the scheduled customer reminders (invoice due-soon, overdue/payment, payment receipt, monthly statement, lease-ending, reservation pickup) are dispatched by `cron/customer_reminders.php`, which is NOT yet in the prod crontab. It is safe to add now: every reminder type ships OFF, so it is a no-op until an operator enables one in Settings → Customer Emails. (Compliance customer emails run from the existing `compliance_alerts` cron and need no new crontab line.)
+**Operator action (under the `www-data` crontab — matches the other app crons):**
+```
+sudo -u www-data crontab -e
+# add:
+0 * * * * php /var/www/fleetforge/cron/customer_reminders.php
+```
+Runs hourly; the cron only does work at the configured local send-hour on an allowed weekday (Settings → Customer Emails → Sending window). Toggle the whole dispatcher from Settings → Intelligence → Scheduled Jobs ("Customer email reminders").
 
 ### F39 — Deploy S-MONTHLY-SHORT-FLAT + remediate the MTTS73 draft invoices 🟢 DEFERRED (drafts only — no money moved)
 

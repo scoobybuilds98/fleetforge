@@ -76,7 +76,8 @@ class Mailer
         string $htmlBody,
         string $textBody = '',
         array  $replyTo  = [],  // [['email' => '...', 'name' => '...']]
-        array  $attachments = [] // [['content' => bytes, 'name' => '...', 'type' => '...'], ...]
+        array  $attachments = [], // [['content' => bytes, 'name' => '...', 'type' => '...'], ...]
+        array  $bcc = []          // ['ops@co.com', ...] envelope BCC (operator copy). S-CUSTOMER-NOTIFICATIONS.
     ): bool {
         // Basic input validation
         if (filter_var($toEmail, FILTER_VALIDATE_EMAIL) === false) {
@@ -116,9 +117,15 @@ class Mailer
         // paths see the same validated, filtered list.
         $attachments = self::normalizeAttachments($attachments);
 
+        // Normalize BCC — valid, unique, never the primary recipient (SES
+        // would otherwise double-deliver). Invalid entries are dropped so an
+        // operator typo in the "send me a copy" field can never fail a
+        // customer send. Empty list → every existing caller is unaffected.
+        $bcc = self::normalizeBcc($bcc, $toEmail);
+
         // Local dev without credentials → write to log file
         if (self::isLogMode()) {
-            return self::logToFile($toEmail, $toName, $subject, $htmlBody, $textBody, $fromEmail, $fromName, $attachments);
+            return self::logToFile($toEmail, $toName, $subject, $htmlBody, $textBody, $fromEmail, $fromName, $attachments, $bcc);
         }
 
         return self::sendViaSes(
@@ -130,7 +137,8 @@ class Mailer
             $fromEmail,
             $fromName,
             $replyTo,
-            $attachments
+            $attachments,
+            $bcc
         );
     }
 
@@ -150,14 +158,15 @@ class Mailer
         string $fromEmail,
         string $fromName,
         array  $replyTo,
-        array  $attachments = []
+        array  $attachments = [],
+        array  $bcc = []
     ): bool {
         // Attachment-bearing mail MUST go through sendRawEmail — the
         // plain sendEmail API has no attachment support (the I14 bug).
         if (!empty($attachments)) {
             return self::sendRawViaSes(
                 $toEmail, $toName, $subject, $htmlBody, $textBody,
-                $fromEmail, $fromName, $replyTo, $attachments
+                $fromEmail, $fromName, $replyTo, $attachments, $bcc
             );
         }
 
@@ -208,6 +217,12 @@ class Mailer
                 }
             }
 
+            // Envelope BCC (operator copy). Added to Destination so SES
+            // delivers a copy without exposing the address in the headers.
+            if (!empty($bcc)) {
+                $params['Destination']['BccAddresses'] = $bcc;
+            }
+
             self::ses()->sendEmail($params);
             return true;
 
@@ -244,7 +259,8 @@ class Mailer
         string $fromEmail,
         string $fromName,
         array  $replyTo,
-        array  $attachments
+        array  $attachments,
+        array  $bcc = []
     ): bool {
         try {
             $rawMessage = self::buildRawMimeMessage(
@@ -263,9 +279,11 @@ class Mailer
                 return false;
             }
 
+            // BCC addresses ride in the SMTP envelope (Destinations) only —
+            // never as a header — so the raw MIME above stays a true BCC.
             self::ses()->sendRawEmail([
                 'Source'       => $fromEmail,
-                'Destinations' => [$toEmail],
+                'Destinations' => array_merge([$toEmail], $bcc),
                 'RawMessage'   => ['Data' => $rawMessage],
             ]);
             return true;
@@ -455,6 +473,33 @@ class Mailer
     }
 
     // ============================================================
+    // normalizeBcc() — validate + de-dupe the BCC list
+    //
+    // Keeps only RFC-valid addresses, drops the primary recipient (SES
+    // rejects / double-delivers a Destination that repeats the To), and
+    // de-duplicates case-insensitively. An all-invalid list collapses to
+    // [] so the plain/raw send paths run exactly as before.
+    // ============================================================
+    private static function normalizeBcc(array $bcc, string $toEmail): array
+    {
+        $seen = [strtolower(trim($toEmail)) => true];
+        $out  = [];
+        foreach ($bcc as $addr) {
+            $addr = trim((string) $addr);
+            if ($addr === '' || filter_var($addr, FILTER_VALIDATE_EMAIL) === false) {
+                continue;
+            }
+            $lc = strtolower($addr);
+            if (isset($seen[$lc])) {
+                continue;
+            }
+            $seen[$lc] = true;
+            $out[] = $addr;
+        }
+        return $out;
+    }
+
+    // ============================================================
     // normalizeAttachments() — validate + filter the attachment list
     //
     // Drops entries without raw content or a name (the only two fields
@@ -507,7 +552,8 @@ class Mailer
         string $textBody,
         string $fromEmail,
         string $fromName,
-        array  $attachments = []
+        array  $attachments = [],
+        array  $bcc = []
     ): bool {
         $logFile = FF_ROOT . '/logs/mail.log';
         $sep     = str_repeat('=', 72);
@@ -531,6 +577,7 @@ class Mailer
             "DATE:    {$now}",
             "FROM:    \"{$fromName}\" <{$fromEmail}>",
             "TO:      \"{$toName}\" <{$toEmail}>",
+            "BCC:     " . (empty($bcc) ? '(none)' : implode(', ', $bcc)),
             "SUBJECT: {$subject}",
             $attachLine,
             str_repeat('-', 72),

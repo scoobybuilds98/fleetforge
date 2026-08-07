@@ -50,6 +50,10 @@ return [
         'label' => 'Compliance expiry alerts', 'category' => 'Compliance', 'default' => '1',
         'description' => 'Alerts on expiring CVI / registration / MVI / insurance.',
     ],
+    'customer_reminders' => [
+        'label' => 'Customer email reminders', 'category' => 'Customer Emails', 'default' => '1',
+        'description' => 'Dispatcher for customer reminder emails (invoice due/overdue, receipts, statements, lease/reservation). Each reminder type is configured and toggled in Settings → Customer Emails; this only runs the dispatcher.',
+    ],
     'stale_reservations' => [
         'label' => 'Stale reservation cleanup', 'category' => 'Reservations', 'default' => '1',
         'description' => 'Expires abandoned/stale reservations.',

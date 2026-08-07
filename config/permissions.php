@@ -117,6 +117,7 @@ return [
         'settings_system'       => $ALL,
         'settings_integrations' => $ALL,
         'settings_intelligence' => $ALL,
+        'settings_customer_notifications' => $ALL,
         'audit'         => $ALL,
         'ai'            => $ALL,
         // Accounting modules (Phase 13+)
@@ -168,6 +169,7 @@ return [
         'settings_system'       => $NONE,
         'settings_integrations' => $NONE,
         'settings_intelligence' => $NONE,
+        'settings_customer_notifications' => $NONE,
         'audit'         => $V,
         'ai'            => $VCE,
         // Accounting modules
@@ -217,6 +219,7 @@ return [
         'settings_system'       => $NONE,
         'settings_integrations' => $NONE,
         'settings_intelligence' => $NONE,
+        'settings_customer_notifications' => $NONE,
         'audit'         => $NONE,
         'ai'            => $V,
         // Accounting modules — no access
@@ -261,6 +264,7 @@ return [
         'settings_system'       => $NONE,
         'settings_integrations' => $NONE,
         'settings_intelligence' => $NONE,
+        'settings_customer_notifications' => $NONE,
         'audit'         => $V,
         'ai'            => $VCE,
         // Accounting modules
@@ -314,6 +318,7 @@ return [
         'settings_system'       => $NONE,
         'settings_integrations' => $NONE,
         'settings_intelligence' => $NONE,
+        'settings_customer_notifications' => $NONE,
         'audit'         => $V,
         'ai'            => $V,
         // Accounting modules

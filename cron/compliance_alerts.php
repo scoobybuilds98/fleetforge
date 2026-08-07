@@ -227,11 +227,26 @@ try {
     // notification_type = 'customer_compliance_alert' — independent dedup
     // from the staff in-app branch above.
     // ===================================================================
-    require_once FF_ROOT . '/lib/Email/templates/customer_compliance_expiring.php';
-
+    // [S-CUSTOMER-NOTIFICATIONS] Customer compliance emails are now governed by
+    // Settings → Customer Emails. The 'compliance_expiry' reminder ships
+    // DISABLED (Task 1: stop sending customers emails for expiring compliance
+    // docs incl. insurance), so this ENTIRE customer-email branch is skipped
+    // unless an operator re-enables it there. When enabled, the per-document
+    // toggles, the audience rules (all / selected / all_except + global
+    // suppression + portal opt-out) and the reply-to / BCC / channel plumbing
+    // all apply — resolved through CustomerReminders so the cron and the module
+    // never disagree. The STAFF in-app branch above is unaffected: staff keep
+    // seeing expiry alerts regardless of this switch.
     $emailNotified = 0;
     $emailSkipped  = 0;
     $emailErrors   = 0;
+
+    $ccfg = \FleetForge\Notifications\CustomerReminders::config('compliance_expiry');
+    if (!(\FleetForge\Notifications\CustomerReminders::masterEnabled() && $ccfg['enabled'])) {
+        error_log('[CRON compliance_alerts] customer compliance email branch disabled (Settings → Customer Emails) — skipping.');
+    } else {
+    require_once FF_ROOT . '/lib/Email/templates/customer_compliance_expiring.php';
+    $ccAudience = \FleetForge\Notifications\CustomerReminders::audienceSets('compliance_expiry');
 
     // Fetch all affected units that are on an active lease, with customer + primary portal user.
     $customerRows = db_select(
@@ -295,16 +310,20 @@ try {
             ];
         }
 
+        // slug => [display label, expiry] so each document can be toggled
+        // independently in Settings → Customer Emails (e.g. silence Insurance
+        // while keeping CVI/registration/MVI).
         $docChecks = [
-            'CVI'          => $row['cvi_expiry'],
-            'Registration' => $row['registration_expiry'],
-            'MVI'          => $row['mvi_expiry'],
-            'Insurance'    => $row['insurance_expiry'],
+            'cvi'          => ['CVI',          $row['cvi_expiry']],
+            'registration' => ['Registration', $row['registration_expiry']],
+            'mvi'          => ['MVI',          $row['mvi_expiry']],
+            'insurance'    => ['Insurance',    $row['insurance_expiry']],
         ];
         $unitDocs = [];
-        foreach ($docChecks as $docName => $expiryDate) {
+        foreach ($docChecks as $docSlug => [$docLabel, $expiryDate]) {
             if ($expiryDate === null || $expiryDate > $inWarning) continue;
-            $unitDocs[] = ['name' => $docName, 'expiry' => $expiryDate];
+            if (!($ccfg['docs'][$docSlug] ?? false)) continue;   // per-document toggle
+            $unitDocs[] = ['name' => $docLabel, 'expiry' => $expiryDate];
         }
 
         if (!empty($unitDocs)) {
@@ -355,14 +374,20 @@ try {
             continue;
         }
 
-        // EC5: null notification_preferences = default opt-in
-        // EC7: explicit compliance_expiring=false → skip
-        if ($custData['notification_preferences'] !== null) {
-            $prefs = json_decode((string) $custData['notification_preferences'], true);
-            if (is_array($prefs) && ($prefs['compliance_expiring'] ?? true) === false) {
-                $emailSkipped++;
-                continue;
-            }
+        // Audience gate (Settings → Customer Emails): global do-not-email
+        // suppression, the per-type audience mode (all / selected / all_except),
+        // and the portal opt-out (notification_preferences.compliance_expiring)
+        // — all resolved in one predicate so the cron and the module agree.
+        // Default mode 'all' + null prefs preserves the prior opt-in behavior.
+        if (!\FleetForge\Notifications\CustomerReminders::customerAllowed(
+                'compliance_expiry',
+                $customerId,
+                $custData['notification_preferences'],
+                $ccAudience,
+                $ccfg
+        )) {
+            $emailSkipped++;
+            continue;
         }
 
         // Dedup: skip if we already emailed this customer today
@@ -395,49 +420,44 @@ try {
         $subject     = "[Action Required] Compliance Documents {$urgencyWord}"
                      . " — {$unitCount} Unit" . ($unitCount > 1 ? 's' : '');
 
-        // Build and wrap email body; customer_name = company_name for formal greeting
-        $bodyHtml    = render_customer_compliance_email([
+        // Build the inner HTML body (customer_name = company_name for a formal
+        // greeting). Delivery, branding wrap, channel fan-out, reply-to, BCC and
+        // the dedup notification_log rows are all handled by CustomerReminders.
+        $bodyHtml = render_customer_compliance_email([
             'customer_name' => $custData['company_name'],
             'company_name'  => $companyName,
             'units'         => $custData['units'],
             'portal_url'    => $appUrl . '/portal/documents',
         ]);
-        $wrappedHtml = \FleetForge\Email\EmailService::renderEmailHtml($bodyHtml);
 
-        try {
-            $sent = \FleetForge\Notifications\Mailer::send(
-                toEmail:  $toEmail,
-                toName:   $toName,
-                subject:  $subject,
-                htmlBody: $wrappedHtml,
-            );
+        $res = \FleetForge\Notifications\CustomerReminders::deliver([
+            'reminder_key' => 'compliance_expiry',
+            'customer_id'  => $customerId,
+            'dedup_type'   => 'customer_compliance_alert',
+            'entity_type'  => 'customer',
+            'entity_id'    => $customerId,
+            'channels'     => $ccfg['channels'],
+            'to_email'     => $toEmail,
+            'to_name'      => $toName,
+            'subject'      => $subject,
+            'body_html'    => $bodyHtml,
+            'in_app'       => [
+                'type'     => $hasExpired ? 'compliance.expired' : 'compliance.expiring_30',
+                'title'    => $subject,
+                'message'  => 'Compliance documents on your leased equipment require attention. View them in your portal.',
+                'url'      => '/portal/documents',
+                'severity' => $hasExpired ? 'critical' : ($hasCritical ? 'warning' : 'info'),
+            ],
+        ]);
 
-            // Always write the dedup log entry regardless of send success
-            db_insert('notification_log', [
-                'rule_id'           => null,
-                'channel'           => 'email',
-                'recipient'         => $toEmail,
-                'subject'           => $subject,
-                'body'              => mb_substr(strip_tags($bodyHtml), 0, 2000),
-                'entity_type'       => 'customer',
-                'entity_id'         => $customerId,
-                'notification_type' => 'customer_compliance_alert',
-                'status'            => $sent ? 'sent' : 'failed',
-                'error_message'     => $sent ? null : 'Mailer::send() returned false',
-                'sent_at'           => $sent ? date('Y-m-d H:i:s') : null,
-            ]);
-
-            if ($sent) {
-                $emailNotified++;
-            } else {
-                $emailErrors++;
-                error_log("[CRON compliance_alerts] Customer #{$customerId} email send failed");
-            }
-        } catch (\Throwable $e) {
+        if (!empty($res['email'])) {
+            $emailNotified++;
+        } else {
             $emailErrors++;
-            error_log("[CRON compliance_alerts] Customer #{$customerId} email exception: " . $e->getMessage());
+            error_log("[CRON compliance_alerts] Customer #{$customerId} email send failed");
         }
     }
+    } // end [S-CUSTOMER-NOTIFICATIONS] customer-email-enabled branch
 
     // -----------------------------------------------------------------------
     // Summary audit log entry

@@ -2331,6 +2331,19 @@ CREATE TABLE `customer_rate_history` (
   CONSTRAINT `customer_rate_history_ibfk_2` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE SET NULL,
   CONSTRAINT `customer_rate_history_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `customer_notification_audience` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `reminder_key` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `customer_id` int unsigned NOT NULL,
+  `mode` enum('include','exclude') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'include',
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_cna_key_customer` (`reminder_key`,`customer_id`),
+  KEY `idx_cna_key_mode` (`reminder_key`,`mode`),
+  KEY `idx_cna_customer` (`customer_id`),
+  CONSTRAINT `fk_cna_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `customer_tags` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `customer_id` int unsigned NOT NULL,
