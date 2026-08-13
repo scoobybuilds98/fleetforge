@@ -115,14 +115,14 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="card-body">
                     <div class="batch-period-row">
                         <div class="tab-bar" style="margin-bottom:0;">
-                            <button type="button" class="tab-btn" :class="{ 'is-active': periodMode === 'month' }" @click="periodMode = 'month'; updatePeriod(); loadEligible();">Calendar Month</button>
-                            <button type="button" class="tab-btn" :class="{ 'is-active': periodMode === 'range' }" @click="periodMode = 'range'; updatePeriod(); loadEligible();">Custom Range</button>
+                            <button type="button" class="tab-btn" :class="{ 'is-active': periodMode === 'month' }" @click="periodMode = 'month'; onPeriodChanged();">Calendar Month</button>
+                            <button type="button" class="tab-btn" :class="{ 'is-active': periodMode === 'range' }" @click="periodMode = 'range'; onPeriodChanged();">Custom Range</button>
                         </div>
 
                         <template x-if="periodMode === 'month'">
                             <div class="batch-period-inputs">
                                 <button type="button" class="btn btn-ghost btn-sm" @click="shiftMonth(-1)" title="Previous month">&larr;</button>
-                                <input type="month" class="form-control form-control-sm" x-model="monthValue" @change="updatePeriod(); loadEligible();" style="max-width:170px;">
+                                <input type="month" class="form-control form-control-sm" x-model="monthValue" @change="onPeriodChanged();" style="max-width:170px;">
                                 <button type="button" class="btn btn-ghost btn-sm" @click="shiftMonth(1)" title="Next month">&rarr;</button>
                                 <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('this_month')">This Month</button>
                                 <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('last_month')">Last Month</button>
@@ -130,9 +130,9 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                         <template x-if="periodMode === 'range'">
                             <div class="batch-period-inputs">
-                                <input type="date" class="form-control form-control-sm" x-model="rangeStart" @change="updatePeriod(); loadEligible();">
+                                <input type="date" class="form-control form-control-sm" x-model="rangeStart" @change="onPeriodChanged();">
                                 <span class="text-secondary">to</span>
-                                <input type="date" class="form-control form-control-sm" x-model="rangeEnd" @change="updatePeriod(); loadEligible();">
+                                <input type="date" class="form-control form-control-sm" x-model="rangeEnd" @change="onPeriodChanged();">
                             </div>
                         </template>
                     </div>
@@ -250,6 +250,59 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
+            <!-- Restored-selection notice: silently reinstating a selection would
+                 be worse than losing it — the operator must know these choices
+                 came from earlier and can throw them away in one click. -->
+            <div class="batch-restored-note" x-show="restoredFrom" x-cloak>
+                <span>
+                    Restored your previous selection and review list from this tab.
+                    Figures are <strong>not</strong> restored — re-run Preview totals to see current numbers.
+                </span>
+                <button type="button" class="btn btn-ghost btn-xs" @click="clearSavedState(); loadEligible();">Start fresh</button>
+            </div>
+
+            <!-- ── Delivery options ──────────────────────────────────────
+                 Sits ABOVE Recipient Emails because it decides whether the
+                 recipient addresses below are used at all — reading the two
+                 in the other order leaves you configuring addresses without
+                 knowing if anything gets emailed. Applies to this run only. -->
+            <div class="card" x-show="selectedCustomerIds().length > 0 || reviewItems.length">
+                <div class="card-header">
+                    <span class="card-title">Delivery Options</span>
+                    <span class="text-secondary text-sm">What happens when you press Send in step 4</span>
+                </div>
+                <div class="card-body">
+                    <div class="batch-send-options">
+                        <label class="form-check" style="margin:0;font-size:13px;">
+                            <input type="checkbox" class="form-check-input" x-model="sendEmailToo">
+                            Also email the invoice to the customer
+                        </label>
+                        <label class="form-check" style="margin:0;font-size:13px;" x-show="sendEmailToo">
+                            <input type="checkbox" class="form-check-input" x-model="attachPdf">
+                            Attach the invoice PDF
+                        </label>
+                    </div>
+
+                    <div class="batch-option-notes">
+                        <p>
+                            <strong>Send</strong> always marks the invoice as <em>sent</em> and books it to the
+                            customer's outstanding balance — that happens whether or not you email anything.
+                        </p>
+                        <p>
+                            <strong>Also email the invoice to the customer</strong> — additionally sends the
+                            <code>invoice_ready</code> email to the address in Recipient Emails below.
+                            Leave this <em>off</em> to mark invoices as sent without contacting anyone
+                            (e.g. you post or hand-deliver them, or you're catching up on back-billing).
+                        </p>
+                        <p x-show="sendEmailToo">
+                            <strong>Attach the invoice PDF</strong> — generates each invoice's PDF and attaches it
+                            to that email. Off means the customer gets the notification text only, with no
+                            document attached.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
             <!-- ── 3. Recipient emails for selected customers ────────── -->
             <div class="card" x-show="selectedCustomerIds().length > 0">
                 <div class="card-header">
@@ -283,6 +336,14 @@ require_once FF_ROOT . '/includes/header.php';
                             Approval required
                         </span>
                     <?php endif; ?>
+                    <!-- Reopen the LAST computed review without recomputing. The dry
+                         run really generates+rolls back per lease, so re-running it
+                         over a big selection is slow — closing the review to go check
+                         something must not throw that work away. -->
+                    <button type="button" class="btn btn-ghost" x-show="previewResult && !reviewOpen"
+                            @click="reviewOpen = true" x-cloak>
+                        Reopen review
+                    </button>
                     <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || previewing || generating" @click="dryRun()">
                         <span x-show="!previewing">Preview totals</span>
                         <span x-show="previewing">Calculating…</span>
@@ -372,22 +433,6 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                     </div>
 
-                    <!-- Send options — deliberately their OWN row, not squeezed into
-                         .table-toolbar-right alongside the search box above: that class
-                         is shared by every other list page in the app (flex-shrink:0,
-                         nowrap) and two long-label checkboxes there collided with and
-                         visually overlapped the search input at normal card widths. -->
-                    <div class="batch-send-options">
-                        <label class="form-check" style="margin:0;font-size:13px;">
-                            <input type="checkbox" class="form-check-input" x-model="sendEmailToo">
-                            Also email the invoice_ready template on send
-                        </label>
-                        <label class="form-check" style="margin:0;font-size:13px;" x-show="sendEmailToo">
-                            <input type="checkbox" class="form-check-input" x-model="attachPdf">
-                            Attach PDF
-                        </label>
-                    </div>
-
                     <div x-show="addDraftResults.length" class="batch-add-results">
                         <template x-for="r in addDraftResults" :key="r.id">
                             <div class="batch-add-result-row">
@@ -421,6 +466,9 @@ require_once FF_ROOT . '/includes/header.php';
                                         <td><input type="checkbox" class="form-check-input" :checked="!!reviewSelected[item.invoice_id]" @change="toggleReviewSelect(item.invoice_id)" :disabled="item.status !== 'draft'"></td>
                                         <td>
                                             <a href="#" class="link" @click.prevent="openPreview(item.invoice_id)" x-text="item.invoice_number"></a>
+                                            <a href="#" class="link text-secondary" style="margin-left:6px;font-size:11px;"
+                                               title="Open the full invoice in a new tab — your list here is kept"
+                                               @click.prevent="openPreviewNewTab(item.invoice_id)">&#8599;</a>
                                         </td>
                                         <td x-text="item.company_name"></td>
                                         <td class="text-right currency" x-text="fmtMoney(item.total_amount)"></td>
@@ -546,7 +594,7 @@ require_once FF_ROOT . '/includes/header.php';
          billing needs every rate, usage input, and line item visible
          at once, and the ~580px left column clipped the totals.
          ============================================================ -->
-    <template x-if="previewResult">
+    <template x-if="previewResult && reviewOpen">
         <?php /* data-theme="light": the Billing Review is ALWAYS rendered in the
                  light palette regardless of the user's theme (operator call — it
                  reads best as a document, and it is the surface people print).
@@ -555,7 +603,7 @@ require_once FF_ROOT . '/includes/header.php';
                  light token set for this subtree only — no palette duplication.
                  The brand vars are re-asserted in the <style> block below because
                  that same token block resets --color-primary to the stock orange. */ ?>
-        <div class="batch-review-overlay" data-theme="light" @keydown.escape.window="previewResult = null">
+        <div class="batch-review-overlay" data-theme="light" @keydown.escape.window="reviewOpen = false">
             <div class="batch-review-head">
                 <div>
                     <div class="batch-review-title">
@@ -571,18 +619,18 @@ require_once FF_ROOT . '/includes/header.php';
                     <button type="button" class="btn btn-secondary btn-sm" @click="printReview()">Print / Save PDF</button>
                     <?php if ($approvalRequired): ?>
                     <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
-                            :disabled="submitting" @click="previewResult = null; submitForApproval()">
+                            :disabled="submitting" @click="reviewOpen = false; submitForApproval()">
                         <span x-show="!submitting">Looks right — Submit for approval</span>
                         <span x-show="submitting">Submitting…</span>
                     </button>
                     <?php else: ?>
                     <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
-                            :disabled="generating" @click="previewResult = null; generate()">
+                            :disabled="generating" @click="reviewOpen = false; generate()">
                         <span x-show="!generating">Looks right — Generate <span x-text="previewResult.totals.ok_count"></span></span>
                         <span x-show="generating">Generating…</span>
                     </button>
                     <?php endif; ?>
-                    <button type="button" class="btn btn-ghost btn-sm" @click="previewResult = null">Close</button>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="reviewOpen = false">Close</button>
                 </div>
             </div>
 
@@ -771,7 +819,30 @@ require_once FF_ROOT . '/includes/header.php';
 
     .batch-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--bg-surface-2); border: 1px solid var(--border-color); border-radius: var(--radius-lg); }
 
-    .batch-send-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 14px; }
+    .batch-send-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; }
+    .batch-restored-note {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        flex-wrap: wrap; padding: 9px 14px; margin-bottom: 4px;
+        border-radius: var(--radius-lg); font-size: 12.5px;
+        color: var(--text-secondary);
+        background: var(--color-info-light);
+        border: 1px solid color-mix(in srgb, var(--color-info) 30%, transparent);
+    }
+    .batch-restored-note strong { color: var(--text-primary); }
+
+    .batch-option-notes {
+        margin-top: 12px; padding-top: 12px;
+        border-top: 1px solid var(--border-color);
+        font-size: 12.5px; color: var(--text-secondary); line-height: 1.55;
+    }
+    .batch-option-notes p { margin: 0 0 7px; }
+    .batch-option-notes p:last-child { margin-bottom: 0; }
+    .batch-option-notes strong { color: var(--text-primary); font-weight: 600; }
+    .batch-option-notes code {
+        font-family: var(--font-mono); font-size: 11.5px;
+        padding: 1px 5px; border-radius: 4px;
+        background: var(--bg-surface-2); border: 1px solid var(--border-color);
+    }
 
     /* Totals strip — the batch as a financial number, not just a row count. */
     .batch-total-strip { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -1122,6 +1193,7 @@ function BatchInvoicing(cfg) {
         presets: [],
         previewing: false,
         previewResult: null,
+        reviewOpen: false,
         downloading: '',
         submitting: false,
         runs: [],
@@ -1146,10 +1218,83 @@ function BatchInvoicing(cfg) {
         previewUrl: '',
 
         init() {
+            // Alpine can run init() twice — keep this idempotent (restore reads
+            // sessionStorage, which is safe to re-read; the load* calls just
+            // re-fetch). See the Alpine double-init note in app.js §07h.
+            this.restoreState();
             this.updatePeriod();
             this.loadEligible();
             this.loadPresets();
             this.loadRuns();
+            // Persist on unload as a catch-all, plus the explicit saves below.
+            window.addEventListener('beforeunload', () => this.persistState());
+        },
+
+        // ==========================================================
+        // Session persistence (S-BATCH-CROSSCHECK)
+        //
+        // Building a selection over 150+ leases and reviewing it is real
+        // work, and cross-checking the maths means leaving this page to
+        // open an invoice. Losing the whole list on the way back made that
+        // check expensive enough to skip — which is the opposite of what a
+        // review step is for. State is stashed in sessionStorage (per tab,
+        // cleared when the tab closes) and restored on return.
+        //
+        // previewResult is deliberately NOT persisted: it is a dry run of
+        // live data, it can be megabytes over a big selection, and silently
+        // restoring stale figures after a round-trip is exactly the kind of
+        // "approved numbers that no longer hold" problem this feature
+        // exists to prevent. It survives closing the REVIEW (in memory),
+        // not navigating away.
+        // ==========================================================
+        stateKey: 'ff_batch_state_v1',
+        persistState() {
+            try {
+                sessionStorage.setItem(this.stateKey, JSON.stringify({
+                    periodMode: this.periodMode,
+                    monthValue: this.monthValue,
+                    periodStart: this.periodStart,
+                    periodEnd: this.periodEnd,
+                    selected: this.selected,
+                    customerEmailOverrides: this.customerEmailOverrides,
+                    reviewItems: this.reviewItems,
+                    reviewSelected: this.reviewSelected,
+                    overrides: this.overrides,
+                    sendEmailToo: this.sendEmailToo,
+                    attachPdf: this.attachPdf,
+                    savedAt: new Date().toISOString(),
+                }));
+            } catch (e) { /* quota or private mode — persistence is a nicety */ }
+        },
+        restoreState() {
+            try {
+                const raw = sessionStorage.getItem(this.stateKey);
+                if (!raw) return;
+                const s = JSON.parse(raw);
+                if (!s || typeof s !== 'object') return;
+                if (s.periodMode)  this.periodMode  = s.periodMode;
+                if (s.monthValue)  this.monthValue  = s.monthValue;
+                if (s.periodStart) this.periodStart = s.periodStart;
+                if (s.periodEnd)   this.periodEnd   = s.periodEnd;
+                this.selected               = s.selected               || {};
+                this.customerEmailOverrides = s.customerEmailOverrides || {};
+                this.reviewItems            = s.reviewItems            || [];
+                this.reviewSelected         = s.reviewSelected         || {};
+                this.overrides              = s.overrides              || {};
+                if (typeof s.sendEmailToo === 'boolean') this.sendEmailToo = s.sendEmailToo;
+                if (typeof s.attachPdf    === 'boolean') this.attachPdf    = s.attachPdf;
+                this.restoredFrom = s.savedAt || null;
+                this.selectionRestored = Object.keys(this.selected).length > 0;
+            } catch (e) { /* corrupt payload — start clean rather than break the page */ }
+        },
+        restoredFrom: null,
+        selectionRestored: false,
+        clearSavedState() {
+            try { sessionStorage.removeItem(this.stateKey); } catch (e) {}
+            this.selected = {}; this.customerEmailOverrides = {};
+            this.reviewItems = []; this.reviewSelected = {}; this.overrides = {};
+            this.previewResult = null; this.reviewOpen = false; this.restoredFrom = null;
+            this.selectionRestored = false;
         },
 
         // ==========================================================
@@ -1186,6 +1331,7 @@ function BatchInvoicing(cfg) {
                 if (r.success) {
                     FF_Toast.success('Submitted as ' + r.data.reference + ' — awaiting approval.');
                     await this.loadRuns();
+                    this.persistState();   // keep the selection for the trip back
                     window.location.href = this.runUrl(r.data.id);
                 } else {
                     FF_Toast.error(r.error?.message || 'Could not submit for approval.');
@@ -1272,6 +1418,7 @@ function BatchInvoicing(cfg) {
                 });
                 if (r.success) {
                     this.previewResult = r.data;
+                    this.reviewOpen = true;
                     const t = r.data.totals;
                     if (t.error_count) FF_Toast.error(t.error_count + ' lease' + (t.error_count === 1 ? '' : 's') + ' cannot be billed — see the preview table.');
                     else FF_Toast.success('Preview ready — nothing was created.');
@@ -1387,15 +1534,13 @@ function BatchInvoicing(cfg) {
                 const d = new Date(Date.UTC(y, m - 2, 1));
                 this.monthValue = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
             }
-            this.updatePeriod();
-            this.loadEligible();
+            this.onPeriodChanged();
         },
         shiftMonth(delta) {
             const [y, m] = this.monthValue.split('-').map(Number);
             const d = new Date(Date.UTC(y, m - 1 + delta, 1));
             this.monthValue = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0');
-            this.updatePeriod();
-            this.loadEligible();
+            this.onPeriodChanged();
         },
         updatePeriod() {
             if (this.periodMode === 'month' && this.monthValue) {
@@ -1418,6 +1563,13 @@ function BatchInvoicing(cfg) {
         // ==========================================================
         // Eligibility
         // ==========================================================
+        /** Period change means a different billing context — drop the restored
+         *  selection so auto-select defaults apply to the new period. */
+        onPeriodChanged() {
+            this.selectionRestored = false;
+            this.updatePeriod();
+            this.loadEligible();
+        },
         async loadEligible() {
             if (!this.periodStart || !this.periodEnd) return;
             this.eligLoading = true;
@@ -1430,9 +1582,20 @@ function BatchInvoicing(cfg) {
                     this.customers = res.data.customers;
                     this.eligSummary = res.data.summary;
                     // Auto-select unbilled leases so "Generate" has sane defaults.
+                    //
+                    // EXCEPT on the first load after restoring a session: a
+                    // deselected lease is stored as an ABSENT key, not false, so
+                    // the `!== false` default below would happily re-select every
+                    // lease the operator had just excluded — restoring 4 as 21.
+                    // Honour the restored set verbatim once, then resume defaults.
+                    const honourRestored = this.selectionRestored;
+
                     const stillValid = {};
                     this.customers.forEach(c => c.leases.forEach(l => {
-                        if (l.billing_status === 'unbilled' && this.selected[l.id] !== false) {
+                        if (l.billing_status !== 'unbilled') return;
+                        if (honourRestored) {
+                            if (this.selected[l.id]) stillValid[l.id] = true;
+                        } else if (this.selected[l.id] !== false) {
                             stillValid[l.id] = true;
                         }
                     }));
@@ -1486,11 +1649,13 @@ function BatchInvoicing(cfg) {
             });
         },
         selectAllUnbilled() {
+            this.selectionRestored = false;
             this.customers.forEach(c => c.leases.forEach(l => {
                 if (l.billing_status === 'unbilled') this.selected[l.id] = true;
             }));
         },
         clearSelection() {
+            this.selectionRestored = false;
             this.selected = {};
         },
         selectedLeaseIds() {
@@ -1548,6 +1713,7 @@ function BatchInvoicing(cfg) {
                     });
 
                     if (d.invoices.length) this.openPreview(d.invoices[0].invoice_id);
+                    this.persistState();
 
                     await this.loadEligible(); // refresh billing_status badges (now 'billed')
                 } else {
@@ -1594,6 +1760,11 @@ function BatchInvoicing(cfg) {
             });
             this.reviewSelected[r.id] = true;
             this.addDraftResults = this.addDraftResults.filter(x => x.id !== r.id);
+        },
+        openPreviewNewTab(invoiceId) {
+            // Cross-checking an invoice must never cost the operator their
+            // list — a new tab leaves this page (and its state) untouched.
+            window.open('<?= base_url('invoices/show') ?>?id=' + invoiceId, '_blank', 'noopener');
         },
         toggleReviewSelect(id) {
             if (this.reviewSelected[id]) delete this.reviewSelected[id];
