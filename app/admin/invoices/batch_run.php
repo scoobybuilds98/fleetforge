@@ -441,8 +441,17 @@ $_brandLight   = settings_get('brand.primary_light');
     .brc-summary-total b { font-size: 17px; font-weight: 700; color: var(--color-primary); }
 
     @media print {
-        .app-layout aside, .topbar, .breadcrumb, .app-footer, .ff-chat-fab { display: none !important; }
-        .batch-review-surface { border: 0; background: #fff !important; }
+        /* Chrome only — the surface is a descendant of .app-layout/.app-main/
+           .page-content, so those must be neutralised, never display:none'd
+           (that blanks the printout). */
+        .sidebar, .sidebar-overlay, .topbar, .breadcrumb, .app-footer,
+        .ff-chat-fab, #ff-toast-container { display: none !important; }
+        .app-layout, .app-main, .page-content {
+            display: block !important;
+            margin: 0 !important; padding: 0 !important;
+            max-width: none !important; width: auto !important;
+        }
+        .batch-review-surface { border: 0; border-radius: 0; background: #fff !important; }
         .batch-review-head-actions { display: none !important; }
         .batch-review-card { break-inside: avoid; page-break-inside: avoid; box-shadow: none; }
     }

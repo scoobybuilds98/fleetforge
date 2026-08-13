@@ -1012,11 +1012,36 @@ if ($_ffBrandPrimary): ?>
 
     /* ── Print: force a light, ink-friendly document ─────────────── */
     @media print {
-        .app-layout, .app-footer, .ff-chat-fab { display: none !important; }
-        .batch-review-overlay { position: static; background: #fff !important; color: #000; }
+        /* Hide CHROME ONLY — never .app-layout / .app-main / .page-content.
+           The review overlay is a DESCENDANT of all three (body > .app-layout
+           > .app-main > main.page-content > … > .batch-review-overlay), so
+           display:none on any of them hid the very thing we're printing and
+           produced a blank page. Neutralise those wrappers instead. */
+        .sidebar, .sidebar-overlay, .topbar, .app-footer, .ff-chat-fab,
+        #ff-toast-container, .breadcrumb, .page-header { display: none !important; }
+
+        .app-layout, .app-main, .page-content {
+            display: block !important;
+            margin: 0 !important; padding: 0 !important;
+            max-width: none !important; width: auto !important;
+        }
+
+        /* The selection workflow behind the overlay must not print. */
+        .batch-split { display: none !important; }
+
+        /* Un-fix the overlay so it flows across as many pages as it needs —
+           a position:fixed element only renders its first viewport in print. */
+        .batch-review-overlay {
+            position: static !important; inset: auto !important;
+            z-index: auto !important; height: auto !important;
+            background: #fff !important; color: #000 !important;
+        }
         .batch-review-head { background: #fff !important; backdrop-filter: none; box-shadow: none; }
         .batch-review-head-actions { display: none !important; }
-        .batch-review-body { overflow: visible; padding: 0; }
+        .batch-review-body {
+            overflow: visible !important; height: auto !important;
+            max-height: none !important; padding: 0 !important;
+        }
         .batch-review-card {
             break-inside: avoid; page-break-inside: avoid;
             border-color: #ccc; box-shadow: none; animation: none; margin-top: 12px;

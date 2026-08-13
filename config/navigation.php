@@ -56,24 +56,36 @@ return [
         'badge'  => null,
     ],
     [
-        'label'  => 'Invoices',
-        'icon'   => 'banknotes',
-        'url'    => '/invoices',
-        'module' => 'invoices',
-        'badge'  => 'overdue_invoices',
-    ],
-    [
-        // S-BATCH-INVOICING: sibling entry point (flat, matching the
-        // codebase's dominant nav convention — see the QuickBooks/
-        // Accounting `children` groups for the exception, not the rule).
-        // Gated on the same 'invoices' module 'view' action as the list
-        // page itself; the page's own Generate/Send actions additionally
-        // require 'create'/'edit' respectively (checked server-side).
-        'label'  => 'Batch Invoicing',
-        'icon'   => 'document-duplicate',
-        'url'    => '/invoices/batch',
-        'module' => 'invoices',
-        'badge'  => null,
+        // Invoices is a collapsible GROUP (S-BATCH-INVOICING): the parent
+        // link still opens the invoice list, with Batch Invoicing nested
+        // beneath it rather than competing for a top-level slot.
+        //
+        // No "All Invoices" child on purpose: active state is decided by
+        // str_starts_with, and a child pointing at '/invoices' would prefix-
+        // match '/invoices/batch' too, so BOTH children would highlight on
+        // the batch page. The parent link covers the list instead.
+        //
+        // The Batch child's '/invoices/batch' prefix also (deliberately)
+        // matches '/invoices/batch_run', so viewing an approval run keeps
+        // Batch Invoicing highlighted — a run belongs to that section.
+        'label'        => 'Invoices',
+        'icon'         => 'banknotes',
+        'url'          => '/invoices',
+        'match_prefix' => '/invoices',
+        'module'       => 'invoices',
+        'badge'        => 'overdue_invoices',
+        'children' => [
+            [
+                // Gated on the same 'invoices' view action as the list page;
+                // the page's own Generate/Send/Approve actions additionally
+                // require create/edit/approve (all checked server-side).
+                'label'  => 'Batch Invoicing',
+                'icon'   => 'document-duplicate',
+                'url'    => '/invoices/batch',
+                'module' => 'invoices',
+                'badge'  => null,
+            ],
+        ],
     ],
     [
         'label'  => 'Rates',
