@@ -706,7 +706,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
                             :disabled="generating" @click="reviewOpen = false; generate()">
                         <span x-show="!generating">
-                            Looks right — Generate <span x-text="previewResult.totals.ok_count"></span><template x-if="previewResult.totals.error_count"><span> &amp; flag <span x-text="previewResult.totals.error_count"></span></span></template>
+                            Looks right — Generate <span x-text="generatableCount()"></span><template x-if="previewResult.totals.error_count + heldLeaseIds.length"><span> &amp; flag <span x-text="previewResult.totals.error_count + heldLeaseIds.length"></span></span></template>
                         </span>
                         <span x-show="generating">Generating…</span>
                     </button>
@@ -752,10 +752,13 @@ require_once FF_ROOT . '/includes/header.php';
 
                 <!-- One full card per invoice -->
                 <template x-for="p in previewResult.previews.filter(x => x.ok)" :key="p.lease_id">
-                    <div class="batch-review-card">
+                    <div class="batch-review-card" :class="{ 'is-held': isHeld(p.lease_id) }">
                         <div class="brc-head">
                             <div class="brc-head-main">
-                                <div class="brc-customer" x-text="p.company_name"></div>
+                                <div class="brc-customer">
+                                    <span x-text="p.company_name"></span>
+                                    <span class="brc-held-pill" x-show="isHeld(p.lease_id)" x-cloak>Held for review</span>
+                                </div>
                                 <div class="brc-meta">
                                     <span class="batch-lease-contract" x-text="p.contract_number"></span>
                                     <span x-show="p.unit_number">&middot; Unit <span x-text="p.unit_number"></span></span>
@@ -765,6 +768,15 @@ require_once FF_ROOT . '/includes/header.php';
                             <div class="brc-head-total">
                                 <div class="batch-total-label">Total</div>
                                 <div class="brc-total-value" x-text="fmtMoney(p.total_amount) + ' ' + p.currency"></div>
+                                <!-- Hold = "this one looks wrong, don't bill it yet". It drops the
+                                     lease from THIS run and records why, so the rest of the batch
+                                     still goes out and the held one is not quietly forgotten. -->
+                                <button type="button" class="btn btn-ghost btn-xs" style="margin-top:6px;"
+                                        x-show="!isHeld(p.lease_id)"
+                                        @click="holdForReview(p)">Hold for review</button>
+                                <button type="button" class="btn btn-ghost btn-xs" style="margin-top:6px;"
+                                        x-show="isHeld(p.lease_id)" x-cloak
+                                        @click="unhold(p)">Include again</button>
                             </div>
                         </div>
 
@@ -1198,6 +1210,18 @@ if ($_ffBrandPrimary): ?>
     }
 
     /* ── Facts: hairline grid that reads as one block ────────────── */
+    /* A held card stays visible (you need to see what you set aside) but
+       reads as excluded rather than pending. */
+    .batch-review-card.is-held { opacity: 0.62; }
+    .batch-review-card.is-held .brc-total-value { text-decoration: line-through; }
+    .brc-held-pill {
+        display: inline-block; margin-left: 8px; vertical-align: middle;
+        font-size: 9.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+        padding: 3px 8px; border-radius: 999px;
+        color: var(--color-warning-text); background: var(--color-warning-light);
+        border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+    }
+
     .brc-facts {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
         gap: 1px; background: var(--border-color);
@@ -1363,6 +1387,7 @@ function BatchInvoicing(cfg) {
         submitting: false,
         runs: [],
         exceptions: [],
+        heldLeaseIds: [],
 
         // ── Generation ──────────────────────────────────────────
         generating: false,
@@ -1479,6 +1504,57 @@ function BatchInvoicing(cfg) {
         leaseUrl(id) { return '<?= base_url('leases/show') ?>?id=' + id; },
 
         // ── Flagged leases ─────────────────────────────────────────────
+        /* ── Hold an individual invoice back (S-BILLING-EXCEPTIONS) ─────
+         * Automatic flagging only catches leases that FAIL to bill. This is
+         * the other half: the invoice computed fine but the reviewer thinks
+         * the number is wrong. Holding drops it from this run and records a
+         * reason, so "I'll look at that one later" actually survives.
+         */
+        isHeld(leaseId) { return this.heldLeaseIds.includes(leaseId); },
+        /** What will actually be created: billable minus anything held back. */
+        generatableCount() {
+            const ok = (this.previewResult?.previews || []).filter(p => p.ok && !this.isHeld(p.lease_id));
+            return ok.length;
+        },
+        async holdForReview(p) {
+            const reason = await FF_Confirm.askText({
+                title: 'Hold ' + (p.company_name || ('lease #' + p.lease_id)) + ' back',
+                message: 'It will be left out of this run and queued under Needs Attention. What looks wrong?',
+                confirmLabel: 'Hold it back',
+                placeholder: 'e.g. mileage looks far too high for this unit',
+            });
+            if (!reason) return;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/billing_exceptions/flag') ?>', {
+                    lease_id: p.lease_id,
+                    period_start: this.periodStart,
+                    period_end: this.periodEnd,
+                    reason: reason,
+                });
+                if (r.success) {
+                    this.heldLeaseIds.push(p.lease_id);
+                    // Drop it from the selection so Generate genuinely skips it.
+                    delete this.selected[p.lease_id];
+                    FF_Toast.success('Held back — the rest of the batch is unaffected.');
+                    await this.loadExceptions();
+                    this.persistState();
+                } else {
+                    FF_Toast.error(r.error?.message || 'Could not hold this one back.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error.');
+            }
+        },
+        async unhold(p) {
+            // Put it back in the run. The queue entry stays until someone
+            // resolves it explicitly — silently deleting the record would
+            // undo the audit trail of it having been questioned at all.
+            this.heldLeaseIds = this.heldLeaseIds.filter(id => id !== p.lease_id);
+            this.selected[p.lease_id] = true;
+            FF_Toast.success('Back in this run. Clear its flag under Needs Attention when resolved.');
+            this.persistState();
+        },
+
         async loadExceptions() {
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/invoices/billing_exceptions') ?>?status=open&limit=100');
