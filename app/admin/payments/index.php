@@ -83,7 +83,11 @@ require_once FF_ROOT . '/includes/header.php';
      KPI tiles
      ============================================================ -->
 <div x-data="paymentsKpis()" x-init="loadKpis()">
-<div class="stat-grid" style="grid-template-columns: repeat(4,1fr); gap:16px; margin-bottom:24px;">
+<!-- S-TILE-FIT: was an inline `grid-template-columns: repeat(4,1fr)`, which
+     outranks every responsive .stat-grid rule — so this row stayed 4-across
+     on a phone (68px tiles, values sheared off). .stat-grid--4 is the same
+     4-up desktop layout but collapses 2-up at tablet and 1-up at mobile. -->
+<div class="stat-grid stat-grid--4" style="margin-bottom:24px;">
 
     <!-- Collected This Month — filters table by status=cleared -->
     <div class="stat-card stat-card--green"

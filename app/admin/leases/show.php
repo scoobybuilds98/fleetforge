@@ -685,7 +685,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 <!-- Has starting odometer → full summary -->
                                 <template x-if="lease.odometer_start_km !== null && lease.odometer_start_km !== undefined">
                                     <div>
-                                        <div class="stat-grid" style="grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;">
+                                        <!-- S-TILE-FIT: inline column count replaced by the
+                                             .stat-grid--3 modifier so this row collapses on
+                                             phones instead of holding 3 columns at ~90px. -->
+                                        <div class="stat-grid stat-grid--3" style="gap:1rem;">
                                             <div>
                                                 <div class="stat-label">Starting Odometer</div>
                                                 <div class="stat-value font-mono"
@@ -797,7 +800,9 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                    class="btn btn-sm btn-ghost">Open Tracking →</a>
                             </div>
                             <div class="card-body">
-                                <div class="stat-grid" style="grid-template-columns:repeat(4,minmax(0,1fr));gap:1rem;">
+                                <!-- S-TILE-FIT: see the odometer row above — inline column
+                                     count swapped for the responsive .stat-grid--4 modifier. -->
+                                <div class="stat-grid stat-grid--4" style="gap:1rem;">
                                     <div>
                                         <div class="stat-label">Last Location</div>
                                         <div class="text-sm"

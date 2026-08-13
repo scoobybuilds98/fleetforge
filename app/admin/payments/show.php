@@ -172,7 +172,10 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 <!-- ============================================================
      Summary tiles
      ============================================================ -->
-<div class="stat-grid" style="grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;">
+<!-- S-TILE-FIT: inline 4-column override removed — it beat the responsive
+     .stat-grid rules and kept these tiles 4-across (and cropping) on phones.
+     .stat-grid--4 keeps the desktop look and collapses at tablet/mobile. -->
+<div class="stat-grid stat-grid--4" style="margin-bottom:24px;">
 
     <!-- TILES-2: Amount Received drills to all payments for this customer;
          Payment Method + Payment Date stay as display-only metadata;

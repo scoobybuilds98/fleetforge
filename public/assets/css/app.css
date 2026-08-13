@@ -2334,6 +2334,27 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 @media (max-width: 480px) {
     .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
+/* S-TILE-FIT: every grid cell is a query container, not just .stat-card.
+   Some rows (the lease Telematics + Odometer panels) put a bare <div> in the
+   grid and style the contents with .stat-label / .stat-value directly — those
+   had no container to size against and kept the old fixed 24px, which sheared
+   "556,900 km" by 38px in a 101px cell. min-width:0 is the standard grid-item
+   guard so a long unbreakable value can never push its track wider than 1fr. */
+.stat-grid > *,
+.kpi-grid > * {
+    container-type: inline-size;
+    min-width: 0;
+}
+
+/* S-TILE-FIT: on a 320–360px phone a 2-up tile leaves ~87px of content, which
+   is below what the .stat-value clamp can shrink into without dropping to
+   label size. Stack instead — a full-width tile there reads better than two
+   cramped ones. Scoped to the base grid: .stat-grid#kpi-grid (id) keeps its
+   deliberate 2-up dashboard layout, and the .stat-grid--N modifiers have
+   already stacked by this width. */
+@media (max-width: 360px) {
+    .stat-grid { grid-template-columns: 1fr; }
+}
 
 /* Invoice addresses: Bill To + Invoice Details cards side-by-side.
    WHY: Extracted from inline style so responsive rules can override it. */
@@ -2358,6 +2379,14 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     overflow: hidden;
     min-width: 0;
     transition: box-shadow var(--transition-base), transform var(--transition-base), border-color var(--transition-base);
+    /* S-TILE-FIT: the tile is its own query container so .stat-value (and the
+       icon/label reservation below) can size off the tile's REAL width instead
+       of the viewport. WHY it has to be the tile and not a media query: the
+       same tile is 1/6 of the row on the dashboard, 1/4 on a KPI row, 1/2 on
+       a phone, and narrower again when the help drawer opens — a viewport
+       breakpoint can't know which. `cqi` = 1% of this card's content box, so
+       one rule fits every one of those cases. */
+    container-type: inline-size;
 }
 
 /* S-LUX-LOUD: the coloured top accent bar was removed per operator feedback
@@ -2433,9 +2462,22 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
        never clips — see .stat-card__header .stat-label. */
     padding-right: 38px;
     display: -webkit-box;
-    -webkit-line-clamp: 2;
+    /* S-TILE-FIT: 3 lines, was 2. A three-word label in a narrow tile
+       ("TOTAL AR OUTSTANDING", "EXPIRING WITHIN 30 DAYS", "COLLECTED THIS
+       MONTH") needs a third line once the icon reservation is taken out of a
+       ~110px box, and the 2-line clamp silently ate it — measured on
+       /payments, /accounting/dashboard and /compliance at 375px AND 768px.
+       The extra line only materialises on labels that actually need it; the
+       row grows a few px rather than dropping a word. */
+    -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    /* S-TILE-FIT: a label can contain a token longer than the box that has no
+       break opportunity — "Total NBV (Active+Impaired)" on
+       /accounting/fixed-assets ran 24px past a 375px tile. Labels are prose,
+       so breaking one mid-token is fine; the same is NOT true of .stat-value,
+       which must never break. */
+    overflow-wrap: anywhere;
 }
 
 /* S-LUX-2-FIX (no-crop): when the icon sits in the flex header it is
@@ -2446,6 +2488,33 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     padding-right: 0;
 }
 
+/* S-TILE-FIT: on a narrow tile (2-up phone, 4-up tablet) the 34px icon plus
+   its 38px label reservation is a third of the content box, which is what
+   pushes a two-word label into the 2-line clamp and starts trimming the third
+   line. Shrink the icon and its reservation with the tile — same container
+   basis as .stat-value, so the whole tile scales as one piece rather than the
+   value shrinking while the chrome stays desktop-sized. */
+@container (max-width: 160px) {
+    .stat-icon {
+        top: 12px;
+        right: 12px;
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+    }
+    .stat-icon svg {
+        width: 15px;
+        height: 15px;
+    }
+    .stat-label {
+        padding-right: 32px;
+        letter-spacing: 0.02em;
+    }
+    .stat-card__header .stat-label {
+        padding-right: 0;
+    }
+}
+
 .stat-value {
     /* S-LUX-2: large display numeral — weight 600, tight tracking, tabular
        figures (via the .stat-value group in the tabular-nums rule). Sans
@@ -2453,9 +2522,28 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
        S-LUX-2-FIX (no-crop): 24px (was 28px) so wide money values like
        "$55,050.00" fit the 6-up dashboard tile (~144px value box) without
        clipping; the ellipsis clip is removed so a figure never renders as
-       "$55,050…". Narrow enough at 24px that the full number always shows;
-       the #kpi-grid mobile rule shrinks it further to 1.125rem. */
-    font-size: 1.5rem;              /* 24px */
+       "$55,050…".
+
+       S-TILE-FIT: 24px was still a FIXED size, so any tile narrower than the
+       desktop 6-up case cropped the figure against .stat-card's
+       `overflow:hidden` — measured on /invoices at 768px (130px value box vs
+       139px of text, "$30,964.07" losing its last digits) and at 375px
+       (115px box vs 139px). Now the size follows the tile: 13cqi caps at 24px
+       once the tile has ~185px of content width and scales down below that.
+
+       WHY 13 exactly: .currency is Geist Mono at ~0.58em per glyph, so a
+       coefficient k fits 172.7/k characters — k=13 fits 13.3, and 13 is the
+       longest value these tiles really carry ("$3,159,925.07" is live today
+       on /accounting/fixed-assets). 13 is also the largest k that stays
+       self-consistent AT the 24px cap: the cap engages at 185px of content
+       and 13 mono characters at 24px measure 181px, so the guarantee holds on
+       both sides of the clamp. A bigger k (15 was tried) looks better on
+       desktop but leaves a hole exactly where the cap takes over — a 6-up
+       1440px tile has 170px of content and cropped that same value by 11px.
+       Never solve a crop here by BREAKING the value — a money figure split
+       mid-number misreads. */
+    font-size: 1.5rem;                              /* fallback: no cqi support */
+    font-size: clamp(0.8125rem, 13cqi, 1.5rem);     /* 13px … 24px */
     font-weight: 600;
     letter-spacing: var(--tracking-tight);
     color: var(--text-primary);
@@ -2463,12 +2551,22 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
     line-height: 1.15;
     margin-bottom: 4px;
     min-width: 0;
-    white-space: nowrap;
+    /* S-TILE-FIT: was `nowrap`, which had nothing left to give once a value is
+       words rather than digits — "ACH / Direct Deposit" on /payments/show
+       still ran past a 320px tile at the clamp's floor. `normal` breaks at
+       SPACES only (overflow-wrap stays default), so a phrase wraps while a
+       money figure — which contains no space — still can't be split. Same
+       rule .stat-delta already relies on. */
+    white-space: normal;
 }
 
-/* WHY: Dates like "Aug 31, 2026" clip at 1.5rem bold mono — drop to 1.125rem to fit */
+/* WHY: Dates like "Aug 31, 2026" clip at 1.5rem bold mono — drop to 1.125rem to fit.
+   S-TILE-FIT: fluid on the same container basis as .stat-value, capped at the
+   1.125rem this variant has always used. 9.5cqi fits an 18-char
+   "Aug 31, 2026 – Sep 30" style string at any tile width. */
 .stat-value--date {
-    font-size: 1.125rem;
+    font-size: 1.125rem;                             /* fallback: no cqi support */
+    font-size: clamp(0.8125rem, 9.5cqi, 1.125rem);
     overflow: visible;
     text-overflow: unset;
 }
@@ -11190,7 +11288,13 @@ tr.ff-row-selected > td:first-child {
         padding: 14px;
     }
     #kpi-grid .stat-value {
-        font-size: 1.125rem;
+        /* S-TILE-FIT: was a flat 1.125rem, which re-introduced the fixed-size
+           crop this ID rule outranks the fluid base with. Keep 1.125rem as the
+           dashboard's mobile CAP (the 12-tile grid reads better with a smaller
+           numeral than the 24px base) but let it shrink below that when the
+           tile is too narrow for the figure. */
+        font-size: 1.125rem;                            /* fallback: no cqi support */
+        font-size: clamp(0.8125rem, 13cqi, 1.125rem);
     }
     #kpi-grid .stat-label {
         font-size: 0.6875rem;
