@@ -483,6 +483,17 @@ $_brandLight   = settings_get('brand.primary_light');
     .batch-total-value { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
 
     /* View switch: per-lease detail (default) vs per-customer rollup. */
+    /* .data-table-wrap has NO definition in app.css — it is a class these
+       batch pages introduced and never styled. Without overflow-x:auto the
+       table just overflowed its wrapper, and the ancestor .card
+       (overflow:hidden) clipped the excess — so the right-hand columns were
+       unreachable: no scrollbar, nothing to swipe, content simply gone.
+       Scoped to these pages rather than added to app.css because nothing
+       else in the app uses the class. */
+    .data-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* Hint that there is more to the right, without a permanent scrollbar. */
+    .data-table-wrap { scrollbar-width: thin; }
+
     .brc-view-toggle { margin-top: 18px; }
     .brc-view-switch {
         display: inline-flex; gap: 4px; padding: 4px;

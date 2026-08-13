@@ -901,6 +901,17 @@ require_once FF_ROOT . '/includes/header.php';
     }
     .batch-collapse-caret.is-open { transform: rotate(90deg); }
 
+    /* .data-table-wrap has NO definition in app.css — it is a class these
+       batch pages introduced and never styled. Without overflow-x:auto the
+       table just overflowed its wrapper, and the ancestor .card
+       (overflow:hidden) clipped the excess — so the right-hand columns were
+       unreachable: no scrollbar, nothing to swipe, content simply gone.
+       Scoped to these pages rather than added to app.css because nothing
+       else in the app uses the class. */
+    .data-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* Hint that there is more to the right, without a permanent scrollbar. */
+    .data-table-wrap { scrollbar-width: thin; }
+
     .batch-period-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
     .batch-period-inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
