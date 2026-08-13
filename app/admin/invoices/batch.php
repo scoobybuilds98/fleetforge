@@ -136,6 +136,23 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-show="periodIsFullMonth" class="badge badge-no-dot badge-info" style="margin-left:6px;">Full calendar month — bills as full_month</span>
                         <span x-show="!periodIsFullMonth" class="badge badge-no-dot badge-neutral" style="margin-left:6px;">Custom span — bills as single_period</span>
                     </div>
+
+                    <!-- Saved presets — a preset stores the SELECTION + send
+                         options, never a period, so the same customer set can
+                         be re-applied to whatever month is picked above. -->
+                    <div class="batch-presets" x-show="presets.length || canGenerate">
+                        <span class="batch-presets-label">Presets</span>
+                        <template x-for="p in presets" :key="p.id">
+                            <span class="batch-preset-chip">
+                                <button type="button" class="batch-preset-apply" @click="applyPreset(p)"
+                                        :title="p.lease_ids.length + ' lease(s) · saved ' + p.created_at" x-text="p.name"></button>
+                                <button type="button" class="batch-preset-del" @click="deletePreset(p)" title="Delete preset">&times;</button>
+                            </span>
+                        </template>
+                        <span x-show="!presets.length" class="text-secondary text-sm">None saved yet</span>
+                        <button type="button" class="btn btn-ghost btn-sm" x-show="canGenerate"
+                                :disabled="selectedLeaseIds().length === 0" @click="savePreset()">+ Save current selection</button>
+                    </div>
                 </div>
             </div>
 
@@ -249,16 +266,71 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
+            <!-- ── Dry-run preview result ────────────────────────────── -->
+            <div class="card" x-show="previewResult" x-cloak>
+                <div class="card-header">
+                    <span class="card-title">Preview — nothing has been created</span>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="previewResult = null">Dismiss</button>
+                </div>
+                <div class="card-body">
+                    <div class="batch-total-strip">
+                        <div class="batch-total">
+                            <div class="batch-total-label">Would bill</div>
+                            <div class="batch-total-value" x-text="previewCurrencyText()"></div>
+                        </div>
+                        <div class="batch-total">
+                            <div class="batch-total-label">Invoices</div>
+                            <div class="batch-total-value" x-text="(previewResult?.totals.ok_count || 0)"></div>
+                        </div>
+                        <div class="batch-total" x-show="previewResult?.totals.error_count">
+                            <div class="batch-total-label">Cannot bill</div>
+                            <div class="batch-total-value text-danger" x-text="(previewResult?.totals.error_count || 0)"></div>
+                        </div>
+                    </div>
+
+                    <div class="data-table-wrap" style="margin-top:12px;">
+                        <table class="data-table">
+                            <thead><tr>
+                                <th>Customer</th><th>Contract</th><th>Days</th><th>Rate</th>
+                                <th class="text-right">Subtotal</th><th class="text-right">Tax</th><th class="text-right">Total</th>
+                            </tr></thead>
+                            <tbody>
+                                <template x-for="p in (previewResult?.previews || [])" :key="p.lease_id">
+                                    <tr :class="{ 'batch-row-error': !p.ok }">
+                                        <td x-text="p.company_name || ('Lease #' + p.lease_id)"></td>
+                                        <td class="batch-lease-contract" x-text="p.contract_number || '—'"></td>
+                                        <td>
+                                            <span x-show="p.ok" x-text="p.billing_days"></span>
+                                            <span x-show="!p.ok" class="text-danger text-sm" x-text="p.error"></span>
+                                        </td>
+                                        <td x-text="p.ok ? (p.rate_method || '—') : ''"></td>
+                                        <td class="text-right currency" x-text="p.ok ? fmtMoney(p.subtotal) : ''"></td>
+                                        <td class="text-right currency" x-text="p.ok ? fmtMoney(p.tax_total) : ''"></td>
+                                        <td class="text-right currency" x-text="p.ok ? (fmtMoney(p.total_amount) + ' ' + p.currency) : ''"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- ── Generate action bar ───────────────────────────────── -->
             <div class="batch-action-bar" x-show="canGenerate">
                 <div>
                     <strong x-text="selectedLeaseIds().length"></strong> lease<span x-show="selectedLeaseIds().length !== 1">s</span> selected
                     <span class="text-secondary text-sm" x-show="selectedLeaseIds().length"> across <span x-text="selectedCustomerIds().length"></span> customer<span x-show="selectedCustomerIds().length !== 1">s</span></span>
                 </div>
-                <button type="button" class="btn btn-primary" :disabled="selectedLeaseIds().length === 0 || generating" @click="generate()">
-                    <span x-show="!generating">Generate <span x-text="selectedLeaseIds().length"></span> Draft Invoice<span x-show="selectedLeaseIds().length !== 1">s</span></span>
-                    <span x-show="generating">Generating…</span>
-                </button>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || previewing || generating" @click="dryRun()">
+                        <span x-show="!previewing">Preview totals</span>
+                        <span x-show="previewing">Calculating…</span>
+                    </button>
+                    <button type="button" class="btn btn-primary" :disabled="selectedLeaseIds().length === 0 || generating" @click="generate()">
+                        <span x-show="!generating">Generate <span x-text="selectedLeaseIds().length"></span> Draft Invoice<span x-show="selectedLeaseIds().length !== 1">s</span></span>
+                        <span x-show="generating">Generating…</span>
+                    </button>
+                </div>
             </div>
 
             <div class="card" x-show="lastGenerateResult" x-cloak>
@@ -372,14 +444,40 @@ require_once FF_ROOT . '/includes/header.php';
                         </table>
                     </div>
 
-                    <div class="batch-action-bar" x-show="reviewItems.length && canSend" style="margin-top:14px;">
+                    <!-- Running totals for the review list -->
+                    <div class="batch-total-strip" x-show="reviewItems.length" style="margin-top:14px;">
+                        <div class="batch-total">
+                            <div class="batch-total-label">Batch total</div>
+                            <div class="batch-total-value" x-text="reviewTotalText()"></div>
+                        </div>
+                        <div class="batch-total">
+                            <div class="batch-total-label">Drafts</div>
+                            <div class="batch-total-value" x-text="reviewItems.filter(i => i.status === 'draft').length"></div>
+                        </div>
+                        <div class="batch-total">
+                            <div class="batch-total-label">Sent</div>
+                            <div class="batch-total-value" x-text="reviewItems.filter(i => i.status !== 'draft').length"></div>
+                        </div>
+                    </div>
+
+                    <div class="batch-action-bar" x-show="reviewItems.length" style="margin-top:12px;">
                         <div>
                             <strong x-text="reviewSelectedIds().length"></strong> selected for sending
                         </div>
-                        <button type="button" class="btn btn-primary" :disabled="reviewSelectedIds().length === 0 || sending" @click="bulkSend()">
-                            <span x-show="!sending" x-text="sendEmailToo ? 'Send & Email ' + reviewSelectedIds().length : 'Mark ' + reviewSelectedIds().length + ' as Sent'"></span>
-                            <span x-show="sending">Sending…</span>
-                        </button>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary btn-sm" :disabled="!reviewItems.length || downloading" @click="downloadBatch('zip')">
+                                <span x-show="downloading !== 'zip'">Download ZIP</span>
+                                <span x-show="downloading === 'zip'">Zipping…</span>
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" :disabled="!reviewItems.length || downloading" @click="downloadBatch('pdf')">
+                                <span x-show="downloading !== 'pdf'">Download combined PDF</span>
+                                <span x-show="downloading === 'pdf'">Merging…</span>
+                            </button>
+                            <button type="button" class="btn btn-primary" x-show="canSend" :disabled="reviewSelectedIds().length === 0 || sending" @click="bulkSend()">
+                                <span x-show="!sending" x-text="sendEmailToo ? 'Send & Email ' + reviewSelectedIds().length : 'Mark ' + reviewSelectedIds().length + ' as Sent'"></span>
+                                <span x-show="sending">Sending…</span>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="card" x-show="lastSendResult" x-cloak style="margin-top:14px;">
@@ -436,10 +534,19 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <style>
-    .batch-split { display: grid; grid-template-columns: minmax(0, 1fr) 460px; gap: 16px; align-items: start; }
-    .batch-left { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-    .batch-right { position: sticky; top: 16px; }
-    .batch-preview-card { display: flex; flex-direction: column; height: calc(100vh - 130px); min-height: 480px; }
+    /* Denser page + a wider preview pane (operator request): the preview is
+       an actual invoice document, so it needs real width to be readable. */
+    .batch-split { display: grid; grid-template-columns: minmax(0, 1fr) clamp(460px, 38vw, 720px); gap: 14px; align-items: start; }
+    .batch-left { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+    .batch-right { position: sticky; top: 12px; }
+    .batch-preview-card { display: flex; flex-direction: column; height: calc(100vh - 100px); min-height: 560px; }
+
+    /* Density: tighten this page's cards without touching the global .card. */
+    #batch-invoicing-app .card-body { padding: 14px 16px; }
+    #batch-invoicing-app .card-header { padding: 10px 16px; }
+    #batch-invoicing-app .data-table td { padding: 7px 10px; }
+    #batch-invoicing-app .data-table thead th { padding: 8px 10px; }
+    #batch-invoicing-app .table-toolbar { margin-bottom: 12px; }
     .batch-preview-body { flex: 1; min-height: 0; display: flex; }
     .batch-preview-empty { display: flex; align-items: center; justify-content: center; flex: 1; padding: 24px; text-align: center; }
     .batch-preview-iframe { flex: 1; width: 100%; border: 0; border-radius: 0 0 var(--radius-xl) var(--radius-xl); background: var(--bg-surface); }
@@ -475,6 +582,22 @@ require_once FF_ROOT . '/includes/header.php';
     .batch-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--bg-surface-2); border: 1px solid var(--border-color); border-radius: var(--radius-lg); }
 
     .batch-send-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 14px; }
+
+    /* Totals strip — the batch as a financial number, not just a row count. */
+    .batch-total-strip { display: flex; flex-wrap: wrap; gap: 10px; }
+    .batch-total { flex: 1; min-width: 130px; padding: 10px 14px; background: var(--bg-surface-2); border: 1px solid var(--border-color); border-radius: var(--radius-lg); }
+    .batch-total-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
+    .batch-total-value { font-size: 17px; font-weight: 600; font-family: var(--font-mono); margin-top: 2px; }
+    .batch-row-error td { opacity: 0.75; }
+
+    /* Presets */
+    .batch-presets { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }
+    .batch-presets-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-right: 2px; }
+    .batch-preset-chip { display: inline-flex; align-items: center; background: var(--bg-surface-2); border: 1px solid var(--border-color); border-radius: 999px; overflow: hidden; }
+    .batch-preset-apply { background: none; border: 0; color: var(--text-primary); font-size: 12px; padding: 4px 4px 4px 12px; cursor: pointer; }
+    .batch-preset-apply:hover { color: var(--color-primary); }
+    .batch-preset-del { background: none; border: 0; color: var(--text-secondary); font-size: 14px; line-height: 1; padding: 4px 10px 4px 6px; cursor: pointer; }
+    .batch-preset-del:hover { color: var(--color-danger); }
 
     .batch-add-results { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
     .batch-add-result-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--bg-surface-2); border-radius: var(--radius-md); font-size: 13px; }
@@ -514,6 +637,12 @@ function BatchInvoicing(cfg) {
         selected: {},           // leaseId -> true
         customerEmailOverrides: {}, // customerId -> email string (this run only)
 
+        // ── Presets / dry-run / download ────────────────────────
+        presets: [],
+        previewing: false,
+        previewResult: null,
+        downloading: '',
+
         // ── Generation ──────────────────────────────────────────
         generating: false,
         lastGenerateResult: null,
@@ -536,6 +665,152 @@ function BatchInvoicing(cfg) {
         init() {
             this.updatePeriod();
             this.loadEligible();
+            this.loadPresets();
+        },
+
+        // ==========================================================
+        // Presets
+        // ==========================================================
+        async loadPresets() {
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/invoices/batch_presets') ?>');
+                if (r.success) this.presets = r.data.presets || [];
+            } catch (e) { /* non-fatal — presets are a convenience */ }
+        },
+        async savePreset() {
+            const leaseIds = this.selectedLeaseIds();
+            if (!leaseIds.length) return;
+            const name = await FF_Confirm.askText({
+                title: 'Save preset',
+                message: 'Name this selection so you can re-apply it next month.',
+                confirmLabel: 'Save preset',
+                placeholder: 'e.g. Monthly — all trucking accounts',
+            });
+            if (!name) return;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/batch_presets') ?>', {
+                    name: name,
+                    customer_ids: this.selectedCustomerIds(),
+                    lease_ids: leaseIds,
+                    status_filter: this.statusFilter,
+                    send_email: this.sendEmailToo,
+                    attach_pdf: this.attachPdf,
+                });
+                if (r.success) { this.presets = r.data.presets || []; FF_Toast.success('Preset saved.'); }
+                else FF_Toast.error(r.error?.message || 'Could not save preset.');
+            } catch (e) { FF_Toast.error('Network error saving preset.'); }
+        },
+        applyPreset(p) {
+            // Re-apply the SELECTION only — the period stays whatever is picked
+            // above, and any lease in the preset that isn't eligible for this
+            // period simply won't be present in displayCustomers to select.
+            const wanted = new Set(p.lease_ids || []);
+            const next = {};
+            let matched = 0;
+            this.customers.forEach(c => c.leases.forEach(l => {
+                if (wanted.has(l.id)) { next[l.id] = true; matched++; }
+            }));
+            this.selected = next;
+            if (p.status_filter) { this.statusFilter = p.status_filter; this.rebuildDisplay(); }
+            this.sendEmailToo = !!p.send_email;
+            this.attachPdf = !!p.attach_pdf;
+            const missing = (p.lease_ids || []).length - matched;
+            FF_Toast.success('Preset "' + p.name + '" applied — ' + matched + ' lease' + (matched === 1 ? '' : 's') + ' selected'
+                + (missing > 0 ? ' (' + missing + ' not eligible this period)' : '') + '.');
+        },
+        async deletePreset(p) {
+            const ok = await FF_Confirm.ask('Delete preset "' + p.name + '"?');
+            if (!ok) return;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/batch_presets') ?>', { _action: 'delete', id: p.id });
+                if (r.success) { this.presets = r.data.presets || []; FF_Toast.success('Preset deleted.'); }
+                else FF_Toast.error(r.error?.message || 'Could not delete preset.');
+            } catch (e) { FF_Toast.error('Network error deleting preset.'); }
+        },
+
+        // ==========================================================
+        // Dry run — computes exact totals without creating anything
+        // ==========================================================
+        async dryRun() {
+            const leaseIds = this.selectedLeaseIds();
+            if (!leaseIds.length || this.previewing) return;
+            this.previewing = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/batch_preview') ?>', {
+                    period_start: this.periodStart,
+                    period_end: this.periodEnd,
+                    lease_ids: leaseIds,
+                });
+                if (r.success) {
+                    this.previewResult = r.data;
+                    const t = r.data.totals;
+                    if (t.error_count) FF_Toast.error(t.error_count + ' lease' + (t.error_count === 1 ? '' : 's') + ' cannot be billed — see the preview table.');
+                    else FF_Toast.success('Preview ready — nothing was created.');
+                } else {
+                    FF_Toast.error(r.error?.message || 'Preview failed.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error during preview.');
+            } finally {
+                this.previewing = false;
+            }
+        },
+        previewCurrencyText() {
+            const by = this.previewResult?.totals?.by_currency || {};
+            const parts = Object.keys(by).map(c => this.fmtMoney(by[c]) + ' ' + c);
+            return parts.length ? parts.join('  +  ') : '—';
+        },
+        reviewTotalText() {
+            const by = {};
+            this.reviewItems.forEach(i => {
+                const c = i.currency || 'CAD';
+                by[c] = (by[c] || 0) + (parseFloat(i.total_amount) || 0);
+            });
+            const parts = Object.keys(by).map(c => this.fmtMoney(by[c].toFixed(2)) + ' ' + c);
+            return parts.length ? parts.join('  +  ') : '—';
+        },
+
+        // ==========================================================
+        // Bulk download (ZIP of PDFs, or one combined PDF)
+        // ==========================================================
+        async downloadBatch(format) {
+            if (this.downloading) return;
+            const ids = this.reviewItems.map(i => i.invoice_id);
+            if (!ids.length) return;
+            this.downloading = format;
+            try {
+                // Not FF_Api: this endpoint streams a binary body, not the JSON
+                // envelope FF_Api unwraps. Same CSRF header contract though.
+                const res = await fetch('<?= base_url('api/v1/invoices/batch_download') ?>', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
+                    },
+                    body: JSON.stringify({ ids: ids, format: format }),
+                });
+                const ctype = res.headers.get('content-type') || '';
+                if (!res.ok || ctype.includes('application/json')) {
+                    let msg = 'Download failed.';
+                    try { const j = await res.json(); msg = j.error?.message || msg; } catch (e) {}
+                    FF_Toast.error(msg);
+                    return;
+                }
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'invoices_' + this.periodStart + (format === 'zip' ? '.zip' : '.pdf');
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+                FF_Toast.success(ids.length + ' invoice' + (ids.length === 1 ? '' : 's') + ' downloaded.');
+            } catch (e) {
+                FF_Toast.error('Network error during download.');
+            } finally {
+                this.downloading = '';
+            }
         },
 
         // ==========================================================
@@ -701,6 +976,7 @@ function BatchInvoicing(cfg) {
                             total_amount: inv.total_amount,
                             status: 'draft',
                             recipient_email: (customer && customer.recipient.email) || '',
+                            currency: (customer && customer.currency) || 'CAD',
                             has_pdf: false,
                             pdfWorking: false,
                             sendingOne: false,
@@ -750,6 +1026,7 @@ function BatchInvoicing(cfg) {
                 total_amount: r.total_amount,
                 status: r.status,
                 recipient_email: '',
+                currency: r.currency || 'CAD',
                 has_pdf: false,
                 pdfWorking: false,
                 sendingOne: false,
