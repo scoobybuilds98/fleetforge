@@ -98,7 +98,7 @@ return [
         'equipment'     => $ALL,
         'leases'        => $ALL,
         'reservations'  => $ALL,
-        'invoices'      => $ALL,
+        'invoices'      => $ALL + ['approve' => true],   // S-BATCH-APPROVAL
         'payments'      => $ALL,
         'rates'         => $ALL,
         'maintenance'   => $ALL,
@@ -149,7 +149,7 @@ return [
         'equipment'     => $VCED,
         'leases'        => $VCED,
         'reservations'  => $VCED,
-        'invoices'      => $VCED,
+        'invoices'      => $VCED + ['approve' => true],  // S-BATCH-APPROVAL
         'payments'      => $VCED,
         'rates'         => $VCE,
         'maintenance'   => $VCED,
@@ -201,7 +201,7 @@ return [
         'equipment'     => $VCE,
         'leases'        => $VCE,
         'reservations'  => $VCED,
-        'invoices'      => $V,       // status + dates only — no amounts (enforced in API)
+        'invoices'      => $V + ['approve' => false],    // S-BATCH-APPROVAL: dispatchers don't approve billing
         'payments'      => $NONE,
         'rates'         => $NONE,
         'maintenance'   => $VCE,
@@ -246,7 +246,7 @@ return [
         'equipment'     => $V,
         'leases'        => $V,
         'reservations'  => $V,
-        'invoices'      => $VCED,
+        'invoices'      => $VCED + ['approve' => true],  // S-BATCH-APPROVAL
         'payments'      => $VCED,
         'rates'         => $V,
         'maintenance'   => $V,
@@ -300,7 +300,7 @@ return [
         'equipment'     => $V,
         'leases'        => $V,
         'reservations'  => $V,
-        'invoices'      => $V,
+        'invoices'      => $V + ['approve' => false],    // S-BATCH-APPROVAL
         'payments'      => $V,
         'rates'         => $V,
         'maintenance'   => $V,

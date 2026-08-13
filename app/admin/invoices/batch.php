@@ -272,10 +272,14 @@ require_once FF_ROOT . '/includes/header.php';
                     <strong x-text="selectedLeaseIds().length"></strong> lease<span x-show="selectedLeaseIds().length !== 1">s</span> selected
                     <span class="text-secondary text-sm" x-show="selectedLeaseIds().length"> across <span x-text="selectedCustomerIds().length"></span> customer<span x-show="selectedCustomerIds().length !== 1">s</span></span>
                 </div>
-                <div style="display:flex; gap:8px; align-items:center;">
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
                     <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || previewing || generating" @click="dryRun()">
                         <span x-show="!previewing">Preview totals</span>
                         <span x-show="previewing">Calculating…</span>
+                    </button>
+                    <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || submitting || generating" @click="submitForApproval()">
+                        <span x-show="!submitting">Submit for approval</span>
+                        <span x-show="submitting">Submitting…</span>
                     </button>
                     <button type="button" class="btn btn-primary" :disabled="selectedLeaseIds().length === 0 || generating" @click="generate()">
                         <span x-show="!generating">Generate <span x-text="selectedLeaseIds().length"></span> Draft Invoice<span x-show="selectedLeaseIds().length !== 1">s</span></span>
@@ -298,6 +302,45 @@ require_once FF_ROOT . '/includes/header.php';
                             </template>
                         </ul>
                     </template>
+                </div>
+            </div>
+
+            <!-- ── Approval runs ─────────────────────────────────────── -->
+            <div class="card" x-show="runs.length" x-cloak>
+                <div class="card-header">
+                    <span class="card-title">Approval Runs</span>
+                    <span class="text-secondary text-sm">Frozen proposals — open one to review or sign off</span>
+                </div>
+                <div class="card-body">
+                    <div class="data-table-wrap">
+                        <table class="data-table">
+                            <thead><tr>
+                                <th>Run</th><th>Period</th><th>Status</th>
+                                <th class="text-right">Invoices</th><th class="text-right">Total</th><th>Submitted by</th>
+                            </tr></thead>
+                            <tbody>
+                                <template x-for="r in runs" :key="r.id">
+                                    <tr>
+                                        <td><a class="link" :href="runUrl(r.id)" x-text="r.reference"></a></td>
+                                        <td class="brc-nowrap"><span x-text="r.period_start"></span> → <span x-text="r.period_end"></span></td>
+                                        <td>
+                                            <span class="badge badge-no-dot"
+                                                  :class="{
+                                                    'badge-warning': r.status === 'pending',
+                                                    'badge-success': r.status === 'approved',
+                                                    'badge-danger':  r.status === 'rejected',
+                                                    'badge-info':    r.status === 'generated',
+                                                    'badge-neutral': r.status === 'cancelled'
+                                                  }" x-text="r.status"></span>
+                                        </td>
+                                        <td class="text-right" x-text="r.invoice_count"></td>
+                                        <td class="text-right currency" x-text="Object.keys(r.total_by_currency || {}).map(c => fmtMoney(r.total_by_currency[c]) + ' ' + c).join(' + ') || '—'"></td>
+                                        <td class="text-sm text-secondary" x-text="r.submitted_by_name || '—'"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
@@ -1029,11 +1072,13 @@ function BatchInvoicing(cfg) {
         selected: {},           // leaseId -> true
         customerEmailOverrides: {}, // customerId -> email string (this run only)
 
-        // ── Presets / dry-run / download ────────────────────────
+        // ── Presets / dry-run / download / approval ─────────────
         presets: [],
         previewing: false,
         previewResult: null,
         downloading: '',
+        submitting: false,
+        runs: [],
 
         // ── Generation ──────────────────────────────────────────
         generating: false,
@@ -1058,6 +1103,52 @@ function BatchInvoicing(cfg) {
             this.updatePeriod();
             this.loadEligible();
             this.loadPresets();
+            this.loadRuns();
+        },
+
+        // ==========================================================
+        // Approval runs
+        // ==========================================================
+        async loadRuns() {
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/invoices/batch_runs') ?>?limit=10');
+                if (r.success) this.runs = r.data.runs || [];
+            } catch (e) { /* non-fatal */ }
+        },
+        runUrl(id) { return '<?= base_url('invoices/batch_run') ?>?id=' + id; },
+        async submitForApproval() {
+            const leaseIds = this.selectedLeaseIds();
+            if (!leaseIds.length || this.submitting) return;
+            const note = await FF_Confirm.askText({
+                title: 'Submit ' + leaseIds.length + ' lease' + (leaseIds.length === 1 ? '' : 's') + ' for approval',
+                message: 'The figures are frozen now and an approver reviews them before anything is created. Add a note for them (optional).',
+                confirmLabel: 'Submit for approval',
+                placeholder: 'e.g. September monthly run',
+            });
+            // askText returns '' when cancelled AND when submitted blank; treat
+            // null/undefined as cancel, '' as "submitted with no note".
+            if (note === null || note === undefined) return;
+
+            this.submitting = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/batch_runs/create') ?>', {
+                    period_start: this.periodStart,
+                    period_end: this.periodEnd,
+                    lease_ids: leaseIds,
+                    note: note,
+                });
+                if (r.success) {
+                    FF_Toast.success('Submitted as ' + r.data.reference + ' — awaiting approval.');
+                    await this.loadRuns();
+                    window.location.href = this.runUrl(r.data.id);
+                } else {
+                    FF_Toast.error(r.error?.message || 'Could not submit for approval.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error while submitting.');
+            } finally {
+                this.submitting = false;
+            }
         },
 
         // ==========================================================

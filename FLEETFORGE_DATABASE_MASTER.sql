@@ -2944,6 +2944,42 @@ CREATE TABLE `inspections` (
   CONSTRAINT `inspections_ibfk_2` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE SET NULL,
   CONSTRAINT `inspections_ibfk_3` FOREIGN KEY (`inspected_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `invoice_batch_runs` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `reference` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `status` enum('pending','approved','rejected','generated','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `lease_ids` json NOT NULL,
+  `snapshot` json NOT NULL,
+  `invoice_count` int unsigned NOT NULL DEFAULT '0',
+  `skipped_count` int unsigned NOT NULL DEFAULT '0',
+  `total_by_currency` json DEFAULT NULL,
+  `note` text COLLATE utf8mb4_unicode_ci COMMENT 'Submitter note to the approver',
+  `decision_note` text COLLATE utf8mb4_unicode_ci COMMENT 'Approver note on approve/reject',
+  `submitted_by` int unsigned DEFAULT NULL,
+  `submitted_at` datetime DEFAULT NULL,
+  `decided_by` int unsigned DEFAULT NULL,
+  `decided_at` datetime DEFAULT NULL,
+  `generated_by` int unsigned DEFAULT NULL,
+  `generated_at` datetime DEFAULT NULL,
+  `generated_invoice_ids` json DEFAULT NULL,
+  `generation_result` json DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_batch_run_reference` (`reference`),
+  KEY `idx_status` (`status`,`deleted_at`),
+  KEY `idx_period` (`period_start`,`period_end`),
+  KEY `idx_submitted_by` (`submitted_by`),
+  KEY `fk_batch_run_decided_by` (`decided_by`),
+  KEY `fk_batch_run_generated_by` (`generated_by`),
+  CONSTRAINT `fk_batch_run_decided_by` FOREIGN KEY (`decided_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_batch_run_generated_by` FOREIGN KEY (`generated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_batch_run_submitted_by` FOREIGN KEY (`submitted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+;
 CREATE TABLE `invoice_line_items` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `invoice_id` int unsigned NOT NULL,

@@ -54,6 +54,15 @@ return [
         // doesn't declare its own action vocabulary below.
         '_default' => ['view', 'create', 'edit', 'delete', 'export'],
 
+        // Invoices — extended with 'approve' for the batch-run approval
+        // workflow (S-BATCH-APPROVAL): a biller submits a proposed batch,
+        // and someone holding invoices.approve signs off on the frozen
+        // figures before any invoice is created. Declared explicitly here
+        // (rather than inheriting _default) so the permissions matrix
+        // renders the extra column. Role defaults for 'approve' are set on
+        // EVERY role in config/permissions.php per D-PERM-EXPAND-4.
+        'invoices' => ['view', 'create', 'edit', 'delete', 'export', 'approve'],
+
         // Journal Entries — extended for the two-eyes post/approve
         // workflow. Today the JE post endpoint gates on 'edit'; future
         // sessions will migrate to the dedicated 'post' verb. 'approve'
