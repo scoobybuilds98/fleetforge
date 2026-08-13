@@ -113,33 +113,46 @@ require_once FF_ROOT . '/includes/header.php';
                     <span class="card-title">1. Billing Period</span>
                 </div>
                 <div class="card-body">
+                    <!-- Mode + controls share ONE row. .tab-bar is width:100%
+                         globally, which stretched a two-button switch across the
+                         whole card and forced the date controls onto their own
+                         line (and "Last Month" onto a third) — hence the local
+                         width override on .batch-period-tabs. -->
                     <div class="batch-period-row">
-                        <div class="tab-bar" style="margin-bottom:0;">
+                        <div class="tab-bar batch-period-tabs">
                             <button type="button" class="tab-btn" :class="{ 'is-active': periodMode === 'month' }" @click="periodMode = 'month'; onPeriodChanged();">Calendar Month</button>
                             <button type="button" class="tab-btn" :class="{ 'is-active': periodMode === 'range' }" @click="periodMode = 'range'; onPeriodChanged();">Custom Range</button>
                         </div>
 
                         <template x-if="periodMode === 'month'">
                             <div class="batch-period-inputs">
-                                <button type="button" class="btn btn-ghost btn-sm" @click="shiftMonth(-1)" title="Previous month">&larr;</button>
-                                <input type="month" class="form-control form-control-sm" x-model="monthValue" @change="onPeriodChanged();" style="max-width:170px;">
-                                <button type="button" class="btn btn-ghost btn-sm" @click="shiftMonth(1)" title="Next month">&rarr;</button>
-                                <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('this_month')">This Month</button>
-                                <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('last_month')">Last Month</button>
+                                <!-- ← month → as one segmented stepper, so the
+                                     arrows read as belonging to the field. -->
+                                <div class="batch-month-stepper">
+                                    <button type="button" class="batch-step-btn" @click="shiftMonth(-1)" title="Previous month" aria-label="Previous month">&larr;</button>
+                                    <input type="month" class="batch-month-input" x-model="monthValue" @change="onPeriodChanged();" aria-label="Billing month">
+                                    <button type="button" class="batch-step-btn" @click="shiftMonth(1)" title="Next month" aria-label="Next month">&rarr;</button>
+                                </div>
+                                <div class="batch-quick-months">
+                                    <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('this_month')">This Month</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('last_month')">Last Month</button>
+                                </div>
                             </div>
                         </template>
                         <template x-if="periodMode === 'range'">
                             <div class="batch-period-inputs">
-                                <input type="date" class="form-control form-control-sm" x-model="rangeStart" @change="onPeriodChanged();">
+                                <input type="date" class="form-control form-control-sm" x-model="rangeStart" @change="onPeriodChanged();" aria-label="Period start">
                                 <span class="text-secondary">to</span>
-                                <input type="date" class="form-control form-control-sm" x-model="rangeEnd" @change="onPeriodChanged();">
+                                <input type="date" class="form-control form-control-sm" x-model="rangeEnd" @change="onPeriodChanged();" aria-label="Period end">
                             </div>
                         </template>
                     </div>
-                    <div class="text-secondary text-sm" style="margin-top:10px;">
-                        Billing period: <strong x-text="periodStart"></strong> &rarr; <strong x-text="periodEnd"></strong>
-                        <span x-show="periodIsFullMonth" class="badge badge-no-dot badge-info" style="margin-left:6px;">Full calendar month — bills as full_month</span>
-                        <span x-show="!periodIsFullMonth" class="badge badge-no-dot badge-neutral" style="margin-left:6px;">Custom span — bills as single_period</span>
+
+                    <div class="batch-period-summary">
+                        <span class="text-secondary">Billing period</span>
+                        <strong x-text="periodStart"></strong> &rarr; <strong x-text="periodEnd"></strong>
+                        <span x-show="periodIsFullMonth" class="badge badge-no-dot badge-info">Full calendar month — bills as full_month</span>
+                        <span x-show="!periodIsFullMonth" class="badge badge-no-dot badge-neutral">Custom span — bills as single_period</span>
                     </div>
 
                     <!-- Saved presets — a preset stores the SELECTION + send
@@ -341,13 +354,29 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
-            <!-- ── 3. Recipient emails for selected customers ────────── -->
+            <!-- ── 3. Recipient emails for selected customers ──────────
+                 Collapsed by default: with 26 customers this is a very tall
+                 list, and the addresses on file are correct in the normal
+                 case — it only needs opening to override one. The header
+                 still surfaces the count and any missing-email warning so a
+                 problem is visible WITHOUT expanding. -->
             <div class="card" x-show="selectedCustomerIds().length > 0">
-                <div class="card-header">
-                    <span class="card-title">3. Recipient Emails</span>
-                    <span class="text-secondary text-sm">Applies to invoices generated in this run — for this batch only, not saved to the customer record</span>
-                </div>
-                <div class="card-body">
+                <button type="button" class="card-header batch-collapse-header" @click="recipientsOpen = !recipientsOpen"
+                        :aria-expanded="recipientsOpen ? 'true' : 'false'">
+                    <span class="batch-collapse-title">
+                        <span class="batch-collapse-caret" :class="{ 'is-open': recipientsOpen }" aria-hidden="true">&rsaquo;</span>
+                        <span class="card-title">3. Recipient Emails</span>
+                        <span class="badge badge-no-dot badge-neutral" x-text="selectedCustomerIds().length + ' customer' + (selectedCustomerIds().length === 1 ? '' : 's')"></span>
+                        <span class="badge badge-no-dot badge-warning" x-show="missingEmailCount() > 0" x-cloak
+                              x-text="missingEmailCount() + ' with no email'"></span>
+                    </span>
+                    <span class="text-secondary text-sm" x-text="recipientsOpen ? 'Hide' : 'Review or override addresses'"></span>
+                </button>
+                <div class="card-body" x-show="recipientsOpen" x-cloak>
+                    <p class="text-secondary text-sm" style="margin:0 0 12px;">
+                        Applies to invoices generated in this run — for this batch only, not saved to the customer record.
+                        Leave a row blank to use the address already on file.
+                    </p>
                     <div class="batch-recipient-list">
                         <template x-for="cid in selectedCustomerIds()" :key="cid">
                             <div class="batch-recipient-row">
@@ -793,8 +822,61 @@ require_once FF_ROOT . '/includes/header.php';
     .batch-preview-empty { display: flex; align-items: center; justify-content: center; flex: 1; padding: 24px; text-align: center; }
     .batch-preview-iframe { flex: 1; width: 100%; border: 0; border-radius: 0 0 var(--radius-xl) var(--radius-xl); background: var(--bg-surface); }
 
-    .batch-period-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
-    .batch-period-inputs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    /* Collapsible card header — a real <button> so it is keyboard- and
+       screen-reader-operable, restyled to sit flush like a .card-header. */
+    .batch-collapse-header {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        width: 100%; text-align: left; cursor: pointer;
+        background: var(--bg-surface-2); border: 0; border-bottom: 1px solid var(--border-color);
+        font: inherit; color: inherit;
+    }
+    .batch-collapse-header:hover { background: var(--bg-surface-hover); }
+    .batch-collapse-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .batch-collapse-caret {
+        display: inline-block; font-size: 17px; line-height: 1; color: var(--text-secondary);
+        transition: transform 150ms ease; transform: rotate(0deg);
+    }
+    .batch-collapse-caret.is-open { transform: rotate(90deg); }
+
+    .batch-period-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+    .batch-period-inputs { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+    /* .tab-bar is width:100% globally — override so a 2-button mode switch
+       hugs its content instead of spanning the card and wrapping everything
+       after it onto new lines. */
+    .batch-period-tabs { width: auto !important; flex: 0 0 auto; margin-bottom: 0 !important; padding: 4px; border-radius: 11px; }
+    .batch-period-tabs .tab-btn { padding: 6px 14px; font-size: 13px; }
+
+    /* ← [month] → as one segmented control so the arrows read as part of
+       the field rather than as loose buttons. */
+    .batch-month-stepper {
+        display: inline-flex; align-items: stretch;
+        border: 1px solid var(--border-color); border-radius: var(--radius-lg);
+        background: var(--bg-input); overflow: hidden;
+    }
+    .batch-step-btn {
+        display: flex; align-items: center; justify-content: center;
+        width: 32px; border: 0; cursor: pointer; font-size: 13px; line-height: 1;
+        background: transparent; color: var(--text-secondary);
+        transition: background 120ms ease, color 120ms ease;
+    }
+    .batch-step-btn:hover { background: var(--bg-surface-hover); color: var(--text-primary); }
+    .batch-month-input {
+        border: 0; border-left: 1px solid var(--border-color); border-right: 1px solid var(--border-color);
+        background: transparent; color: var(--text-primary);
+        font-family: var(--font-sans); font-size: 13px;
+        padding: 7px 10px; min-width: 148px;
+    }
+    .batch-month-input:focus { outline: none; box-shadow: none; }
+    .batch-quick-months { display: flex; gap: 6px; }
+
+    .batch-period-summary {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px;
+        margin-top: 14px; padding-top: 12px;
+        border-top: 1px solid var(--border-color);
+        font-size: 13px;
+    }
+    .batch-period-summary strong { font-family: var(--font-mono); font-size: 12.5px; }
 
     .batch-customer-list { display: flex; flex-direction: column; gap: 12px; max-height: 620px; overflow-y: auto; padding-right: 4px; }
     /* flex-shrink:0 is LOAD-BEARING: .batch-customer-list is a column flexbox
@@ -1198,6 +1280,7 @@ function BatchInvoicing(cfg) {
         previewing: false,
         previewResult: null,
         reviewOpen: false,
+        recipientsOpen: false,
         downloading: '',
         submitting: false,
         runs: [],
@@ -1266,6 +1349,7 @@ function BatchInvoicing(cfg) {
                     overrides: this.overrides,
                     sendEmailToo: this.sendEmailToo,
                     attachPdf: this.attachPdf,
+                    recipientsOpen: this.recipientsOpen,
                     savedAt: new Date().toISOString(),
                 }));
             } catch (e) { /* quota or private mode — persistence is a nicety */ }
@@ -1286,7 +1370,8 @@ function BatchInvoicing(cfg) {
                 this.reviewSelected         = s.reviewSelected         || {};
                 this.overrides              = s.overrides              || {};
                 if (typeof s.sendEmailToo === 'boolean') this.sendEmailToo = s.sendEmailToo;
-                if (typeof s.attachPdf    === 'boolean') this.attachPdf    = s.attachPdf;
+                if (typeof s.attachPdf      === 'boolean') this.attachPdf      = s.attachPdf;
+                if (typeof s.recipientsOpen === 'boolean') this.recipientsOpen = s.recipientsOpen;
                 this.restoredFrom = s.savedAt || null;
                 this.selectionRestored = Object.keys(this.selected).length > 0;
             } catch (e) { /* corrupt payload — start clean rather than break the page */ }
@@ -1434,6 +1519,19 @@ function BatchInvoicing(cfg) {
             } finally {
                 this.previewing = false;
             }
+        },
+        /** Selected customers with no address on file AND no override typed —
+         *  surfaced on the collapsed header so a missing email is visible
+         *  without expanding the section. */
+        missingEmailCount() {
+            let n = 0;
+            this.selectedCustomerIds().forEach(cid => {
+                const c = this.customerById(cid);
+                if (!c) return;
+                const override = (this.customerEmailOverrides[cid] || '').trim();
+                if (!override && !(c.recipient && c.recipient.email)) n++;
+            });
+            return n;
         },
         previewCustomerCount() {
             const ids = new Set();
