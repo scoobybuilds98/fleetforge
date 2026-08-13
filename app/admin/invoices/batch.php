@@ -491,7 +491,15 @@ require_once FF_ROOT . '/includes/header.php';
          at once, and the ~580px left column clipped the totals.
          ============================================================ -->
     <template x-if="previewResult">
-        <div class="batch-review-overlay" @keydown.escape.window="previewResult = null">
+        <?php /* data-theme="light": the Billing Review is ALWAYS rendered in the
+                 light palette regardless of the user's theme (operator call — it
+                 reads best as a document, and it is the surface people print).
+                 [data-theme="light"] in app.css is a bare attribute selector, not
+                 :root-scoped, so putting it on this element re-binds the whole
+                 light token set for this subtree only — no palette duplication.
+                 The brand vars are re-asserted in the <style> block below because
+                 that same token block resets --color-primary to the stock orange. */ ?>
+        <div class="batch-review-overlay" data-theme="light" @keydown.escape.window="previewResult = null">
             <div class="batch-review-head">
                 <div>
                     <div class="batch-review-title">
@@ -722,8 +730,55 @@ require_once FF_ROOT . '/includes/header.php';
        ══════════════════════════════════════════════════════════════ */
     /* z-index above the AI chat widget (9999) — it is fixed bottom-right and
        otherwise floats over this overlay's per-invoice totals. */
+<?php
+/* Re-assert the runtime brand override INSIDE the forced-light overlay.
+   Mirrors includes/header.php: the override rebinds exactly these three
+   vars on :root, but the overlay's own [data-theme="light"] token block
+   re-declares --color-primary (stock orange) at a more specific scope and
+   would otherwise win, un-branding the totals and rental chips. Same
+   fallbacks as header.php so the two can't drift apart silently. */
+$_ffBrandPrimary = settings_get('brand.primary_color');
+$_ffBrandHover   = settings_get('brand.primary_hover');
+$_ffBrandLight   = settings_get('brand.primary_light');
+if ($_ffBrandPrimary): ?>
+    .batch-review-overlay[data-theme="light"] {
+        --color-primary:       <?= e((string) $_ffBrandPrimary) ?>;
+        --color-primary-hover: <?= e((string) ($_ffBrandHover ?: '#1e7ea0')) ?>;
+        --color-primary-light: <?= e((string) ($_ffBrandLight ?: '#e0f4fb')) ?>;
+    }
+<?php endif; ?>
+    /* app.css declares a set of "spec-name alias" tokens on :root as
+       --alias: var(--real). A var() reference is substituted at the element
+       that DECLARES it, so each alias computed against the DARK palette on
+       :root and then inherits into this subtree as a frozen dark literal —
+       re-binding --bg-surface here does NOT re-resolve --bg-card. Any app.css
+       rule reaching for an alias therefore painted dark inside the forced-light
+       overlay (the responsive .table-stack cards use var(--bg-card) and came
+       out dark-on-dark). Re-declare the aliases here so they re-resolve. */
+    .batch-review-overlay[data-theme="light"] {
+        --bg-page:            var(--bg-body);
+        --bg-card:            var(--bg-surface);
+        --bg-elev:            var(--bg-surface-2);
+        --bg-elevated:        var(--bg-surface-2);
+        --bg-subtle:          var(--bg-surface-2);
+        --bg-selected:        color-mix(in srgb, var(--color-primary) 12%, transparent);
+        --border-default:     var(--border-color);
+        --border-strong:      var(--border-color-strong);
+        --text-muted:         var(--text-tertiary);
+        --text-inverse:       var(--text-on-primary);
+        --color-accent:       var(--color-primary);
+        --color-accent-hover: var(--color-primary-hover);
+        --card-sheen:         inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+
     .batch-review-overlay {
         position: fixed; inset: 0; z-index: 10000;
+        /* MUST re-assert color explicitly. `color` inherits as a COMPUTED
+           value, so <body> already resolved --text-primary to the DARK ink
+           and passes that down; re-binding the token on this subtree alone
+           left near-white text on the now-white cards. Anything below that
+           doesn't set its own colour inherits from here instead. */
+        color: var(--text-primary);
         background:
             radial-gradient(1200px 600px at 12% -8%, color-mix(in srgb, var(--color-primary) 11%, transparent), transparent 70%),
             radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--color-info) 8%, transparent), transparent 65%),
