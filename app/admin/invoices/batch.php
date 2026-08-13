@@ -102,7 +102,7 @@ require_once FF_ROOT . '/includes/header.php';
     <!-- ============================================================
          SPLIT LAYOUT — left: workflow, right: sticky invoice preview
          ============================================================ -->
-    <div class="batch-split">
+    <div class="batch-split" :class="{ 'has-preview': previewInvoiceId }">
 
         <!-- ────────────────────────── LEFT COLUMN ────────────────────────── -->
         <div class="batch-left">
@@ -561,29 +561,30 @@ require_once FF_ROOT . '/includes/header.php';
 
         </div>
 
-        <!-- ────────────────────────── RIGHT COLUMN — PREVIEW ─────────────── -->
+        <!-- ────────────────────────── RIGHT COLUMN — PREVIEW ───────────────
+             Rendered ONLY while an invoice is being previewed. It used to hold
+             a permanent ~40% of the width showing an empty-state message, which
+             squeezed the workflow for the whole of steps 1–3 (and is what
+             cropped the totals table). The pane earns its space when you are
+             clicking through generated drafts; the rest of the time the
+             selection UI gets the full width. -->
+        <template x-if="previewInvoiceId">
         <div class="batch-right">
             <div class="card batch-preview-card">
                 <div class="card-header">
                     <span class="card-title">Preview</span>
                     <div style="display:flex; gap:8px; align-items:center;">
-                        <template x-if="previewInvoiceId">
-                            <a :href="fullInvoiceUrl()" target="_blank" class="btn btn-ghost btn-sm">Open Full Page ↗</a>
-                        </template>
+                        <a :href="fullInvoiceUrl()" target="_blank" class="btn btn-ghost btn-sm">Open Full Page ↗</a>
+                        <button type="button" class="btn btn-ghost btn-sm" @click="closePreview()"
+                                title="Close the preview and give the full width back to the workflow">Close</button>
                     </div>
                 </div>
                 <div class="batch-preview-body">
-                    <template x-if="!previewInvoiceId">
-                        <div class="batch-preview-empty text-secondary text-sm">
-                            Select an invoice on the left to preview it here — no download needed.
-                        </div>
-                    </template>
-                    <template x-if="previewInvoiceId">
-                        <iframe :src="previewUrl" class="batch-preview-iframe" title="Invoice preview"></iframe>
-                    </template>
+                    <iframe :src="previewUrl" class="batch-preview-iframe" title="Invoice preview"></iframe>
                 </div>
             </div>
         </div>
+        </template>
 
     </div>
 
@@ -774,7 +775,10 @@ require_once FF_ROOT . '/includes/header.php';
 <style>
     /* Denser page + a wider preview pane (operator request): the preview is
        an actual invoice document, so it needs real width to be readable. */
-    .batch-split { display: grid; grid-template-columns: minmax(0, 1fr) clamp(460px, 38vw, 720px); gap: 14px; align-items: start; }
+    /* Single column by default — the preview column only exists while an
+       invoice is open (see the right-column comment in the markup). */
+    .batch-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+    .batch-split.has-preview { grid-template-columns: minmax(0, 1fr) clamp(460px, 38vw, 720px); }
     .batch-left { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
     .batch-right { position: sticky; top: 12px; }
     .batch-preview-card { display: flex; flex-direction: column; height: calc(100vh - 100px); min-height: 560px; }
@@ -1157,7 +1161,7 @@ if ($_ffBrandPrimary): ?>
     .batch-row-active { background: var(--color-primary-light); }
 
     @media (max-width: 1100px) {
-        .batch-split { grid-template-columns: 1fr; }
+        .batch-split, .batch-split.has-preview { grid-template-columns: 1fr; }
         .batch-right { position: static; }
         .batch-preview-card { height: 70vh; }
     }
@@ -1760,6 +1764,10 @@ function BatchInvoicing(cfg) {
             });
             this.reviewSelected[r.id] = true;
             this.addDraftResults = this.addDraftResults.filter(x => x.id !== r.id);
+        },
+        closePreview() {
+            this.previewInvoiceId = null;
+            this.previewUrl = '';
         },
         openPreviewNewTab(invoiceId) {
             // Cross-checking an invoice must never cost the operator their
