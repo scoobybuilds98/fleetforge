@@ -70,6 +70,26 @@ $userId    = current_user_id();
 $userName  = current_user()['name'] ?? 'System';
 $now       = date('Y-m-d H:i:s');
 
+// ── Two-eyes gate (S-BATCH-APPROVAL) ────────────────────────────────
+// Settings → General → Invoices & Billing → "Allow self-approval of batch
+// runs". When OFF, the submitter cannot sign off their own run — the whole
+// point of an approval step is that a second pair of eyes sees the figures.
+// Applies to APPROVE only: rejecting your own run is just withdrawing it,
+// and blocking that would strand the run with nobody able to clear it.
+// Super admins are NOT exempt — an exemption would silently defeat the
+// control for exactly the accounts most likely to use it.
+if ($decision === 'approve'
+    && (string) settings_get('invoices.approval_allow_self', '1') !== '1'
+    && (int) $run['submitted_by'] === (int) $userId
+) {
+    json_error(
+        'SELF_APPROVAL_BLOCKED',
+        'You submitted this run, so someone else has to approve it. '
+        . '(Settings → General → Invoices & Billing → "Allow self-approval of batch runs".)',
+        403
+    );
+}
+
 // Guarded UPDATE: the status check above ran unlocked, so a concurrent
 // decision could otherwise both pass. Matching on status='pending' makes
 // the loser affect 0 rows.

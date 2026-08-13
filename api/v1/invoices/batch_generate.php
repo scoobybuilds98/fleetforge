@@ -107,6 +107,25 @@ if (!$leaseIds) {
     json_validation_error(['lease_ids' => 'No valid lease IDs were submitted.']);
 }
 
+// ── Approval gate (S-BATCH-APPROVAL) ────────────────────────────────
+// Settings → General → Invoices & Billing → "Require approval before batch
+// billing". When on, this direct path is closed and billing must go through
+// a submitted+approved run (api/v1/invoices/batch_runs/*), which is what
+// makes the approval workflow enforceable rather than advisory.
+// Deliberately scoped to BATCH generation only: single-invoice creation
+// (invoices/create) and the monthly cron are untouched, so turning this on
+// cannot stop routine billing.
+// The generate-from-run endpoint does NOT come through here, so an approved
+// run still generates normally.
+if ((string) settings_get('invoices.approval_required', '0') === '1') {
+    json_error(
+        'APPROVAL_REQUIRED',
+        'Approval is required before batch billing. Submit these leases for approval instead — '
+        . 'once a run is approved it can be generated from its own page.',
+        409
+    );
+}
+
 // A full-calendar-month selection bills as 'full_month' (matches how the
 // monthly cron labels the same shape); anything else is a general-purpose
 // 'single_period' span — see InvoiceGenerator's billing_type doc comment.

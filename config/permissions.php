@@ -246,7 +246,11 @@ return [
         'equipment'     => $V,
         'leases'        => $V,
         'reservations'  => $V,
-        'invoices'      => $VCED + ['approve' => true],  // S-BATCH-APPROVAL
+        // S-BATCH-APPROVAL: batch-run approval is deliberately scoped to
+        // MANAGER + SUPER_ADMIN (operator decision). Accountants keep full
+        // invoice CRUD but do not sign off batch runs — flip this to true if
+        // you want them approving billing as well.
+        'invoices'      => $VCED + ['approve' => false],
         'payments'      => $VCED,
         'rates'         => $V,
         'maintenance'   => $V,

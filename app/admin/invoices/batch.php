@@ -46,6 +46,11 @@ require_auth();
 require_permission('invoices', 'view');
 
 $canGenerate = can('invoices', 'create');
+// S-BATCH-APPROVAL: when approval is required, the direct Generate path is
+// closed server-side in api/v1/invoices/batch_generate.php. Reflect that in
+// the UI so the operator is pointed at "Submit for approval" instead of
+// clicking a button that will only 409 — the server remains the gate.
+$approvalRequired = (string) settings_get('invoices.approval_required', '0') === '1';
 $canSend     = can('invoices', 'edit');
 
 $defaultMonth = date('Y-m');
@@ -273,18 +278,26 @@ require_once FF_ROOT . '/includes/header.php';
                     <span class="text-secondary text-sm" x-show="selectedLeaseIds().length"> across <span x-text="selectedCustomerIds().length"></span> customer<span x-show="selectedCustomerIds().length !== 1">s</span></span>
                 </div>
                 <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <?php if ($approvalRequired): ?>
+                        <span class="badge badge-no-dot badge-warning" title="Settings → General → Invoices &amp; Billing">
+                            Approval required
+                        </span>
+                    <?php endif; ?>
                     <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || previewing || generating" @click="dryRun()">
                         <span x-show="!previewing">Preview totals</span>
                         <span x-show="previewing">Calculating…</span>
                     </button>
-                    <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || submitting || generating" @click="submitForApproval()">
+                    <button type="button" class="btn <?= $approvalRequired ? 'btn-primary' : 'btn-secondary' ?>"
+                            :disabled="selectedLeaseIds().length === 0 || submitting || generating" @click="submitForApproval()">
                         <span x-show="!submitting">Submit for approval</span>
                         <span x-show="submitting">Submitting…</span>
                     </button>
+                    <?php if (!$approvalRequired): ?>
                     <button type="button" class="btn btn-primary" :disabled="selectedLeaseIds().length === 0 || generating" @click="generate()">
                         <span x-show="!generating">Generate <span x-text="selectedLeaseIds().length"></span> Draft Invoice<span x-show="selectedLeaseIds().length !== 1">s</span></span>
                         <span x-show="generating">Generating…</span>
                     </button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -556,11 +569,19 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <div class="batch-review-head-actions">
                     <button type="button" class="btn btn-secondary btn-sm" @click="printReview()">Print / Save PDF</button>
+                    <?php if ($approvalRequired): ?>
+                    <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
+                            :disabled="submitting" @click="previewResult = null; submitForApproval()">
+                        <span x-show="!submitting">Looks right — Submit for approval</span>
+                        <span x-show="submitting">Submitting…</span>
+                    </button>
+                    <?php else: ?>
                     <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
                             :disabled="generating" @click="previewResult = null; generate()">
                         <span x-show="!generating">Looks right — Generate <span x-text="previewResult.totals.ok_count"></span></span>
                         <span x-show="generating">Generating…</span>
                     </button>
+                    <?php endif; ?>
                     <button type="button" class="btn btn-ghost btn-sm" @click="previewResult = null">Close</button>
                 </div>
             </div>
