@@ -844,8 +844,35 @@ require_once FF_ROOT . '/includes/header.php';
     /* .tab-bar is width:100% globally — override so a 2-button mode switch
        hugs its content instead of spanning the card and wrapping everything
        after it onto new lines. */
-    .batch-period-tabs { width: auto !important; flex: 0 0 auto; margin-bottom: 0 !important; padding: 4px; border-radius: 11px; }
-    .batch-period-tabs .tab-btn { padding: 6px 14px; font-size: 13px; }
+    .batch-period-tabs {
+        width: auto !important; flex: 0 0 auto; margin-bottom: 0 !important;
+        padding: 4px; border-radius: 11px;
+        /* The track sat on --bg-surface-2 while .tab-btn has NO background of
+           its own, so the inactive option was literally the same pixels as the
+           strip behind it — nothing to see. Track goes to the card surface and
+           the inactive pill gets its own one-step-off surface below, so the two
+           always separate. Tokens, so it holds in both themes. */
+        background: var(--bg-surface) !important;
+        border: 1px solid var(--border-color);
+    }
+    .batch-period-tabs .tab-btn {
+        padding: 6px 14px; font-size: 13px;
+        border-radius: 8px;
+        transition: background 130ms ease, border-color 130ms ease;
+    }
+    /* :not(.is-active) is LOAD-BEARING. This page's inline <style> comes after
+       app.css, so a bare `.batch-period-tabs .tab-btn` background ties on
+       specificity with app.css's `.tab-btn.is-active` and wins on order —
+       which silently repainted the ACTIVE pill over its brand fill. Only the
+       inactive option gets a surface; the active one keeps its brand colour. */
+    .batch-period-tabs .tab-btn:not(.is-active) {
+        background: var(--bg-surface-2);
+        border: 1px solid var(--border-color);
+    }
+    .batch-period-tabs .tab-btn:not(.is-active):hover {
+        background: var(--bg-hover);
+        border-color: var(--border-color-strong);
+    }
 
     /* ← [month] → as one segmented control so the arrows read as part of
        the field rather than as loose buttons. */
