@@ -266,55 +266,6 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
-            <!-- ── Dry-run preview result ────────────────────────────── -->
-            <div class="card" x-show="previewResult" x-cloak>
-                <div class="card-header">
-                    <span class="card-title">Preview — nothing has been created</span>
-                    <button type="button" class="btn btn-ghost btn-sm" @click="previewResult = null">Dismiss</button>
-                </div>
-                <div class="card-body">
-                    <div class="batch-total-strip">
-                        <div class="batch-total">
-                            <div class="batch-total-label">Would bill</div>
-                            <div class="batch-total-value" x-text="previewCurrencyText()"></div>
-                        </div>
-                        <div class="batch-total">
-                            <div class="batch-total-label">Invoices</div>
-                            <div class="batch-total-value" x-text="(previewResult?.totals.ok_count || 0)"></div>
-                        </div>
-                        <div class="batch-total" x-show="previewResult?.totals.error_count">
-                            <div class="batch-total-label">Cannot bill</div>
-                            <div class="batch-total-value text-danger" x-text="(previewResult?.totals.error_count || 0)"></div>
-                        </div>
-                    </div>
-
-                    <div class="data-table-wrap" style="margin-top:12px;">
-                        <table class="data-table">
-                            <thead><tr>
-                                <th>Customer</th><th>Contract</th><th>Days</th><th>Rate</th>
-                                <th class="text-right">Subtotal</th><th class="text-right">Tax</th><th class="text-right">Total</th>
-                            </tr></thead>
-                            <tbody>
-                                <template x-for="p in (previewResult?.previews || [])" :key="p.lease_id">
-                                    <tr :class="{ 'batch-row-error': !p.ok }">
-                                        <td x-text="p.company_name || ('Lease #' + p.lease_id)"></td>
-                                        <td class="batch-lease-contract" x-text="p.contract_number || '—'"></td>
-                                        <td>
-                                            <span x-show="p.ok" x-text="p.billing_days"></span>
-                                            <span x-show="!p.ok" class="text-danger text-sm" x-text="p.error"></span>
-                                        </td>
-                                        <td x-text="p.ok ? (p.rate_method || '—') : ''"></td>
-                                        <td class="text-right currency" x-text="p.ok ? fmtMoney(p.subtotal) : ''"></td>
-                                        <td class="text-right currency" x-text="p.ok ? fmtMoney(p.tax_total) : ''"></td>
-                                        <td class="text-right currency" x-text="p.ok ? (fmtMoney(p.total_amount) + ' ' + p.currency) : ''"></td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
             <!-- ── Generate action bar ───────────────────────────────── -->
             <div class="batch-action-bar" x-show="canGenerate">
                 <div>
@@ -531,6 +482,170 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
 
     </div>
+
+    <!-- ============================================================
+         FULL-SCREEN BILLING REVIEW (dry run)
+         Its own full-width surface rather than a card inside the left
+         column of the split layout — a manager checking a month's
+         billing needs every rate, usage input, and line item visible
+         at once, and the ~580px left column clipped the totals.
+         ============================================================ -->
+    <template x-if="previewResult">
+        <div class="batch-review-overlay" @keydown.escape.window="previewResult = null">
+            <div class="batch-review-head">
+                <div>
+                    <div class="batch-review-title">Billing Review</div>
+                    <div class="batch-review-sub">
+                        <span x-text="periodStart"></span> &rarr; <span x-text="periodEnd"></span>
+                        &middot; nothing has been created yet &mdash; this is a dry run
+                    </div>
+                </div>
+                <div class="batch-review-head-actions">
+                    <button type="button" class="btn btn-secondary btn-sm" @click="printReview()">Print / Save PDF</button>
+                    <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
+                            :disabled="generating" @click="previewResult = null; generate()">
+                        <span x-show="!generating">Looks right — Generate <span x-text="previewResult.totals.ok_count"></span></span>
+                        <span x-show="generating">Generating…</span>
+                    </button>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="previewResult = null">Close</button>
+                </div>
+            </div>
+
+            <div class="batch-review-body">
+                <!-- Summary -->
+                <div class="batch-total-strip">
+                    <div class="batch-total">
+                        <div class="batch-total-label">Would bill</div>
+                        <div class="batch-total-value" x-text="previewCurrencyText()"></div>
+                    </div>
+                    <div class="batch-total">
+                        <div class="batch-total-label">Invoices</div>
+                        <div class="batch-total-value" x-text="previewResult.totals.ok_count"></div>
+                    </div>
+                    <div class="batch-total">
+                        <div class="batch-total-label">Customers</div>
+                        <div class="batch-total-value" x-text="previewCustomerCount()"></div>
+                    </div>
+                    <div class="batch-total" x-show="previewResult.totals.error_count">
+                        <div class="batch-total-label">Cannot bill</div>
+                        <div class="batch-total-value text-danger" x-text="previewResult.totals.error_count"></div>
+                    </div>
+                </div>
+
+                <!-- Problems first — these will be skipped by Generate -->
+                <template x-if="previewResult.previews.some(p => !p.ok)">
+                    <div class="batch-review-problems">
+                        <div class="batch-review-section-title">Will be skipped</div>
+                        <template x-for="p in previewResult.previews.filter(x => !x.ok)" :key="'e' + p.lease_id">
+                            <div class="batch-problem-row">
+                                <strong x-text="p.company_name || ('Lease #' + p.lease_id)"></strong>
+                                <span class="batch-lease-contract" x-text="p.contract_number || ''"></span>
+                                <span class="text-danger" x-text="p.error"></span>
+                            </div>
+                        </template>
+                    </div>
+                </template>
+
+                <!-- One full card per invoice -->
+                <template x-for="p in previewResult.previews.filter(x => x.ok)" :key="p.lease_id">
+                    <div class="batch-review-card">
+                        <div class="brc-head">
+                            <div class="brc-head-main">
+                                <div class="brc-customer" x-text="p.company_name"></div>
+                                <div class="brc-meta">
+                                    <span class="batch-lease-contract" x-text="p.contract_number"></span>
+                                    <span x-show="p.unit_number">&middot; Unit <span x-text="p.unit_number"></span></span>
+                                    <span x-show="p.po_number">&middot; PO <span x-text="p.po_number"></span></span>
+                                </div>
+                            </div>
+                            <div class="brc-head-total">
+                                <div class="batch-total-label">Total</div>
+                                <div class="brc-total-value" x-text="fmtMoney(p.total_amount) + ' ' + p.currency"></div>
+                            </div>
+                        </div>
+
+                        <!-- Facts grid: dates, days, rates, usage -->
+                        <div class="brc-facts">
+                            <div class="brc-fact"><span>Billing period</span><b><span x-text="p.period_start"></span> → <span x-text="p.period_end"></span></b></div>
+                            <div class="brc-fact"><span>Billable days</span><b x-text="p.billing_days"></b></div>
+                            <div class="brc-fact"><span>Rate method</span><b x-text="p.rate_method || '—'"></b></div>
+                            <div class="brc-fact"><span>Billing type</span><b x-text="p.billing_type"></b></div>
+                            <div class="brc-fact"><span>Invoice / due</span><b><span x-text="p.invoice_date"></span> → <span x-text="p.due_date"></span></b></div>
+                            <div class="brc-fact"><span>Lease term</span><b><span x-text="p.terms.lease_start"></span> → <span x-text="p.terms.lease_end || 'open'"></span></b></div>
+
+                            <div class="brc-fact" x-show="+p.terms.daily_rate > 0"><span>Daily rate</span><b x-text="fmtMoney(p.terms.daily_rate)"></b></div>
+                            <div class="brc-fact" x-show="+p.terms.weekly_rate > 0"><span>Weekly rate</span><b x-text="fmtMoney(p.terms.weekly_rate)"></b></div>
+                            <div class="brc-fact" x-show="+p.terms.monthly_rate > 0"><span>Monthly rate</span><b x-text="fmtMoney(p.terms.monthly_rate)"></b></div>
+                            <div class="brc-fact" x-show="p.terms.hourly_rate && +p.terms.hourly_rate > 0"><span>Hourly rate</span><b x-text="fmtMoney(p.terms.hourly_rate)"></b></div>
+
+                            <div class="brc-fact" x-show="mileageRateOf(p)"><span>Mileage rate</span><b x-text="mileageRateOf(p)"></b></div>
+                            <div class="brc-fact" x-show="+p.terms.estimated_mileage_per_day > 0"><span>Est. per day</span><b><span x-text="p.terms.estimated_mileage_per_day"></span> <span x-text="p.terms.mileage_unit"></span></b></div>
+                            <div class="brc-fact" x-show="+p.terms.estimated_engine_hours_per_day > 0"><span>Est. hours/day</span><b x-text="p.terms.estimated_engine_hours_per_day"></b></div>
+                            <div class="brc-fact" x-show="p.terms.mileage_tracking_mode && p.terms.mileage_tracking_mode !== 'off'"><span>Mileage mode</span><b x-text="p.terms.mileage_tracking_mode"></b></div>
+
+                            <div class="brc-fact" x-show="p.usage.odometer_start !== null || p.usage.odometer_end !== null">
+                                <span>Odometer</span><b><span x-text="p.usage.odometer_start ?? '—'"></span> → <span x-text="p.usage.odometer_end ?? '—'"></span></b>
+                            </div>
+                            <div class="brc-fact" x-show="p.usage.hours_start !== null || p.usage.hours_end !== null">
+                                <span>Engine hours</span><b><span x-text="p.usage.hours_start ?? '—'"></span> → <span x-text="p.usage.hours_end ?? '—'"></span></b>
+                            </div>
+
+                            <div class="brc-fact" x-show="p.terms.insurance"><span>Insurance</span><b x-text="fmtMoney(p.terms.insurance)"></b></div>
+                            <div class="brc-fact" x-show="p.terms.warranty"><span>Warranty</span><b x-text="fmtMoney(p.terms.warranty)"></b></div>
+                            <div class="brc-fact" x-show="p.terms.gps"><span>GPS</span><b x-text="fmtMoney(p.terms.gps)"></b></div>
+                            <div class="brc-fact" x-show="p.terms.minimum_billing_days"><span>Min. billing days</span><b x-text="p.terms.minimum_billing_days"></b></div>
+                            <div class="brc-fact" x-show="p.terms.billing_days_removed > 0"><span>Days removed</span><b x-text="p.terms.billing_days_removed"></b></div>
+                            <div class="brc-fact" x-show="p.exchange_rate_to_cad"><span>FX to CAD</span><b x-text="p.exchange_rate_to_cad"></b></div>
+                        </div>
+
+                        <!-- Line items -->
+                        <div class="data-table-wrap">
+                            <table class="data-table brc-lines">
+                                <thead><tr>
+                                    <th>Type</th><th>Description</th><th>Period</th>
+                                    <th class="text-right">Qty</th><th class="text-right">Unit price</th><th class="text-right">Amount</th>
+                                </tr></thead>
+                                <tbody>
+                                    <template x-for="(l, li) in p.lines" :key="li">
+                                        <tr>
+                                            <td><span class="badge badge-no-dot badge-neutral" x-text="l.item_type.replace(/_/g,' ')"></span></td>
+                                            <td>
+                                                <div x-text="l.description"></div>
+                                                <div class="brc-line-sub" x-show="l.billing_days || l.rate_method">
+                                                    <span x-show="l.billing_days"><span x-text="l.billing_days"></span> days</span>
+                                                    <span x-show="l.rate_method">&middot; <span x-text="l.rate_method"></span></span>
+                                                </div>
+                                                <div class="brc-line-sub" x-show="l.mileage_distance">
+                                                    <span x-text="l.mileage_distance"></span> <span x-text="l.mileage_unit"></span>
+                                                    <span x-show="l.mileage_rate">@ <span x-text="l.mileage_rate"></span></span>
+                                                    <span x-show="l.mileage_estimated">&middot; est <span x-text="l.mileage_estimated"></span></span>
+                                                    <span x-show="l.mileage_actual">&middot; actual <span x-text="l.mileage_actual"></span></span>
+                                                </div>
+                                            </td>
+                                            <td class="brc-nowrap"><span x-text="l.period_start || '—'"></span><span x-show="l.period_end"> → <span x-text="l.period_end"></span></span></td>
+                                            <td class="text-right"><span x-text="trimNum(l.quantity)"></span> <span class="text-secondary" x-show="l.unit" x-text="l.unit"></span></td>
+                                            <td class="text-right currency" x-text="fmtMoney(l.unit_price)"></td>
+                                            <td class="text-right currency" :class="{ 'text-danger': l.is_credit }" x-text="(l.is_credit ? '−' : '') + fmtMoney(l.amount)"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Money summary -->
+                        <div class="brc-summary">
+                            <div><span>Subtotal</span><b x-text="fmtMoney(p.subtotal)"></b></div>
+                            <div x-show="+p.discount_amount > 0"><span>Discount</span><b x-text="'−' + fmtMoney(p.discount_amount)"></b></div>
+                            <div x-show="+p.tax_gst_amount > 0"><span>GST</span><b x-text="fmtMoney(p.tax_gst_amount)"></b></div>
+                            <div x-show="+p.tax_pst_amount > 0"><span>PST</span><b x-text="fmtMoney(p.tax_pst_amount)"></b></div>
+                            <div x-show="+p.tax_hst_amount > 0"><span>HST</span><b x-text="fmtMoney(p.tax_hst_amount)"></b></div>
+                            <div class="brc-summary-total"><span>Total</span><b x-text="fmtMoney(p.total_amount) + ' ' + p.currency"></b></div>
+                        </div>
+                    </div>
+                </template>
+            </div>
+        </div>
+    </template>
 </div>
 
 <style>
@@ -589,6 +704,61 @@ require_once FF_ROOT . '/includes/header.php';
     .batch-total-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
     .batch-total-value { font-size: 17px; font-weight: 600; font-family: var(--font-mono); margin-top: 2px; }
     .batch-row-error td { opacity: 0.75; }
+
+    /* ── Full-screen Billing Review (dry run) ───────────────────── */
+    /* z-index above the AI chat widget (9999) — it is fixed bottom-right and
+       otherwise floats over this overlay's per-invoice totals. */
+    .batch-review-overlay {
+        position: fixed; inset: 0; z-index: 10000;
+        background: var(--bg-base, #12100c);
+        display: flex; flex-direction: column;
+    }
+    /* Hide the floating chat launcher while reviewing so nothing covers a total.
+       :has() is well-supported in current browsers; the z-index above is the
+       belt-and-braces fallback if it ever isn't. */
+    body:has(.batch-review-overlay) .ff-chat-fab { display: none !important; }
+    .batch-review-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 16px;
+        padding: 14px 24px; border-bottom: 1px solid var(--border-color);
+        background: var(--bg-surface); flex-shrink: 0;
+    }
+    .batch-review-title { font-size: 17px; font-weight: 600; }
+    .batch-review-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    .batch-review-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+    .batch-review-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 40px; }
+    .batch-review-body > * { max-width: 1500px; margin-left: auto; margin-right: auto; }
+    .batch-review-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 6px; }
+    .batch-review-problems { margin: 16px auto 0; padding: 12px 16px; border: 1px solid var(--color-danger); border-radius: var(--radius-lg); background: var(--color-danger-light); }
+    .batch-problem-row { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; padding: 3px 0; }
+
+    .batch-review-card { margin-top: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-xl); background: var(--bg-surface); overflow: hidden; }
+    .brc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 18px; background: var(--bg-surface-2); border-bottom: 1px solid var(--border-color); }
+    .brc-customer { font-size: 15px; font-weight: 600; }
+    .brc-meta { font-size: 12px; color: var(--text-secondary); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .brc-head-total { text-align: right; flex-shrink: 0; }
+    .brc-total-value { font-size: 19px; font-weight: 700; font-family: var(--font-mono); }
+
+    .brc-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 1px; background: var(--border-color); border-bottom: 1px solid var(--border-color); }
+    .brc-fact { background: var(--bg-surface); padding: 8px 14px; font-size: 12px; display: flex; justify-content: space-between; gap: 10px; }
+    .brc-fact span { color: var(--text-secondary); }
+    .brc-fact b { font-family: var(--font-mono); font-size: 11.5px; text-align: right; }
+
+    .brc-lines { font-size: 12.5px; }
+    .brc-line-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+    .brc-nowrap { white-space: nowrap; }
+
+    .brc-summary { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 24px; padding: 12px 18px; border-top: 1px solid var(--border-color); background: var(--bg-surface-2); }
+    .brc-summary > div { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
+    .brc-summary span { color: var(--text-secondary); }
+    .brc-summary b { font-family: var(--font-mono); }
+    .brc-summary-total b { font-size: 15px; font-weight: 700; }
+
+    @media print {
+        .app-layout, .app-footer { display: none !important; }
+        .batch-review-overlay { position: static; background: #fff; color: #000; }
+        .batch-review-head-actions { display: none !important; }
+        .batch-review-card { break-inside: avoid; page-break-inside: avoid; border-color: #ccc; }
+    }
 
     /* Presets */
     .batch-presets { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }
@@ -755,6 +925,27 @@ function BatchInvoicing(cfg) {
                 this.previewing = false;
             }
         },
+        previewCustomerCount() {
+            const ids = new Set();
+            (this.previewResult?.previews || []).forEach(p => { if (p.ok && p.customer_id) ids.add(p.customer_id); });
+            return ids.size;
+        },
+        /** Show the rate in the lease's OWN unit — mileage_rate_km and
+         *  mileage_rate_miles are separate columns and only one is the
+         *  lease's billing unit (see the mileage-unit conversion rules). */
+        mileageRateOf(p) {
+            const t = p.terms || {};
+            const unit = t.mileage_unit || 'km';
+            const r = unit === 'miles' ? (t.mileage_rate_miles ?? t.mileage_rate) : (t.mileage_rate_km ?? t.mileage_rate);
+            if (r === null || r === undefined || +r === 0) return '';
+            return this.fmtMoney(r) + ' / ' + unit;
+        },
+        trimNum(v) {
+            const n = parseFloat(v);
+            if (isNaN(n)) return v;
+            return String(parseFloat(n.toFixed(4)));
+        },
+        printReview() { window.print(); },
         previewCurrencyText() {
             const by = this.previewResult?.totals?.by_currency || {};
             const parts = Object.keys(by).map(c => this.fmtMoney(by[c]) + ' ' + c);
