@@ -69,6 +69,7 @@ require_permission('invoices', 'create');
 
 use FleetForge\Billing\InvoiceGenerator;
 use FleetForge\Billing\BillingRateException;
+use FleetForge\Billing\BillingExceptions;
 
 $body = json_body();
 
@@ -242,9 +243,43 @@ foreach ($leaseIds as $leaseId) {
     }
 }
 
+// ── S-BILLING-EXCEPTIONS: persist the mixed outcome ─────────────────────
+// Done AFTER the loop, in one place, rather than at each of the six error
+// sites — every skip/failure lands in $errors regardless of which guard
+// caught it, so this cannot drift out of sync with the loop.
+//
+// Both directions run, and the clear() half matters as much as the flag:
+// an operator who fixes a missing rate and re-runs would otherwise bill
+// the lease correctly and STILL be left staring at an open exception.
+$exceptionCustomer = [];
+if ($errors) {
+    $ids  = array_values(array_unique(array_column($errors, 'lease_id')));
+    $ph   = implode(',', array_fill(0, count($ids), '?'));
+    foreach (db_select("SELECT id, customer_id FROM leases WHERE id IN ({$ph})", $ids) as $row) {
+        $exceptionCustomer[(int) $row['id']] = $row['customer_id'] !== null ? (int) $row['customer_id'] : null;
+    }
+}
+foreach ($errors as $err) {
+    BillingExceptions::flag(
+        (int) $err['lease_id'],
+        $exceptionCustomer[(int) $err['lease_id']] ?? null,
+        $periodStart,
+        $periodEnd,
+        (string) $err['reason'],
+        'batch_generate',
+        null,
+        current_user_id()
+    );
+}
+foreach ($invoices as $inv) {
+    BillingExceptions::clear((int) $inv['lease_id'], $periodStart, $periodEnd, current_user_id());
+}
+
 json_success([
     'actioned' => $actioned,
     'skipped'  => $skipped,
     'errors'   => $errors,
     'invoices' => $invoices,
+    // How many of the skips are now sitting in the review queue.
+    'flagged'  => count($errors),
 ], 201);

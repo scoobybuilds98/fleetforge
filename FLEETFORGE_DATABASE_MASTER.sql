@@ -2980,6 +2980,34 @@ CREATE TABLE `invoice_batch_runs` (
   CONSTRAINT `fk_batch_run_submitted_by` FOREIGN KEY (`submitted_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ;
+CREATE TABLE `invoice_billing_exceptions` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `lease_id` int unsigned NOT NULL,
+  `customer_id` int unsigned DEFAULT NULL,
+  `period_start` date NOT NULL,
+  `period_end` date NOT NULL,
+  `reason` text COLLATE utf8mb4_unicode_ci NOT NULL,
+  `source` enum('batch_generate','batch_run','manual') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'batch_generate',
+  `batch_run_id` int unsigned DEFAULT NULL COMMENT 'Breadcrumb only — exceptions outlive runs',
+  `status` enum('open','resolved','ignored') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'open',
+  `resolution_note` text COLLATE utf8mb4_unicode_ci,
+  `resolved_by` int unsigned DEFAULT NULL,
+  `resolved_at` datetime DEFAULT NULL,
+  `flagged_count` int unsigned NOT NULL DEFAULT '1' COMMENT 'Times this lease/period has failed',
+  `last_flagged_at` datetime DEFAULT NULL,
+  `created_by` int unsigned DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_lease_period` (`lease_id`,`period_start`,`period_end`),
+  KEY `idx_status` (`status`,`deleted_at`),
+  KEY `idx_customer` (`customer_id`),
+  KEY `fk_bex_resolved_by` (`resolved_by`),
+  CONSTRAINT `fk_bex_lease` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_bex_resolved_by` FOREIGN KEY (`resolved_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+;
 CREATE TABLE `invoice_line_items` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `invoice_id` int unsigned NOT NULL,

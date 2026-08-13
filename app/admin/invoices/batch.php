@@ -408,6 +408,55 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
+            <!-- ── Flagged leases (S-BILLING-EXCEPTIONS) ──────────────────
+                 A batch is normally mixed: most bill, a few can't. Those
+                 failures used to live only in the response and vanished on
+                 navigation, so they were forgotten and never billed. They now
+                 persist here until someone deals with them. -->
+            <div class="card" x-show="exceptions.length" x-cloak>
+                <div class="card-header">
+                    <span class="card-title">
+                        Needs Attention
+                        <span class="badge badge-no-dot badge-warning" style="margin-left:8px;"
+                              x-text="exceptions.length"></span>
+                    </span>
+                    <span class="text-secondary text-sm">Leases that could not be billed — the rest of the batch went through</span>
+                </div>
+                <div class="card-body">
+                    <div class="data-table-wrap">
+                        <table class="data-table">
+                            <thead><tr>
+                                <th>Customer</th><th>Contract</th><th>Period</th><th>Why it was skipped</th><th style="width:150px;"></th>
+                            </tr></thead>
+                            <tbody>
+                                <template x-for="ex in exceptions" :key="ex.id">
+                                    <tr>
+                                        <td>
+                                            <div x-text="ex.company_name || ('Lease #' + ex.lease_id)"></div>
+                                            <div class="brc-line-sub" x-show="ex.flagged_count > 1"
+                                                 x-text="'failed ' + ex.flagged_count + ' times'"></div>
+                                        </td>
+                                        <td>
+                                            <a class="link batch-lease-contract" :href="leaseUrl(ex.lease_id)" target="_blank"
+                                               x-text="ex.contract_number || '—'"></a>
+                                            <div class="brc-line-sub" x-show="ex.unit_number" x-text="'Unit ' + ex.unit_number"></div>
+                                        </td>
+                                        <td class="brc-nowrap text-sm"><span x-text="ex.period_start"></span> → <span x-text="ex.period_end"></span></td>
+                                        <td class="text-sm text-danger" x-text="ex.reason"></td>
+                                        <td>
+                                            <button type="button" class="btn btn-ghost btn-xs" @click="resolveException(ex, 'resolve')"
+                                                    title="The problem is fixed — clear this flag">Fixed</button>
+                                            <button type="button" class="btn btn-ghost btn-xs" @click="resolveException(ex, 'ignore')"
+                                                    title="Deliberately not billing this — requires a reason">Skip</button>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- ── Approval runs ─────────────────────────────────────── -->
             <div class="card" x-show="runs.length" x-cloak>
                 <div class="card-header">
@@ -656,7 +705,9 @@ require_once FF_ROOT . '/includes/header.php';
                     <?php else: ?>
                     <button type="button" class="btn btn-primary btn-sm" x-show="canGenerate"
                             :disabled="generating" @click="reviewOpen = false; generate()">
-                        <span x-show="!generating">Looks right — Generate <span x-text="previewResult.totals.ok_count"></span></span>
+                        <span x-show="!generating">
+                            Looks right — Generate <span x-text="previewResult.totals.ok_count"></span><template x-if="previewResult.totals.error_count"><span> &amp; flag <span x-text="previewResult.totals.error_count"></span></span></template>
+                        </span>
                         <span x-show="generating">Generating…</span>
                     </button>
                     <?php endif; ?>
@@ -1311,6 +1362,7 @@ function BatchInvoicing(cfg) {
         downloading: '',
         submitting: false,
         runs: [],
+        exceptions: [],
 
         // ── Generation ──────────────────────────────────────────
         generating: false,
@@ -1340,6 +1392,7 @@ function BatchInvoicing(cfg) {
             this.loadEligible();
             this.loadPresets();
             this.loadRuns();
+            this.loadExceptions();
             // Persist on unload as a catch-all, plus the explicit saves below.
             window.addEventListener('beforeunload', () => this.persistState());
         },
@@ -1423,6 +1476,42 @@ function BatchInvoicing(cfg) {
             } catch (e) { /* non-fatal */ }
         },
         runUrl(id) { return '<?= base_url('invoices/batch_run') ?>?id=' + id; },
+        leaseUrl(id) { return '<?= base_url('leases/show') ?>?id=' + id; },
+
+        // ── Flagged leases ─────────────────────────────────────────────
+        async loadExceptions() {
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/invoices/billing_exceptions') ?>?status=open&limit=100');
+                if (r.success) this.exceptions = r.data.exceptions || [];
+            } catch (e) { /* non-fatal */ }
+        },
+        async resolveException(ex, action) {
+            let note = '';
+            if (action === 'ignore') {
+                // A dismissal with no reason is worse than no record — the API
+                // rejects it too, this just asks before the round-trip.
+                note = await FF_Confirm.askText({
+                    title: 'Skip this lease',
+                    message: 'Why is ' + (ex.company_name || ('lease #' + ex.lease_id)) + ' not being billed for this period?',
+                    confirmLabel: 'Skip it',
+                    placeholder: 'e.g. unit was off-hire all month — confirmed with the customer',
+                });
+                if (!note) return;
+            }
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/billing_exceptions/resolve') ?>', {
+                    id: ex.id, action: action, note: note,
+                });
+                if (r.success) {
+                    FF_Toast.success(action === 'ignore' ? 'Skipped.' : 'Cleared.');
+                    await this.loadExceptions();
+                } else {
+                    FF_Toast.error(r.error?.message || 'Could not update the flag.');
+                }
+            } catch (e) {
+                FF_Toast.error('Network error.');
+            }
+        },
         async submitForApproval() {
             const leaseIds = this.selectedLeaseIds();
             if (!leaseIds.length || this.submitting) return;
@@ -1819,7 +1908,14 @@ function BatchInvoicing(cfg) {
                     this.lastGenerateResult = res.data;
                     const d = res.data;
                     if (d.actioned > 0) FF_Toast.success(d.actioned + ' draft invoice' + (d.actioned === 1 ? '' : 's') + ' created.');
-                    if (d.errors?.length) FF_Toast.error(d.errors.length + ' lease' + (d.errors.length === 1 ? '' : 's') + ' skipped — see details below.');
+                    // The mixed outcome is the NORMAL one: the good leases are
+                    // already billed, the rest are now a durable queue rather
+                    // than a toast the operator will lose on navigation.
+                    if (d.errors?.length) {
+                        FF_Toast.error(d.errors.length + ' lease' + (d.errors.length === 1 ? '' : 's')
+                            + ' could not be billed — flagged under Needs Attention.');
+                        await this.loadExceptions();
+                    }
 
                     d.invoices.forEach(inv => {
                         const customer = this.customers.find(c => c.id === inv.customer_id);

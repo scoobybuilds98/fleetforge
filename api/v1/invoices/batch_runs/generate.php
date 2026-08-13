@@ -45,6 +45,7 @@ require_permission('invoices', 'create');
 
 use FleetForge\Billing\InvoiceGenerator;
 use FleetForge\Billing\BillingRateException;
+use FleetForge\Billing\BillingExceptions;
 
 $body = json_body();
 
@@ -216,6 +217,32 @@ foreach (array_keys($approvedTotals) as $leaseId) {
         $errors[] = ['lease_id' => $leaseId, 'reason' => $e->getMessage()];
         error_log("[batch_runs/generate] Run {$run['reference']} lease #{$leaseId}: " . $e->getMessage());
     }
+}
+
+// ── S-BILLING-EXCEPTIONS ────────────────────────────────────────────────
+// Same durable flagging as the direct batch path, so an approved run that
+// partially fails leaves its problem leases in the review queue instead of
+// only in this one HTTP response. Sourced as 'batch_run' with the run id as
+// a breadcrumb.
+$bexCustomer = [];
+if ($errors) {
+    $ids = array_values(array_unique(array_column($errors, 'lease_id')));
+    $ph  = implode(',', array_fill(0, count($ids), '?'));
+    foreach (db_select("SELECT id, customer_id FROM leases WHERE id IN ({$ph})", $ids) as $row) {
+        $bexCustomer[(int) $row['id']] = $row['customer_id'] !== null ? (int) $row['customer_id'] : null;
+    }
+}
+foreach ($errors as $err) {
+    BillingExceptions::flag(
+        (int) $err['lease_id'],
+        $bexCustomer[(int) $err['lease_id']] ?? null,
+        $periodStart, $periodEnd,
+        (string) $err['reason'],
+        'batch_run', $id, $userId
+    );
+}
+foreach ($invoices as $inv) {
+    BillingExceptions::clear((int) $inv['lease_id'], $periodStart, $periodEnd, $userId);
 }
 
 $generationResult = [
