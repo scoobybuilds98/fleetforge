@@ -216,6 +216,78 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <?php endif; ?>
 
+            <?php
+            /* Per-customer rollup. The cards below are per LEASE (one card =
+               one invoice), which is the detail view — but a customer with 5
+               leases produces 5 cards with the same name at the top, and
+               there was no way to see what that customer is being billed in
+               TOTAL. Group here, toggle between the two. Totals stay
+               per-currency: a customer can hold both CAD and USD leases and
+               summing them into one number would be a lie. */
+            $byCustomer = [];
+            foreach ($billable as $p) {
+                $cid = (int) ($p['customer_id'] ?? 0);
+                if (!isset($byCustomer[$cid])) {
+                    $byCustomer[$cid] = [
+                        'company_name' => $p['company_name'],
+                        'count'        => 0,
+                        'totals'       => [],   // currency => bcmath string
+                        'leases'       => [],
+                    ];
+                }
+                $byCustomer[$cid]['count']++;
+                $cur = (string) $p['currency'];
+                $byCustomer[$cid]['totals'][$cur] = bcadd(
+                    $byCustomer[$cid]['totals'][$cur] ?? '0', (string) $p['total_amount'], 2
+                );
+                $byCustomer[$cid]['leases'][] = $p;
+            }
+            uasort($byCustomer, static fn ($a, $b) => $b['count'] <=> $a['count']);
+            ?>
+
+            <div class="brc-view-toggle" x-data="{ view: 'lease' }">
+                <div class="brc-view-switch">
+                    <button type="button" class="brc-view-btn" :class="{ 'is-active': view === 'lease' }"
+                            @click="view = 'lease'">By lease (<?= count($billable) ?>)</button>
+                    <button type="button" class="brc-view-btn" :class="{ 'is-active': view === 'customer' }"
+                            @click="view = 'customer'">By customer (<?= count($byCustomer) ?>)</button>
+                </div>
+
+                <!-- ── By customer: one row per customer, subtotal per currency ── -->
+                <div x-show="view === 'customer'" x-cloak class="batch-review-card" style="margin-top:14px;">
+                    <div class="data-table-wrap">
+                        <table class="data-table">
+                            <thead><tr>
+                                <th>Customer</th>
+                                <th class="text-right">Invoices</th>
+                                <th>Leases</th>
+                                <th class="text-right">Total</th>
+                            </tr></thead>
+                            <tbody>
+                            <?php foreach ($byCustomer as $cid => $row): ?>
+                                <tr>
+                                    <td><strong><?= e($row['company_name']) ?></strong></td>
+                                    <td class="text-right"><?= (int) $row['count'] ?></td>
+                                    <td class="text-sm text-secondary">
+                                        <?php foreach ($row['leases'] as $l): ?>
+                                            <span class="batch-lease-contract"><?= e($l['contract_number']) ?></span><?php
+                                            ?><?= $l !== end($row['leases']) ? ' · ' : '' ?>
+                                        <?php endforeach; ?>
+                                    </td>
+                                    <td class="text-right currency">
+                                        <?php $parts = [];
+                                        foreach ($row['totals'] as $cur => $amt) { $parts[] = format_currency($amt) . ' ' . $cur; }
+                                        echo e(implode('  +  ', $parts)); ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- ── By lease: the existing per-invoice detail cards ── -->
+                <div x-show="view === 'lease'">
             <?php foreach ($billable as $p): ?>
             <div class="batch-review-card">
                 <div class="brc-head">
@@ -324,6 +396,8 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
             <?php endforeach; ?>
+                </div><!-- /by-lease -->
+            </div><!-- /brc-view-toggle -->
 
         </div>
     </div>
@@ -407,6 +481,25 @@ $_brandLight   = settings_get('brand.primary_light');
     .batch-total::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: linear-gradient(180deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 25%, transparent)); }
     .batch-total-label { font-size: 10px; letter-spacing: 0.09em; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); }
     .batch-total-value { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+    /* View switch: per-lease detail (default) vs per-customer rollup. */
+    .brc-view-toggle { margin-top: 18px; }
+    .brc-view-switch {
+        display: inline-flex; gap: 4px; padding: 4px;
+        background: var(--bg-surface); border: 1px solid var(--border-color);
+        border-radius: 11px;
+    }
+    .brc-view-btn {
+        padding: 6px 14px; font-size: 13px; font-weight: 500; cursor: pointer;
+        border-radius: 8px; border: 1px solid var(--border-color);
+        background: var(--bg-surface-2); color: var(--text-secondary);
+        transition: background 130ms ease, color 130ms ease;
+    }
+    .brc-view-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .brc-view-btn.is-active {
+        background: var(--color-primary); border-color: transparent;
+        color: var(--text-on-primary);
+    }
 
     .batch-review-card { margin-top: 18px; border-radius: var(--radius-xl); background: var(--bg-surface); border: 1px solid var(--border-color); box-shadow: var(--card-sheen), var(--shadow-md); overflow: hidden; }
     .brc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 16px 20px; background: linear-gradient(135deg, color-mix(in srgb, var(--color-primary) 7%, var(--bg-surface-2)) 0%, var(--bg-surface-2) 55%); border-bottom: 1px solid var(--border-color); }
