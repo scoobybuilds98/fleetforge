@@ -250,6 +250,44 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
             </div>
 
+            <!-- ── Generate action bar ───────────────────────────────── -->
+            <div class="batch-action-bar" x-show="canGenerate">
+                <div>
+                    <strong x-text="selectedLeaseIds().length"></strong> lease<span x-show="selectedLeaseIds().length !== 1">s</span> selected
+                    <span class="text-secondary text-sm" x-show="selectedLeaseIds().length"> across <span x-text="selectedCustomerIds().length"></span> customer<span x-show="selectedCustomerIds().length !== 1">s</span></span>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <?php if ($approvalRequired): ?>
+                        <span class="badge badge-no-dot badge-warning" title="Settings → General → Invoices &amp; Billing">
+                            Approval required
+                        </span>
+                    <?php endif; ?>
+                    <!-- Reopen the LAST computed review without recomputing. The dry
+                         run really generates+rolls back per lease, so re-running it
+                         over a big selection is slow — closing the review to go check
+                         something must not throw that work away. -->
+                    <button type="button" class="btn btn-ghost" x-show="previewResult && !reviewOpen"
+                            @click="reviewOpen = true" x-cloak>
+                        Reopen review
+                    </button>
+                    <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || previewing || generating" @click="dryRun()">
+                        <span x-show="!previewing">Preview totals</span>
+                        <span x-show="previewing">Calculating…</span>
+                    </button>
+                    <button type="button" class="btn <?= $approvalRequired ? 'btn-primary' : 'btn-secondary' ?>"
+                            :disabled="selectedLeaseIds().length === 0 || submitting || generating" @click="submitForApproval()">
+                        <span x-show="!submitting">Submit for approval</span>
+                        <span x-show="submitting">Submitting…</span>
+                    </button>
+                    <?php if (!$approvalRequired): ?>
+                    <button type="button" class="btn btn-primary" :disabled="selectedLeaseIds().length === 0 || generating" @click="generate()">
+                        <span x-show="!generating">Generate <span x-text="selectedLeaseIds().length"></span> Draft Invoice<span x-show="selectedLeaseIds().length !== 1">s</span></span>
+                        <span x-show="generating">Generating…</span>
+                    </button>
+                    <?php endif; ?>
+                </div>
+            </div>
+
             <!-- Restored-selection notice: silently reinstating a selection would
                  be worse than losing it — the operator must know these choices
                  came from earlier and can throw them away in one click. -->
@@ -321,44 +359,6 @@ require_once FF_ROOT . '/includes/header.php';
                             </div>
                         </template>
                     </div>
-                </div>
-            </div>
-
-            <!-- ── Generate action bar ───────────────────────────────── -->
-            <div class="batch-action-bar" x-show="canGenerate">
-                <div>
-                    <strong x-text="selectedLeaseIds().length"></strong> lease<span x-show="selectedLeaseIds().length !== 1">s</span> selected
-                    <span class="text-secondary text-sm" x-show="selectedLeaseIds().length"> across <span x-text="selectedCustomerIds().length"></span> customer<span x-show="selectedCustomerIds().length !== 1">s</span></span>
-                </div>
-                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                    <?php if ($approvalRequired): ?>
-                        <span class="badge badge-no-dot badge-warning" title="Settings → General → Invoices &amp; Billing">
-                            Approval required
-                        </span>
-                    <?php endif; ?>
-                    <!-- Reopen the LAST computed review without recomputing. The dry
-                         run really generates+rolls back per lease, so re-running it
-                         over a big selection is slow — closing the review to go check
-                         something must not throw that work away. -->
-                    <button type="button" class="btn btn-ghost" x-show="previewResult && !reviewOpen"
-                            @click="reviewOpen = true" x-cloak>
-                        Reopen review
-                    </button>
-                    <button type="button" class="btn btn-secondary" :disabled="selectedLeaseIds().length === 0 || previewing || generating" @click="dryRun()">
-                        <span x-show="!previewing">Preview totals</span>
-                        <span x-show="previewing">Calculating…</span>
-                    </button>
-                    <button type="button" class="btn <?= $approvalRequired ? 'btn-primary' : 'btn-secondary' ?>"
-                            :disabled="selectedLeaseIds().length === 0 || submitting || generating" @click="submitForApproval()">
-                        <span x-show="!submitting">Submit for approval</span>
-                        <span x-show="submitting">Submitting…</span>
-                    </button>
-                    <?php if (!$approvalRequired): ?>
-                    <button type="button" class="btn btn-primary" :disabled="selectedLeaseIds().length === 0 || generating" @click="generate()">
-                        <span x-show="!generating">Generate <span x-text="selectedLeaseIds().length"></span> Draft Invoice<span x-show="selectedLeaseIds().length !== 1">s</span></span>
-                        <span x-show="generating">Generating…</span>
-                    </button>
-                    <?php endif; ?>
                 </div>
             </div>
 
