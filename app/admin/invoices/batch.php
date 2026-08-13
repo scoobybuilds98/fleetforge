@@ -151,7 +151,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="table-toolbar-left">
                             <input type="search" class="form-control form-control-sm" placeholder="Search customer…"
                                    x-model="search" @input.debounce.400ms="loadEligible()" style="min-width:200px;" maxlength="255">
-                            <select class="form-select form-control-sm" x-model="statusFilter" aria-label="Filter by billing status">
+                            <select class="form-select form-control-sm" x-model="statusFilter" @change="rebuildDisplay()" aria-label="Filter by billing status">
                                 <option value="unbilled">Unbilled only</option>
                                 <option value="all">All statuses</option>
                                 <option value="billed">Already billed</option>
@@ -167,46 +167,57 @@ require_once FF_ROOT . '/includes/header.php';
                     <div x-show="eligLoading" class="text-secondary text-sm" style="padding:16px 0;">Loading eligible leases…</div>
                     <div x-show="eligError" class="text-danger text-sm" style="padding:8px 0;" x-text="eligError"></div>
 
-                    <div x-show="!eligLoading && customers.length === 0 && !eligError" class="text-secondary text-sm" style="padding:16px 0;">
+                    <div x-show="!eligLoading && displayCustomers.length === 0 && !eligError" class="text-secondary text-sm" style="padding:16px 0;">
                         No active monthly leases match this period and filter.
                     </div>
 
+                    <!-- PERF (S-BATCH-INVOICING fix): iterates the PRECOMPUTED
+                         displayCustomers array, never a function call like
+                         filteredCustomers(). A function in x-for is re-evaluated on
+                         every Alpine reactivity tick and returns a NEW array each
+                         time, so x-for tears down and rebuilds every node on any
+                         state change (including a single checkbox click). With a
+                         real fleet (26 customers / 166 leases) that churn locked up
+                         rendering and the list appeared to never load. Same reason
+                         each row's leases are pre-filtered onto c.leases rather than
+                         calling visibleLeases(c) per row. -->
                     <div class="batch-customer-list" x-show="!eligLoading">
-                        <template x-for="c in filteredCustomers()" :key="c.id">
+                        <template x-for="c in displayCustomers" :key="c.id">
                             <div class="batch-customer-group">
-                                <div class="batch-customer-row">
-                                    <label class="form-check" style="margin:0;">
+                                <div class="batch-customer-row" @click="toggleCustomerAll(c)">
+                                    <label class="form-check" style="margin:0;" @click.stop>
                                         <input type="checkbox" class="form-check-input"
-                                               :checked="allLeasesSelected(c)"
+                                               :checked="c.leases.length > 0 && c.leases.every(l => !!selected[l.id])"
                                                @change="toggleCustomerAll(c)">
                                     </label>
                                     <div class="batch-customer-name">
                                         <strong x-text="c.company_name"></strong>
-                                        <span class="badge badge-no-dot badge-neutral" style="margin-left:6px;font-size:10px;" x-text="c.status"></span>
+                                        <span class="badge badge-no-dot badge-neutral batch-chip" x-text="c.status"></span>
+                                        <span class="batch-lease-count" x-text="c.leases.length + (c.leases.length === 1 ? ' lease' : ' leases')"></span>
                                     </div>
                                     <div class="batch-customer-recipient">
                                         <span x-show="c.recipient.email" x-text="c.recipient.email"></span>
                                         <span x-show="!c.recipient.email" class="text-danger">no email on file</span>
-                                        <span x-show="c.recipient.warnings.length" class="badge badge-no-dot badge-warning" style="margin-left:4px;font-size:10px;" :title="c.recipient.warnings.join(' ')">&#9888;</span>
+                                        <span x-show="c.recipient.warnings.length" class="badge badge-no-dot badge-warning batch-chip" :title="c.recipient.warnings.join(' ')">&#9888;</span>
                                     </div>
                                 </div>
-                                <template x-for="l in visibleLeases(c)" :key="l.id">
-                                    <div class="batch-lease-row">
-                                        <label class="form-check" style="margin:0;">
+                                <template x-for="l in c.leases" :key="l.id">
+                                    <div class="batch-lease-row" :class="{ 'is-selected': !!selected[l.id] }" @click="toggleLease(l)">
+                                        <label class="form-check" style="margin:0;" @click.stop>
                                             <input type="checkbox" class="form-check-input"
                                                    :checked="!!selected[l.id]"
                                                    @change="toggleLease(l)">
                                         </label>
                                         <div class="batch-lease-info">
-                                            <span x-text="l.contract_number"></span>
+                                            <span class="batch-lease-contract" x-text="l.contract_number"></span>
                                             <span class="text-secondary" x-show="l.unit_number">&middot; Unit <span x-text="l.unit_number"></span></span>
                                         </div>
-                                        <div>
+                                        <div class="batch-lease-status">
                                             <span class="badge badge-no-dot"
                                                   :class="{'badge-warning': l.billing_status === 'unbilled', 'badge-success': l.billing_status === 'billed', 'badge-neutral': l.billing_status === 'void'}"
                                                   x-text="l.billing_status"></span>
                                             <template x-if="l.existing_invoice">
-                                                <a href="#" class="link text-sm" style="margin-left:6px;" @click.prevent="openPreview(l.existing_invoice.id)" x-text="l.existing_invoice.invoice_number"></a>
+                                                <a href="#" class="link text-sm" style="margin-left:6px;" @click.stop.prevent="openPreview(l.existing_invoice.id)" x-text="l.existing_invoice.invoice_number"></a>
                                             </template>
                                         </div>
                                     </div>
@@ -278,18 +289,24 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="table-toolbar">
                         <div class="table-toolbar-left">
                             <input type="search" class="form-control form-control-sm" placeholder="Find an existing draft to add (invoice # or customer)…"
-                                   x-model="addDraftQuery" @input.debounce.400ms="searchAddDraft()" style="min-width:280px;" maxlength="255">
+                                   x-model="addDraftQuery" @input.debounce.400ms="searchAddDraft()" style="min-width:280px; max-width:420px;" maxlength="255">
                         </div>
-                        <div class="table-toolbar-right">
-                            <label class="form-check" style="margin:0;font-size:13px;">
-                                <input type="checkbox" class="form-check-input" x-model="sendEmailToo">
-                                Also email the invoice_ready template on send
-                            </label>
-                            <label class="form-check" style="margin:0;font-size:13px;" x-show="sendEmailToo">
-                                <input type="checkbox" class="form-check-input" x-model="attachPdf">
-                                Attach PDF
-                            </label>
-                        </div>
+                    </div>
+
+                    <!-- Send options — deliberately their OWN row, not squeezed into
+                         .table-toolbar-right alongside the search box above: that class
+                         is shared by every other list page in the app (flex-shrink:0,
+                         nowrap) and two long-label checkboxes there collided with and
+                         visually overlapped the search input at normal card widths. -->
+                    <div class="batch-send-options">
+                        <label class="form-check" style="margin:0;font-size:13px;">
+                            <input type="checkbox" class="form-check-input" x-model="sendEmailToo">
+                            Also email the invoice_ready template on send
+                        </label>
+                        <label class="form-check" style="margin:0;font-size:13px;" x-show="sendEmailToo">
+                            <input type="checkbox" class="form-check-input" x-model="attachPdf">
+                            Attach PDF
+                        </label>
                     </div>
 
                     <div x-show="addDraftResults.length" class="batch-add-results">
@@ -430,19 +447,34 @@ require_once FF_ROOT . '/includes/header.php';
     .batch-period-row { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
     .batch-period-inputs { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
-    .batch-customer-list { display: flex; flex-direction: column; gap: 10px; max-height: 480px; overflow-y: auto; }
-    .batch-customer-group { border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; }
-    .batch-customer-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--bg-surface-2); }
-    .batch-customer-name { flex: 1; }
-    .batch-customer-recipient { font-size: 12px; color: var(--text-secondary); }
-    .batch-lease-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px 8px 34px; border-top: 1px solid var(--border-color); font-size: 13px; }
-    .batch-lease-info { flex: 1; }
+    .batch-customer-list { display: flex; flex-direction: column; gap: 12px; max-height: 620px; overflow-y: auto; padding-right: 4px; }
+    /* flex-shrink:0 is LOAD-BEARING: .batch-customer-list is a column flexbox
+       with a max-height, so its children default to flex-shrink:1 and get
+       SQUASHED to fit instead of overflowing into the scroll area. Combined
+       with overflow:hidden here that collapsed each group to ~8px and clipped
+       every row's text — the list rendered as blank bars (worse the more
+       customers there were). Do not remove. */
+    .batch-customer-group { flex-shrink: 0; border: 1px solid var(--border-color); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-surface); }
+    .batch-customer-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; background: var(--bg-surface-2); cursor: pointer; transition: background 120ms ease; }
+    .batch-customer-row:hover { background: var(--bg-surface-3, var(--bg-surface-2)); }
+    .batch-customer-name { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 14px; }
+    .batch-chip { font-size: 10px; }
+    .batch-lease-count { font-size: 11px; color: var(--text-secondary); }
+    .batch-customer-recipient { font-size: 12px; color: var(--text-secondary); text-align: right; flex-shrink: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .batch-lease-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px 10px 42px; border-top: 1px solid var(--border-color); font-size: 13px; cursor: pointer; transition: background 120ms ease; }
+    .batch-lease-row:hover { background: var(--bg-surface-2); }
+    .batch-lease-row.is-selected { background: color-mix(in srgb, var(--color-primary) 9%, transparent); }
+    .batch-lease-info { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .batch-lease-contract { font-family: var(--font-mono, monospace); font-size: 12px; }
+    .batch-lease-status { flex-shrink: 0; display: flex; align-items: center; }
 
     .batch-recipient-list { display: flex; flex-direction: column; gap: 8px; }
     .batch-recipient-row { display: flex; align-items: center; gap: 10px; }
     .batch-recipient-name { min-width: 200px; font-size: 13px; }
 
     .batch-action-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; background: var(--bg-surface-2); border: 1px solid var(--border-color); border-radius: var(--radius-lg); }
+
+    .batch-send-options { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 14px; }
 
     .batch-add-results { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
     .batch-add-result-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--bg-surface-2); border-radius: var(--radius-md); font-size: 13px; }
@@ -474,7 +506,8 @@ function BatchInvoicing(cfg) {
         // ── Eligibility ─────────────────────────────────────────
         eligLoading: false,
         eligError: '',
-        customers: [],
+        customers: [],          // raw API payload
+        displayCustomers: [],   // PRECOMPUTED render list (see rebuildDisplay())
         eligSummary: {},
         search: '',
         statusFilter: 'unbilled',
@@ -568,7 +601,10 @@ function BatchInvoicing(cfg) {
                         }
                     }));
                     this.selected = stillValid;
+                    this.rebuildDisplay();
                 } else {
+                    this.customers = [];
+                    this.displayCustomers = [];
                     this.eligError = res.error?.message || 'Failed to load eligible leases.';
                 }
             } catch (e) {
@@ -578,13 +614,22 @@ function BatchInvoicing(cfg) {
             }
         },
 
-        filteredCustomers() {
-            if (this.statusFilter === 'all') return this.customers;
-            return this.customers.filter(c => c.leases.some(l => l.billing_status === this.statusFilter));
-        },
-        visibleLeases(c) {
-            if (this.statusFilter === 'all') return c.leases;
-            return c.leases.filter(l => l.billing_status === this.statusFilter);
+        /**
+         * Rebuild the render list. Called EXPLICITLY whenever the inputs
+         * change (new API payload, or the status filter) — never from a
+         * template binding. Each entry carries its own already-filtered
+         * `leases` array so the markup can iterate plain data and Alpine's
+         * :key diffing actually reuses DOM nodes between ticks.
+         */
+        rebuildDisplay() {
+            const f = this.statusFilter;
+            const out = [];
+            for (const c of this.customers) {
+                const leases = (f === 'all') ? c.leases : c.leases.filter(l => l.billing_status === f);
+                if (leases.length === 0) continue;
+                out.push({ ...c, leases });
+            }
+            this.displayCustomers = out;
         },
         customerById(id) {
             return this.customers.find(c => c.id === id) || { company_name: '', recipient: { email: '', warnings: [] } };
@@ -597,14 +642,9 @@ function BatchInvoicing(cfg) {
             if (this.selected[l.id]) delete this.selected[l.id];
             else this.selected[l.id] = true;
         },
-        allLeasesSelected(c) {
-            const leases = this.visibleLeases(c);
-            return leases.length > 0 && leases.every(l => !!this.selected[l.id]);
-        },
         toggleCustomerAll(c) {
-            const leases = this.visibleLeases(c);
-            const allOn = this.allLeasesSelected(c);
-            leases.forEach(l => {
+            const allOn = c.leases.length > 0 && c.leases.every(l => !!this.selected[l.id]);
+            c.leases.forEach(l => {
                 if (allOn) delete this.selected[l.id];
                 else this.selected[l.id] = true;
             });
