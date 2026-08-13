@@ -494,10 +494,13 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="batch-review-overlay" @keydown.escape.window="previewResult = null">
             <div class="batch-review-head">
                 <div>
-                    <div class="batch-review-title">Billing Review</div>
+                    <div class="batch-review-title">
+                        Billing Review
+                        <span class="brc-dryrun-pill">Dry run</span>
+                    </div>
                     <div class="batch-review-sub">
                         <span x-text="periodStart"></span> &rarr; <span x-text="periodEnd"></span>
-                        &middot; nothing has been created yet &mdash; this is a dry run
+                        &middot; nothing has been created yet
                     </div>
                 </div>
                 <div class="batch-review-head-actions">
@@ -608,7 +611,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <tbody>
                                     <template x-for="(l, li) in p.lines" :key="li">
                                         <tr>
-                                            <td><span class="badge badge-no-dot badge-neutral" x-text="l.item_type.replace(/_/g,' ')"></span></td>
+                                            <td><span class="brc-line-type" :data-fam="lineFamily(l)" x-text="l.item_type.replace(/_/g,' ')"></span></td>
                                             <td>
                                                 <div x-text="l.description"></div>
                                                 <div class="brc-line-sub" x-show="l.billing_days || l.rate_method">
@@ -705,59 +708,223 @@ require_once FF_ROOT . '/includes/header.php';
     .batch-total-value { font-size: 17px; font-weight: 600; font-family: var(--font-mono); margin-top: 2px; }
     .batch-row-error td { opacity: 0.75; }
 
-    /* ── Full-screen Billing Review (dry run) ───────────────────── */
+    /* ══════════════════════════════════════════════════════════════
+       FULL-SCREEN BILLING REVIEW
+       Every colour here comes from a design token so the surface works
+       in BOTH themes (:root is dark, [data-theme="light"] overrides).
+       Tints use color-mix() against --color-primary rather than baked
+       rgba(), so they re-tint automatically under a brand override and
+       stay legible on warm-paper light as well as atelier dark.
+       NOTE: do NOT use var(--bg-base, <literal>) — that token does not
+       exist, so the literal fallback would paint a near-black overlay in
+       LIGHT mode (the exact "light palette missing a var" trap that hit
+       the notification rows).
+       ══════════════════════════════════════════════════════════════ */
     /* z-index above the AI chat widget (9999) — it is fixed bottom-right and
        otherwise floats over this overlay's per-invoice totals. */
     .batch-review-overlay {
         position: fixed; inset: 0; z-index: 10000;
-        background: var(--bg-base, #12100c);
+        background:
+            radial-gradient(1200px 600px at 12% -8%, color-mix(in srgb, var(--color-primary) 11%, transparent), transparent 70%),
+            radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--color-info) 8%, transparent), transparent 65%),
+            var(--bg-body);
         display: flex; flex-direction: column;
     }
     /* Hide the floating chat launcher while reviewing so nothing covers a total.
        :has() is well-supported in current browsers; the z-index above is the
        belt-and-braces fallback if it ever isn't. */
     body:has(.batch-review-overlay) .ff-chat-fab { display: none !important; }
+
     .batch-review-head {
         display: flex; align-items: center; justify-content: space-between; gap: 16px;
-        padding: 14px 24px; border-bottom: 1px solid var(--border-color);
-        background: var(--bg-surface); flex-shrink: 0;
+        padding: 16px 28px; flex-shrink: 0;
+        border-bottom: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        box-shadow: var(--card-sheen), 0 1px 0 color-mix(in srgb, var(--border-color) 60%, transparent);
     }
-    .batch-review-title { font-size: 17px; font-weight: 600; }
-    .batch-review-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    .batch-review-title {
+        font-size: 20px; font-weight: 650; letter-spacing: -0.02em;
+        display: flex; align-items: center; gap: 10px;
+    }
+    .brc-dryrun-pill {
+        font-size: 9.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+        padding: 3px 9px; border-radius: 999px; color: var(--color-warning-text);
+        background: var(--color-warning-light);
+        border: 1px solid color-mix(in srgb, var(--color-warning) 35%, transparent);
+    }
+    .batch-review-sub { font-size: 12.5px; color: var(--text-secondary); margin-top: 3px; }
     .batch-review-head-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-    .batch-review-body { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 24px 40px; }
+    .batch-review-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 56px; }
     .batch-review-body > * { max-width: 1500px; margin-left: auto; margin-right: auto; }
-    .batch-review-section-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 6px; }
-    .batch-review-problems { margin: 16px auto 0; padding: 12px 16px; border: 1px solid var(--color-danger); border-radius: var(--radius-lg); background: var(--color-danger-light); }
-    .batch-problem-row { display: flex; flex-wrap: wrap; gap: 10px; font-size: 13px; padding: 3px 0; }
 
-    .batch-review-card { margin-top: 16px; border: 1px solid var(--border-color); border-radius: var(--radius-xl); background: var(--bg-surface); overflow: hidden; }
-    .brc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px 18px; background: var(--bg-surface-2); border-bottom: 1px solid var(--border-color); }
-    .brc-customer { font-size: 15px; font-weight: 600; }
-    .brc-meta { font-size: 12px; color: var(--text-secondary); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .batch-review-section-title {
+        font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+        color: var(--text-secondary); margin-bottom: 8px; font-weight: 600;
+    }
+    .batch-review-problems {
+        margin: 18px auto 0; padding: 14px 18px; border-radius: var(--radius-xl);
+        border: 1px solid color-mix(in srgb, var(--color-danger) 40%, transparent);
+        background: var(--color-danger-light);
+    }
+    .batch-problem-row {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+        font-size: 13px; padding: 5px 0;
+        border-top: 1px solid color-mix(in srgb, var(--color-danger) 15%, transparent);
+    }
+    .batch-problem-row:first-of-type { border-top: 0; }
+
+    /* ── Hero stat tiles ─────────────────────────────────────────── */
+    .batch-review-body .batch-total-strip { gap: 14px; }
+    .batch-review-body .batch-total {
+        position: relative; overflow: hidden;
+        padding: 16px 18px; border-radius: var(--radius-xl);
+        background: linear-gradient(160deg,
+            color-mix(in srgb, var(--bg-surface) 96%, var(--color-primary)) 0%,
+            var(--bg-surface) 60%);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--card-sheen), var(--shadow-md);
+    }
+    .batch-review-body .batch-total::before {
+        content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
+        background: linear-gradient(180deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 25%, transparent));
+    }
+    .batch-review-body .batch-total-label {
+        font-size: 10px; letter-spacing: 0.09em; font-weight: 600;
+    }
+    .batch-review-body .batch-total-value {
+        font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin-top: 4px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Invoice cards ───────────────────────────────────────────── */
+    .batch-review-card {
+        margin-top: 18px; border-radius: var(--radius-xl);
+        background: var(--bg-surface);
+        border: 1px solid var(--border-color);
+        box-shadow: var(--card-sheen), var(--shadow-md);
+        overflow: hidden;
+        transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+        animation: brcRise 320ms ease both;
+    }
+    .batch-review-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--card-sheen), var(--shadow-lg);
+        border-color: color-mix(in srgb, var(--color-primary) 30%, var(--border-color));
+    }
+    @keyframes brcRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) {
+        .batch-review-card { animation: none; transition: none; }
+        .batch-review-card:hover { transform: none; }
+    }
+
+    .brc-head {
+        display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+        padding: 16px 20px; position: relative;
+        background: linear-gradient(135deg,
+            color-mix(in srgb, var(--color-primary) 7%, var(--bg-surface-2)) 0%,
+            var(--bg-surface-2) 55%);
+        border-bottom: 1px solid var(--border-color);
+    }
+    .brc-customer { font-size: 16.5px; font-weight: 650; letter-spacing: -0.01em; }
+    .brc-meta {
+        font-size: 12px; color: var(--text-secondary); margin-top: 5px;
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    }
     .brc-head-total { text-align: right; flex-shrink: 0; }
-    .brc-total-value { font-size: 19px; font-weight: 700; font-family: var(--font-mono); }
+    .brc-total-value {
+        font-size: 22px; font-weight: 700; letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+        /* --color-primary (NOT --color-primary-text): header.php's runtime
+           brand override rebinds only --color-primary/-hover/-light, so
+           --color-primary-text keeps the palette default (orange) and would
+           render an orange total on a blue-branded deployment. Large bold
+           text, so the brand hue clears the 3:1 large-text bar in both themes. */
+        color: var(--color-primary);
+    }
 
-    .brc-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 1px; background: var(--border-color); border-bottom: 1px solid var(--border-color); }
-    .brc-fact { background: var(--bg-surface); padding: 8px 14px; font-size: 12px; display: flex; justify-content: space-between; gap: 10px; }
-    .brc-fact span { color: var(--text-secondary); }
-    .brc-fact b { font-family: var(--font-mono); font-size: 11.5px; text-align: right; }
+    /* ── Facts: hairline grid that reads as one block ────────────── */
+    .brc-facts {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr));
+        gap: 1px; background: var(--border-color);
+        border-bottom: 1px solid var(--border-color);
+    }
+    .brc-fact {
+        background: var(--bg-surface); padding: 9px 16px; font-size: 12px;
+        display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+        transition: background 130ms ease;
+    }
+    .brc-fact:hover { background: var(--bg-surface-2); }
+    .brc-fact > span { color: var(--text-secondary); white-space: nowrap; }
+    .brc-fact > b {
+        font-family: var(--font-mono); font-size: 11.5px; text-align: right;
+        font-variant-numeric: tabular-nums; font-weight: 600;
+    }
 
+    /* ── Line items ──────────────────────────────────────────────── */
     .brc-lines { font-size: 12.5px; }
-    .brc-line-sub { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+    .brc-lines thead th {
+        font-size: 9.5px; letter-spacing: 0.08em;
+        background: color-mix(in srgb, var(--bg-surface-2) 60%, transparent);
+    }
+    .brc-lines tbody tr { transition: background 130ms ease; }
+    .brc-lines tbody tr:hover { background: color-mix(in srgb, var(--color-primary) 5%, transparent); }
+    .brc-lines .currency { font-variant-numeric: tabular-nums; }
+    .brc-line-type {
+        font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+        padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+        color: var(--text-secondary); background: var(--bg-surface-2);
+        border: 1px solid var(--border-color);
+    }
+    /* Semantic tint per line family so the eye can scan a long invoice. */
+    /* rental uses the BRAND hue and must follow a brand override, so it mixes
+       from --color-primary rather than the non-overridden --color-primary-text
+       / --color-primary-light pair. Mixing the label toward --text-primary
+       keeps this 9.5px chip legible on the tint in light AND dark. */
+    .brc-line-type[data-fam="rental"] {
+        color: color-mix(in srgb, var(--color-primary) 62%, var(--text-primary));
+        background: color-mix(in srgb, var(--color-primary) 13%, transparent);
+        border-color: color-mix(in srgb, var(--color-primary) 30%, transparent);
+    }
+    .brc-line-type[data-fam="usage"]  { color: var(--color-info-text);    background: var(--color-info-light);    border-color: color-mix(in srgb, var(--color-info) 30%, transparent); }
+    .brc-line-type[data-fam="credit"] { color: var(--color-success-text); background: var(--color-success-light); border-color: color-mix(in srgb, var(--color-success) 30%, transparent); }
+    .brc-line-type[data-fam="fee"]    { color: var(--color-warning-text); background: var(--color-warning-light); border-color: color-mix(in srgb, var(--color-warning) 30%, transparent); }
+    .brc-line-sub { font-size: 11px; color: var(--text-secondary); margin-top: 3px; }
     .brc-nowrap { white-space: nowrap; }
 
-    .brc-summary { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 24px; padding: 12px 18px; border-top: 1px solid var(--border-color); background: var(--bg-surface-2); }
-    .brc-summary > div { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; }
+    /* ── Money summary ───────────────────────────────────────────── */
+    .brc-summary {
+        display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+        gap: 10px 26px; padding: 14px 20px;
+        border-top: 1px solid var(--border-color);
+        background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--color-primary) 4%, var(--bg-surface-2)));
+    }
+    .brc-summary > div { display: flex; gap: 9px; align-items: baseline; font-size: 12.5px; }
     .brc-summary span { color: var(--text-secondary); }
-    .brc-summary b { font-family: var(--font-mono); }
-    .brc-summary-total b { font-size: 15px; font-weight: 700; }
+    .brc-summary b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+    .brc-summary-total {
+        padding-left: 22px; margin-left: 2px;
+        border-left: 1px solid var(--border-color);
+    }
+    .brc-summary-total span { color: var(--text-primary); font-weight: 600; }
+    .brc-summary-total b {
+        font-size: 17px; font-weight: 700; letter-spacing: -0.01em;
+        color: var(--color-primary);   /* brand-override safe — see .brc-total-value */
+    }
 
+    /* ── Print: force a light, ink-friendly document ─────────────── */
     @media print {
-        .app-layout, .app-footer { display: none !important; }
-        .batch-review-overlay { position: static; background: #fff; color: #000; }
+        .app-layout, .app-footer, .ff-chat-fab { display: none !important; }
+        .batch-review-overlay { position: static; background: #fff !important; color: #000; }
+        .batch-review-head { background: #fff !important; backdrop-filter: none; box-shadow: none; }
         .batch-review-head-actions { display: none !important; }
-        .batch-review-card { break-inside: avoid; page-break-inside: avoid; border-color: #ccc; }
+        .batch-review-body { overflow: visible; padding: 0; }
+        .batch-review-card {
+            break-inside: avoid; page-break-inside: avoid;
+            border-color: #ccc; box-shadow: none; animation: none; margin-top: 12px;
+        }
+        .brc-head, .brc-summary, .batch-review-body .batch-total { background: #f6f6f6 !important; }
+        .brc-total-value, .brc-summary-total b { color: #000 !important; }
     }
 
     /* Presets */
@@ -939,6 +1106,17 @@ function BatchInvoicing(cfg) {
             const r = unit === 'miles' ? (t.mileage_rate_miles ?? t.mileage_rate) : (t.mileage_rate_km ?? t.mileage_rate);
             if (r === null || r === undefined || +r === 0) return '';
             return this.fmtMoney(r) + ' / ' + unit;
+        },
+        /** Group a line's item_type into a colour family so a long invoice
+         *  can be scanned by eye. Credits win over everything (a credit
+         *  mileage line should read green, not blue). */
+        lineFamily(l) {
+            const t = String(l.item_type || '');
+            if (l.is_credit || t.includes('credit')) return 'credit';
+            if (t === 'base_rental' || t === 'insurance' || t === 'warranty') return 'rental';
+            if (t.startsWith('mileage') || t.startsWith('hours') || t === 'hourly_usage' || t === 'gps') return 'usage';
+            if (t === 'late_fee' || t === 'damage' || t === 'cartage' || t === 'sweep' || t === 'wash' || t === 'fuel') return 'fee';
+            return '';
         },
         trimNum(v) {
             const n = parseFloat(v);
