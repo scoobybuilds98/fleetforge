@@ -2304,6 +2304,18 @@ class InvoiceGenerator
                     'rate_method'  => $item['rate_method'] ?? null,
                     'period_start' => $item['period_start'] ?? null,
                     'period_end'   => $item['period_end'] ?? null,
+                    // S-MILEAGE-COLS: this insert is an explicit column
+                    // whitelist, and the three mileage columns were missing from
+                    // it — so every mileage line the engine built with a
+                    // distance/rate/unit (ff_mileage_line_display) had them
+                    // silently dropped and landed with NULLs. The values still
+                    // reached quantity/unit_price/unit, which is why nothing
+                    // visibly broke, but the dedicated columns were dead for
+                    // reporting or any future re-render in a different unit.
+                    // Null-coalesced: non-mileage lines simply pass null.
+                    'mileage_distance' => $item['mileage_distance'] ?? null,
+                    'mileage_rate'     => $item['mileage_rate'] ?? null,
+                    'mileage_unit'     => $item['mileage_unit'] ?? null,
                 ]);
             }
 
