@@ -768,15 +768,6 @@ require_once FF_ROOT . '/includes/header.php';
                             <div class="brc-head-total">
                                 <div class="batch-total-label">Total</div>
                                 <div class="brc-total-value" x-text="fmtMoney(p.total_amount) + ' ' + p.currency"></div>
-                                <!-- Hold = "this one looks wrong, don't bill it yet". It drops the
-                                     lease from THIS run and records why, so the rest of the batch
-                                     still goes out and the held one is not quietly forgotten. -->
-                                <button type="button" class="btn btn-ghost btn-xs" style="margin-top:6px;"
-                                        x-show="!isHeld(p.lease_id)"
-                                        @click="holdForReview(p)">Hold for review</button>
-                                <button type="button" class="btn btn-ghost btn-xs" style="margin-top:6px;"
-                                        x-show="isHeld(p.lease_id)" x-cloak
-                                        @click="unhold(p)">Include again</button>
                             </div>
                         </div>
 
@@ -850,12 +841,31 @@ require_once FF_ROOT . '/includes/header.php';
 
                         <!-- Money summary -->
                         <div class="brc-summary">
+                            <!-- Hold = "this one looks wrong, don't bill it yet": drops the lease
+                                 from THIS run and records why, so the rest still goes out and the
+                                 held one is not quietly forgotten. Sits on the summary row, left
+                                 of the figures — the decision belongs next to the money it is
+                                 about, not tucked under the header total. -->
+                            <div class="brc-summary-action">
+                                <button type="button" class="brc-hold-btn"
+                                        x-show="!isHeld(p.lease_id)"
+                                        @click="holdForReview(p)">
+                                    <span aria-hidden="true">&#9873;</span> Hold for review
+                                </button>
+                                <button type="button" class="brc-hold-btn is-held"
+                                        x-show="isHeld(p.lease_id)" x-cloak
+                                        @click="unhold(p)">
+                                    <span aria-hidden="true">&#8634;</span> Include again
+                                </button>
+                            </div>
+                            <div class="brc-summary-figures">
                             <div><span>Subtotal</span><b x-text="fmtMoney(p.subtotal)"></b></div>
                             <div x-show="+p.discount_amount > 0"><span>Discount</span><b x-text="'−' + fmtMoney(p.discount_amount)"></b></div>
                             <div x-show="+p.tax_gst_amount > 0"><span>GST</span><b x-text="fmtMoney(p.tax_gst_amount)"></b></div>
                             <div x-show="+p.tax_pst_amount > 0"><span>PST</span><b x-text="fmtMoney(p.tax_pst_amount)"></b></div>
                             <div x-show="+p.tax_hst_amount > 0"><span>HST</span><b x-text="fmtMoney(p.tax_hst_amount)"></b></div>
                             <div class="brc-summary-total"><span>Total</span><b x-text="fmtMoney(p.total_amount) + ' ' + p.currency"></b></div>
+                            </div><!-- /figures -->
                         </div>
                     </div>
                 </template>
@@ -1283,11 +1293,44 @@ if ($_ffBrandPrimary): ?>
 
     /* ── Money summary ───────────────────────────────────────────── */
     .brc-summary {
-        display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center;
+        /* space-between so the Hold action anchors LEFT and the figures stay
+           right; .brc-summary-figures keeps the money grouped as one block
+           rather than spreading across the row. */
+        display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center;
         gap: 10px 26px; padding: 14px 20px;
         border-top: 1px solid var(--border-color);
         background: linear-gradient(180deg, transparent, color-mix(in srgb, var(--color-primary) 4%, var(--bg-surface-2)));
     }
+    .brc-summary-figures { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 26px; }
+    .brc-summary-action { flex: 0 0 auto; }
+    .brc-summary-figures > div { display: flex; gap: 9px; align-items: baseline; font-size: 12.5px; }
+
+    /* Deliberately NOT a .btn — this is the one destructive-ish choice on an
+       otherwise read-only review card, so it gets an amber outline that reads
+       as "set this aside" rather than blending into the neutral chrome. */
+    .brc-hold-btn {
+        display: inline-flex; align-items: center; gap: 6px;
+        padding: 7px 14px; border-radius: 8px; cursor: pointer;
+        font-size: 12.5px; font-weight: 600; font-family: inherit;
+        color: var(--color-warning-text);
+        background: var(--color-warning-light);
+        border: 1.5px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+        transition: background 130ms ease, border-color 130ms ease, transform 130ms ease;
+    }
+    .brc-hold-btn:hover {
+        background: color-mix(in srgb, var(--color-warning) 22%, transparent);
+        border-color: var(--color-warning);
+        transform: translateY(-1px);
+    }
+    .brc-hold-btn:active { transform: none; }
+    /* Reversing the hold is the benign action — read it back as neutral. */
+    .brc-hold-btn.is-held {
+        color: var(--text-secondary);
+        background: var(--bg-surface-2);
+        border-color: var(--border-color);
+    }
+    .brc-hold-btn.is-held:hover { background: var(--bg-hover); border-color: var(--border-color-strong); color: var(--text-primary); }
+
     .brc-summary > div { display: flex; gap: 9px; align-items: baseline; font-size: 12.5px; }
     .brc-summary span { color: var(--text-secondary); }
     .brc-summary b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
