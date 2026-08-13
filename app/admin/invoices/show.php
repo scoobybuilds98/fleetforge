@@ -31,6 +31,15 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('invoices', 'view');
 
+// S-BATCH-INVOICING: ?embed=1 renders this page chrome-free (no sidebar/
+// topbar, no action toolbar) for the batch-invoicing split-screen preview
+// iframe — see includes/header_embed.php for why this is a parallel shell
+// rather than a branch inside header.php. Read-only: the action toolbar
+// below (Send/Email/Void/Delete/Edit) is skipped entirely in embed mode so
+// a stray click inside a small preview pane can never mutate the invoice;
+// operators take those actions from the batch page itself.
+$isEmbed = (($_GET['embed'] ?? '') === '1');
+
 /* ─── Resolve invoice ID ────────────────────────────────────────── */
 $invoiceId = clean_int($_GET['id'] ?? null);
 if (!$invoiceId || $invoiceId <= 0) {
@@ -541,7 +550,7 @@ $hasPrintableNotes = !empty($invoice['notes'])
 
 $pageTitle      = 'Invoice ' . $invoice['invoice_number'];
 $helpModuleSlug = 'invoices';
-require_once FF_ROOT . '/includes/header.php';
+require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.php');
 ?>
 
 <!-- ================================================================
@@ -1376,8 +1385,10 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- Action Buttons -->
+    <!-- Action Buttons — omitted entirely in embed mode (S-BATCH-INVOICING);
+         see $isEmbed docblock note near the top of this file. -->
     <div class="page-header-actions">
+    <?php if (!$isEmbed): ?>
         <?= help_button('invoices') ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm no-print"
@@ -1393,6 +1404,15 @@ require_once FF_ROOT . '/includes/header.php';
         <button class="btn btn-secondary btn-sm no-print" onclick="window.print();" title="Print Invoice">
             <?= heroicon('document-text', 'icon-sm') ?>
             Print
+        </button>
+
+        <!-- S-INVOICE-PDF: generate (or re-open) the server-side PDF. Same
+             action either way — the endpoint returns a fresh signed URL
+             whether or not one already existed. -->
+        <button type="button" class="btn btn-secondary btn-sm no-print" @click="generatePdf()" :disabled="pdfWorking">
+            <?= heroicon('document-text', 'icon-sm') ?>
+            <span x-show="!pdfWorking"><?= $invoice['pdf_path'] && $invoice['status'] !== 'draft' ? 'View PDF' : 'Generate PDF' ?></span>
+            <span x-show="pdfWorking">Generating…</span>
         </button>
 
         <?php if (can('customers', 'create')): /* EMAIL-1: email this invoice */ ?>
@@ -1463,6 +1483,7 @@ require_once FF_ROOT . '/includes/header.php';
         <?php if ($canDelete): ?>
             <button class="btn btn-danger btn-sm" @click="showDeleteModal = true">Delete</button>
         <?php endif; ?>
+    <?php endif; // !$isEmbed ?>
     </div>
 </div><!-- end .page-header -->
 
@@ -3395,6 +3416,30 @@ function FF_InvoiceShow() {
          * Reconciliation panel in C6 per D-L (read-only display, no
          * review actions). */
 
+        /* ── S-INVOICE-PDF: Generate / View PDF ────────────────
+         * One action either way — generate_pdf.php returns a fresh signed
+         * URL whether it built a new PDF or reused an existing one (sent+
+         * invoices are frozen, D12, so their PDF is reused unless forced).
+         */
+        pdfWorking: false,
+        async generatePdf() {
+            this.pdfWorking = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/invoices/generate_pdf') ?>', {
+                    id: <?= (int)$invoiceId ?>
+                });
+                if (r.success) {
+                    window.open(r.data.download_url, '_blank');
+                    if (r.data.regenerated) this.showToast('PDF generated', 'success');
+                } else {
+                    this.showToast(r.error?.message || 'Failed to generate PDF', 'error');
+                }
+            } catch (e) {
+                this.showToast('Network error', 'error');
+            }
+            this.pdfWorking = false;
+        },
+
         /* ── Send Invoice ───────────────────────────────────── */
         async sendInvoice() {
             this.sending = true;
@@ -3566,11 +3611,16 @@ function qboSyncPanel(mappingId) {
 </script>
 
 <?php
+// AI Analysis floating panel — skipped in embed mode along with its trigger
+// button (already hidden above); it's a page-level overlay, not part of the
+// invoice document, and has no purpose in a read-only preview pane.
+if (!$isEmbed):
 $aiSummaryEntityType = 'invoice';
 $aiSummaryEntityId   = $invoiceId;
 $aiSummaryType       = 'invoice_analysis';
 $aiSummaryTitle      = 'Invoice Analysis — ' . e($invoice['invoice_number'] ?? '');
 require_once FF_ROOT . '/includes/partials/ai-panel.php';
+endif;
 ?>
 
-<?php require_once FF_ROOT . '/includes/footer.php'; ?>
+<?php require_once FF_ROOT . '/includes/' . ($isEmbed ? 'footer_embed.php' : 'footer.php'); ?>

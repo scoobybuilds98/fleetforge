@@ -82,6 +82,10 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title h4">Invoices</h1>
     <div class="page-header-actions">
         <?= help_button('invoices') ?>
+        <a href="<?= base_url('invoices/batch') ?>" class="btn btn-secondary btn-sm">
+            <?= heroicon('document-duplicate', 'icon-sm') ?>
+            Batch Invoicing
+        </a>
         <?php if (can('invoices', 'create')): ?>
         <a href="<?= base_url('invoices/create') ?>" class="btn btn-primary btn-sm">
             + New Invoice

@@ -63,6 +63,19 @@ return [
         'badge'  => 'overdue_invoices',
     ],
     [
+        // S-BATCH-INVOICING: sibling entry point (flat, matching the
+        // codebase's dominant nav convention — see the QuickBooks/
+        // Accounting `children` groups for the exception, not the rule).
+        // Gated on the same 'invoices' module 'view' action as the list
+        // page itself; the page's own Generate/Send actions additionally
+        // require 'create'/'edit' respectively (checked server-side).
+        'label'  => 'Batch Invoicing',
+        'icon'   => 'document-duplicate',
+        'url'    => '/invoices/batch',
+        'module' => 'invoices',
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Rates',
         'icon'   => 'currency-dollar',
         'url'    => '/rates',

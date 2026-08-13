@@ -4637,6 +4637,32 @@ window.FF_EmailCompose = function () {
             }
             await Promise.all(promises);
 
+            // S-INVOICE-PDF: composing FROM an invoice's own page should
+            // default to attaching that invoice's own PDF — the operator
+            // opened this modal specifically to email THIS invoice, not to
+            // go hunting for it in the "Attach Invoice PDF" list below.
+            // this.invoices was just populated by loadAttachmentsAndContacts()
+            // above (it lists every invoice for this.customerId, which
+            // show.php always passes), so no extra fetch is needed to find
+            // the row. If it has no PDF yet, generate one now rather than
+            // silently attaching nothing — api/v1/email/send.php drops an
+            // invoice_id attachment whose pdf_path is still empty with no
+            // error, so skipping this would mean "Email Invoice" quietly
+            // sends without the PDF the operator clicked the button to send.
+            if (this.entityType === 'invoice' && this.entityId) {
+                const self = this.invoices.find((inv) => inv.id === this.entityId);
+                if (self && self.has_pdf) {
+                    this.addInvoiceAttachment(self);
+                } else if (self) {
+                    try {
+                        const r = await FF_Api.post(FF_Api.url('/api/v1/invoices/generate_pdf.php'), { id: self.id });
+                        if (r && r.success) this.addInvoiceAttachment(self);
+                    } catch (e) {
+                        console.error('[FF_EmailCompose] auto-generate PDF failed', e);
+                    }
+                }
+            }
+
             // If a template slug was passed in, find + activate it
             if (opts.templateSlug) {
                 const t = this.templates.find((x) => x.slug === opts.templateSlug);
