@@ -257,11 +257,28 @@ require_once FF_ROOT . '/includes/header.php';
          ──────────────────────────────────────────────────────── -->
     <template x-if="selectedLease">
         <div style="margin-bottom:20px;padding:16px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface-2);">
-            <div style="font-weight:600;margin-bottom:0.75rem;font-size:0.95rem;">Odometer &amp; Distance</div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:0.75rem;">
+                <div style="font-weight:600;font-size:0.95rem;">Odometer &amp; Distance</div>
+                <!-- S-ODO-UNIT: entry/display unit ONLY. Readings are ALWAYS
+                     stored in km (the columns are odometer_at_period_*_km and
+                     the billing engine computes distance in km) — picking
+                     "miles" converts on the way in, it does NOT change which
+                     rate is billed. That is driven by the LEASE's own
+                     mileage_unit and is untouched here. Defaults to the
+                     lease's unit so the operator normally never touches it. -->
+                <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;" class="text-secondary">
+                    Enter readings in
+                    <select class="form-control form-control-sm" style="width:auto;padding-block:4px;"
+                            x-model="odoUnit" @change="onOdoUnitChanged($event)">
+                        <option value="km">Kilometres (km)</option>
+                        <option value="miles">Miles (mi)</option>
+                    </select>
+                </label>
+            </div>
 
             <!-- Period Start Odometer -->
             <div style="margin-bottom:1rem;">
-                <label class="form-label">Odometer at Period Start (km)</label>
+                <label class="form-label">Odometer at Period Start (<span x-text="odoUnitLabel"></span>)</label>
                 <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <input type="number"
                            class="form-control font-mono"
@@ -288,7 +305,7 @@ require_once FF_ROOT . '/includes/header.php';
 
             <!-- Period End Odometer -->
             <div style="margin-bottom:1rem;">
-                <label class="form-label">Odometer at Period End — current (km)</label>
+                <label class="form-label">Odometer at Period End — current (<span x-text="odoUnitLabel"></span>)</label>
                 <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
                     <input type="number"
                            class="form-control font-mono"
@@ -316,14 +333,14 @@ require_once FF_ROOT . '/includes/header.php';
                 <div>
                     <div class="text-xs text-secondary">Period Distance</div>
                     <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
-                         x-text="fmtKm(periodDistance)"></div>
+                         x-text="fmtDist(periodDistance)"></div>
                     <div x-show="periodDistanceWarning" class="text-xs" style="color:var(--color-danger);margin-top:2px;"
                          x-text="periodDistanceWarning"></div>
                 </div>
                 <div>
                     <div class="text-xs text-secondary">Cumulative (since lease start)</div>
                     <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
-                         x-text="fmtKm(cumulativeDistance)"></div>
+                         x-text="fmtDist(cumulativeDistance)"></div>
                     <div x-show="cumulativeContext" class="text-xs text-secondary" style="margin-top:2px;"
                          x-text="cumulativeContext"></div>
                 </div>
@@ -431,6 +448,10 @@ function FF_InvoiceCreate() {
         showSuccessOverlay: false,
         error:              null,
         result:             null,
+
+        // S-ODO-UNIT: unit the operator TYPES/READS in. Storage stays km.
+        odoUnit: 'km',
+        get odoUnitLabel() { return this.odoUnit === 'miles' ? 'mi' : 'km'; },
 
         // SAMSARA-3 odometer UI state
         odoCanFetch:        false,
@@ -776,6 +797,13 @@ function FF_InvoiceCreate() {
                 const d = r.data || {};
 
                 this.odoCanFetch     = !!d.samsara_vehicle_id;
+                // S-ODO-UNIT: default to the lease's own convention so the
+                // operator normally never has to touch the selector. Set
+                // before any auto-fill below so those convert correctly.
+                if (d.mileage_unit === 'miles' || d.mileage_unit === 'km') {
+                    this.odoUnit      = d.mileage_unit;
+                    this._odoUnitPrev = d.mileage_unit;
+                }
                 this._leaseStartOdo  = d.odometer_start_km !== null && d.odometer_start_km !== undefined
                     ? parseFloat(d.odometer_start_km) : null;
                 this._leaseStartDate = d.start_date || this._leaseStartDate;
@@ -816,11 +844,12 @@ function FF_InvoiceCreate() {
                 // Auto-populate start side
                 const prevEndOdo = d.latest_invoice_odometer_km;
                 if (prevEndOdo !== null && prevEndOdo !== undefined && !isNaN(Number(prevEndOdo))) {
-                    this.form.odometer_at_period_start_km = Number(prevEndOdo).toFixed(2);
+                    // S-ODO-UNIT: stored value is KM — show it in the chosen unit.
+                    this.form.odometer_at_period_start_km = this.fromKm(prevEndOdo).toFixed(2);
                     this.odoStartSource                    = 'manual';
                     this.odoStartAutoSource                = 'Auto-filled from previous invoice end odometer.';
                 } else if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
-                    this.form.odometer_at_period_start_km = this._leaseStartOdo.toFixed(2);
+                    this.form.odometer_at_period_start_km = this.fromKm(this._leaseStartOdo).toFixed(2);
                     this.odoStartSource                    = 'manual';
                     this.odoStartAutoSource                = 'Auto-filled from lease starting odometer.';
                 } else {
@@ -872,10 +901,15 @@ function FF_InvoiceCreate() {
         },
         // Live-calculated cumulative distance since lease start
         get cumulativeDistance() {
-            const e = parseFloat(this.form.odometer_at_period_end_km);
+            const e = parseFloat(this.form.odometer_at_period_end_km);   // display unit
             if (isNaN(e)) return null;
             if (this._leaseStartOdo === null || isNaN(this._leaseStartOdo)) return null;
-            return e - this._leaseStartOdo;
+            // _leaseStartOdo is stored KM — bring it into the display unit
+            // before subtracting, or a miles reading would be differenced
+            // against a km baseline.
+            const startInDisplay = this.fromKm(this._leaseStartOdo);
+            if (startInDisplay === null) return null;
+            return e - startInDisplay;
         },
         get cumulativeContext() {
             if (this._leaseStartOdo === null || isNaN(this._leaseStartOdo)) {
@@ -885,6 +919,47 @@ function FF_InvoiceCreate() {
                 return 'since lease start on ' + this._leaseStartDate;
             }
             return '';
+        },
+        /* ── S-ODO-UNIT conversion ──────────────────────────────────────
+         * DISTANCE converts with 1 mi = 1.609344 km. Note this is the
+         * OPPOSITE direction to a RATE conversion ($/km = $/mi × 0.621):
+         * a rate is per-unit-distance, so it scales inversely. Getting
+         * those two confused is what caused the historic 2.59× mileage
+         * overcharge, so keep them strictly separate — nothing in this
+         * file touches rates.
+         *
+         * The form fields hold values in the DISPLAY unit; km is what
+         * gets stored (converted in submit()).
+         */
+        _MI_TO_KM: 1.609344,
+        toKm(v)   { const n = parseFloat(v); if (isNaN(n)) return null;
+                    return this.odoUnit === 'miles' ? n * this._MI_TO_KM : n; },
+        fromKm(v) { const n = parseFloat(v); if (isNaN(n)) return null;
+                    return this.odoUnit === 'miles' ? n / this._MI_TO_KM : n; },
+
+        /** Switching units re-expresses whatever is already typed so the
+         *  operator never loses input or silently changes the reading. */
+        onOdoUnitChanged(ev) {
+            const prev = (ev && ev.target && ev.target._ffPrevUnit) || this._odoUnitPrev || 'km';
+            const next = this.odoUnit;
+            if (prev === next) return;
+            const factor = (prev === 'miles' && next === 'km') ? this._MI_TO_KM
+                         : (prev === 'km' && next === 'miles') ? (1 / this._MI_TO_KM)
+                         : 1;
+            ['odometer_at_period_start_km', 'odometer_at_period_end_km'].forEach(k => {
+                const n = parseFloat(this.form[k]);
+                if (!isNaN(n)) this.form[k] = (n * factor).toFixed(2);
+            });
+            this._odoUnitPrev = next;
+        },
+        _odoUnitPrev: 'km',
+
+        fmtDist(v) {
+            if (v === null || v === undefined || isNaN(v)) return '— ' + this.odoUnitLabel;
+            const fmt = Number(v).toLocaleString('en-CA', {
+                minimumFractionDigits: 2, maximumFractionDigits: 2,
+            });
+            return fmt + ' ' + this.odoUnitLabel;
         },
         fmtKm(v) {
             if (v === null || v === undefined || isNaN(v)) return '— km';
@@ -916,7 +991,8 @@ function FF_InvoiceCreate() {
                     this.odoBanner = { type: 'warning', message: d.message || 'Could not reach Samsara. Enter odometer manually.' };
                     return;
                 }
-                const km = Number(d.odometer_km).toFixed(2);
+                // S-ODO-UNIT: Samsara always reports KM — display in the chosen unit.
+                const km = this.fromKm(d.odometer_km).toFixed(2);
                 if (target === 'start') {
                     this.form.odometer_at_period_start_km = km;
                     this.odoStartSource                    = 'gps';
@@ -1005,11 +1081,14 @@ function FF_InvoiceCreate() {
             // SAMSARA-3: build payload with odometer fields coerced to floats
             // (omit empty strings so the API sees proper null)
             const payload = { ...this.form };
+            // S-ODO-UNIT: the *_km columns and the billing engine are km-only.
+            // Whatever unit the operator typed in, convert to km HERE — this is
+            // the single boundary between display units and storage.
             ['odometer_at_period_start_km', 'odometer_at_period_end_km'].forEach(k => {
                 if (payload[k] === '' || payload[k] === null || payload[k] === undefined) {
                     delete payload[k];
                 } else {
-                    payload[k] = parseFloat(payload[k]);
+                    payload[k] = this.toKm(payload[k]);
                 }
             });
             if (payload.odometer_source === null) delete payload.odometer_source;
