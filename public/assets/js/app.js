@@ -1268,8 +1268,22 @@ function FF_Notifications() {
         _initialized: false,
 
         async init() {
+            // S-PERF-POLL: guard against Alpine's double init (auto-init from
+            // x-data + the explicit init() in includes/topbar.php's x-init).
+            if (this._pollTimer) return;
+
             try { this.viewMode = localStorage.getItem('ff_notif_view') || 'flat'; } catch {}
-            await this.fetchCount();
+
+            // S-PERF-POLL: no initial fetchCount() here any more. topbar.php
+            // already computed this exact COUNT server-side and seeds
+            // unreadCount from the same x-init attribute — which runs AFTER
+            // this, so the fetched value was always overwritten and thrown
+            // away. That made it a guaranteed-wasted round trip on every page
+            // load. Marking _initialized here means the seeded value is the
+            // baseline the first 60s poll compares against, so a genuine
+            // increase still dings; without it that first ding is swallowed.
+            this._initialized = true;
+
             // Refresh badge every 60s — lightweight COUNT only.
             this._pollTimer = setInterval(() => { this.fetchCount(); }, 60000);
             // Stop polling when Alpine tears the component down.
@@ -2856,11 +2870,37 @@ function FF_ChatHubBadge() {
         _initialized: false,
 
         async init() {
+            // S-PERF-POLL: init() runs TWICE — Alpine 3 auto-calls init() from
+            // x-data, and includes/topbar.php ALSO calls it from x-init. Without
+            // this guard both timers register, one is leaked beyond the
+            // alpine:destroyed cleanup below, and this component polls two
+            // endpoints at double rate forever. Idempotence lives here rather
+            // than in the markup so it holds no matter how the component is
+            // mounted. See the known Alpine double-init trap in this codebase.
+            if (this._timer) return;
+
             await this.fetchUnread();
             // WHY: 5s matches FF_ChatBadge + FF_MessengerBadge cadence so
             // all three stay visually in sync when a message lands.
-            this._timer = setInterval(() => this.fetchUnread(), 5000);
-            this.$el.addEventListener('alpine:destroyed', () => clearInterval(this._timer));
+            // S-PERF-POLL: skip while the tab is hidden. Two requests every 5s
+            // is 24 req/min per tab, each a full PHP bootstrap holding this
+            // user's session lock — and most admin tabs sit in the background.
+            // Foreground cadence is deliberately unchanged so the badge stays
+            // as responsive as before.
+            this._timer = setInterval(() => {
+                if (document.hidden) return;
+                this.fetchUnread();
+            }, 5000);
+
+            // Catch up the moment the tab is looked at again — without this the
+            // badge would show a stale count for up to 5s after refocus.
+            this._onVis = () => { if (!document.hidden) this.fetchUnread(); };
+            document.addEventListener('visibilitychange', this._onVis);
+
+            this.$el.addEventListener('alpine:destroyed', () => {
+                clearInterval(this._timer);
+                document.removeEventListener('visibilitychange', this._onVis);
+            });
         },
 
         async fetchUnread() {

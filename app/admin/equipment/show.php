@@ -85,6 +85,9 @@ $linkedAssetId = $linkedAsset ? (int) $linkedAsset['id'] : 0;
 
 $pageTitle      = 'Unit ' . e($unit['unit_number']);
 $helpModuleSlug = 'equipment';
+// S-PERF-CHARTS: this page draws ApexCharts — opt in before header.php so
+// footer.php emits the 522 KB chart bundle. Without this the charts are blank.
+$pageNeedsCharts = true;
 require_once FF_ROOT . '/includes/header.php';
 
 // statusBadgeClass — page-local alias for the canonical shared helper at

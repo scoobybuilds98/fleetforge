@@ -11,7 +11,14 @@ declare(strict_types=1);
  * can display ApexCharts, HTML tables, and markdown text — all from
  * a single Claude response.
  *
- * Required: ApexCharts must be loaded (already in footer.php).
+ * Required: ApexCharts must be loaded. Since S-PERF-CHARTS that is NO LONGER
+ * automatic — footer.php only emits the 522 KB chart bundle when the page sets
+ * $pageNeedsCharts. This partial sets that flag itself (below) as a backstop,
+ * because it renders `new ApexCharts` at :441 with no availability guard and
+ * its includers (app/admin/ai/index.php in particular) contain no literal
+ * "ApexCharts" match — so a grep-driven audit would not flag them.
+ * The backstop works because every include site is in page scope and runs
+ * before footer.php. Pages should still set the flag explicitly.
  *
  * Optional variables (set before including):
  *   $aiVizId        — unique Alpine component name (default: 'FF_AiViz')
@@ -29,6 +36,13 @@ if (!function_exists('can') || !can('ai', 'view') || !can('reports', 'view')) re
 $_vizEnabled = (bool) settings_get('ai.enabled', false);
 $_vizHasKey  = (bool) (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 if (!$_vizEnabled || !$_vizHasKey) return;
+
+// S-PERF-CHARTS backstop — set AFTER the early returns above, so a page that
+// includes this partial but no-ops (AI off, or no permission) does not pull in
+// the 522 KB chart bundle for a component that renders nothing. Past this line
+// the generator WILL render and `new ApexCharts` at :441 is reachable, so the
+// constructor must exist. footer.php reads this on the same page scope.
+$pageNeedsCharts = true;
 
 $_vizId      = $aiVizId ?? 'FF_AiViz';
 $_vizContext  = $aiVizContext ?? 'reports';

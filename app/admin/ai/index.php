@@ -32,6 +32,9 @@ require_permission('ai', 'view');
 
 $pageTitle = 'AI Assistant';
 $helpModuleSlug = 'ai';
+// S-PERF-CHARTS: this page draws ApexCharts — opt in before header.php so
+// footer.php emits the 522 KB chart bundle. Without this the charts are blank.
+$pageNeedsCharts = true;
 require_once FF_ROOT . '/includes/header.php';
 
 // WHY: Check if AI is configured so we can show setup prompt if needed

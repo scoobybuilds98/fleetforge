@@ -22,8 +22,13 @@
              those globals are reachable, and skipping them keeps the
              iframe payload lighter.
              ============================================================ -->
-        <script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>"></script>
+        <?php // S-PERF-CHARTS — same opt-in gate as footer.php. The embed pane is a
+              // read-only invoice preview and draws no charts, so this is normally
+              // skipped entirely (saves 522 KB raw / 134 KB gzipped per iframe load). ?>
+        <?php if (!empty($pageNeedsCharts)): ?>
+        <script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
         <script src="<?= asset_url('assets/js/ff-chart-theme.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+        <?php endif; ?>
         <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
         <script src="<?= asset_url('assets/js/ff-animations.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
         <script defer src="<?= asset_url('assets/vendor/alpinejs/cdn.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>

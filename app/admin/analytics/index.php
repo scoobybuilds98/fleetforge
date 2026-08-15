@@ -26,6 +26,9 @@ require_permission('analytics', 'view');
 
 $pageTitle      = 'Analytics';
 $helpModuleSlug = 'analytics';
+// S-PERF-CHARTS: this page draws ApexCharts — opt in before header.php so
+// footer.php emits the 522 KB chart bundle. Without this the charts are blank.
+$pageNeedsCharts = true;
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 

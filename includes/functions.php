@@ -823,17 +823,74 @@ function vin_conflict_message(string $vin, ?int $excludeId = null): ?string
 if (!function_exists('settings_get')) {
 function settings_get(string $key, mixed $default = null): mixed
 {
-    try {
-        // DB schema: columns are `key` and `value` (reserved words — must be backtick-quoted)
-        $row = db_row(
-            "SELECT `value` FROM settings WHERE `key` = ?",
-            [$key]
-        );
-        return $row !== null ? $row['value'] : $default;
-    } catch (Throwable) {
-        // Table doesn't exist yet — silent fallback
-        return $default;
+    // S-PERF-SETTINGS — request-scoped cache.
+    //
+    // This used to issue one SELECT per call, and it has ~650 call sites: the
+    // shared chrome alone (header + sidebar + topbar + footer + always-included
+    // partials) made 14 round trips per page render, three of them for the
+    // identical `company.name` key, and the Settings page made 41+. The whole
+    // table is 386 rows / ~4.8 KB, so one SELECT loads it for less than the
+    // cost of two of the individual lookups it replaces.
+    //
+    // Correctness contract this MUST preserve, and why:
+    //   - a row whose `value` is NULL returns NULL, NOT $default. Only a
+    //     genuinely ABSENT key falls back. Hence array_key_exists(), never
+    //     isset()/?? — those two cases are distinguishable today and callers
+    //     depend on it.
+    //   - a missing `settings` table (early install/migration) must still
+    //     return $default silently rather than throw.
+    //
+    // Staleness is handled at the WRITE side, not here: db_insert/db_update/
+    // db_execute call settings_cache_flush() whenever they touch this table
+    // (see includes/db.php). That is a chokepoint rather than a per-call-site
+    // convention, so writers added later cannot forget to invalidate — which
+    // matters because there is no central settings_set() helper and the ~20
+    // existing writers all issue their own SQL. lib/QuickBooksClient.php
+    // writes a refreshed OAuth token and re-reads it inside a single request;
+    // that path is exactly what a naive cache would break.
+    static $all     = null;
+    static $seenGen = -1;
+
+    // Reload when nothing is cached yet, OR when a write bumped the generation
+    // counter since the last read — that is what makes a write-then-read inside
+    // one request see the new value.
+    $gen = settings_cache_generation();
+    if ($all === null || $seenGen !== $gen) {
+        $seenGen = $gen;
+        try {
+            $all = [];
+            foreach (db_select("SELECT `key`, `value` FROM settings") as $r) {
+                $all[$r['key']] = $r['value'];
+            }
+        } catch (Throwable) {
+            // Table doesn't exist yet — leave the cache EMPTY (not null) so we
+            // don't re-attempt the failing query on every subsequent call, and
+            // every key falls through to its default.
+            $all = [];
+        }
     }
+
+    return array_key_exists($key, $all) ? $all[$key] : $default;
+}
+}
+
+// settings_cache_generation() — bumped by settings_cache_flush().
+// A counter rather than a direct reset because settings_get()'s cache lives in
+// a function-static that nothing outside it can reach.
+if (!function_exists('settings_cache_generation')) {
+function settings_cache_generation(): int
+{
+    return (int) ($GLOBALS['__ff_settings_generation'] ?? 0);
+}
+}
+
+// settings_cache_flush() — invalidate the request-scoped settings cache.
+// Called automatically from the db.php write helpers whenever the `settings`
+// table is written. Safe to call when no cache has been built yet.
+if (!function_exists('settings_cache_flush')) {
+function settings_cache_flush(): void
+{
+    $GLOBALS['__ff_settings_generation'] = settings_cache_generation() + 1;
 }
 }
 

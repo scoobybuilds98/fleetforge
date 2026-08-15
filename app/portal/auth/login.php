@@ -588,8 +588,11 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
 
 <!-- Background video — same wave footage as admin login for brand consistency -->
 <div class="video-bg-wrapper" aria-hidden="true">
-    <video class="video-bg" autoplay muted loop playsinline preload="auto">
-        <source src="<?= asset_url('media/video1.mp4') ?>?v=<?= e(FF_ASSET_VERSION) ?>" type="video/mp4">
+    <?php // S-PERF-LOGIN-VIDEO — see app/auth/login.php for the full rationale.
+          // 6,993,794 B -> 578,823 B (-91.7%), audio stripped, faststart, and no
+          // ?v= so it is not re-downloaded on every deploy under immutable caching. ?>
+    <video class="video-bg" autoplay muted loop playsinline preload="metadata">
+        <source src="<?= asset_url('media/login-bg-480.mp4') ?>" type="video/mp4">
     </video>
     <div class="video-bg-overlay"></div>
 </div>

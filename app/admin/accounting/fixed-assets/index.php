@@ -31,6 +31,9 @@ $disposedAssets = db_count("SELECT COUNT(*) FROM acc_fixed_assets WHERE status =
 $totalNbv       = db_row("SELECT SUM(net_book_value) AS nbv FROM acc_fixed_assets WHERE status IN ('active','impaired')")['nbv'] ?? '0.00';
 
 $pageTitle = 'Fixed Assets';
+// S-PERF-CHARTS: this page draws ApexCharts — opt in before header.php so
+// footer.php emits the 522 KB chart bundle. Without this the charts are blank.
+$pageNeedsCharts = true;
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

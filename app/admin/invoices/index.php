@@ -23,41 +23,21 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('invoices', 'view');
 
-// ── AR Aging KPI tiles — server-side so they always reflect reality ──────────
-// WHY server-side: these are accounting figures that must be accurate on load,
-// not approximations from the paginated list response.
-$arCurrent = db_row(
-    "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
-       FROM invoices
-      WHERE status IN ('sent','partially_paid') AND due_date >= CURDATE() AND deleted_at IS NULL",
-    []
-);
-$ar30 = db_row(
-    "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
-       FROM invoices
-      WHERE status IN ('sent','partially_paid','overdue')
-        AND due_date < CURDATE()
-        AND due_date >= CURDATE() - INTERVAL 30 DAY
-        AND deleted_at IS NULL",
-    []
-);
-$ar60 = db_row(
-    "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
-       FROM invoices
-      WHERE status IN ('sent','partially_paid','overdue')
-        AND due_date < CURDATE() - INTERVAL 30 DAY
-        AND due_date >= CURDATE() - INTERVAL 60 DAY
-        AND deleted_at IS NULL",
-    []
-);
-$ar90 = db_row(
-    "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due),0) AS total
-       FROM invoices
-      WHERE status IN ('sent','partially_paid','overdue')
-        AND due_date < CURDATE() - INTERVAL 60 DAY
-        AND deleted_at IS NULL",
-    []
-);
+// ── AR Aging KPI tiles ───────────────────────────────────────────────────────
+// These four buckets used to be computed HERE and inlined into the Alpine
+// component below. That was removed (S-PERF-KPI-DEDUP) because the values were
+// never used: x-init="loadKpis()" fetches api/v1/invoices/kpis and Object.assign
+// overwrites all eight fields ~1 RTT later, so the four SELECTs were pure waste.
+//
+// Deleting them also closes a financial-redaction hole. api/v1/invoices/kpis.php
+// zeroes the *_total fields via can_view_financials() ("I03: dispatchers get the
+// AR-aging COUNTS but not the dollar totals"), but this page had no such gate —
+// it json_encode'd the raw SUM(balance_due) straight into the HTML. A dispatcher
+// could read the real AR totals in view-source. That was not a visible flash;
+// it was in the markup regardless of what the API later returned.
+//
+// The API is now the ONLY producer of these numbers, so the redaction rule has
+// exactly one implementation. Do not reintroduce a server-side copy here.
 
 // S-QBO-INVOICE-LIST-BADGE: per-row QBO push-status column on the list.
 // Visible only when QBO is connected — column hidden entirely (header
@@ -110,7 +90,7 @@ require_once FF_ROOT . '/includes/header.php';
          @click="activeTile = activeTile === 'current' ? '' : 'current'; setAging(activeTile)">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Current</div>
-        <div class="stat-value currency" x-text="fmt(kpis.current_total)"></div>
+        <div class="stat-value currency" x-text="kpiMoney(kpis.current_total)"></div>
         <div class="stat-delta text-secondary" x-text="kpis.current_cnt + ' invoice' + (kpis.current_cnt !== 1 ? 's' : '')"></div>
     </div>
 
@@ -120,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
          @click="activeTile = activeTile === 'ar30' ? '' : 'ar30'; setAging(activeTile)">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">1–30 Days Overdue</div>
-        <div class="stat-value currency" style="color:var(--color-warning);" x-text="fmt(kpis.ar30_total)"></div>
+        <div class="stat-value currency" style="color:var(--color-warning);" x-text="kpiMoney(kpis.ar30_total)"></div>
         <div class="stat-delta text-secondary" x-text="kpis.ar30_cnt + ' overdue'"></div>
     </div>
 
@@ -130,7 +110,7 @@ require_once FF_ROOT . '/includes/header.php';
          @click="activeTile = activeTile === 'ar60' ? '' : 'ar60'; setAging(activeTile)">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">31–60 Days Overdue</div>
-        <div class="stat-value currency" style="color:var(--color-danger);" x-text="fmt(kpis.ar60_total)"></div>
+        <div class="stat-value currency" style="color:var(--color-danger);" x-text="kpiMoney(kpis.ar60_total)"></div>
         <div class="stat-delta text-secondary" x-text="kpis.ar60_cnt + ' overdue'"></div>
     </div>
 
@@ -140,7 +120,7 @@ require_once FF_ROOT . '/includes/header.php';
          @click="activeTile = activeTile === 'ar90' ? '' : 'ar90'; setAging(activeTile)">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-fire"/></svg></span>
         <div class="stat-label">60+ Days Overdue</div>
-        <div class="stat-value currency" style="color:var(--color-danger);" x-text="fmt(kpis.ar90_total)"></div>
+        <div class="stat-value currency" style="color:var(--color-danger);" x-text="kpiMoney(kpis.ar90_total)"></div>
         <div class="stat-delta text-secondary" x-text="kpis.ar90_cnt + ' overdue'"></div>
     </div>
 
@@ -449,15 +429,17 @@ require_once FF_ROOT . '/includes/header.php';
 function invoicesKpis() {
     return {
         activeTile: '',
+        // S-PERF-KPI-DEDUP: zeros, not server-rendered figures. loadKpis()
+        // populates these from api/v1/invoices/kpis, which is the single place
+        // the can_view_financials() redaction is applied. kpisFailed drives a
+        // dash in the tile so a failed fetch cannot masquerade as a real $0.00.
+        kpisLoaded: false,
+        kpisFailed: false,
         kpis: {
-            current_total: <?= json_encode($arCurrent['total'] ?? '0.00') ?>,
-            current_cnt:   <?= json_encode((int)($arCurrent['cnt'] ?? 0)) ?>,
-            ar30_total:    <?= json_encode($ar30['total'] ?? '0.00') ?>,
-            ar30_cnt:      <?= json_encode((int)($ar30['cnt'] ?? 0)) ?>,
-            ar60_total:    <?= json_encode($ar60['total'] ?? '0.00') ?>,
-            ar60_cnt:      <?= json_encode((int)($ar60['cnt'] ?? 0)) ?>,
-            ar90_total:    <?= json_encode($ar90['total'] ?? '0.00') ?>,
-            ar90_cnt:      <?= json_encode((int)($ar90['cnt'] ?? 0)) ?>,
+            current_total: '0.00', current_cnt: 0,
+            ar30_total:    '0.00', ar30_cnt:    0,
+            ar60_total:    '0.00', ar60_cnt:    0,
+            ar90_total:    '0.00', ar90_cnt:    0,
         },
         fmt(n) { return '$' + Number(n || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
 
@@ -494,9 +476,27 @@ function invoicesKpis() {
         },
 
         async loadKpis() {
-            const r = await FF_Api.get('<?= base_url('api/v1/invoices/kpis') ?>');
-            if (r.success) Object.assign(this.kpis, r.data);
+            // The tiles are now the ONLY source of these figures, so a failed
+            // fetch must be visibly distinct from a genuine zero balance —
+            // otherwise a network blip reads as "nothing outstanding".
+            // FF_Api.get RESOLVES (does not reject) on a 4xx/5xx envelope, so
+            // gate on r.success as well as catching a thrown transport error.
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/invoices/kpis') ?>');
+                if (r && r.success) {
+                    Object.assign(this.kpis, r.data);
+                    this.kpisLoaded = true;
+                    this.kpisFailed = false;
+                } else {
+                    this.kpisFailed = true;
+                }
+            } catch {
+                this.kpisFailed = true;
+            }
         },
+
+        /** Tile display value: dash while loading or on failure, never a fake $0.00. */
+        kpiMoney(v) { return this.kpisFailed ? '—' : (this.kpisLoaded ? this.fmt(v) : '…'); },
     };
 }
 

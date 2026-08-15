@@ -873,13 +873,34 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
   readable.
 -->
 <div class="video-bg-wrapper" aria-hidden="true">
+    <?php
+    // S-PERF-LOGIN-VIDEO — this was media/video1.mp4: 6,993,794 B of 1920x1080
+    // H.264 with an AAC track that can never be heard (the element is muted),
+    // preload="auto", on the first page every user hits. ~93% of the page's
+    // bytes for something rendered under filter: blur(10px).
+    //
+    // Now 480x270 / 20fps / CRF 33 / no audio / faststart = 578,823 B (-91.7%).
+    // Verified equivalent, not assumed: simulated the browser's own pipeline
+    // (upscale to a 2560px viewport, then 10px Gaussian) and measured SSIM
+    // 0.982 against the original. Under that blur the source resolution is
+    // almost entirely discarded, which is why this is invisible.
+    //
+    // NO ?v= CACHE-BUSTER, deliberately. FF_ASSET_VERSION is the git HEAD hash,
+    // so the old URL re-downloaded the entire video on EVERY deploy — with
+    // /assets/ and /media/ now served `immutable` for a year, a stable URL is
+    // what actually makes the cache work. Version this by FILENAME instead:
+    // re-encode to login-bg-<something-new>.mp4 rather than overwriting.
+    //
+    // preload="metadata" (not "auto"): autoplay still streams it, but the
+    // browser stops racing the whole file against app.css and the two fonts.
+    ?>
     <video class="video-bg"
            autoplay
            muted
            loop
            playsinline
-           preload="auto">
-        <source src="<?= asset_url('media/video1.mp4') ?>?v=<?= e(FF_ASSET_VERSION) ?>" type="video/mp4">
+           preload="metadata">
+        <source src="<?= asset_url('media/login-bg-480.mp4') ?>" type="video/mp4">
     </video>
     <div class="video-bg-overlay"></div>
 </div>

@@ -175,12 +175,40 @@
      Alpine must be last so it discovers all x-data in the DOM.
      ============================================================ -->
 
+<?php
+// ============================================================
+// S-PERF-CHARTS — ApexCharts is 522 KB (134 KB gzipped) and used by
+// 8 of 163 admin pages. It used to load here unconditionally, so 95%
+// of page views downloaded, parsed and executed it for nothing.
+//
+// A page opts in by setting $pageNeedsCharts = true BEFORE including
+// header.php. footer.php runs in the page's own scope, so a plain
+// page-level variable is visible here.
+//
+// THE FLAG IS REQUIRED ON EVERY PAGE THAT REACHES `new ApexCharts`,
+// INCLUDING INDIRECTLY. includes/partials/ai-report-generator.php builds
+// a chart with no availability guard, so any page including that partial
+// needs the flag too — app/admin/ai/index.php contains no literal
+// "ApexCharts" match and is exactly the page a grep-driven edit misses.
+// The partial sets the flag itself as a backstop (it is always included
+// before this file), but pages set it explicitly as well.
+//
+// Emit position is unchanged — before app.js — so FF_CHART_THEME and
+// app.js's patchApexChartsForResponsive still see the constructor.
+// Do NOT add defer to only one of these: defer preserves order among
+// deferred scripts, but mixing deferred and non-deferred does not.
+// ============================================================
+?>
+<?php if (!empty($pageNeedsCharts)): ?>
 <!-- ApexCharts v3.45.1 (pinned, self-hosted via S-PROD-3 2026-05-14) -->
-<script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>"></script>
+<!-- ?v= is REQUIRED: /assets/ is served `public, max-age=31536000, immutable`,
+     so without a cache-buster this file could never be updated in place. -->
+<script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
 
 <!-- S-LUX-2: global ApexCharts theme (FF_CHART_THEME). MUST load after the
      ApexCharts lib and before app.js (which registers instances) + any chart init. -->
 <script src="<?= asset_url('assets/js/ff-chart-theme.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+<?php endif; ?>
 
 <!-- FleetForge application JS -->
 <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->

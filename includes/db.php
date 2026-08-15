@@ -217,6 +217,8 @@ function db_insert(string $table, array $data): int
     $stmt = db_pdo()->prepare($sql);
     $stmt->execute(array_values($data));
 
+    db_invalidate_caches_for_table($table);
+
     return (int) db_pdo()->lastInsertId();
 }
 
@@ -245,6 +247,8 @@ function db_update(string $table, array $data, string $where, array $whereParams
     $stmt = db_pdo()->prepare($sql);
     $stmt->execute($params);
 
+    db_invalidate_caches_for_table($table);
+
     return $stmt->rowCount();
 }
 
@@ -256,7 +260,45 @@ function db_execute(string $sql, array $params = []): int
 {
     $stmt = db_pdo()->prepare($sql);
     $stmt->execute($params);
+
+    // Raw SQL — the table isn't a parameter here, so sniff it out of the
+    // statement. Deliberately cheap and deliberately over-eager: a false
+    // positive costs one extra 386-row SELECT, a false negative costs a stale
+    // read, so the trade is lopsided and we take the cheap side.
+    db_invalidate_caches_for_sql($sql);
+
     return $stmt->rowCount();
+}
+
+// ============================================================
+// db_invalidate_caches_for_table() / _for_sql() — S-PERF-SETTINGS
+//
+// settings_get() keeps a request-scoped cache of the whole settings table
+// (386 rows) because it had ~650 call sites each doing its own SELECT. There
+// is no central settings_set() helper — roughly 20 files write the table with
+// their own SQL — so invalidation is hooked HERE, at the three write helpers
+// every one of those writers already goes through, rather than relying on
+// each call site to remember. A writer added next year inherits it for free.
+//
+// lib/QuickBooksClient.php is the path that proves this is necessary: it
+// writes a refreshed OAuth token and re-reads it within the same request.
+// ============================================================
+function db_invalidate_caches_for_table(string $table): void
+{
+    if (strtolower(trim($table, '` ')) === 'settings' && function_exists('settings_cache_flush')) {
+        settings_cache_flush();
+    }
+}
+
+function db_invalidate_caches_for_sql(string $sql): void
+{
+    // Only bother looking at statements that actually mutate.
+    if (!preg_match('/^\s*(INSERT|UPDATE|DELETE|REPLACE|TRUNCATE|ALTER|DROP)\b/i', $sql)) {
+        return;
+    }
+    if (preg_match('/\bsettings\b/i', $sql) && function_exists('settings_cache_flush')) {
+        settings_cache_flush();
+    }
 }
 
 // ============================================================
