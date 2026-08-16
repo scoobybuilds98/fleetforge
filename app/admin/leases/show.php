@@ -310,6 +310,14 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     <div class="tab-bar" role="tablist">
         <button class="tab-btn" :class="{ 'is-active': tab === 'overview' }"
                 @click="tab = 'overview'" :aria-selected="tab === 'overview'" role="tab">Overview</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'invoices' }"
+                @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices</button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'documents' }"
+                @click="tab = 'documents'; loadDocuments()" :aria-selected="tab === 'documents'" role="tab">Documents
+            <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'inspections' }"
+                @click="tab = 'inspections'; loadInspections()" :aria-selected="tab === 'inspections'" role="tab">Inspections</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'status_log' }"
                 @click="tab = 'status_log'" :aria-selected="tab === 'status_log'" role="tab">
             Status Log
@@ -321,18 +329,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             Amendments
             <span class="tab-count" x-show="amendments.length > 0" x-text="amendments.length"></span>
         </button>
-        <button class="tab-btn" :class="{ 'is-active': tab === 'invoices' }"
-                @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'damage_claims' }"
                 @click="tab = 'damage_claims'; loadDamageClaims()" :aria-selected="tab === 'damage_claims'" role="tab">Damage Claims</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'mileage_logs' }"
                 @click="tab = 'mileage_logs'; loadMileageLogs()" :aria-selected="tab === 'mileage_logs'" role="tab">Mileage Log</button>
-        <button class="tab-btn" :class="{ 'is-active': tab === 'inspections' }"
-                @click="tab = 'inspections'; loadInspections()" :aria-selected="tab === 'inspections'" role="tab">Inspections</button>
-        <button class="tab-btn" :class="{ 'is-active': tab === 'documents' }"
-                @click="tab = 'documents'; loadDocuments()" :aria-selected="tab === 'documents'" role="tab">Documents
-            <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
-        </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'activity' }"
                 @click="tab = 'activity'" :aria-selected="tab === 'activity'" role="tab">Activity</button>
     </div>
@@ -2155,8 +2155,8 @@ function FF_LeaseDetail() {
             // Tab clicks use @click="tab='x'; loadX()" — those continue to
             // handle lazy-loading. We only need the manual trigger here for
             // the hash-restored initial tab (bypasses the click path).
-            const _tabs = ['overview','status_log','amendments','invoices',
-                           'damage_claims','mileage_logs','inspections','documents','activity'];
+            const _tabs = ['overview','invoices','documents','inspections',
+                           'status_log','amendments','damage_claims','mileage_logs','activity'];
             const _initTab = FF_TabHash.init(_tabs, 'overview');
             this.tab = _initTab;
             FF_TabHash.write(_initTab);
