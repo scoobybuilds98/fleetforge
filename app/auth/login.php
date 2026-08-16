@@ -866,8 +866,9 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
   MEDIA-1 — Background video layer.
   Sits behind everything via z-index:0; form card above via z-index:10+.
   Muted + playsinline + autoplay are required for modern browser
-  auto-play policies. preload="auto" because the file is local and
-  small-ish; if file grows, bump to preload="metadata".
+  auto-play policies. preload="metadata" (S-PERF-LOGIN-VIDEO): autoplay
+  still streams the clip, but the browser no longer races the whole file
+  against app.css and the two preloaded fonts on the critical path.
   Fallback: if the <video> element can't play the source, the
   wrapper keeps its solid dark background color so the form stays
   readable.
