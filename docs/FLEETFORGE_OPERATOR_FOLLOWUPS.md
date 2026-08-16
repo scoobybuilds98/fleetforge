@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-08-07 via S-CUSTOMER-NOTIFICATIONS — added **F64** (deploy + migration `202608070001`; note Task 1 "stop customer compliance emails" is effective on code deploy alone) and **F65** (add `cron/customer_reminders.php` to the prod crontab — no-op until a reminder is enabled). Prior: 2026-07-22 via S-NORTHLAND-P0 — F61 CLOSED (SES bounce+complaint handling proven on prod); F62 (credit-app PDF teal accent) still open 🟡.
+**Last updated:** 2026-08-16 via S-REPORTS-STALE — added **F66** (prod has 1,553 unsent draft invoices / $1,080,790.91 and zero invoices have ever reached `sent`; all revenue reporting, AR, collections and QBO invoice sync read $0 as a direct consequence). Previously: 2026-08-07 via S-CUSTOMER-NOTIFICATIONS — added **F64** (deploy + migration `202608070001`; note Task 1 "stop customer compliance emails" is effective on code deploy alone) and **F65** (add `cron/customer_reminders.php` to the prod crontab — no-op until a reminder is enabled). Prior: 2026-07-22 via S-NORTHLAND-P0 — F61 CLOSED (SES bounce+complaint handling proven on prod); F62 (credit-app PDF teal accent) still open 🟡.
 
 ---
 
@@ -408,6 +408,30 @@
 **Note:** This gate is per-session per D-QBO-VALIDATOR-3 (S-QBO-VALIDATOR-SCOPE-SPLIT). Other Pushers have their own category requirements: InvoicePusher needs ar_clearing + sales_revenue; PaymentPusher needs ar_clearing + undeposited_funds; BillPusher needs ap_clearing; BillPaymentPusher needs ap_clearing + undeposited_funds.
 
 ---
+
+### F66 — Nothing has ever been billed through FleetForge: 1,553 unsent draft invoices ($1,080,790.91) 🔴 BLOCKING (LIVE NOW)
+
+**Surfaced by:** S-REPORTS-STALE (2026-08-16) — operator asked "why aren't reports being updated and is empty?". Investigating the Reports module found the module was correct and the DATA was the story.
+
+**Observed on prod (read-only probe, 2026-08-16):**
+- `invoices` contains exactly TWO statuses: `draft` (1,553 / $1,080,790.91) and `void` (145). There are **zero** `sent`, `partially_paid`, `paid`, or `overdue` rows — none have ever existed.
+- `payments` table is **empty** (0 rows).
+- `customers.outstanding_balance` sums to **$0.00** across all 42 customers — internally consistent, since that counter only increments on draft→sent (Path B semantics).
+- The operational side IS in real use: 169 units, 514 leases (165 active), 42 customers. Drafts span 2025-05-28 → 2026-12-03.
+- `cron.invoice_generate_monthly_enabled = 0` — the monthly recurring-invoice cron is switched OFF, so Aug-2026 produced only 2 drafts against 175 in July.
+
+**What this breaks:** every money-derived surface reads $0.00 for EVERY date range including All Time — Reports (all Financial + Customer views), Dashboard revenue KPIs, AR aging, collections, dunning, and the QBO InvoiceEnqueuer (which only pushes `sent`). None of these are broken code; they are all correctly reporting that nothing has been billed.
+
+**Operator action (decisions required — do NOT bulk-send blindly):**
+1. Decide which of the 1,553 drafts are real billings vs. abandoned/superseded artifacts. Future-dated drafts through 2026-12-03 almost certainly should NOT be sent yet.
+2. Decide whether `cron.invoice_generate_monthly_enabled` should be turned back ON (Settings → Intelligence → Scheduled Jobs), or whether monthly billing is intentionally manual.
+3. Send the approved backlog. **Side effects to expect:** each draft→sent transition increments `customers.outstanding_balance`, and sending fires customer email — 1,553 at once would be a very large mail burst against SES limits. Stage it.
+4. After sending, verify: Reports → Financial → By Period should populate, and `customers.outstanding_balance` should become non-zero.
+
+**Why blocking:** FleetForge's core purpose is billing, and no invoice has ever left draft on production. Until this is resolved the operator has no AR, no revenue reporting, and no QBO invoice sync — regardless of how much of the app works.
+
+**Code-side (already shipped in S-REPORTS-STALE, deploy required):** the Reports module no longer renders a silent $0.00 grid — it now names the cause ("N draft invoices totalling $X fall in this range, but drafts are excluded from revenue reporting until they are sent") with a link straight to the draft list. **No migration** — plain code deploy. Deploying this first will make the backlog visible in-app while it is worked through.
+
 
 ## 🟢 DEFERRED — queued for follow-up sessions
 

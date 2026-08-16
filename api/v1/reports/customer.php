@@ -20,6 +20,8 @@ declare(strict_types=1);
  *   view      : ltv | payment_behavior | new_returning | frequency | credit_notes
  *   format    : json | csv
  *
+ * Returns (json): { success, data: { kpis, chart_data, table, totals, excluded, date_from, date_to, view, cached } }
+ *
  * Spec ref: §7.10 Reports, Reports Charts #9–#10, PROGRESS.md S021
  * Decisions: D16 (bcmath), D5 (soft-delete both JOIN sides)
  */
@@ -93,6 +95,32 @@ $kpis = [
     'invoice_count'     => (int)   $kpiRow['invoice_count'],
     'lease_count'       => (int)   $kpiRow['lease_count'],
     'avg_days_to_pay'   => bcround((string) ($payRow['avg_days_to_pay']   ?? '0'), 1),
+];
+
+// ── Excluded-invoice census ──────────────────────────────────────────────────
+// Mirrors api/v1/reports/revenue.php: the customer views are invoice-status
+// driven too, so an all-draft range collapses to zero customers with no
+// explanation. Surfacing the withheld counts lets the UI name the cause.
+$excludedRow = db_row(
+    "SELECT
+        COUNT(CASE WHEN i.status = 'draft'       THEN 1 END) AS draft_count,
+        COUNT(CASE WHEN i.status = 'void'        THEN 1 END) AS void_count,
+        COUNT(CASE WHEN i.status = 'written_off' THEN 1 END) AS written_off_count,
+        COALESCE(SUM(CASE WHEN i.status = 'draft'
+                          THEN (CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)
+                          ELSE 0 END), 0)                    AS draft_total
+     FROM invoices i
+     WHERE i.deleted_at IS NULL
+       AND i.status IN ('draft', 'void', 'written_off')
+       AND i.invoice_date BETWEEN ? AND ?",
+    [$dateFrom, $dateTo]
+);
+
+$excluded = [
+    'draft_count'       => (int) ($excludedRow['draft_count']       ?? 0),
+    'void_count'        => (int) ($excludedRow['void_count']        ?? 0),
+    'written_off_count' => (int) ($excludedRow['written_off_count'] ?? 0),
+    'draft_total'       => bcround((string) ($excludedRow['draft_total'] ?? '0'), 2),
 ];
 
 // ── View-specific data ───────────────────────────────────────────────────────
@@ -408,6 +436,7 @@ $result = [
     'chart_data'   => $chartData,
     'table'        => $table,
     'totals'       => $totals,
+    'excluded'     => $excluded,
     'date_from'    => $dateFrom,
     'date_to'      => $dateTo,
     'preset'       => $preset,

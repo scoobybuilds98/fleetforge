@@ -175,14 +175,15 @@ set_exception_handler(function (Throwable $e): void {
  */
 function json_success(mixed $data = null, int $status = 200): never
 {
-    // Invalidate dashboard cache on any write request so KPI tiles and charts
-    // reflect the change immediately rather than waiting for the TTL to expire.
-    // Safe to call on every write — the DELETE on report_cache is a no-op when
-    // no cached rows exist, and GET/HEAD/OPTIONS requests never reach this branch.
+    // Invalidate the derived analytics caches on any write request so Dashboard
+    // KPIs/charts AND the Reports module tabs reflect the change immediately
+    // rather than waiting for the TTL to expire. Safe to call on every write —
+    // the DELETE on report_cache is a no-op when no cached rows exist, and
+    // GET/HEAD/OPTIONS requests never reach this branch.
     $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
     if (in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
-        if (function_exists('invalidate_dashboard_cache')) {
-            invalidate_dashboard_cache();
+        if (function_exists('invalidate_analytics_cache')) {
+            invalidate_analytics_cache();
         }
     }
 

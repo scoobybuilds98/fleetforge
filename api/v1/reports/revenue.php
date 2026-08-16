@@ -17,7 +17,7 @@ declare(strict_types=1);
  *   view        : period | customer | equipment_type | ar_aging | collection | status
  *   format      : json | csv  (default json)
  *
- * Returns (json): { success, data: { kpis, chart_data, table, totals, date_from, date_to, view, cached } }
+ * Returns (json): { success, data: { kpis, chart_data, table, totals, excluded, date_from, date_to, view, cached } }
  * Returns (csv):  Content-Disposition: attachment download
  *
  * Spec ref: §7.10 Reports, Reports Charts #1–#4, PROGRESS.md S021
@@ -106,6 +106,35 @@ $kpis = [
     'paid_count'        => (int)   $kpiRow['paid_count'],
     'overdue_count'     => (int)   $kpiRow['overdue_count'],
     'overdue_amount'    => bcround((string) ($kpiRow['overdue_amount']    ?? '0'), 2),
+];
+
+// ── Excluded-invoice census ──────────────────────────────────────────────────
+// WHY this exists: every revenue query above filters out draft/void/written_off
+// per the reporting policy, so a range containing nothing but drafts renders as
+// a silent grid of $0.00 that is indistinguishable from "no activity". Counting
+// what was withheld lets the UI say WHY the range is empty instead of implying
+// the business did nothing. Same BETWEEN window as the KPI tiles so the numbers
+// line up with the date range shown in the toolbar.
+$excludedRow = db_row(
+    "SELECT
+        COUNT(CASE WHEN i.status = 'draft'       THEN 1 END) AS draft_count,
+        COUNT(CASE WHEN i.status = 'void'        THEN 1 END) AS void_count,
+        COUNT(CASE WHEN i.status = 'written_off' THEN 1 END) AS written_off_count,
+        COALESCE(SUM(CASE WHEN i.status = 'draft'
+                          THEN (CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)
+                          ELSE 0 END), 0)                    AS draft_total
+     FROM invoices i
+     WHERE i.deleted_at IS NULL
+       AND i.status IN ('draft', 'void', 'written_off')
+       AND i.invoice_date BETWEEN ? AND ?",
+    [$dateFrom, $dateTo]
+);
+
+$excluded = [
+    'draft_count'       => (int) ($excludedRow['draft_count']       ?? 0),
+    'void_count'        => (int) ($excludedRow['void_count']        ?? 0),
+    'written_off_count' => (int) ($excludedRow['written_off_count'] ?? 0),
+    'draft_total'       => bcround((string) ($excludedRow['draft_total'] ?? '0'), 2),
 ];
 
 // ── View-specific data ───────────────────────────────────────────────────────
@@ -462,6 +491,7 @@ $result = [
     'chart_data'   => $chartData,
     'table'        => $table,
     'totals'       => $totals,
+    'excluded'     => $excluded,
     'date_from'    => $dateFrom,
     'date_to'      => $dateTo,
     'preset'       => $preset,

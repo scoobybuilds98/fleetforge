@@ -1486,15 +1486,64 @@ function help_button(string $moduleSlug): string
 endif; // function_exists('help_button')
 
 /**
- * Invalidate all dashboard cache rows (KPIs + all 12 charts).
+ * Analytics cache-key prefixes stored in report_cache.
  *
- * Call after any write that changes KPI-relevant data so the next
- * dashboard load reflects the change immediately rather than waiting
- * for the TTL (5 min KPIs, 15 min charts) to expire naturally.
+ * Every entry here is a DERIVED aggregate that can be recomputed from live
+ * tables at any time, so it is safe to drop on write. The list is deliberately
+ * an ALLOWLIST rather than a blanket wipe: report_cache also holds
+ * 'ai_fleet_brief', which is the product of a paid Claude API call and is read
+ * back by MorningBriefingRenderer (briefing history + the test-send guard).
+ * Deleting that row would silently break the morning brief and cost money to
+ * regenerate — never add it here.
+ *
+ *   dashboard_*   api/v1/dashboard/kpis.php + charts.php  (5 / 15 min TTL)
+ *   revenue_*     api/v1/reports/revenue.php              (15 min TTL)
+ *   fleet_*       api/v1/reports/fleet.php                (15 min TTL)
+ *   customer_*    api/v1/reports/customer.php             (15 min TTL)
+ *   compliance_*  api/v1/reports/compliance.php           (15 min TTL)
+ */
+const FF_ANALYTICS_CACHE_PREFIXES = ['dashboard', 'revenue', 'fleet', 'customer', 'compliance'];
+
+/**
+ * Invalidate every derived analytics cache row — Dashboard KPIs/charts AND the
+ * four Reports-module tabs (Financial, Fleet, Customer, Compliance).
+ *
+ * Call after any write that changes reportable data so the next page load
+ * reflects the change immediately rather than waiting out the TTL.
+ *
+ * WHY the underscore is escaped: in SQL LIKE, `_` is a single-character
+ * wildcard, so an unescaped 'fleet_%' would also match 'fleetXanything'.
+ * Escaping keeps each pattern anchored to a real prefix boundary. (sql_mode
+ * does not set NO_BACKSLASH_ESCAPES, so `\_` is the literal underscore.)
+ * Each pattern is a left-anchored prefix, so MySQL can drive the delete off
+ * the uq_report_hash(report_type, parameters_hash) index.
+ */
+function invalidate_analytics_cache(): void
+{
+    $clauses = [];
+    $params  = [];
+    foreach (FF_ANALYTICS_CACHE_PREFIXES as $prefix) {
+        $clauses[] = 'report_type LIKE ?';
+        $params[]  = $prefix . '\\_%';
+    }
+    db_execute(
+        'DELETE FROM report_cache WHERE ' . implode(' OR ', $clauses),
+        $params
+    );
+}
+
+/**
+ * Back-compat alias retained for the ~28 existing call sites.
+ *
+ * Prefer invalidate_analytics_cache() in new code — the behaviour has always
+ * been "drop the derived aggregates", and since the Reports module caches
+ * under its own prefixes the dashboard-only name was actively misleading:
+ * Reports kept serving a stale snapshot for up to 15 minutes after a write
+ * while the Dashboard refreshed instantly.
  */
 function invalidate_dashboard_cache(): void
 {
-    db_execute("DELETE FROM report_cache WHERE report_type LIKE 'dashboard_%'");
+    invalidate_analytics_cache();
 }
 
 /**
