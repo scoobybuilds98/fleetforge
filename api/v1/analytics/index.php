@@ -18,7 +18,9 @@ declare(strict_types=1);
  *                        avg_lease_value, cohort_revenue)
  *   date_to   : Y-m-d  (optional)
  *
- * Returns: { success:true, data:{ chart_data:{}, kpis:{}, view, date_from, date_to } }
+ * Returns: { success:true, data:{ chart_data:{}, kpis:{}, view, date_from, date_to,
+ *            excluded? } }  — `excluded` is present only on the six
+ *            invoice-status-dependent views (see analytics_view_window).
  *
  * Spec ref: §7.11 Analytics, §9 Analytics Module Charts (8), PROGRESS.md S023
  * Decisions: D5 (soft-delete both sides), D16 (bcmath), D32 (no float math)
@@ -67,11 +69,89 @@ $result = match ($view) {
     'avg_lease_value'     => view_avg_lease_value($dateFrom, $dateTo),
 };
 
+// Six of the eight views aggregate money and therefore filter out
+// draft/void/written_off per the reporting policy. Attach a census of what was
+// withheld so the UI can explain a flat chart instead of implying no activity.
+// The other two (fleet_optimizer, lead_time) are lease-driven — no census.
+$window = analytics_view_window($view, $dateFrom, $dateTo);
+
 json_success(array_merge($result, [
     'view'      => $view,
     'date_from' => $dateFrom,
     'date_to'   => $dateTo,
-]));
+], $window === null ? [] : ['excluded' => analytics_excluded_census($window[0], $window[1])]));
+
+
+// ════════════════════════════════════════════════════════════════════════════
+// EXCLUDED-INVOICE CENSUS (shared by the six invoice-status-dependent views)
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * The invoice_date window a given view actually queries.
+ *
+ * WHY per-view rather than one global range: the views do NOT share a window.
+ * revenue_forecast/cohort_revenue/avg_lease_value honour the user's date
+ * pickers, utilization_matrix/concentration_risk hard-code a trailing 12
+ * months, and seasonal_pattern deliberately spans all time to build its radar.
+ * A census computed over the wrong window would contradict the chart beside it.
+ *
+ * @return array{0:?string,1:?string}|null  [from, to]; nulls mean all-time.
+ *                                          NULL = view is not invoice-driven.
+ */
+function analytics_view_window(string $view, string $dateFrom, string $dateTo): ?array
+{
+    return match ($view) {
+        'revenue_forecast', 'cohort_revenue', 'avg_lease_value' => [$dateFrom, $dateTo],
+        'utilization_matrix', 'concentration_risk'              => [date('Y-m-d', strtotime('-12 months')), date('Y-m-d')],
+        'seasonal_pattern'                                      => [null, null],
+        default                                                 => null,
+    };
+}
+
+/**
+ * Count the invoices a money view withheld, plus how many it COULD see.
+ *
+ * `billable_count` is the discriminator the UI needs: zero billable with
+ * non-zero drafts means "nothing has been sent yet" (explainable), whereas zero
+ * of both simply means no invoices exist in the window at all.
+ *
+ * @param ?string $from  Y-m-d, or null for all-time
+ * @param ?string $to    Y-m-d, or null for all-time
+ */
+function analytics_excluded_census(?string $from, ?string $to): array
+{
+    $where  = 'i.deleted_at IS NULL';
+    $params = [];
+    if ($from !== null && $to !== null) {
+        $where   .= ' AND i.invoice_date BETWEEN ? AND ?';
+        $params[] = $from;
+        $params[] = $to;
+    }
+
+    $row = db_row(
+        "SELECT
+            COUNT(CASE WHEN i.status = 'draft'       THEN 1 END) AS draft_count,
+            COUNT(CASE WHEN i.status = 'void'        THEN 1 END) AS void_count,
+            COUNT(CASE WHEN i.status = 'written_off' THEN 1 END) AS written_off_count,
+            COUNT(CASE WHEN i.status NOT IN ('draft','void','written_off') THEN 1 END) AS billable_count,
+            COALESCE(SUM(CASE WHEN i.status = 'draft'
+                              THEN (CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)
+                              ELSE 0 END), 0)                    AS draft_total
+         FROM invoices i
+         WHERE {$where}",
+        $params
+    );
+
+    return [
+        'draft_count'       => (int) ($row['draft_count']       ?? 0),
+        'void_count'        => (int) ($row['void_count']        ?? 0),
+        'written_off_count' => (int) ($row['written_off_count'] ?? 0),
+        'billable_count'    => (int) ($row['billable_count']    ?? 0),
+        'draft_total'       => bcround((string) ($row['draft_total'] ?? '0'), 2),
+        'window_from'       => $from,
+        'window_to'         => $to,
+    ];
+}
 
 
 // ════════════════════════════════════════════════════════════════════════════

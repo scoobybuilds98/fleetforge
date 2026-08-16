@@ -166,6 +166,21 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     color: var(--text-muted);
     font-size: 13px;
 }
+/* Column variant used when the panel can explain WHY it is empty — a flat
+   chart caused by unsent drafts reads as "no business activity" otherwise. */
+.an-empty--notice {
+    flex-direction: column;
+    gap: 10px;
+    text-align: center;
+    padding: 0 24px;
+    line-height: 1.5;
+}
+.an-empty--notice .an-empty-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.an-empty--notice .an-empty-body { max-width: 420px; }
 </style>
 
 <div class="page-header">
@@ -253,13 +268,20 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
 
         <!-- Chart -->
         <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('revenue_forecast')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('revenue_forecast')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.revenue_forecast?.draft_count||0)+' draft '+((excluded.revenue_forecast?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
             <div x-show="loading.revenue_forecast && !charts.revenue_forecast"
                  class="an-skeleton" style="height:280px;margin:0 8px;border-radius:6px;"></div>
             <div x-show="errors.revenue_forecast" class="an-error">
                 Chart data unavailable
             </div>
             <div id="chart-revenue-forecast"
-                 x-show="!loading.revenue_forecast || charts.revenue_forecast"></div>
+                 x-show="(!loading.revenue_forecast || charts.revenue_forecast) && !showDraftNotice('revenue_forecast')"></div>
         </div>
     </div>
     </div>
@@ -307,11 +329,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('utilization_matrix')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('utilization_matrix')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.utilization_matrix?.draft_count||0)+' draft '+((excluded.utilization_matrix?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.utilization_matrix && !charts.utilization_matrix"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.utilization_matrix" class="an-error">Chart data unavailable</div>
                 <div id="chart-utilization-matrix"
-                     x-show="!loading.utilization_matrix || charts.utilization_matrix"></div>
+                     x-show="(!loading.utilization_matrix || charts.utilization_matrix) && !showDraftNotice('utilization_matrix')"></div>
             </div>
         </div>
 
@@ -357,11 +386,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('concentration_risk')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('concentration_risk')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.concentration_risk?.draft_count||0)+' draft '+((excluded.concentration_risk?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.concentration_risk && !charts.concentration_risk"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.concentration_risk" class="an-error">Chart data unavailable</div>
                 <div id="chart-concentration-risk"
-                     x-show="!loading.concentration_risk || charts.concentration_risk"></div>
+                     x-show="(!loading.concentration_risk || charts.concentration_risk) && !showDraftNotice('concentration_risk')"></div>
             </div>
         </div>
 
@@ -403,11 +439,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('seasonal_pattern')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('seasonal_pattern')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.seasonal_pattern?.draft_count||0)+' draft '+((excluded.seasonal_pattern?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.seasonal_pattern && !charts.seasonal_pattern"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.seasonal_pattern" class="an-error">Chart data unavailable</div>
                 <div id="chart-seasonal-pattern"
-                     x-show="!loading.seasonal_pattern || charts.seasonal_pattern"></div>
+                     x-show="(!loading.seasonal_pattern || charts.seasonal_pattern) && !showDraftNotice('seasonal_pattern')"></div>
             </div>
         </div>
 
@@ -459,11 +502,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('cohort_revenue')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('cohort_revenue')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.cohort_revenue?.draft_count||0)+' draft '+((excluded.cohort_revenue?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.cohort_revenue && !charts.cohort_revenue"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.cohort_revenue" class="an-error">Chart data unavailable</div>
                 <div id="chart-cohort-revenue"
-                     x-show="!loading.cohort_revenue || charts.cohort_revenue"></div>
+                     x-show="(!loading.cohort_revenue || charts.cohort_revenue) && !showDraftNotice('cohort_revenue')"></div>
             </div>
         </div>
 
@@ -505,11 +555,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('fleet_optimizer')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('fleet_optimizer')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.fleet_optimizer?.draft_count||0)+' draft '+((excluded.fleet_optimizer?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.fleet_optimizer && !charts.fleet_optimizer"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.fleet_optimizer" class="an-error">Chart data unavailable</div>
                 <div id="chart-fleet-optimizer"
-                     x-show="!loading.fleet_optimizer || charts.fleet_optimizer"></div>
+                     x-show="(!loading.fleet_optimizer || charts.fleet_optimizer) && !showDraftNotice('fleet_optimizer')"></div>
             </div>
         </div>
 
@@ -559,11 +616,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('lead_time')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('lead_time')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.lead_time?.draft_count||0)+' draft '+((excluded.lead_time?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.lead_time && !charts.lead_time"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.lead_time" class="an-error">Chart data unavailable</div>
                 <div id="chart-lead-time"
-                     x-show="!loading.lead_time || charts.lead_time"></div>
+                     x-show="(!loading.lead_time || charts.lead_time) && !showDraftNotice('lead_time')"></div>
             </div>
         </div>
 
@@ -615,11 +679,18 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             </div>
 
             <div class="an-chart-area">
+            <!-- Explains a flat chart caused by the draft/void exclusion rather than by no activity -->
+            <div x-show="showDraftNotice('avg_lease_value')" class="an-empty an-empty--notice">
+                <div class="an-empty-title">Nothing billed yet</div>
+                <div class="an-empty-body" x-text="draftNotice('avg_lease_value')"></div>
+                <a class="btn btn-secondary btn-sm" :href="draftsUrl()"
+                   x-text="'Review '+(excluded.avg_lease_value?.draft_count||0)+' draft '+((excluded.avg_lease_value?.draft_count||0)===1?'invoice':'invoices')"></a>
+            </div>
                 <div x-show="loading.avg_lease_value && !charts.avg_lease_value"
                      class="an-skeleton" style="height:260px;margin:0 8px;border-radius:6px;"></div>
                 <div x-show="errors.avg_lease_value" class="an-error">Chart data unavailable</div>
                 <div id="chart-avg-lease-value"
-                     x-show="!loading.avg_lease_value || charts.avg_lease_value"></div>
+                     x-show="(!loading.avg_lease_value || charts.avg_lease_value) && !showDraftNotice('avg_lease_value')"></div>
             </div>
         </div>
 
@@ -648,12 +719,17 @@ function FF_Analytics() {
     const errorsInit   = Object.fromEntries(ALL_VIEWS.map(v => [v, false]));
     const kpisInit     = Object.fromEntries(ALL_VIEWS.map(v => [v, null]));
     const chartsInit   = Object.fromEntries(ALL_VIEWS.map(v => [v, null]));
+    // Census of invoices each money view had to withhold (draft/void/written_off).
+    // Stays null for fleet_optimizer + lead_time, which are lease-driven and
+    // never receive an `excluded` block from the API.
+    const excludedInit = Object.fromEntries(ALL_VIEWS.map(v => [v, null]));
 
     return {
-        loading: { ...loadingInit },
-        errors:  { ...errorsInit  },
-        kpis:    { ...kpisInit    },
-        charts:  { ...chartsInit  },
+        loading:  { ...loadingInit  },
+        errors:   { ...errorsInit   },
+        kpis:     { ...kpisInit     },
+        charts:   { ...chartsInit   },
+        excluded: { ...excludedInit },
 
         // Per-view date ranges (only used by views that support it)
         dateFrom: {
@@ -673,6 +749,39 @@ function FF_Analytics() {
         init() {
             ALL_VIEWS.forEach(v => this.loadView(v));
         },
+
+        // ── Draft-exclusion notice ─────────────────────────────────────────
+        // Show ONLY when the view could see nothing billable AND drafts are the
+        // reason. Zero billable with zero drafts is a genuinely empty window and
+        // gets the normal (blank) chart, not a misleading explanation.
+        showDraftNotice(view) {
+            const ex = this.excluded[view];
+            return !!ex && ex.billable_count === 0 && ex.draft_count > 0;
+        },
+
+        draftNotice(view) {
+            const ex = this.excluded[view];
+            if (!ex) return '';
+            // seasonal_pattern spans all time and so reports no window — say
+            // "exist" there rather than inventing a range to fall inside.
+            const dated = !!(ex.window_from && ex.window_to);
+            let s = ex.draft_count + (ex.draft_count === 1 ? ' draft invoice' : ' draft invoices')
+                  + ' totalling ' + this.money(ex.draft_total)
+                  + (dated
+                        ? (ex.draft_count === 1 ? ' falls in ' : ' fall in ') + ex.window_from + ' \u2192 ' + ex.window_to
+                        : (ex.draft_count === 1 ? ' exists' : ' exist'))
+                  + ', but drafts are excluded from analytics until they are sent.';
+            const bits = [];
+            if (ex.void_count)        bits.push(ex.void_count + ' void');
+            if (ex.written_off_count) bits.push(ex.written_off_count + ' written-off');
+            if (bits.length) {
+                const other = (ex.void_count || 0) + (ex.written_off_count || 0);
+                s += ' ' + bits.join(' and ') + (other === 1 ? ' invoice is' : ' invoices are') + ' excluded too.';
+            }
+            return s;
+        },
+
+        draftsUrl() { return (window.FF_BASE_PATH || '') + '/invoices?status=draft'; },
 
         // ── Load a single view ──────────────────────────────────────────────
         async loadView(view) {
@@ -709,7 +818,8 @@ function FF_Analytics() {
                     return;
                 }
 
-                this.kpis[view] = json.data.kpis || {};
+                this.kpis[view]     = json.data.kpis || {};
+                this.excluded[view] = json.data.excluded || null;
 
                 // Wait for DOM to paint KPI strip before rendering chart
                 await this.$nextTick();

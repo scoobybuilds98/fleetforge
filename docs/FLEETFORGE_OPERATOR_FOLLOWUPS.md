@@ -430,7 +430,7 @@
 
 **Why blocking:** FleetForge's core purpose is billing, and no invoice has ever left draft on production. Until this is resolved the operator has no AR, no revenue reporting, and no QBO invoice sync — regardless of how much of the app works.
 
-**Code-side (already shipped in S-REPORTS-STALE, deploy required):** the Reports module no longer renders a silent $0.00 grid — it now names the cause ("N draft invoices totalling $X fall in this range, but drafts are excluded from revenue reporting until they are sent") with a link straight to the draft list. **No migration** — plain code deploy. Deploying this first will make the backlog visible in-app while it is worked through.
+**Code-side (already shipped in S-REPORTS-STALE, deploy required):** the Reports module AND the Analytics module no longer render silent zeros — Analytics' six money-driven views (revenue forecast, utilization matrix, concentration risk, seasonal pattern, cohort revenue, avg lease value) now carry the same explanation, each scoped to the window that view actually queries. Reports names the cause inline — "N draft invoices totalling $X fall in this range, but drafts are excluded from revenue reporting until they are sent" — with a link straight to the draft list. **No migration** — plain code deploy. Deploying this first will make the backlog visible in-app while it is worked through.
 
 
 ## 🟢 DEFERRED — queued for follow-up sessions

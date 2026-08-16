@@ -21,7 +21,8 @@ declare(strict_types=1);
  *     `_` is a LIKE wildcard, so an unescaped 'fleet_%' also matches
  *     'fleetXanything'.
  *
- *  2. EMPTY-STATE CENSUS. Revenue views exclude draft/void/written_off per the
+ *  2. EMPTY-STATE CENSUS. Revenue views (Reports) AND six of the eight Analytics
+ *     views exclude draft/void/written_off per the
  *     reporting policy, so a range holding nothing but drafts rendered a silent
  *     grid of $0.00 — indistinguishable from "no business activity". The APIs
  *     now return an `excluded` block so the UI can name the cause.
@@ -222,6 +223,94 @@ if (!$dateFrom || !$dateTo) {
 
     // Leave no post-test cache rows built from the smoke's custom window.
     invalidate_analytics_cache();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PART 3 — Analytics module census (same policy, different module)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Analytics does NOT cache (fast-path queries), so Part 1 does not apply to it.
+// But six of its eight views apply the same draft/void/written_off exclusion,
+// so they need the same explanation — and each view uses a DIFFERENT window,
+// which is the part most likely to regress into a single global range.
+
+$ANALYTICS_EXPECT = [
+    // view                 => expects a census?
+    'revenue_forecast'      => true,
+    'utilization_matrix'    => true,
+    'concentration_risk'    => true,
+    'seasonal_pattern'      => true,   // all-time: window_from/to are null
+    'cohort_revenue'        => true,
+    'avg_lease_value'       => true,
+    'fleet_optimizer'       => false,  // lease-driven — must NOT claim a census
+    'lead_time'             => false,  // lease-driven
+];
+
+foreach ($ANALYTICS_EXPECT as $view => $wantsCensus) {
+    $resp = $invoke('api/v1/analytics/index.php', 'view=' . $view);
+    if (!$resp || empty($resp['success'])) {
+        $fail("analytics/{$view} — endpoint did not return success");
+        continue;
+    }
+    $ex = $resp['data']['excluded'] ?? null;
+
+    if (!$wantsCensus) {
+        if ($ex === null) {
+            $pass("analytics/{$view} — lease-driven, correctly carries no census");
+        } else {
+            $fail("analytics/{$view} — lease-driven but returned an `excluded` block");
+        }
+        continue;
+    }
+    if (!is_array($ex)) {
+        $fail("analytics/{$view} — money view with no `excluded` block; UI cannot explain a flat chart");
+        continue;
+    }
+    foreach (['draft_count', 'void_count', 'written_off_count', 'billable_count', 'draft_total'] as $k) {
+        if (!array_key_exists($k, $ex)) {
+            $fail("analytics/{$view} — census missing `{$k}`");
+            continue 2;
+        }
+    }
+
+    // The census must agree with a direct count over the SAME window it reports,
+    // which is what catches a view being handed the wrong range.
+    $w  = 'i.deleted_at IS NULL';
+    $pr = [];
+    if (($ex['window_from'] ?? null) !== null && ($ex['window_to'] ?? null) !== null) {
+        $w   .= ' AND i.invoice_date BETWEEN ? AND ?';
+        $pr[] = $ex['window_from'];
+        $pr[] = $ex['window_to'];
+    }
+    $sql = db_row(
+        "SELECT COUNT(CASE WHEN i.status='draft' THEN 1 END) AS d,
+                COUNT(CASE WHEN i.status NOT IN ('draft','void','written_off') THEN 1 END) AS b
+         FROM invoices i WHERE {$w}",
+        $pr
+    );
+    if ((int) $ex['draft_count'] === (int) $sql['d'] && (int) $ex['billable_count'] === (int) $sql['b']) {
+        $win = ($ex['window_from'] ?? null) === null ? 'all-time' : $ex['window_from'] . '..' . $ex['window_to'];
+        $pass(sprintf('analytics/%s — census agrees with SQL over its own window (%s; draft=%d, billable=%d)',
+            $view, $win, $ex['draft_count'], $ex['billable_count']));
+    } else {
+        $fail(sprintf('analytics/%s — census disagrees with SQL over window %s..%s: api draft=%s/billable=%s vs sql draft=%s/billable=%s',
+            $view, $ex['window_from'] ?? 'null', $ex['window_to'] ?? 'null',
+            $ex['draft_count'], $ex['billable_count'], $sql['d'], $sql['b']));
+    }
+}
+
+// The windows must not all collapse to one range — that is the regression that
+// would make every census silently contradict its own chart.
+$windows = [];
+foreach (['revenue_forecast', 'concentration_risk', 'seasonal_pattern'] as $view) {
+    $r = $invoke('api/v1/analytics/index.php', 'view=' . $view);
+    $e = $r['data']['excluded'] ?? [];
+    $windows[$view] = ($e['window_from'] ?? 'null') . '..' . ($e['window_to'] ?? 'null');
+}
+if (count(array_unique($windows)) > 1 && $windows['seasonal_pattern'] === 'null..null') {
+    $pass('analytics — per-view windows are distinct and seasonal_pattern is all-time (not collapsed to one range)');
+} else {
+    $fail('analytics — windows collapsed: ' . json_encode($windows));
 }
 
 @unlink($harnessFile);
