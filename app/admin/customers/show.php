@@ -316,11 +316,6 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             Credit Application
             <span class="tab-badge" x-show="tabCounts.credit_applications > 0" x-text="tabCounts.credit_applications"></span>
         </button>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'notes' }"
-                @click="activeTab = 'notes'; loadNotes()" :aria-selected="activeTab === 'notes'" role="tab">
-            Notes
-            <span class="tab-badge" x-show="tabCounts.notes > 0" x-text="tabCounts.notes"></span>
-        </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'leases' }"
                 @click="activeTab = 'leases'" :aria-selected="activeTab === 'leases'" role="tab">
             Leases
@@ -330,6 +325,11 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                 @click="activeTab = 'invoices'" :aria-selected="activeTab === 'invoices'" role="tab">
             Invoices
             <span class="tab-badge" x-show="tabCounts.invoices > 0" x-text="tabCounts.invoices"></span>
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'documents' }"
+                @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
+            Documents
+            <span class="tab-badge" x-show="tabCounts.documents > 0" x-text="tabCounts.documents"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'damage_claims' }"
                 @click="activeTab = 'damage_claims'" :aria-selected="activeTab === 'damage_claims'" role="tab">
@@ -348,15 +348,15 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             <span class="tab-badge" x-show="tabCounts.rates > 0" x-text="tabCounts.rates"></span>
         </button>
         <?php endif; ?>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'documents' }"
-                @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
-            Documents
-            <span class="tab-badge" x-show="tabCounts.documents > 0" x-text="tabCounts.documents"></span>
-        </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'emails' }"
                 @click="activeTab = 'emails'; loadEmails()" :aria-selected="activeTab === 'emails'" role="tab">
             Email History
             <span class="tab-badge" x-show="tabCounts.emails > 0" x-text="tabCounts.emails"></span>
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'notes' }"
+                @click="activeTab = 'notes'; loadNotes()" :aria-selected="activeTab === 'notes'" role="tab">
+            Notes
+            <span class="tab-badge" x-show="tabCounts.notes > 0" x-text="tabCounts.notes"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'activity' }"
                 @click="activeTab = 'activity'" :aria-selected="activeTab === 'activity'" role="tab">
@@ -1692,9 +1692,9 @@ function FF_CustomerProfile() {
                 if (tab === 'credit_applications' && !this.creditAppsLoaded) this.loadCreditApps();
                 if (tab === 'emails'        && !this.emailsLoaded)           this.loadEmails();
             };
-            const _tabs = ['overview','notes','leases','invoices','damage_claims',
-                           'mileage_logs','rates','documents','credit_applications',
-                           'emails','activity'];
+            const _tabs = ['overview','credit_applications','leases','invoices','documents',
+                           'damage_claims','mileage_logs','rates','emails','notes',
+                           'activity'];
             const _initTab = FF_TabHash.init(_tabs, 'overview');
             this.activeTab = _initTab;
             FF_TabHash.write(_initTab);
