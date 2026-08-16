@@ -246,7 +246,7 @@ $history = db_select(
     </div>
 
     <!-- Manual full backup (async — S-BACKUP-3c) -->
-    <div class="card" x-data="FF_ManualBackup()" x-init="init()">
+    <div class="card" x-data="FF_ManualBackup()">
         <div class="card-header" style="font-weight:600;">Manual Backup <span style="font-weight:400;color:var(--text-muted);font-size:0.8125rem;">— on-demand</span></div>
         <div class="card-body" style="font-size:0.875rem;">
             <?php if ($manualFull): ?>

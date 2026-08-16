@@ -100,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="damageClaimCreate()" x-init="init()"><!-- S-FORM-DRAFT-ROLLOUT -->
+<div x-data="damageClaimCreate()"><!-- S-FORM-DRAFT-ROLLOUT -->
 
 <div class="card" style="max-width:760px;">
 

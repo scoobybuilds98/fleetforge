@@ -59,7 +59,7 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-<div x-data="qboDrift({ canEditCreds: <?= can('quickbooks', 'edit_credentials') ? 'true' : 'false' ?> })" x-init="init()">
+<div x-data="qboDrift({ canEditCreds: <?= can('quickbooks', 'edit_credentials') ? 'true' : 'false' ?> })">
 
     <div x-show="flash.message" x-cloak
          :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"

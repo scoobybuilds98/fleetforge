@@ -46,7 +46,7 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- Form -->
-<div x-data="createCreditNote()" x-init="init()">
+<div x-data="createCreditNote()">
 
 <div class="card" style="max-width:680px;">
     <div class="card-body">

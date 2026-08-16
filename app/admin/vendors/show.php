@@ -452,7 +452,7 @@ require_once FF_ROOT . '/includes/header.php';
 </div><!-- /card -->
 
 <!-- ── Work Orders (Alpine — paginated + filtered) ────────────────────────── -->
-<div class="card" x-data="FF_VendorWorkOrders()" x-init="init()">
+<div class="card" x-data="FF_VendorWorkOrders()">
     <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
         <span style="font-weight:600;">
             Work Orders

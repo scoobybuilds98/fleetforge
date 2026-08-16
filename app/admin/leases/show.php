@@ -220,7 +220,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 <!-- ============================================================
      LEASE DETAIL — Alpine component
      ============================================================ -->
-<div x-data="FF_LeaseDetail()" x-init="init()">
+<div x-data="FF_LeaseDetail()">
 
     <!-- ── S-LEASE-MILEAGE: starting-odometer banner ──────────────
          High-visibility prompt shown at the top of every active lease

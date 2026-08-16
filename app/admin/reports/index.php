@@ -44,7 +44,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="FF_Reports()" x-init="init()" x-cloak id="reports-root">
+<div x-data="FF_Reports()" x-cloak id="reports-root">
 
     <!-- ── Date range bar ── -->
     <div class="card rpt-toolbar no-print" id="date-range-bar">

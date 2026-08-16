@@ -86,7 +86,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      EDIT FORM — Alpine.js component with server-side prefill
      ============================================================ -->
-<div x-data="FF_CustomerEditForm()" x-init="init()">
+<div x-data="FF_CustomerEditForm()">
 
     <form @submit.prevent="submit()" novalidate>
 

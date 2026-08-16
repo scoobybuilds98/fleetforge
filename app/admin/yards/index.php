@@ -101,7 +101,6 @@ require_once FF_ROOT . '/includes/header.php';
      view='inactive' → showAll=true + quickFilter='inactive' which the
      filteredYards getter uses to show only deactivated yards. -->
 <div x-data="FF_YardsManager()"
-     x-init="init()"
      @open-create-yard.window="openCreate()"
      @ff-yards-filter.window="
         const v = $event.detail.view;

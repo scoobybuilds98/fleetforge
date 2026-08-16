@@ -194,7 +194,7 @@ $aiVizCompact  = false;
 include FF_ROOT . '/includes/partials/ai-report-generator.php';
 ?>
 
-<div x-data="FF_Analytics()" x-init="init()" x-cloak>
+<div x-data="FF_Analytics()" x-cloak>
 
     <!-- ════════════════════════════════════════════════════════════════════
          PANEL 1 — Revenue Forecast  (full width)

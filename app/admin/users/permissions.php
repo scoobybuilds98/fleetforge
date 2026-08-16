@@ -349,7 +349,7 @@ require_once FF_ROOT . '/includes/header.php';
 <?php endif; ?>
 
 <!-- ── Main: permission matrix + sidebar ──────────────────── -->
-<div x-data="permissionsMatrix()" x-init="init()">
+<div x-data="permissionsMatrix()">
 
 <div class="perm-layout">
 

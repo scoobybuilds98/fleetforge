@@ -62,7 +62,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="woCreate()" x-init="init()">
+<div x-data="woCreate()">
 
 <div class="card">
     <div class="card-body">

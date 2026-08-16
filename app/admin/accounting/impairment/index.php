@@ -55,7 +55,7 @@ require_once FF_ROOT . '/includes/header.php';
 $qboFaNote = 'impairment';
 require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
 
-<div x-data="impairmentWorkflow(<?= (int) $fiscalYear ?>)" x-init="init()">
+<div x-data="impairmentWorkflow(<?= (int) $fiscalYear ?>)">
 
     <!-- Fiscal year + run controls -->
     <div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;gap:14px;align-items:end;flex-wrap:wrap;">

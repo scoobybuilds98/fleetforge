@@ -50,7 +50,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CREATE TEMPLATE FORM (Alpine)
      ============================================================ -->
-<div x-data="FF_CreateTemplate()" x-init="init()">
+<div x-data="FF_CreateTemplate()">
 
     <form @submit.prevent="submit()" novalidate>
 

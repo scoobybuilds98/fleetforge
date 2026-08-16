@@ -141,7 +141,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      TAX PERIODS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_TaxPeriods()" x-init="init()"
+<div x-data="FF_TaxPeriods()"
      @open-tax-create.window="openCreate()"
      @ff-tax-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; reload()">
 

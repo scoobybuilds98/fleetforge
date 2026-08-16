@@ -57,8 +57,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="yearEnd(<?= (int) $defaultYear ?>, <?= $isSuperAdmin ? 'true' : 'false' ?>)"
-     x-init="init()">
+<div x-data="yearEnd(<?= (int) $defaultYear ?>, <?= $isSuperAdmin ? 'true' : 'false' ?>)">
 
     <!-- Fiscal year selector -->
     <div class="card" style="padding:14px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:12px;align-items:end;">

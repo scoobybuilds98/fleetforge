@@ -88,7 +88,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CAPEX REQUESTS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Capex()" x-init="init()"
+<div x-data="FF_Capex()"
      @open-capex-create.window="openCreate()"
      @ff-capex-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; load()">
 

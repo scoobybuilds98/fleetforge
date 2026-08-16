@@ -174,7 +174,7 @@ $helpModuleSlug = 'damage-claims';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div x-data="damageClaimShow()" x-init="init()">
+<div x-data="damageClaimShow()">
 
 <!-- ── Page header ───────────────────────────────────────────────────────── -->
 <div class="page-header" style="flex-wrap:wrap;gap:8px;">

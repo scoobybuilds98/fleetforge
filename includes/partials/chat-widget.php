@@ -22,7 +22,6 @@
 <div id="ff-chat-widget"
      class="chat-widget"
      x-data="FF_ChatWidget()"
-     x-init="init()"
      @keydown.escape.window="if(open) open = false">
 
     <!--

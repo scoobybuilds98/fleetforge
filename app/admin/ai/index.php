@@ -93,7 +93,7 @@ $isAdmin    = can('settings', 'view');
 <?php else: ?>
 
 <!-- ── AI Chat Interface ──────────────────────────────────────────────────── -->
-<div x-data="FF_AiChat()" x-init="init()" style="margin-top:8px;">
+<div x-data="FF_AiChat()" style="margin-top:8px;">
 
     <!-- Tab Navigation -->
     <div style="display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--border-color);padding-bottom:0;">

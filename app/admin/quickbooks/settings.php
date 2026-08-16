@@ -125,7 +125,7 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title h4">QuickBooks Settings</h1>
 </div>
 
-<div x-data="qboSettings()" x-init="init()" style="max-width:880px;">
+<div x-data="qboSettings()" style="max-width:880px;">
 
     <!-- ── Flash message (top of page) ───────────────────────── -->
     <div x-show="flash.message" x-cloak

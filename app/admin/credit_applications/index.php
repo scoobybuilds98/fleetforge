@@ -45,7 +45,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CREDIT APPLICATIONS ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_CreditApps()" x-init="init()">
+<div x-data="FF_CreditApps()">
 
     <!-- ── KPI TILES ─────────────────────────────────────────── -->
     <div class="stat-grid">

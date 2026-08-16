@@ -64,7 +64,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CREATE FORM — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_ReservationCreate()" x-init="init()">
+<div x-data="FF_ReservationCreate()">
 
     <!-- Error banner -->
     <div class="alert alert-danger" x-show="formError" x-text="formError"

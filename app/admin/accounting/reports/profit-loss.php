@@ -43,7 +43,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="plReport()" x-init="init()">
+<div x-data="plReport()">
     <!-- Filters -->
     <div class="card" style="padding:14px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
         <div>

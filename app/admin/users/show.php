@@ -152,8 +152,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <!-- ── Left: Detail card ─────────────────────────────────────────────────── -->
 <div class="card"
-     x-data="userShow()"
-     x-init="init()">
+     x-data="userShow()">
 
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
         <span style="font-weight:600;">User Details</span>

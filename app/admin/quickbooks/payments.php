@@ -63,7 +63,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 </div>
 
-<div x-data="qboPaymentsAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)" x-init="init()">
+<div x-data="qboPaymentsAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)">
 
     <!-- Flash strip -->
     <div x-show="flash.message" x-cloak
@@ -244,7 +244,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 </div>
 
-<div x-data="qboPaymentInitiationsAdmin()" x-init="init()">
+<div x-data="qboPaymentInitiationsAdmin()">
     <!-- 5 KPI tiles for initiations -->
     <div class="kpi-grid kpi-grid--qbo" style="grid-template-columns:repeat(5,1fr);margin-bottom:14px;">
         <div class="kpi-tile">

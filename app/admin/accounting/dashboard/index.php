@@ -309,7 +309,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
      Handles: recent JEs table, quick-post, interactive elements.
      KPIs and alerts are server-rendered above and below.
      ============================================================ -->
-<div x-data="FF_AccDashboard()" x-init="init()">
+<div x-data="FF_AccDashboard()">
 
     <!-- ── Two-Column Layout: Recent JEs + Alerts / Quick Actions ── -->
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">

@@ -99,7 +99,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      JOURNAL ENTRIES -- ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_JournalEntries()" x-init="init()"
+<div x-data="FF_JournalEntries()"
      @open-je-create.window="openCreate()"
      @ff-je-filter.window="
         if ($event.detail.date) { filters.date_from = $event.detail.date; filters.date_to = $event.detail.date; }

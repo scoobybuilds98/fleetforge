@@ -86,7 +86,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      ACCOUNTING SETTINGS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_AcctSettings()" x-init="init()">
+<div x-data="FF_AcctSettings()">
 
     <!-- ── TAB BAR ────────────────────────────────────────────── -->
     <div class="tab-bar" role="tablist">

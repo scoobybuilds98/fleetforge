@@ -100,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      FIXED ASSETS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_FixedAssets()" x-init="init()"
+<div x-data="FF_FixedAssets()"
      @open-asset-create.window="openCreate()"
      @ff-assets-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; load()">
 

@@ -43,7 +43,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="ledgerPage()" x-init="init()">
+<div x-data="ledgerPage()">
 
     <!-- Filter Bar -->
     <div class="card" style="padding:16px;margin-bottom:20px;display:flex;flex-wrap:wrap;gap:12px;align-items:end;">

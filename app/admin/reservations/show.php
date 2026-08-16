@@ -71,7 +71,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      RESERVATION SHOW — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_ReservationShow(<?= $resId ?>)" x-init="init()">
+<div x-data="FF_ReservationShow(<?= $resId ?>)">
 
     <!-- Flash message -->
     <?php if ($flashMsg): ?>

@@ -130,7 +130,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      INVOICES ALPINE COMPONENT
      ============================================================ -->
-<div id="invoices-table-card" x-data="FF_Invoices()" x-init="init()">
+<div id="invoices-table-card" x-data="FF_Invoices()">
 
     <!-- ── TAB BAR ───────────────────────────────────────────────── -->
     <div class="tab-bar" role="tablist">

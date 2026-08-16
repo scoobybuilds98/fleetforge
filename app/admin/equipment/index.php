@@ -54,7 +54,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      EQUIPMENT ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Equipment()" x-init="init()">
+<div x-data="FF_Equipment()">
 
     <!-- ── KPI TILES ────────────────────────────────────────── -->
     <!-- Spec §4.1: each tile drills down to filtered view -->

@@ -268,8 +268,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
 </style>
 
 <div class="pchat-wrap"
-     x-data="FF_PortalChat()"
-     x-init="init()">
+     x-data="FF_PortalChat()">
 
     <!-- ── Loading ────────────────────────────────────────────────── -->
     <div class="pchat-empty" x-show="loading" x-cloak>

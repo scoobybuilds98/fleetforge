@@ -46,7 +46,7 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title h4">QuickBooks — Sync Queue</h1>
 </div>
 
-<div x-data="qboSyncQueue()" x-init="init()">
+<div x-data="qboSyncQueue()">
 
     <div x-show="flash.message" x-cloak
          :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"

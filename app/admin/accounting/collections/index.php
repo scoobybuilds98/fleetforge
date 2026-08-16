@@ -45,7 +45,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="collectionsPage()" x-init="init()">
+<div x-data="collectionsPage()">
     <div style="margin-bottom:20px;display:flex;justify-content:flex-end;align-items:end;gap:8px;">
         <div>
             <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Customer</label>

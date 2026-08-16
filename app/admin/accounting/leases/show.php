@@ -119,7 +119,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="capitalLeaseShow(<?= (int) $leaseId ?>, <?= $hasSchedule ? 'true' : 'false' ?>)" x-init="init()">
+<div x-data="capitalLeaseShow(<?= (int) $leaseId ?>, <?= $hasSchedule ? 'true' : 'false' ?>)">
 
     <!-- ── Header info row + summary card ──────────────────────── -->
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">

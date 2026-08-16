@@ -59,7 +59,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="FF_PayoffReport()" x-init="init()" @payoff-export-csv.window="exportCsv()">
+<div x-data="FF_PayoffReport()" @payoff-export-csv.window="exportCsv()">
 
     <!-- ── Summary tiles ─────────────────────────────────────── -->
     <div class="stat-grid" style="margin-bottom:24px;">

@@ -211,7 +211,7 @@ require_once FF_ROOT . '/includes/header.php';
          (via FF_Display) and persist to the DB.
          ══════════════════════════════════════════════════════ -->
     <template x-if="tab === 'display'">
-        <div class="card ff-tab-animated" x-data="displaySettingsTab()" x-init="init()">
+        <div class="card ff-tab-animated" x-data="displaySettingsTab()">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <span style="font-weight:600;">Display Settings</span>
                 <button class="btn btn-secondary btn-sm"
@@ -448,7 +448,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ── Card: Two-Factor Authentication (MFA) ───────────────────── -->
-    <div class="card" x-data="mfaCard()" x-init="init()">
+    <div class="card" x-data="mfaCard()">
         <div class="card-header" style="font-weight:600;font-size:0.875rem;">Two-Factor Authentication</div>
         <div class="card-body" style="padding:16px;">
 

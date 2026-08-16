@@ -57,7 +57,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      RESERVATIONS ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Reservations()" x-init="init()">
+<div x-data="FF_Reservations()">
 
     <!-- ── KPI TILES ─────────────────────────────────────────────── -->
     <div class="stat-grid" style="--stat-cols:4;">

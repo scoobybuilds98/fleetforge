@@ -55,7 +55,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="qboVendorMapping()" x-init="init()">
+<div x-data="qboVendorMapping()">
 
     <!-- Flash strip -->
     <div x-show="flash.message" x-cloak

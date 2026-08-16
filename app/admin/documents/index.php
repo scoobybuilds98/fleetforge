@@ -37,7 +37,7 @@ $helpModuleSlug = 'documents';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div x-data="FF_Documents()" x-init="init()" x-cloak>
+<div x-data="FF_Documents()" x-cloak>
 
     <!-- ── Page header ──────────────────────────────────────────── -->
     <div class="page-header">

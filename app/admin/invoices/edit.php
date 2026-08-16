@@ -105,7 +105,7 @@ require_once FF_ROOT . '/includes/header.php';
     invoice is locked and corrections go through a credit note.
 </div>
 
-<div x-data="FF_InvoiceLineEditor()" x-init="init()">
+<div x-data="FF_InvoiceLineEditor()">
     <form @submit.prevent="save()" novalidate>
         <div class="card" style="margin-bottom:1.5rem;">
             <div class="card-header">

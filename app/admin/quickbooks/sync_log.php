@@ -51,7 +51,7 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title h4">QuickBooks — Sync Log</h1>
 </div>
 
-<div x-data="qboSyncLog()" x-init="init()">
+<div x-data="qboSyncLog()">
 
     <div x-show="flash.message" x-cloak
          :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"

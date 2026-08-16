@@ -2865,19 +2865,30 @@ function FF_ChatHubBadge() {
     return {
         totalUnread: 0,
         _timer: null,
+        // S-PERF-POLL-2: synchronous re-entry guard for init(). Distinct from
+        // _initialized, which gates the notification SOUND, not initialisation.
+        _initStarted: false,
         // MEDIA-1: first-load gate so unread counts don't fire audio
         // the moment the page hydrates.
         _initialized: false,
 
         async init() {
-            // S-PERF-POLL: init() runs TWICE — Alpine 3 auto-calls init() from
-            // x-data, and includes/topbar.php ALSO calls it from x-init. Without
-            // this guard both timers register, one is leaked beyond the
-            // alpine:destroyed cleanup below, and this component polls two
-            // endpoints at double rate forever. Idempotence lives here rather
-            // than in the markup so it holds no matter how the component is
-            // mounted. See the known Alpine double-init trap in this codebase.
-            if (this._timer) return;
+            // S-PERF-POLL-2: the guard MUST be a synchronous flag set before the
+            // first await — NOT `if (this._timer) return`.
+            //
+            // init() runs twice (Alpine 3 auto-calls it from x-data; the markup
+            // historically also called it from x-init). Guarding on _timer looks
+            // right but races: _timer is assigned AFTER `await this.fetchUnread()`,
+            // so while call #1 is suspended at that await, call #2 still sees
+            // _timer === null, passes the guard, and both proceed. The result was
+            // two initial fetches AND two live intervals, with only the last id
+            // tracked — so alpine:destroyed cleared one and leaked the other.
+            // Measured before this fix: 8 polls per 21s where 4 were expected.
+            //
+            // _initStarted is set synchronously, before any await, so the second
+            // call cannot get past it no matter where the first one is suspended.
+            if (this._initStarted) return;
+            this._initStarted = true;
 
             await this.fetchUnread();
             // WHY: 5s matches FF_ChatBadge + FF_MessengerBadge cadence so

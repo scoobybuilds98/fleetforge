@@ -93,7 +93,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ================================================================
      CHART OF ACCOUNTS -- ALPINE COMPONENT
      ================================================================ -->
-<div x-data="FF_ChartOfAccounts()" x-init="init()"
+<div x-data="FF_ChartOfAccounts()"
      @open-coa-create.window="openCreate()"
      @ff-coa-filter.window="filters.active = $event.detail.active">
 

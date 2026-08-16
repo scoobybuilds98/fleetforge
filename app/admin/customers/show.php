@@ -232,7 +232,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
      switches to the matching profile tab (Leases / Invoices /
      Documents) instead of being display-only.
      ============================================================ -->
-<div x-data="FF_CustomerProfile()" x-init="init()">
+<div x-data="FF_CustomerProfile()">
 
 <!-- ============================================================
      STATS ROW — 4 clickable quick-stat tiles (TILES-2)

@@ -91,8 +91,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="budgetShow(<?= (int) $id ?>, <?= htmlspecialchars(json_encode($budget['updated_at']), ENT_QUOTES) ?>)"
-     x-init="init()">
+<div x-data="budgetShow(<?= (int) $id ?>, <?= htmlspecialchars(json_encode($budget['updated_at']), ENT_QUOTES) ?>)">
 
     <div class="card" style="padding:18px;margin-bottom:14px;">
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start;">

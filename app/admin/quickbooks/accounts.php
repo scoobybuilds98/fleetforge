@@ -54,7 +54,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="qboAccountMapping()" x-init="init()">
+<div x-data="qboAccountMapping()">
 
     <!-- Flash strip -->
     <div x-show="flash.message" x-cloak

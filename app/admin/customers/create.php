@@ -48,7 +48,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CREATE FORM ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_CustomerForm()" x-init="init()">
+<div x-data="FF_CustomerForm()">
 
     <form @submit.prevent="submit()" novalidate>
 

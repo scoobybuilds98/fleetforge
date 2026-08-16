@@ -79,7 +79,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      ACCOUNTING PERIODS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Periods()" x-init="init()"
+<div x-data="FF_Periods()"
      @ff-periods-filter.window="statusFilter = (statusFilter === $event.detail.status && statusFilter !== '') ? '' : $event.detail.status">
 
     <!-- ── Year Filter ────────────────────────────────────────── -->

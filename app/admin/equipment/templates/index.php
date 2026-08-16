@@ -64,7 +64,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      TEMPLATES ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Templates()" x-init="init()">
+<div x-data="FF_Templates()">
 
     <!-- ── FILTER TOOLBAR ────────────────────────────────────── -->
     <div class="table-toolbar">

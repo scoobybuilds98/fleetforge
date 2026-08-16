@@ -54,7 +54,7 @@ $gpsConfigured = ($samsaraKey !== '');
 <link rel="stylesheet" href="<?= asset_url('assets/vendor/leaflet/leaflet.css') ?>">
 <script src="<?= asset_url('assets/vendor/leaflet/leaflet.js') ?>"></script>
 
-<div x-data="FF_FleetTracking()" x-init="init()">
+<div x-data="FF_FleetTracking()">
 
 <!-- ── Page header ───────────────────────────────────────────────── -->
 <div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">

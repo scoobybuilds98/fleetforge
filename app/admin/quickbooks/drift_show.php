@@ -99,7 +99,7 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/quickbooks-nav.php'; ?>
 
-<div x-data="driftShow()" x-init="init()">
+<div x-data="driftShow()">
 
 <!-- flash -->
 <div x-show="flash.msg" x-cloak

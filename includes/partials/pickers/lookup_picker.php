@@ -30,7 +30,7 @@ $pickerPlaceholder      = $pickerPlaceholder      ?? 'Search…';
 $pickerManualPlaceholder = $pickerManualPlaceholder ?? 'Enter ID';
 $pickerLabelHint        = $pickerLabelHint        ?? '';
 ?>
-<div class="form-group ff-picker" x-data="FF_LookupPicker(<?= $pickerConfig ?>)" x-init="init()">
+<div class="form-group ff-picker" x-data="FF_LookupPicker(<?= $pickerConfig ?>)">
     <label for="<?= e($pickerId) ?>"><?= e($pickerLabel) ?><?= $pickerRequired ? ' *' : '' ?></label>
 
     <div class="ff-picker-input-wrap">

@@ -361,7 +361,7 @@ $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
 <!-- ============================================================
      TABS (Alpine)
      ============================================================ -->
-<div x-data="FF_UnitDetail()" x-init="init()">
+<div x-data="FF_UnitDetail()">
 
     <!-- Tab bar — modern segmented-pill style -->
     <div class="tab-bar" role="tablist">

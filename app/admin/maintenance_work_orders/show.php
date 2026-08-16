@@ -173,7 +173,7 @@ function priorityBadgeClass(string $p): string {
 </div>
 
 <!-- ── Main content: detail + line items ─────────────────────────────────── -->
-<div x-data="woShow()" x-init="init()">
+<div x-data="woShow()">
 
     <!-- Global error banners -->
     <template x-if="staleError">

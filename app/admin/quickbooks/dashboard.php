@@ -49,7 +49,7 @@ require_once FF_ROOT . '/includes/header.php';
     <h1 class="page-header-title h4">QuickBooks — Dashboard</h1>
 </div>
 
-<div x-data="qboDashboard()" x-init="init()">
+<div x-data="qboDashboard()">
 
     <!-- ── Flash message strip ───────────────────────────────── -->
     <div x-show="flash.message" x-cloak

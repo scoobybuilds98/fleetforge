@@ -57,7 +57,7 @@ require_once FF_ROOT . '/includes/header.php';
 .eqtax-actions{display:flex;gap:.4rem;align-items:center;flex-wrap:wrap;}
 </style>
 
-<div x-data="FF_EquipmentCategories()" x-init="init()">
+<div x-data="FF_EquipmentCategories()">
 
 <!-- Page header -->
 <div class="page-header">

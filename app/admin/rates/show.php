@@ -97,7 +97,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<div x-data="FF_RateCardShow()" x-init="init()">
+<div x-data="FF_RateCardShow()">
 
     <!-- Global messages -->
     <div class="alert alert-danger" x-show="globalError" x-text="globalError"

@@ -166,7 +166,7 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
 <!-- ============================================================
      ALPINE COMPONENT — fetches drill-down + remittances
      ============================================================ -->
-<div x-data="FF_TaxPeriodDetail(<?= (int) $id ?>)" x-init="init()">
+<div x-data="FF_TaxPeriodDetail(<?= (int) $id ?>)">
 
     <!-- ── Remittances ───────────────────────────────────────── -->
     <h2 class="h6" style="margin-bottom:10px;">Remittance History</h2>

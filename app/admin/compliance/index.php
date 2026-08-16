@@ -251,7 +251,7 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Alpine.js component wraps tiles + grid so tiles can refresh after save ── -->
-<div x-data="FF_Compliance()" x-init="init()">
+<div x-data="FF_Compliance()">
 
 <!-- ── KPI tiles ──────────────────────────────────────────────────────────── -->
 <div class="stat-grid" style="margin-bottom:24px;">

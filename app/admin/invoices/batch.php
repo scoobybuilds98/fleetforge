@@ -96,8 +96,7 @@ require_once FF_ROOT . '/includes/header.php';
 <?php endif; ?>
 
 <div id="batch-invoicing-app"
-     x-data="BatchInvoicing({ defaultMonth: <?= e(json_encode($defaultMonth)) ?>, today: <?= e(json_encode($todayIso)) ?>, canGenerate: <?= $canGenerate ? 'true' : 'false' ?>, canSend: <?= $canSend ? 'true' : 'false' ?> })"
-     x-init="init()">
+     x-data="BatchInvoicing({ defaultMonth: <?= e(json_encode($defaultMonth)) ?>, today: <?= e(json_encode($todayIso)) ?>, canGenerate: <?= $canGenerate ? 'true' : 'false' ?>, canSend: <?= $canSend ? 'true' : 'false' ?> })">
 
     <!-- ============================================================
          SPLIT LAYOUT — left: workflow, right: sticky invoice preview

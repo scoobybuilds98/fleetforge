@@ -54,7 +54,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 </div>
 
-<div x-data="qboCreditMemosAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)" x-init="init()">
+<div x-data="qboCreditMemosAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)">
 
     <!-- Flash strip -->
     <div x-show="flash.message" x-cloak
@@ -212,7 +212,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
 <!--  OFF) is an operator follow-up per D-QBO-CREDIT-MEMO-APPLY-3 — NOT   -->
 <!--  runtime-probed.                                                     -->
 <!-- ════════════════════════════════════════════════════════════════════ -->
-<div style="margin-top:36px;" x-data="qboCreditApplicationsAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)" x-init="init()">
+<div style="margin-top:36px;" x-data="qboCreditApplicationsAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)">
 
     <div class="page-header">
         <h2 class="h5" style="margin:0;">Applications → QBO LinkedTxn</h2>

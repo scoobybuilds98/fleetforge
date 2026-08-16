@@ -153,7 +153,7 @@ $_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
                 <!-- [NOTIF-1] Portal notifications bell — uses FF_PortalNotifications() factory -->
                 <div class="notif-wrapper"
                      x-data="FF_PortalNotifications()"
-                     x-init="init(); unreadCount = <?= (int) $_portalUnread ?>;"
+                     x-init="unreadCount = <?= (int) $_portalUnread ?>;"
                      @click.outside="open = false"
                      @keydown.escape.window="open = false">
 

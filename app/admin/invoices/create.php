@@ -74,7 +74,7 @@ require_once FF_ROOT . '/includes/header.php';
      CREATE INVOICE FORM
      ============================================================ -->
 <!-- FIX #39: wrap in form tag so Enter-to-submit works -->
-<form x-data="FF_InvoiceCreate()" x-init="init()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;">
+<form x-data="FF_InvoiceCreate()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;">
 
     <!-- Lease Selection — D-DROPDOWN-RETROFIT-PATTERN: FF_RecordPicker.
          @record-picked fires onLeasePickerSelected(raw) which populates the lease

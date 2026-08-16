@@ -46,7 +46,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CUSTOMERS ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Customers()" x-init="init()">
+<div x-data="FF_Customers()">
 
     <!-- ── KPI TILES — all clickable drill-down filters (TILES-1) ── -->
     <div class="stat-grid">

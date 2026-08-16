@@ -137,7 +137,7 @@ require_once FF_ROOT . '/includes/header.php';
 </style>
 
 <!-- Credit notes table — Alpine.js -->
-<div class="card" id="credit-notes-table" x-data="creditNotesList()" x-init="init()">
+<div class="card" id="credit-notes-table" x-data="creditNotesList()">
 
     <!-- Filters -->
     <div class="card-header" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">

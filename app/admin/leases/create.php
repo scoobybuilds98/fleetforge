@@ -63,7 +63,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      CREATE LEASE FORM (Alpine)
      ============================================================ -->
-<div x-data="FF_CreateLease()" x-init="init()">
+<div x-data="FF_CreateLease()">
 
     <form @submit.prevent="submit()" novalidate>
 

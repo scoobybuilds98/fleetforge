@@ -68,7 +68,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      EDIT TEMPLATE FORM (Alpine)
      ============================================================ -->
-<div x-data="FF_EditTemplate(<?= $templateId ?>)" x-init="init()">
+<div x-data="FF_EditTemplate(<?= $templateId ?>)">
 
     <!-- Stale-data reload banner (distinct from form-level banner) -->
     <div class="alert alert-warning" x-show="staleError" style="margin-bottom:16px;" x-transition>

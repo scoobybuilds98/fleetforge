@@ -36,7 +36,7 @@ $provinces = ['BC','AB','SK','MB','ON','QC','NB','NS','PE','NL','YT','NT','NU'];
     <span class="breadcrumb-current">Bulk Email</span>
 </nav>
 
-<div x-data="FF_BulkEmail()" x-init="init()">
+<div x-data="FF_BulkEmail()">
 
     <div class="page-header" style="margin-bottom:24px;">
         <div>

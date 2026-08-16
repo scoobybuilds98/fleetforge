@@ -57,7 +57,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 </div>
 
-<div x-data="qboJournalEntriesAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)" x-init="init()">
+<div x-data="qboJournalEntriesAdmin(<?= $canEditCredentials ? 'true' : 'false' ?>)">
 
     <!-- Flash strip -->
     <div x-show="flash.message" x-cloak

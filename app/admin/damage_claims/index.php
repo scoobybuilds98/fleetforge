@@ -124,8 +124,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
 <div class="card"
      id="damage-claims-table"
-     x-data="damageClaimsList()"
-     x-init="init()">
+     x-data="damageClaimsList()">
 
     <!-- Filter bar -->
     <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">

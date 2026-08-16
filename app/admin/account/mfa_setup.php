@@ -86,7 +86,7 @@ if (!$forcedSetup) {
         </div>
 <?php endif; ?>
 
-        <div x-data="mfaSetup()" x-init="init()" x-cloak><!-- S-PROD-1A-FIX-4 T28: x-cloak prevents flash of all steps before Alpine binds -->
+        <div x-data="mfaSetup()" x-cloak><!-- S-PROD-1A-FIX-4 T28: x-cloak prevents flash of all steps before Alpine binds -->
 
             <!-- ── Step indicator ──────────────────────────────────────────── -->
             <div style="display:flex;gap:8px;margin-bottom:28px;" x-show="step < 4">

@@ -28,7 +28,6 @@ declare(strict_types=1);
      ============================================================ -->
 <div id="ff-help-drawer"
      x-data="FF_HelpDrawer()"
-     x-init="init()"
      @ff-help-drawer.window="toggle($event.detail.slug)"
      @keydown.escape.window="if (isOpen) close()"
      x-cloak>

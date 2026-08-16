@@ -57,7 +57,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      LEASES ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_Leases()" x-init="init()">
+<div x-data="FF_Leases()">
 
     <!-- ── KPI TILES ─────────────────────────────────────────────── -->
     <div class="stat-grid">

@@ -38,7 +38,7 @@ require_once FF_ROOT . '/includes/header.php';
     <span class="breadcrumb-current">Email Templates</span>
 </nav>
 
-<div x-data="FF_EmailTemplates()" x-init="init()">
+<div x-data="FF_EmailTemplates()">
 
     <div class="page-header" style="margin-bottom:24px;">
         <div>

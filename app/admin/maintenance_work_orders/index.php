@@ -99,7 +99,6 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
 <div class="card"
      x-data="woList()"
-     x-init="init()"
      id="wo-table-card">
 
     <!-- Filter bar -->

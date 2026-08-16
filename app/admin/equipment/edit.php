@@ -94,7 +94,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      EDIT FORM (Alpine) — server pre-populated
      ============================================================ -->
-<div x-data="FF_EditUnit()" x-init="init()">
+<div x-data="FF_EditUnit()">
 
     <form @submit.prevent="submit()" novalidate>
 

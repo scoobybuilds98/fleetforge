@@ -120,7 +120,7 @@ $cnState = [
 
 $cnCategoryOrder = array_keys($cnCategories);
 ?>
-<div x-data="customerNotifications()" x-init="init()" class="cn-root">
+<div x-data="customerNotifications()" class="cn-root">
 
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
         <div>

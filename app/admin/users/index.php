@@ -223,7 +223,6 @@ require_once FF_ROOT . '/includes/header.php';
 
 <!-- ── Team table (Alpine.js) ─────────────────────────────────────────────── -->
 <div x-data="teamList()"
-     x-init="init()"
      @ff-users-filter.window="
         filters.status = (filters.status === $event.detail.status && filters.status !== '') ? '' : $event.detail.status;
         goPage(1);
@@ -501,7 +500,6 @@ require_once FF_ROOT . '/includes/header.php';
 
 <!-- Portal users list (Alpine) -->
 <div x-data="portalList()"
-     x-init="init()"
      @ff-portal-filter.window="applyKpiFilter($event.detail)">
 
     <div class="table-toolbar">
@@ -642,7 +640,7 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <?php if (is_super_admin()): ?>
 <div x-show="activeTab === 'defaults'" x-transition:enter class="ff-tab-enter"
-     x-data="FF_RoleDefaults()" x-init="init()">
+     x-data="FF_RoleDefaults()">
 
     <!-- Role selector cards -->
     <div class="rp-roles-card card" style="margin-bottom:18px;border-radius:16px;">

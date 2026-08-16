@@ -489,8 +489,7 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
           Unread badge still reflects team chat unreads.
         -->
         <div class="chat-topbar"
-             x-data="FF_ChatHubBadge()"
-             x-init="init()">
+             x-data="FF_ChatHubBadge()">
             <a href="<?= base_url('chat') ?>"
                class="chat-topbar-btn topbar-chat-btn"
                :class="{ 'has-unread': totalUnread > 0 }"
@@ -547,7 +546,7 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
              every 60s. -->
         <div class="notif-wrapper"
              x-data="FF_Notifications()"
-             x-init="init(); unreadCount = <?= (int) $_unreadCount ?>;"
+             x-init="unreadCount = <?= (int) $_unreadCount ?>;"
              @click.outside="open = false"
              @keydown.escape.window="open = false">
 

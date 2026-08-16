@@ -52,7 +52,7 @@ require_once FF_ROOT . '/includes/header.php';
      Fetches all dashboard data on mount. Charts rendered after
      KPI + chart data resolves. Error states handled inline.
      ============================================================ -->
-<div x-data="FF_Dashboard()" x-init="init()">
+<div x-data="FF_Dashboard()">
 
     <!-- ── KPI TILES ──────────────────────────────────────────── -->
     <!-- 6 tiles, single row desktop / 3×2 tablet / 2×3 mobile   -->

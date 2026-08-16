@@ -102,7 +102,7 @@ require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
 <!-- ============================================================
      DEPRECIATION RUNS — ALPINE COMPONENT
      ============================================================ -->
-<div x-data="FF_DepreciationRuns()" x-init="init()"
+<div x-data="FF_DepreciationRuns()"
      @open-depr-preview.window="openPreview()"
      @ff-depr-filter.window="filterStatus = (filterStatus === $event.detail.status && filterStatus !== '') ? '' : $event.detail.status; load()">
 

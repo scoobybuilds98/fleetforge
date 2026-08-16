@@ -122,7 +122,7 @@ require_once FF_ROOT . '/includes/header.php';
 [data-theme="light"] .rate-cust-tile.is-selected { background: #ffffff; }
 </style>
 
-<div x-data="FF_RatesManager()" x-init="init()">
+<div x-data="FF_RatesManager()">
 
 <!-- KPI tiles -->
 <div class="stat-grid" style="margin-bottom:24px;">
