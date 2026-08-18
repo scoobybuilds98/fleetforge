@@ -217,9 +217,17 @@ function qboRefundReceiptsAdmin(canEdit) {
                 }
                 const r = await FF_Api.get('<?= base_url('api/v1/quickbooks/refund_receipts/list') ?>?' + params.toString());
                 if (r.success) {
-                    this.rows = r.rows || [];
-                    this.kpis = r.kpis || this.kpis;
-                    this.total = r.total || 0;
+                    // Envelope contract: json_success([...]) nests EVERY key under
+                    // `data`, so these reads must go through r.data — reading
+                    // r.rows / r.kpis / r.total off the envelope yields undefined,
+                    // which the `|| []` / `|| 0` fallbacks silently turned into a
+                    // permanently empty table and zeroed KPI tiles. Matches the
+                    // `const d = j.data` convention already used by the
+                    // accounts / customers / vendors / items / tax_codes consoles.
+                    const d = r.data || {};
+                    this.rows = d.rows || [];
+                    this.kpis = d.kpis || this.kpis;
+                    this.total = d.total || 0;
                 }
             } catch (e) {
                 this.flash = { type: 'danger', message: 'Failed to load: ' + (e.message || e) };
@@ -233,10 +241,16 @@ function qboRefundReceiptsAdmin(canEdit) {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/quickbooks/refund_receipts/retry') ?>', { id: mappingId });
                 if (r.success) {
-                    if (r.action === 'enqueued') {
+                    // Envelope contract (same class as reload above): retry.php
+                    // emits json_success(['action' => …, 'reason' => …]), so the
+                    // keys live under r.data. Reading r.action off the envelope
+                    // was always undefined, which sent EVERY successful re-enqueue
+                    // down the else branch and reported "Skipped: gate refused".
+                    const d = r.data || {};
+                    if (d.action === 'enqueued') {
                         this.flash = { type: 'success', message: 'Re-enqueued for push.' };
                     } else {
-                        this.flash = { type: 'danger', message: 'Skipped: ' + (r.reason || 'gate refused') };
+                        this.flash = { type: 'danger', message: 'Skipped: ' + (d.reason || 'gate refused') };
                     }
                     await this.reload();
                 }

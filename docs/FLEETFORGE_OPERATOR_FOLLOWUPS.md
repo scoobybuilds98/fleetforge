@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL — added **F67** (Yards KPI tiles count soft-deleted yards, so the tiles read 9/1/8 while the list holds 1) and **F68** (the Credit Notes list renders a phantom all-dashes row instead of its empty state, and its KPI tiles disagree with the list). Both are pre-existing and were reproduced on HEAD with this session's changes reverted; both are deploy-blocking for nobody but both are operator-visible wrong numbers. Previous: 2026-08-16 via S-REPORTS-STALE.
+**Last updated:** 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
@@ -946,7 +946,7 @@ Optionally run it DAILY (`0 14 * * *`) — the cron is now idempotent + catch-up
 
 ---
 
-### F67 — Yards KPI tiles count soft-deleted yards 🟢 DEFERRED (display-only; no money, no data loss)
+### F67 — Yards KPI tiles count soft-deleted yards ✅ CLOSED (2026-08-18, commit 8ee2ee3)
 
 **Surfaced by:** S-LIST-TOOLBAR (2026-08-18) while restyling the Yards filter bar — the toolbar's "1 yard" sat directly under tiles reading "TOTAL YARDS 9 / ACTIVE 1 / INACTIVE 8".
 **What:** the three server-rendered tiles in `app/admin/yards/index.php` (~lines 44-48) count without the D5 soft-delete filter:
@@ -957,17 +957,17 @@ $inactiveYards = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 0");
 ```
 `api/v1/yards/index.php` (~line 58) correctly excludes them (`WHERE y.deleted_at IS NULL`), so the table below the tiles is right and the tiles are wrong. On the dev DB 8 of 9 yards are soft-deleted.
 **Fix:** add `deleted_at IS NULL` to all three counts, then confirm nothing else reads them.
-**Why deferred / not blocking:** display-only on an admin-facing page; no billing, reporting, or reservation logic reads these numbers. Not fixed inside S-LIST-TOOLBAR because that session was scoped to filter-bar presentation and this is a data-correctness bug in a different part of the page.
+**Closed:** all three `db_count()` calls now carry `deleted_at IS NULL`, with a WHY comment pointing at the API's matching D5 filter. Landed in commit `8ee2ee3` — see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for why that commit's message does not mention it.
 
 ---
 
-### F68 — Credit Notes list shows a phantom empty row instead of its empty state 🟢 DEFERRED (display-only)
+### F68 — Credit Notes list shows a phantom empty row instead of its empty state ✅ CLOSED (2026-08-18, commit 8ee2ee3)
 
 **Surfaced by:** S-LIST-TOOLBAR (2026-08-18) while restyling the Credit Notes filter bar.
 **What:** with zero rows, `app/admin/credit_notes/index.php` renders one table row of "—" placeholders rather than the "No credit notes found" empty state. The tbody's direct children are `[TEMPLATE, TEMPLATE, TEMPLATE, TR]` — that trailing `TR` is the `<template x-for="cn in rows" :key="cn.id">` body sitting in the live DOM, bound with `cn` undefined (its `:href` resolves to `…?id=undefined`). `Alpine.$data` reports `rows.length === 0` and `loading === false`, so the `x-if` empty state should be showing and is not. Suspect keyed-diff breakage when `:key` is undefined.
 **Second, probably related:** the page's KPI tiles report "6 active notes / $3,600.00 outstanding" while the list API returns 0 rows — worth checking `api/v1/credit_notes/index.php`'s WHERE clause against the tile queries at the top of the page.
 **Confirmed pre-existing:** reproduced by reverting the file to HEAD and reloading; the same phantom row appears. Not caused by the toolbar restyle.
-**Why deferred / not blocking:** cosmetic on an empty list; no credit-note math, application, or GL path is involved.
+**Closed:** root cause was the API envelope, not Alpine — the page read `data.data` / `data.total` / `data.last_page`, none of which exist, so `rows` was assigned the `{items, pagination}` OBJECT; `rows.length` was undefined (empty state never fired) and `x-for` iterated the object's 2 keys with an undefined `:key`, collapsing them into one dashes row. Now reads `r.data.items` / `r.data.pagination.total` / `.total_pages` behind an `r.success` gate. The "Fully Applied" KPI tile also drilled on a non-existent status `fully_applied`, corrected to `fully_used`. Landed in commit `8ee2ee3` — see S-SWEPT-COMMIT-DISCLOSURE. **This root cause generalised:** the same envelope class was then found on seven QuickBooks consoles and fixed by S-QBO-ENVELOPE-FIX.
 
 
 ## Cross-cutting notes
