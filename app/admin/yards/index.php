@@ -29,7 +29,8 @@ declare(strict_types=1);
  *              api/v1/yards/create.php, api/v1/yards/update.php,
  *              api/v1/yards/delete.php, api/v1/yards/bulk_activate.php,
  *              api/v1/yards/bulk_deactivate.php
- * @decisions   D19 (optimistic lock on edit), D32 (confirmed CSS classes only)
+ * @decisions   D5 (soft-delete filtered in the KPI tiles and the list API),
+ *              D19 (optimistic lock on edit), D32 (confirmed CSS classes only)
  * @session     S018-EXT
  */
 
@@ -43,12 +44,20 @@ $canEdit = can('settings', 'edit') ||
            in_array($_SESSION['ff_user']['role_slug'] ?? '', ['super_admin', 'manager']);
 
 // ── KPI tiles (server-rendered — yards is a tiny table) ─────────────────────
-$totalYards    = db_count("SELECT COUNT(*) FROM yards");
-$activeYards   = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 1");
-$inactiveYards = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 0");
+// WHY the deleted_at guard: these tiles must agree with the table below, and
+// api/v1/yards/index.php already filters `y.deleted_at IS NULL` (D5). Without
+// it the tiles counted soft-deleted yards the list never shows — dev read
+// "9 / 1 / 8" against a single visible row.
+$totalYards    = db_count("SELECT COUNT(*) FROM yards WHERE deleted_at IS NULL");
+$activeYards   = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 1 AND deleted_at IS NULL");
+$inactiveYards = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 0 AND deleted_at IS NULL");
 
 $pageTitle = 'Yards';
 $helpModuleSlug = 'yards';
+// S-TOPBAR-CREATE-ALL: yards has no create.php — the topbar "New Yard" link
+// arrives as ?new=1 and app.js dispatches this event, which the Alpine root
+// below already listens for (@open-create-yard.window).
+$createModalEvent = 'open-create-yard';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
@@ -104,9 +113,9 @@ require_once FF_ROOT . '/includes/header.php';
      @open-create-yard.window="openCreate()"
      @ff-yards-filter.window="
         const v = $event.detail.view;
-        if (v === 'active')    { showAll = false; quickFilter = ''; }
-        else if (v === 'inactive') { showAll = true;  quickFilter = 'inactive'; }
-        else                    { showAll = true;  quickFilter = ''; }
+        if (v === 'active')    { showAll = false; quickFilter = ''; statusFilter = 'active'; }
+        else if (v === 'inactive') { showAll = true;  quickFilter = 'inactive'; statusFilter = 'inactive'; }
+        else                    { showAll = true;  quickFilter = ''; statusFilter = ''; }
      ">
 
     <!-- Global feedback banners -->
@@ -117,49 +126,62 @@ require_once FF_ROOT . '/includes/header.php';
          style="margin-bottom:16px;" x-transition
          x-effect="actionError && setTimeout(() => actionError = '', 6000)"></div>
 
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was a segmented Active/All button pair plus sort
+         controls crammed into the card header; now the same .table-toolbar
+         shape as customers/invoices. The segmented toggle became a single
+         status select — applyStatus() writes the showAll/quickFilter pair the
+         KPI tiles already drive, so the two stay in sync in both directions. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search name, city, or address…"
+                   x-model="filters.q"
+                   maxlength="255"
+                   style="min-width:220px;"
+                   aria-label="Search yards">
+
+            <select class="form-select form-control-sm"
+                    x-model="statusFilter"
+                    @change="applyStatus()"
+                    aria-label="Filter by status">
+                <option value="">All Yards</option>
+                <option value="active">Active Only</option>
+                <option value="inactive">Inactive Only</option>
+            </select>
+
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters.q = ''; statusFilter = ''; applyStatus()">Reset</button>
+        </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="filteredYards.length + ' yard' + (filteredYards.length === 1 ? '' : 's')"></span>
+
+            <select class="form-select form-control-sm" x-model="sort" @change="load()"
+                    aria-label="Sort by">
+                <optgroup label="Sort by">
+                    <option value="name">Name</option>
+                    <option value="is_active">Status</option>
+                    <option value="created_at">Created</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm" x-model="dir" @change="load()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="ASC">&#8593; Asc</option>
+                <option value="DESC">&#8595; Desc</option>
+            </select>
+        </div>
+
+    </div>
+
     <!-- ── Yards table card ─────────────────────────────────────────────── -->
     <div class="card">
-        <div class="card-header" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <span style="font-weight:600;">All Yards</span>
-
-            <!-- Active/All toggle -->
-            <div style="display:flex;gap:0;border:1px solid var(--border-color);border-radius:6px;overflow:hidden;font-size:0.8125rem;">
-                <button type="button"
-                        class="btn btn-sm"
-                        :class="showAll ? 'btn-ghost' : 'btn-primary'"
-                        @click="showAll = false"
-                        style="border-radius:0;border:none;">
-                    Active Only
-                </button>
-                <button type="button"
-                        class="btn btn-sm"
-                        :class="showAll ? 'btn-primary' : 'btn-ghost'"
-                        @click="showAll = true"
-                        style="border-radius:0;border:none;border-left:1px solid var(--border-color);">
-                    All Yards
-                </button>
-            </div>
-
-            <!-- Sort controls -->
-            <div style="display:flex;align-items:center;gap:6px;margin-left:auto;">
-                <select class="form-input form-input-sm" x-model="sort" @change="load()"
-                        style="width:auto;font-size:0.8125rem;">
-                    <optgroup label="Sort by">
-                        <option value="name">Name</option>
-                        <option value="is_active">Status</option>
-                        <option value="created_at">Created</option>
-                    </optgroup>
-                </select>
-                <select class="form-input form-input-sm" x-model="dir" @change="load()"
-                        style="width:auto;font-size:0.8125rem;">
-                    <option value="ASC">&#8593; Asc</option>
-                    <option value="DESC">&#8595; Desc</option>
-                </select>
-            </div>
-
-            <span class="text-secondary" style="font-size:0.875rem;"
-                  x-text="filteredYards.length + ' yard' + (filteredYards.length === 1 ? '' : 's')"></span>
-        </div>
 
         <!-- Loading -->
         <div class="card-body" x-show="loading" style="text-align:center;padding:32px;">
@@ -598,11 +620,37 @@ function FF_YardsManager() {
         // Value is '' (no filter) or 'inactive' (show only deactivated).
         quickFilter: '',
 
+        // S-LIST-TOOLBAR: toolbar-facing state. `statusFilter` is the select's
+        // single value; showAll/quickFilter remain the underlying pair so the
+        // KPI tiles keep working unchanged. `filters.q` is a client-side text
+        // match — the yards list is small and loaded whole, so there is no
+        // server round-trip to debounce.
+        statusFilter: '',
+        filters: { q: '' },
+
+        // Map the one select value onto the showAll/quickFilter pair.
+        applyStatus() {
+            if (this.statusFilter === 'active') {
+                this.showAll = false; this.quickFilter = '';
+            } else if (this.statusFilter === 'inactive') {
+                this.showAll = true;  this.quickFilter = 'inactive';
+            } else {
+                this.showAll = true;  this.quickFilter = '';
+            }
+        },
+
         // ── Computed: filtered yards list ─────────────────────────────
         get filteredYards() {
             let list = this.showAll ? this.yards : this.yards.filter(y => y.is_active);
             if (this.quickFilter === 'inactive') {
                 list = list.filter(y => !y.is_active);
+            }
+            const q = (this.filters.q || '').trim().toLowerCase();
+            if (q) {
+                list = list.filter(y =>
+                    [y.name, y.city, y.address, y.state, y.phone, y.notes]
+                        .some(v => (v || '').toString().toLowerCase().includes(q))
+                );
             }
             return list;
         },

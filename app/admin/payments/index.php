@@ -141,40 +141,93 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      Filter bar + table — Alpine.js component
      ============================================================ -->
-<div class="card" x-data="FF_Payments()" id="payments-table">
+<!-- S-LIST-TOOLBAR: bare Alpine root so the filter toolbar sits ABOVE the table
+     card, matching customers/invoices. id stays on the x-data element — the KPI
+     tiles' drill() resolves the component via Alpine.$data(). -->
+<div x-data="FF_Payments()" id="payments-table">
 
-    <!-- Filter bar -->
-    <div class="card-header" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <div style="position:relative; flex:1; min-width:200px;">
-            <input
-                type="text"
-                class="form-input"
-                placeholder="Search by reference or payment #…"
-                x-model="filters.q"
-                @input.debounce.400ms="resetAndLoad()"
-                style="padding-left:36px;"
-            >
-            <span style="position:absolute; left:10px; top:50%; transform:translateY(-50%); color:var(--text-muted);">
-                <?= heroicon('magnifying-glass', 'icon-sm') ?>
-            </span>
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search by reference or payment #…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="resetAndLoad()"
+                   maxlength="255"
+                   style="min-width:240px;"
+                   aria-label="Search payments">
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.status" @change="resetAndLoad()"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="cleared">Cleared</option>
+                <option value="pending">Pending</option>
+                <option value="failed">Failed</option>
+                <option value="refunded">Refunded</option>
+                <option value="void">Void</option>
+                <option value="returned">Returned</option>
+            </select>
+
+            <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
         </div>
 
-        <select class="form-input" style="width:160px;" x-model="filters.status" @change="resetAndLoad()">
-            <option value="">All Statuses</option>
-            <option value="cleared">Cleared</option>
-            <option value="pending">Pending</option>
-            <option value="failed">Failed</option>
-            <option value="refunded">Refunded</option>
-            <option value="void">Void</option>
-            <option value="returned">Returned</option>
-        </select>
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="pagination.total !== undefined
+                      ? pagination.total + ' payment' + (pagination.total !== 1 ? 's' : '')
+                      : ''"></span>
 
-        <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
+            <select class="form-select form-control-sm"
+                    x-model="sort"
+                    @change="if (sort !== 'company_name') filters.customer_filter = ''; resetAndLoad()"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="payment_date">Payment date</option>
+                    <option value="created_at">Date created</option>
+                    <option value="updated_at">Last updated</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="payment_number">Payment #</option>
+                    <option value="company_name">Customer name</option>
+                    <option value="status">Status</option>
+                    <option value="payment_method">Method</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="amount">Amount</option>
+                </optgroup>
+            </select>
 
-        <span class="text-muted" style="font-size:0.85rem; margin-left:auto;" x-show="!loading">
-            <span x-text="pagination.total"></span> payments
-        </span>
+            <!-- Contextual customer filter — appears when sorting by customer
+                 name, same affordance as the invoices list. filters.customer_filter
+                 was already declared on the component and sent to the API; this
+                 is the input that was missing. -->
+            <input x-show="sort === 'company_name'"
+                   x-transition
+                   type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Filter by customer…"
+                   x-model="filters.customer_filter"
+                   @input.debounce.350ms="resetAndLoad()"
+                   style="min-width:160px;"
+                   aria-label="Filter by customer name">
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="resetAndLoad()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
     <!-- Bulk action bar — shown when one or more rows are checked -->
     <div x-show="selectedIds.length > 0"
@@ -288,7 +341,9 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="goPage(pagination.page + 1)">Next →</button>
     </div>
 
-</div><!-- /card -->
+    </div><!-- /card -->
+
+</div><!-- /payments-table -->
 
 <script>
 function paymentsKpis() {
@@ -397,7 +452,10 @@ function FF_Payments() {
         },
 
         resetFilters() {
-            this.filters = { q: '', status: '' };
+            // customer_filter is part of the declared filter shape (see the
+            // contextual input in the toolbar) — clearing it here keeps Reset
+            // from leaving a stale customer name applied to the next sort.
+            this.filters = { q: '', status: '', customer_filter: '' };
             this.sort    = 'payment_date';
             this.dir     = 'DESC';
             this.resetAndLoad();

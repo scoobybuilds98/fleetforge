@@ -314,29 +314,35 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-    <!-- Filter bar -->
-    <div class="card" style="margin-bottom:0;border-bottom:none;border-radius:8px 8px 0 0;">
-        <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was a stacked filter card welded to the table card by
+         border-radius overrides; now the standard toolbar-above-card shape. -->
+    <div class="table-toolbar">
 
-            <input type="text"
-                   class="form-control"
-                   style="max-width:200px;height:32px;font-size:0.875rem;"
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <input type="search"
+                   class="form-control form-control-sm"
                    placeholder="Search unit…"
                    x-model="filters.q"
-                   @input.debounce.400ms="load(1)">
+                   @input.debounce.400ms="load(1)"
+                   maxlength="255"
+                   style="min-width:180px;"
+                   aria-label="Search units">
 
-            <select class="form-select form-select-sm"
+            <select class="form-select form-control-sm"
                     x-model="filters.yard"
-                    @change="load(1)">
+                    @change="load(1)"
+                    aria-label="Filter by yard">
                 <option value="">All Yards</option>
                 <?php foreach ($yards as $yard): ?>
                 <option value="<?= e($yard['yard_location']) ?>"><?= e($yard['yard_location']) ?></option>
                 <?php endforeach; ?>
             </select>
 
-            <select class="form-select form-select-sm"
+            <select class="form-select form-control-sm"
                     x-model="filters.status"
-                    @change="load(1)">
+                    @change="load(1)"
+                    aria-label="Filter by status">
                 <option value="">All Statuses</option>
                 <option value="available">Available</option>
                 <option value="reserved">Reserved</option>
@@ -344,9 +350,10 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="maintenance">Maintenance</option>
             </select>
 
-            <select class="form-select form-select-sm"
+            <select class="form-select form-control-sm"
                     x-model="filters.window"
-                    @change="load(1)">
+                    @change="load(1)"
+                    aria-label="Filter by expiry window">
                 <option value="0">All units</option>
                 <option value="7">Expiring / expired in 7 days</option>
                 <option value="14">Expiring / expired in 14 days</option>
@@ -357,14 +364,41 @@ require_once FF_ROOT . '/includes/header.php';
 
             <button class="btn btn-secondary btn-sm"
                     @click="filters = {q:'',yard:'',status:'',window:'0',expired_only:''}; load(1)">Reset</button>
-
-            <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
-                  x-text="total > 0 ? total + ' unit' + (total === 1 ? '' : 's') : (loading ? '' : 'No units found')"></span>
         </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total > 0 ? total + ' unit' + (total === 1 ? '' : 's') : 'No units found'"></span>
+
+            <select class="form-select form-control-sm"
+                    x-model="sort" @change="load(1)"
+                    aria-label="Sort by">
+                <optgroup label="Unit">
+                    <option value="unit_number">Unit #</option>
+                    <option value="template_name">Type</option>
+                    <option value="yard_location">Yard</option>
+                    <option value="status">Status</option>
+                </optgroup>
+                <optgroup label="Expiry">
+                    <option value="cvi_expiry">CVI expiry</option>
+                    <option value="registration_expiry">Registration expiry</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="load(1)"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="ASC">↑ Asc</option>
+                <option value="DESC">↓ Desc</option>
+            </select>
+        </div>
+
     </div>
 
-    <!-- Table card -->
-    <div class="card" style="border-top:none;border-radius:0 0 8px 8px;">
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
         <!-- Loading -->
         <div class="card-body" x-show="loading" style="text-align:center;padding:32px;">

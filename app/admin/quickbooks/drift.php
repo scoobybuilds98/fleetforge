@@ -88,51 +88,46 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Filters bar ─────────────────────────────────────── -->
-    <div class="card" style="padding:14px 18px;margin-bottom:14px;display:grid;grid-template-columns:repeat(5,1fr);gap:12px;align-items:flex-end;">
-        <div>
-            <label class="form-label">Status</label>
-            <select class="form-select form-select-sm" x-model="filters.status" @change="page=1; reload()">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was a CSS-grid filter card of labelled fields;
+         now the same .table-toolbar shape as customers/invoices. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <select aria-label="Filter by status" class="form-select form-control-sm" x-model="filters.status" @change="page=1; reload()">
                 <option value="unresolved">Unresolved (open)</option>
                 <option value="resolved">Resolved</option>
                 <option value="accepted">Accepted</option>
                 <option value="suppressed">Suppressed</option>
-                <option value="all">All</option>
+                <option value="all">All Statuses</option>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Category</label>
-            <select class="form-select form-select-sm" x-model="filters.category" @change="page=1; reload()">
-                <option value="">All</option>
+            <select aria-label="Filter by category" class="form-select form-control-sm" x-model="filters.category" @change="page=1; reload()">
+                <option value="">All Categories</option>
                 <template x-for="c in categories" :key="c"><option :value="c" x-text="c"></option></template>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Entity</label>
-            <select class="form-select form-select-sm" x-model="filters.entity" @change="page=1; reload()">
-                <option value="">All</option>
+            <select aria-label="Filter by entity" class="form-select form-control-sm" x-model="filters.entity" @change="page=1; reload()">
+                <option value="">All Entities</option>
                 <template x-for="e in entityTypes" :key="e"><option :value="e" x-text="e"></option></template>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Source</label>
-            <select class="form-select form-select-sm" x-model="filters.source" @change="page=1; reload()">
-                <option value="">All</option>
+            <select aria-label="Filter by source" class="form-select form-control-sm" x-model="filters.source" @change="page=1; reload()">
+                <option value="">All Sources</option>
                 <option value="drift_cron">drift_cron</option>
                 <option value="push_failure">push_failure</option>
                 <option value="pull_failure">pull_failure</option>
                 <option value="manual">manual</option>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Range</label>
-            <select class="form-select form-select-sm" x-model="filters.range" @change="page=1; reload()">
+            <select aria-label="Filter by range" class="form-select form-control-sm" x-model="filters.range" @change="page=1; reload()">
                 <option value="7">7d</option>
                 <option value="30">30d</option>
                 <option value="90">90d</option>
-                <option value="all">All</option>
+                <option value="all">All Ranges</option>
             </select>
         </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-sm text-secondary" x-text="total + ' row' + (total === 1 ? '' : 's')"></span>
+        </div>
+
     </div>
 
     <?php if (can('quickbooks', 'edit_credentials')): ?>

@@ -122,48 +122,89 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
-<div class="card"
-     id="damage-claims-table"
+<!-- S-LIST-TOOLBAR: bare Alpine root so the filter toolbar sits ABOVE the table
+     card, matching customers/invoices. id stays on the x-data element —
+     damageClaimsKpis().setFilter() resolves it via Alpine.$data(). -->
+<div id="damage-claims-table"
      x-data="damageClaimsList()">
 
-    <!-- Filter bar -->
-    <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
 
-        <select class="form-select form-select-sm"
-                x-model="filters.status"
-                @change="goPage(1)">
-            <option value="">All Statuses</option>
-            <option value="reported">Reported</option>
-            <option value="assessed">Assessed</option>
-            <option value="repair_ordered">Repair Ordered</option>
-            <option value="invoiced">Invoiced</option>
-            <option value="resolved">Resolved</option>
-            <option value="written_off">Written Off</option>
-        </select>
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search claim # or unit…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="goPage(1)"
+                   maxlength="255"
+                   style="min-width:200px;"
+                   aria-label="Search damage claims">
 
-        <select class="form-select form-select-sm"
-                x-model="filters.severity"
-                @change="goPage(1)">
-            <option value="">All Severities</option>
-            <option value="minor">Minor</option>
-            <option value="moderate">Moderate</option>
-            <option value="major">Major</option>
-            <option value="total_loss">Total Loss</option>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.status"
+                    @change="goPage(1)"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="reported">Reported</option>
+                <option value="assessed">Assessed</option>
+                <option value="repair_ordered">Repair Ordered</option>
+                <option value="invoiced">Invoiced</option>
+                <option value="resolved">Resolved</option>
+                <option value="written_off">Written Off</option>
+            </select>
 
-        <input type="text"
-               class="form-input form-input-sm"
-               style="max-width:200px;"
-               placeholder="Search claim # or unit…"
-               x-model="filters.q"
-               @input.debounce.400ms="goPage(1)">
+            <select class="form-select form-control-sm"
+                    x-model="filters.severity"
+                    @change="goPage(1)"
+                    aria-label="Filter by severity">
+                <option value="">All Severities</option>
+                <option value="minor">Minor</option>
+                <option value="moderate">Moderate</option>
+                <option value="major">Major</option>
+                <option value="total_loss">Total Loss</option>
+            </select>
 
-        <button class="btn btn-secondary btn-sm"
-                @click="resetFilters()">Reset</button>
+            <button class="btn btn-secondary btn-sm"
+                    @click="resetFilters()">Reset</button>
+        </div>
 
-        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;white-space:nowrap;"
-              x-text="total > 0 ? total + ' claim' + (total === 1 ? '' : 's') : ''"></span>
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total > 0 ? total + ' claim' + (total === 1 ? '' : 's') : ''"></span>
+
+            <select class="form-select form-control-sm"
+                    x-model="sort" @change="goPage(1)"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="created_at">Date created</option>
+                    <option value="updated_at">Last updated</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="claim_number">Claim #</option>
+                    <option value="status">Status</option>
+                    <option value="severity">Severity</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="estimated_repair_cost">Estimated cost</option>
+                    <option value="actual_repair_cost">Actual cost</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="goPage(1)"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
     <!-- Bulk action bar -->
     <div x-show="selectedIds.length > 0"
@@ -271,7 +312,9 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
-</div><!-- /card -->
+    </div><!-- /card -->
+
+</div><!-- /damage-claims-table -->
 
 <style>
 .stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }

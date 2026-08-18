@@ -53,39 +53,47 @@ require_once FF_ROOT . '/includes/header.php';
          style="margin-bottom:14px;"
          x-text="flash.message"></div>
 
-    <!-- ── Filters bar ─────────────────────────────────────── -->
-    <div class="card" style="padding:14px 18px;margin-bottom:14px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
-        <div>
-            <label class="form-label">Status</label>
-            <select class="form-select form-select-sm" x-model="filters.status" @change="reload()">
-                <option value="">All</option>
+    <!-- ── FILTER TOOLBAR ──────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was a filter card of labelled fields; now the same
+         .table-toolbar shape as customers/invoices. Sort lives on the right
+         with the row count, where every other list page puts it. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <select class="form-select form-control-sm" x-model="filters.status" @change="reload()"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
                 <option value="queued">Queued</option>
                 <option value="processing">Processing</option>
                 <option value="failed">Failed</option>
                 <option value="skipped">Skipped</option>
                 <option value="completed">Completed</option>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Entity</label>
-            <select class="form-select form-select-sm" x-model="filters.entity" @change="reload()">
-                <option value="">All</option>
+
+            <select class="form-select form-control-sm" x-model="filters.entity" @change="reload()"
+                    aria-label="Filter by entity">
+                <option value="">All Entities</option>
                 <template x-for="e in entityTypes" :key="e"><option :value="e" x-text="e"></option></template>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Operation</label>
-            <select class="form-select form-select-sm" x-model="filters.operation" @change="reload()">
-                <option value="">All</option>
+
+            <select class="form-select form-control-sm" x-model="filters.operation" @change="reload()"
+                    aria-label="Filter by operation">
+                <option value="">All Operations</option>
                 <option value="create">create</option>
                 <option value="update">update</option>
                 <option value="void">void</option>
                 <option value="delete">delete</option>
             </select>
+
+            <button class="btn btn-secondary btn-sm" @click="reload()">↻ Refresh</button>
         </div>
-        <div>
-            <label class="form-label">Sort</label>
-            <select class="form-select form-select-sm" x-model="filters.sort" @change="reload()">
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="total + ' item' + (total === 1 ? '' : 's')"></span>
+
+            <select class="form-select form-control-sm" x-model="filters.sort" @change="reload()"
+                    aria-label="Sort by">
                 <option value="priority_enqueued">Pickup order (default)</option>
                 <option value="enqueued_desc">Enqueued ↓</option>
                 <option value="enqueued_asc">Enqueued ↑</option>
@@ -93,9 +101,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="retry_desc">Retry count ↓</option>
             </select>
         </div>
-        <div style="margin-left:auto;">
-            <button class="btn btn-secondary btn-sm" @click="reload()">↻ Refresh</button>
-        </div>
+
     </div>
 
     <!-- ── Bulk actions bar (super_admin / extended-action gates) ── -->

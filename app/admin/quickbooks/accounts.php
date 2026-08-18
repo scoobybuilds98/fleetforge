@@ -117,11 +117,15 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Filters bar ─────────────────────────────────────────── -->
-    <div class="card" style="padding:14px 18px;margin-bottom:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;align-items:flex-end;">
-        <div>
-            <label class="form-label">Type</label>
-            <select class="form-select form-select-sm" x-model="filters.type" @change="page=1; reload()">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was a CSS-grid filter card of labelled fields;
+         now the same .table-toolbar shape as customers/invoices. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <input aria-label="Search" type="search" class="form-control form-control-sm" maxlength="255" placeholder="code, name…"
+            x-model.debounce.350ms="filters.q" @input="page=1; reload()">
+            <select aria-label="Filter by type" class="form-select form-control-sm" x-model="filters.type" @change="page=1; reload()">
                 <option value="all">All types</option>
                 <option value="asset">Asset</option>
                 <option value="liability">Liability</option>
@@ -132,29 +136,23 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="other_income">Other Income</option>
                 <option value="other_expense">Other Expense</option>
             </select>
-        </div>
-        <div>
-            <label class="form-label">Status</label>
-            <select class="form-select form-select-sm" x-model="filters.status" @change="page=1; reload()">
-                <option value="all">All</option>
+            <select aria-label="Filter by status" class="form-select form-control-sm" x-model="filters.status" @change="page=1; reload()">
+                <option value="all">All Statuses</option>
                 <option value="mapped">Mapped</option>
                 <option value="ff_only">FF only</option>
                 <option value="qbo_only">QBO only</option>
                 <option value="ignored">Ignored</option>
             </select>
         </div>
-        <div>
-            <label class="form-label">Search</label>
-            <input type="text" class="form-control form-control-sm" placeholder="code, name…"
-                   x-model.debounce.350ms="filters.q" @input="page=1; reload()">
-        </div>
-        <div style="text-align:right;">
+
+        <div class="table-toolbar-right">
             <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:0.875rem;">
                 <input type="checkbox" x-model="filters.critical_only" @change="page=1; reload()">
                 Critical only
             </label>
-            <div class="text-sm text-secondary" style="margin-top:4px;" x-text="total + ' rows'"></div>
+            <span class="text-sm text-secondary" x-text="total + ' rows'"></span>
         </div>
+
     </div>
 
     <!-- ── Empty state ─────────────────────────────────────────── -->

@@ -58,67 +58,73 @@ require_once FF_ROOT . '/includes/header.php';
          style="margin-bottom:14px;"
          x-text="flash.message"></div>
 
-    <!-- ── Filters bar ─────────────────────────────────────── -->
-    <div class="card" style="padding:14px 18px;margin-bottom:14px;">
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;">
-            <div>
-                <label class="form-label">Direction</label>
-                <select class="form-select form-select-sm" x-model="filters.direction" @change="reload()">
-                    <option value="">All</option><option value="push">Push</option><option value="pull">Pull</option>
-                </select>
-            </div>
-            <div>
-                <label class="form-label">Entity</label>
-                <select class="form-select form-select-sm" x-model="filters.entity" @change="reload()">
-                    <option value="">All</option>
-                    <template x-for="e in entityTypes" :key="e"><option :value="e" x-text="e"></option></template>
-                </select>
-            </div>
-            <div>
-                <label class="form-label">Status</label>
-                <select class="form-select form-select-sm" x-model="filters.status" @change="reload()">
-                    <option value="">All</option>
-                    <option value="success">Success (2xx)</option>
-                    <option value="client_error">Client error (4xx)</option>
-                    <option value="server_error">Server error (5xx / transport)</option>
-                </select>
-            </div>
-            <div>
-                <label class="form-label">Date range</label>
-                <select class="form-select form-select-sm" x-model="filters.range" @change="applyRange()">
-                    <option value="7">Last 7 days</option>
-                    <option value="30">Last 30 days</option>
-                    <option value="90">Last 90 days</option>
-                    <option value="custom">Custom</option>
-                </select>
-            </div>
+    <!-- ── FILTER TOOLBAR ──────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was two stacked CSS grids of labelled fields inside a
+         card; now the same .table-toolbar shape as customers/invoices. The
+         custom-date row stays a separate conditional strip — it only appears
+         when Date range = Custom, so folding it into the main row would leave
+         a hole most of the time. Selects reload on change; the two free-text
+         boxes keep their Enter-to-apply plus the explicit Apply button. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <input type="search" class="form-control form-control-sm"
+                   style="min-width:240px;" maxlength="255"
+                   x-model="filters.q" @keyup.enter="reload()"
+                   placeholder="message / endpoint / entity_id / qbo_entity_id"
+                   aria-label="Search sync log">
+
+            <select class="form-select form-control-sm" x-model="filters.direction" @change="reload()"
+                    aria-label="Filter by direction">
+                <option value="">All Directions</option><option value="push">Push</option><option value="pull">Pull</option>
+            </select>
+
+            <select class="form-select form-control-sm" x-model="filters.entity" @change="reload()"
+                    aria-label="Filter by entity">
+                <option value="">All Entities</option>
+                <template x-for="e in entityTypes" :key="e"><option :value="e" x-text="e"></option></template>
+            </select>
+
+            <select class="form-select form-control-sm" x-model="filters.status" @change="reload()"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="success">Success (2xx)</option>
+                <option value="client_error">Client error (4xx)</option>
+                <option value="server_error">Server error (5xx / transport)</option>
+            </select>
+
+            <select class="form-select form-control-sm" x-model="filters.range" @change="applyRange()"
+                    aria-label="Filter by date range">
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="custom">Custom</option>
+            </select>
+
+            <input type="search" class="form-control form-control-sm"
+                   style="min-width:150px;" maxlength="255"
+                   x-model="filters.error_code" @keyup.enter="reload()"
+                   placeholder="Error code contains…"
+                   aria-label="Filter by error code">
+
+            <button class="btn btn-primary btn-sm" @click="reload()">Apply</button>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:10px;">
-            <div>
-                <label class="form-label">Error code</label>
-                <input type="text" class="form-input form-input-sm" x-model="filters.error_code" @keyup.enter="reload()" placeholder="contains…">
-            </div>
-            <div style="grid-column:span 2;">
-                <label class="form-label">Free text</label>
-                <input type="text" class="form-input form-input-sm" x-model="filters.q" @keyup.enter="reload()" placeholder="message / endpoint / entity_id / qbo_entity_id">
-            </div>
-            <div>
-                <label class="form-label">&nbsp;</label>
-                <button class="btn btn-primary btn-sm" @click="reload()" style="width:100%;">Apply filters</button>
-            </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="total + ' entr' + (total === 1 ? 'y' : 'ies')"></span>
         </div>
-        <div x-show="filters.range === 'custom'" x-cloak style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:10px;">
-            <div>
-                <label class="form-label">From</label>
-                <input type="date" class="form-input form-input-sm" x-model="filters.date_from">
-            </div>
-            <div>
-                <label class="form-label">To</label>
-                <input type="date" class="form-input form-input-sm" x-model="filters.date_to">
-            </div>
-            <div style="grid-column:span 2;align-self:end;">
-                <button class="btn btn-secondary btn-sm" @click="reload()">Apply date range</button>
-            </div>
+
+    </div>
+
+    <!-- Custom date range — only shown when Date range = Custom -->
+    <div x-show="filters.range === 'custom'" x-cloak class="table-toolbar">
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <input type="date" class="form-control form-control-sm"
+                   x-model="filters.date_from" title="From date" aria-label="From date">
+            <input type="date" class="form-control form-control-sm"
+                   x-model="filters.date_to" title="To date" aria-label="To date">
+            <button class="btn btn-secondary btn-sm" @click="reload()">Apply date range</button>
         </div>
     </div>
 

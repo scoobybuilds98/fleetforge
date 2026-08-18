@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-08-16 via S-REPORTS-STALE — added **F66** (prod has 1,553 unsent draft invoices / $1,080,790.91 and zero invoices have ever reached `sent`; all revenue reporting, AR, collections and QBO invoice sync read $0 as a direct consequence). Previously: 2026-08-07 via S-CUSTOMER-NOTIFICATIONS — added **F64** (deploy + migration `202608070001`; note Task 1 "stop customer compliance emails" is effective on code deploy alone) and **F65** (add `cron/customer_reminders.php` to the prod crontab — no-op until a reminder is enabled). Prior: 2026-07-22 via S-NORTHLAND-P0 — F61 CLOSED (SES bounce+complaint handling proven on prod); F62 (credit-app PDF teal accent) still open 🟡.
+**Last updated:** 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL — added **F67** (Yards KPI tiles count soft-deleted yards, so the tiles read 9/1/8 while the list holds 1) and **F68** (the Credit Notes list renders a phantom all-dashes row instead of its empty state, and its KPI tiles disagree with the list). Both are pre-existing and were reproduced on HEAD with this session's changes reverted; both are deploy-blocking for nobody but both are operator-visible wrong numbers. Previous: 2026-08-16 via S-REPORTS-STALE.
 
 ---
 
@@ -945,6 +945,30 @@ Optionally run it DAILY (`0 14 * * *`) — the cron is now idempotent + catch-up
 *(empty — track here when operator confirms completion + provides verification timestamp)*
 
 ---
+
+### F67 — Yards KPI tiles count soft-deleted yards 🟢 DEFERRED (display-only; no money, no data loss)
+
+**Surfaced by:** S-LIST-TOOLBAR (2026-08-18) while restyling the Yards filter bar — the toolbar's "1 yard" sat directly under tiles reading "TOTAL YARDS 9 / ACTIVE 1 / INACTIVE 8".
+**What:** the three server-rendered tiles in `app/admin/yards/index.php` (~lines 44-48) count without the D5 soft-delete filter:
+```
+$totalYards    = db_count("SELECT COUNT(*) FROM yards");
+$activeYards   = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 1");
+$inactiveYards = db_count("SELECT COUNT(*) FROM yards WHERE is_active = 0");
+```
+`api/v1/yards/index.php` (~line 58) correctly excludes them (`WHERE y.deleted_at IS NULL`), so the table below the tiles is right and the tiles are wrong. On the dev DB 8 of 9 yards are soft-deleted.
+**Fix:** add `deleted_at IS NULL` to all three counts, then confirm nothing else reads them.
+**Why deferred / not blocking:** display-only on an admin-facing page; no billing, reporting, or reservation logic reads these numbers. Not fixed inside S-LIST-TOOLBAR because that session was scoped to filter-bar presentation and this is a data-correctness bug in a different part of the page.
+
+---
+
+### F68 — Credit Notes list shows a phantom empty row instead of its empty state 🟢 DEFERRED (display-only)
+
+**Surfaced by:** S-LIST-TOOLBAR (2026-08-18) while restyling the Credit Notes filter bar.
+**What:** with zero rows, `app/admin/credit_notes/index.php` renders one table row of "—" placeholders rather than the "No credit notes found" empty state. The tbody's direct children are `[TEMPLATE, TEMPLATE, TEMPLATE, TR]` — that trailing `TR` is the `<template x-for="cn in rows" :key="cn.id">` body sitting in the live DOM, bound with `cn` undefined (its `:href` resolves to `…?id=undefined`). `Alpine.$data` reports `rows.length === 0` and `loading === false`, so the `x-if` empty state should be showing and is not. Suspect keyed-diff breakage when `:key` is undefined.
+**Second, probably related:** the page's KPI tiles report "6 active notes / $3,600.00 outstanding" while the list API returns 0 rows — worth checking `api/v1/credit_notes/index.php`'s WHERE clause against the tile queries at the top of the page.
+**Confirmed pre-existing:** reproduced by reverting the file to HEAD and reloading; the same phantom row appears. Not caused by the toolbar restyle.
+**Why deferred / not blocking:** cosmetic on an empty list; no credit-note math, application, or GL path is involved.
+
 
 ## Cross-cutting notes
 

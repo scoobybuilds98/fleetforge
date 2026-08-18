@@ -243,56 +243,57 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<!-- ── Filter form ──────────────────────────────────────────────────────────── -->
-<div class="card notif-filter-card">
-    <div class="card-body">
-        <form method="GET" action="" class="notif-filter-form">
+<!-- ── FILTER TOOLBAR ───────────────────────────────────────────────────────── -->
+<!-- S-LIST-TOOLBAR: was a labelled filter card; now the same .table-toolbar
+     shape as customers/invoices. Filtering is server-side via a plain GET
+     form, so the toolbar IS the form — the selects auto-submit on change and
+     the Filter button remains for the free-text search box. -->
+<form method="GET" action="" class="table-toolbar">
 
-            <div class="notif-filter-field">
-                <label class="form-label">Status</label>
-                <select name="is_read" class="form-select form-select-sm">
-                    <option value="all"    <?= $isReadFilter === 'all'    ? 'selected' : '' ?>>All</option>
-                    <option value="unread" <?= $isReadFilter === 'unread' ? 'selected' : '' ?>>Unread</option>
-                    <option value="read"   <?= $isReadFilter === 'read'   ? 'selected' : '' ?>>Read</option>
-                </select>
-            </div>
+    <div class="table-toolbar-left table-toolbar-left--wrap">
+        <input type="search" name="q" class="form-control form-control-sm"
+               value="<?= e($search) ?>"
+               maxlength="255"
+               style="min-width:220px;"
+               placeholder="Search title or message…"
+               aria-label="Search notifications">
 
-            <div class="notif-filter-field">
-                <label class="form-label">Category</label>
-                <select name="category" class="form-select form-select-sm">
-                    <option value="">All Categories</option>
-                    <?php foreach ($allowedCategories as $slug => $label): ?>
-                    <option value="<?= e($slug) ?>" <?= $category === $slug ? 'selected' : '' ?>>
-                        <?= e($label) ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+        <select name="is_read" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by read status">
+            <option value="all"    <?= $isReadFilter === 'all'    ? 'selected' : '' ?>>All Statuses</option>
+            <option value="unread" <?= $isReadFilter === 'unread' ? 'selected' : '' ?>>Unread</option>
+            <option value="read"   <?= $isReadFilter === 'read'   ? 'selected' : '' ?>>Read</option>
+        </select>
 
-            <div class="notif-filter-field">
-                <label class="form-label">Date</label>
-                <select name="date_range" class="form-select form-select-sm">
-                    <option value="all"   <?= $dateRange === 'all'   ? 'selected' : '' ?>>All Time</option>
-                    <option value="today" <?= $dateRange === 'today' ? 'selected' : '' ?>>Today</option>
-                    <option value="week"  <?= $dateRange === 'week'  ? 'selected' : '' ?>>This Week</option>
-                    <option value="month" <?= $dateRange === 'month' ? 'selected' : '' ?>>This Month</option>
-                </select>
-            </div>
+        <select name="category" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by category">
+            <option value="">All Categories</option>
+            <?php foreach ($allowedCategories as $slug => $label): ?>
+            <option value="<?= e($slug) ?>" <?= $category === $slug ? 'selected' : '' ?>>
+                <?= e($label) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
 
-            <div class="notif-filter-field notif-filter-field--grow">
-                <label class="form-label">Search</label>
-                <input type="text" name="q" class="form-control form-control-sm"
-                       value="<?= e($search) ?>"
-                       placeholder="Search title or message…">
-            </div>
+        <select name="date_range" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by date range">
+            <option value="all"   <?= $dateRange === 'all'   ? 'selected' : '' ?>>All Time</option>
+            <option value="today" <?= $dateRange === 'today' ? 'selected' : '' ?>>Today</option>
+            <option value="week"  <?= $dateRange === 'week'  ? 'selected' : '' ?>>This Week</option>
+            <option value="month" <?= $dateRange === 'month' ? 'selected' : '' ?>>This Month</option>
+        </select>
 
-            <div class="notif-filter-actions">
-                <button type="submit" class="btn btn-primary btn-sm">Filter</button>
-                <a href="<?= base_url('notifications') ?>" class="btn btn-secondary btn-sm">Reset</a>
-            </div>
-        </form>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="<?= base_url('notifications') ?>" class="btn btn-secondary btn-sm">Reset</a>
     </div>
-</div>
+
+    <div class="table-toolbar-right">
+        <span class="text-secondary text-sm">
+            <?= number_format($total) ?> notification<?= $total === 1 ? '' : 's' ?>
+        </span>
+    </div>
+
+</form>
 
 <!-- ── List ─────────────────────────────────────────────────────────────────── -->
 

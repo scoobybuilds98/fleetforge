@@ -150,19 +150,31 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<!-- ── Customer Rate Cards (grouped by customer) ─────────────────────────── -->
-<div class="card" style="margin-bottom:16px;">
-    <div class="card-header" style="display:flex;align-items:center;gap:10px;flex-wrap:nowrap;">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="width:18px;height:18px;color:var(--text-secondary);flex-shrink:0;"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
-        <input type="text" class="form-control form-control-sm"
-               style="flex:1;min-width:0;max-width:320px;"
+<!-- ── FILTER TOOLBAR ────────────────────────────────────────────────────── -->
+<!-- S-LIST-TOOLBAR: was a standalone search card with a hand-drawn magnifier;
+     now the same .table-toolbar shape as every other list page. Rates groups
+     by customer with no server-side sort, so the right side carries the count
+     only — no sort/direction pair to mirror. -->
+<div class="table-toolbar">
+
+    <div class="table-toolbar-left table-toolbar-left--wrap">
+        <input type="search" class="form-control form-control-sm"
+               style="min-width:260px;"
+               maxlength="255"
                placeholder="Search customers by name…"
-               x-model="q" @input.debounce.350ms="search()">
-        <button class="btn btn-ghost btn-sm" style="white-space:nowrap;" x-show="q"
-                @click="q='';search()">Clear</button>
-        <span class="text-secondary" style="margin-left:auto;white-space:nowrap;font-size:0.8125rem;"
+               x-model="q" @input.debounce.350ms="search()"
+               aria-label="Search customers with custom rate cards">
+
+        <button class="btn btn-secondary btn-sm" x-show="q"
+                @click="q='';search()">Reset</button>
+    </div>
+
+    <div class="table-toolbar-right">
+        <span class="text-secondary text-sm"
+              x-show="!groupsLoading"
               x-text="groupsTotal > 0 ? groupsTotal + ' customer' + (groupsTotal === 1 ? '' : 's') + ' with custom cards' : ''"></span>
     </div>
+
 </div>
 
 <div x-ref="custSection" style="font-weight:600;font-size:0.9375rem;margin:4px 2px 12px;">Customer Rate Cards</div>

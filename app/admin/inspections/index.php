@@ -96,43 +96,85 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
-<div class="card"
-     id="inspections-table"
+<!-- S-LIST-TOOLBAR: bare Alpine root so the filter toolbar sits ABOVE the table
+     card, matching customers/invoices. id stays on the x-data element —
+     the KPI tiles' drill() resolves it via Alpine.$data(). -->
+<div id="inspections-table"
      x-data="inspectionList()"
      x-init="loadInspections()">
 
-    <!-- Filters -->
-    <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
 
-        <input type="text" class="form-control form-control-sm"
-               placeholder="Search inspection #, unit, inspector..."
-               style="width:240px;"
-               x-model="filters.q"
-               @input.debounce.400ms="loadInspections()">
+        <div class="table-toolbar-left">
+            <input type="search" class="form-control form-control-sm"
+                   placeholder="Search inspection #, unit, inspector…"
+                   style="min-width:240px;"
+                   maxlength="255"
+                   x-model="filters.q"
+                   @input.debounce.400ms="loadInspections()"
+                   aria-label="Search inspections">
 
-        <select class="form-control form-control-sm" style="width:150px;"
-                x-model="filters.status" @change="loadInspections()">
-            <option value="">All Statuses</option>
-            <option value="draft">Draft</option>
-            <option value="complete">Complete</option>
-            <option value="signed">Signed</option>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.status" @change="loadInspections()"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="draft">Draft</option>
+                <option value="complete">Complete</option>
+                <option value="signed">Signed</option>
+            </select>
 
-        <select class="form-control form-control-sm" style="width:170px;"
-                x-model="filters.inspection_type" @change="loadInspections()">
-            <option value="">All Types</option>
-            <option value="pre_lease">Pre-Lease</option>
-            <option value="post_lease">Post-Lease</option>
-            <option value="periodic">Periodic</option>
-            <option value="damage">Damage</option>
-            <option value="compliance">Compliance</option>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.inspection_type" @change="loadInspections()"
+                    aria-label="Filter by type">
+                <option value="">All Types</option>
+                <option value="pre_lease">Pre-Lease</option>
+                <option value="post_lease">Post-Lease</option>
+                <option value="periodic">Periodic</option>
+                <option value="damage">Damage</option>
+                <option value="compliance">Compliance</option>
+            </select>
 
-        <button class="btn btn-sm btn-ghost" @click="clearFilters()">Clear</button>
+            <button class="btn btn-secondary btn-sm" @click="clearFilters()">Reset</button>
+        </div>
 
-        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;"
-              x-text="total + ' result' + (total !== 1 ? 's' : '')"></span>
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total + ' result' + (total !== 1 ? 's' : '')"></span>
+
+            <select class="form-select form-control-sm"
+                    x-model="sort" @change="page = 1; loadInspections()"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="inspection_date">Inspection date</option>
+                    <option value="created_at">Date created</option>
+                    <option value="updated_at">Last updated</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="inspection_number">Inspection #</option>
+                    <option value="unit_number">Unit #</option>
+                    <option value="status">Status</option>
+                    <option value="inspection_type">Type</option>
+                </optgroup>
+                <optgroup label="Condition">
+                    <option value="overall_condition">Overall condition</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="page = 1; loadInspections()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
     <!-- Bulk action bar -->
     <div x-show="selectedIds.length > 0"
@@ -215,7 +257,9 @@ require_once FF_ROOT . '/includes/header.php';
             <button class="btn btn-sm btn-ghost" :disabled="page >= totalPages" @click="page++; loadInspections()">Next</button>
         </div>
     </div>
-</div>
+    </div><!-- /card -->
+
+</div><!-- /inspections-table -->
 
 <style>
 .stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }

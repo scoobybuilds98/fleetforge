@@ -107,26 +107,37 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         </div>
     </div>
 
-    <!-- ── Filter bar (status + origin) ────────────────────────── -->
-    <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <div class="text-sm text-secondary">Status:</div>
-        <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','skipped_voided','skipped_by_mode','pulled_from_qbo']" :key="s">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
-                <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
-                <span x-text="s"></span>
-            </label>
-        </template>
-        <div class="text-sm text-secondary" style="margin-left:14px;">Origin:</div>
-        <template x-for="o in ['ff_native','qbo_payments_webhook','qbo_other']" :key="o">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
-                <input type="checkbox" :value="o" x-model="filters.origins" @change="page=1; reload()">
-                <span x-text="o"></span>
-            </label>
-        </template>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto;"
-                @click="filters.statuses = []; filters.origins = []; page=1; reload()">
-            Clear filters
-        </button>
+    <!-- ── FILTER TOOLBAR (status + origin) ────────────────────── -->
+    <!-- S-LIST-TOOLBAR: same .table-toolbar shape as customers/invoices. Both
+         controls stay checkbox sets — push status and payment origin are
+         genuinely multi-select, which a single-value <select> would drop. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <span class="text-secondary text-sm" style="white-space:nowrap;">Status:</span>
+            <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','skipped_voided','skipped_by_mode','pulled_from_qbo']" :key="s">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
+                    <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
+                    <span x-text="s"></span>
+                </label>
+            </template>
+
+            <span class="text-secondary text-sm" style="white-space:nowrap;margin-left:6px;">Origin:</span>
+            <template x-for="o in ['ff_native','qbo_payments_webhook','qbo_other']" :key="o">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
+                    <input type="checkbox" :value="o" x-model="filters.origins" @change="page=1; reload()">
+                    <span x-text="o"></span>
+                </label>
+            </template>
+        </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="total + ' row' + (total === 1 ? '' : 's')"></span>
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters.statuses = []; filters.origins = []; page=1; reload()">Reset</button>
+        </div>
+
     </div>
 
     <!-- ── Main table ──────────────────────────────────────────── -->

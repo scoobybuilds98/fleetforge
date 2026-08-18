@@ -123,77 +123,70 @@ require_once FF_ROOT . '/includes/header.php';
 
 <div class="page-header">
     <h1 class="page-header-title">Audit Log</h1>
-    <?php if ($total > 0): ?>
-    <span class="badge badge-neutral" style="margin-left:8px;"><?= number_format($total) ?> entries</span>
-    <?php endif; ?>
+    <?php // S-LIST-TOOLBAR: the entry count moved to the filter toolbar below,
+          // where every other list page shows it. ?>
 </div>
 
-<!-- ── Filter form ───────────────────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-body" style="padding:16px;">
-        <form method="GET" action="" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+<!-- ── FILTER TOOLBAR ────────────────────────────────────────────────────────── -->
+<!-- S-LIST-TOOLBAR: was a filter card of labelled fields; now the same
+     .table-toolbar shape as customers/invoices. Audit filters server-side via
+     a plain GET form, so the toolbar IS the form — the selects auto-submit on
+     change and the Filter button stays for the two date fields (which people
+     type into rather than pick, so submitting per keystroke would thrash). -->
+<form method="GET" action="" class="table-toolbar">
 
-            <div>
-                <label class="form-label" style="display:block;margin-bottom:4px;font-size:0.8125rem;">Module</label>
-                <select name="module" class="form-select form-select-sm">
-                    <option value="">All Modules</option>
-                    <?php foreach ($modules as $m): ?>
-                    <option value="<?= e($m['module']) ?>"
-                            <?= $module === $m['module'] ? 'selected' : '' ?>>
-                        <?= e($m['module']) ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+    <div class="table-toolbar-left table-toolbar-left--wrap">
+        <select name="module" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by module">
+            <option value="">All Modules</option>
+            <?php foreach ($modules as $m): ?>
+            <option value="<?= e($m['module']) ?>"
+                    <?= $module === $m['module'] ? 'selected' : '' ?>>
+                <?= e($m['module']) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
 
-            <div>
-                <label class="form-label" style="display:block;margin-bottom:4px;font-size:0.8125rem;">User</label>
-                <select name="user_id" class="form-select form-select-sm">
-                    <option value="">All Users</option>
-                    <?php foreach ($users as $u): ?>
-                    <option value="<?= e($u['id']) ?>"
-                            <?= $userId === (int)$u['id'] ? 'selected' : '' ?>>
-                        <?= e($u['name']) ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+        <select name="user_id" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by user">
+            <option value="">All Users</option>
+            <?php foreach ($users as $u): ?>
+            <option value="<?= e($u['id']) ?>"
+                    <?= $userId === (int)$u['id'] ? 'selected' : '' ?>>
+                <?= e($u['name']) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
 
-            <div>
-                <label class="form-label" style="display:block;margin-bottom:4px;font-size:0.8125rem;">Action</label>
-                <select name="action" class="form-select form-select-sm">
-                    <option value="">All Actions</option>
-                    <?php foreach ($actionValues as $av): ?>
-                    <option value="<?= e($av) ?>"
-                            <?= $action === $av ? 'selected' : '' ?>>
-                        <?= e($av) ?>
-                    </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+        <select name="action" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by action">
+            <option value="">All Actions</option>
+            <?php foreach ($actionValues as $av): ?>
+            <option value="<?= e($av) ?>"
+                    <?= $action === $av ? 'selected' : '' ?>>
+                <?= e($av) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
 
-            <div>
-                <label class="form-label" style="display:block;margin-bottom:4px;font-size:0.8125rem;">From</label>
-                <input type="date" name="date_from" class="form-control"
-                       style="height:32px;font-size:0.875rem;"
-                       value="<?= e($dateFrom ?? '') ?>">
-            </div>
+        <input type="date" name="date_from" class="form-control form-control-sm"
+               value="<?= e($dateFrom ?? '') ?>"
+               title="From date" aria-label="From date">
+        <input type="date" name="date_to" class="form-control form-control-sm"
+               value="<?= e($dateTo ?? '') ?>"
+               title="To date" aria-label="To date">
 
-            <div>
-                <label class="form-label" style="display:block;margin-bottom:4px;font-size:0.8125rem;">To</label>
-                <input type="date" name="date_to" class="form-control"
-                       style="height:32px;font-size:0.875rem;"
-                       value="<?= e($dateTo ?? '') ?>">
-            </div>
-
-            <div style="display:flex;gap:8px;">
-                <button type="submit" class="btn btn-primary btn-sm">Filter</button>
-                <a href="<?= base_url('audit') ?>" class="btn btn-secondary btn-sm">Reset</a>
-            </div>
-
-        </form>
+        <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+        <a href="<?= base_url('audit') ?>" class="btn btn-secondary btn-sm">Reset</a>
     </div>
-</div>
+
+    <div class="table-toolbar-right">
+        <span class="text-secondary text-sm">
+            <?= number_format($total) ?> <?= $total === 1 ? 'entry' : 'entries' ?>
+        </span>
+    </div>
+
+</form>
 
 <!-- ── Table ─────────────────────────────────────────────────────────────────── -->
 <div class="card">

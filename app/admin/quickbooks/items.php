@@ -125,26 +125,27 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         </div>
     </div>
 
-    <!-- ── Filters bar ─────────────────────────────────────────── -->
-    <div class="card" style="padding:14px 18px;margin-bottom:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:flex-end;">
-        <div>
-            <label class="form-label">Status</label>
-            <select class="form-select form-select-sm" x-model="filters.status" @change="page=1; reload()">
-                <option value="all">All</option>
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was a CSS-grid filter card of labelled fields;
+         now the same .table-toolbar shape as customers/invoices. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <input aria-label="Search" type="search" class="form-control form-control-sm" maxlength="255" placeholder="ff item_type, qbo name, account…"
+            x-model.debounce.350ms="filters.q" @input="page=1; reload()">
+            <select aria-label="Filter by status" class="form-select form-control-sm" x-model="filters.status" @change="page=1; reload()">
+                <option value="all">All Statuses</option>
                 <option value="mapped">Mapped</option>
                 <option value="ff_only">FF only (needs QBO)</option>
                 <option value="qbo_only">QBO only</option>
                 <option value="ignored">Ignored</option>
             </select>
         </div>
-        <div>
-            <label class="form-label">Search</label>
-            <input type="text" class="form-control form-control-sm" placeholder="ff item_type, qbo name, account…"
-                   x-model.debounce.350ms="filters.q" @input="page=1; reload()">
-        </div>
-        <div style="text-align:right;">
+
+        <div class="table-toolbar-right">
             <span class="text-sm text-secondary" x-text="total + ' rows'"></span>
         </div>
+
     </div>
 
     <!-- ── Empty state ─────────────────────────────────────────── -->

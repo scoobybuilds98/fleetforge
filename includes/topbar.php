@@ -75,19 +75,68 @@ $_roleLabel = $_roleMap[$_me['role_slug'] ?? '']
 
 // Quick-create items: permission-gated shortcuts shown in the "+" dropdown.
 // Icons must exist in public/assets/icons/ (checked against disk, S009).
+//
+// S-TOPBAR-CREATE-ALL: the dropdown covers EVERY record the app can create,
+// not just the original four. Items are grouped into sections so a ~20-entry
+// menu stays scannable; each group renders its own .topbar-dropdown-label and
+// is skipped entirely when the user can create nothing inside it.
+//
+// Three destinations are modal-based list pages rather than dedicated create
+// forms (Yards, Journal Entries, Documents). Those links carry `?new=1`, which
+// header.php + app.js turn into the page's own open-modal window event — see
+// $createModalEvent in the respective index.php files.
+//
+// Shape: [ 'Section label', [ [label, url, icon], … ] ]
 $_creates = [];
-if (can('customers', 'create')) {
-    $_creates[] = ['New Customer',   base_url('customers/create'),  'users'];
+
+// ── Sales & billing ──
+$_g = [];
+if (can('customers', 'create'))    { $_g[] = ['New Customer',     base_url('customers/create'),    'users']; }
+if (can('leases', 'create'))       { $_g[] = ['New Lease',        base_url('leases/create'),       'clipboard-document-list']; }
+if (can('reservations', 'create')) { $_g[] = ['New Reservation',  base_url('reservations/create'), 'calendar']; }
+if (can('invoices', 'create'))     { $_g[] = ['New Invoice',      base_url('invoices/create'),     'document-text']; }
+if (can('invoices', 'create'))     { $_g[] = ['New Credit Note',  base_url('credit_notes/create'), 'receipt-percent']; }
+if (can('payments', 'create'))     { $_g[] = ['Record Payment',   base_url('payments/create'),     'credit-card']; }
+if (can('rates', 'create'))        { $_g[] = ['New Rate Card',    base_url('rates/create'),        'currency-dollar']; }
+if ($_g) { $_creates[] = ['Sales & Billing', $_g]; }
+
+// ── Fleet ──
+// Yards has no create.php — its page gates the create modal on settings-edit
+// or manager/super_admin, so mirror that gate here rather than a module check.
+$_g = [];
+if (can('equipment', 'create')) { $_g[] = ['New Equipment',  base_url('equipment/create'),           'truck']; }
+if (can('equipment', 'create')) { $_g[] = ['New Template',   base_url('equipment/templates/create'), 'cube']; }
+if (can('settings', 'edit') || in_array($_me['role_slug'] ?? '', ['super_admin', 'manager'], true)) {
+    $_g[] = ['New Yard', base_url('yards') . '?new=1', 'map-pin'];
 }
-if (can('leases', 'create')) {
-    $_creates[] = ['New Lease',      base_url('leases/create'),     'clipboard-document-list'];
+if ($_g) { $_creates[] = ['Fleet', $_g]; }
+
+// ── Maintenance ──
+$_g = [];
+if (can('maintenance', 'create')) { $_g[] = ['New Work Order',   base_url('maintenance_work_orders/create'), 'wrench-screwdriver']; }
+if (can('inspections', 'create')) { $_g[] = ['New Inspection',   base_url('inspections/create'),             'clipboard-document-check']; }
+if (can('maintenance', 'create')) { $_g[] = ['New Damage Claim', base_url('damage_claims/create'),           'exclamation-triangle']; }
+if (can('maintenance', 'create')) { $_g[] = ['New Mileage Log',  base_url('mileage_logs/create'),            'chart-bar-square']; }
+if (can('maintenance', 'create')) { $_g[] = ['New Vendor',       base_url('vendors/create'),                 'building-storefront']; }
+if ($_g) { $_creates[] = ['Maintenance', $_g]; }
+
+// ── Accounting ──
+$_g = [];
+if (can('journal_entries', 'create')) { $_g[] = ['New Journal Entry',   base_url('accounting/journal-entries') . '?new=1',  'book-open']; }
+if (can('journal_entries', 'create')) { $_g[] = ['New Budget',          base_url('accounting/budgets/create'),              'document-chart-bar']; }
+if (can('journal_entries', 'create')) { $_g[] = ['New Recurring Entry', base_url('accounting/recurring-entries/create'),    'arrow-path']; }
+if ($_g) { $_creates[] = ['Accounting', $_g]; }
+
+// ── Everything else ──
+// Documents mirrors its own page gate (edit on any of the three owner modules).
+// Invite User is super_admin-only — users/create.php renders an access wall
+// for everyone else, so showing the link to managers would be a dead end.
+$_g = [];
+if (can('equipment', 'edit') || can('customers', 'edit') || can('leases', 'edit')) {
+    $_g[] = ['Upload Document', base_url('documents') . '?new=1', 'arrow-up-tray'];
 }
-if (can('invoices', 'create')) {
-    $_creates[] = ['New Invoice',    base_url('invoices/create'),   'document-text'];
-}
-if (can('payments', 'create')) {
-    $_creates[] = ['Record Payment', base_url('payments/create'),   'credit-card'];
-}
+if (is_super_admin()) { $_g[] = ['Invite User', base_url('users/create'), 'user-group']; }
+if ($_g) { $_creates[] = ['Other', $_g]; }
 
 $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
 
@@ -199,15 +248,16 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                  role="menu"
                  aria-label="Quick create">
 
-                <p class="topbar-dropdown-label">Create</p>
-
-                <?php foreach ($_creates as [$_label, $_url, $_icon]): ?>
-                    <a href="<?= e($_url) ?>"
-                       class="topbar-create-item"
-                       role="menuitem">
-                        <?= heroicon($_icon, 'nav-icon') ?>
-                        <?= e($_label) ?>
-                    </a>
+                <?php foreach ($_creates as [$_section, $_items]): ?>
+                    <p class="topbar-dropdown-label"><?= e($_section) ?></p>
+                    <?php foreach ($_items as [$_label, $_url, $_icon]): ?>
+                        <a href="<?= e($_url) ?>"
+                           class="topbar-create-item"
+                           role="menuitem">
+                            <?= heroicon($_icon, 'nav-icon') ?>
+                            <?= e($_label) ?>
+                        </a>
+                    <?php endforeach; ?>
                 <?php endforeach; ?>
 
             </div>

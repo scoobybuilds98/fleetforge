@@ -5378,3 +5378,46 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
 });
+
+/* ============================================================
+   S-TOPBAR-CREATE-ALL — `?new=1` deep link → open a page's create modal.
+
+   A few list pages create records through an in-page modal rather than a
+   dedicated create.php form (Yards, Journal Entries, Documents). The topbar
+   "New" menu links to those pages with `?new=1`; this listener turns that
+   into the window event the page's Alpine root already listens for.
+
+   The event name is declared per page via `$createModalEvent` before the
+   header include, which header.php emits as body[data-ff-new-event]. Pages
+   without the attribute are unaffected.
+
+   WHY alpine:initialized: the listener on the page root (`@evt.window`) is
+   not registered until Alpine walks the DOM, so dispatching any earlier —
+   DOMContentLoaded included — would fire into a void.
+   ============================================================ */
+document.addEventListener('alpine:initialized', function () {
+    var evt = document.body && document.body.dataset
+        ? document.body.dataset.ffNewEvent
+        : '';
+    if (!evt) return;
+
+    var params;
+    try {
+        params = new URLSearchParams(window.location.search);
+    } catch (e) {
+        return;
+    }
+    if (params.get('new') !== '1') return;
+
+    window.dispatchEvent(new CustomEvent(evt));
+
+    // Drop the flag so a refresh (or a back-navigation) does not re-open the
+    // modal the user just dismissed. replaceState keeps the history entry.
+    params.delete('new');
+    var qs = params.toString();
+    window.history.replaceState(
+        window.history.state,
+        '',
+        window.location.pathname + (qs ? '?' + qs : '') + window.location.hash
+    );
+});

@@ -115,46 +115,60 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
-<div class="card"
-     id="vendors-table"
+<!-- S-LIST-TOOLBAR: the Alpine root is a bare wrapper, not the card, so the
+     filter toolbar sits ABOVE the table card exactly like customers/invoices.
+     id stays on the x-data element — vendorsKpis().drill() resolves the
+     component via Alpine.$data(document.getElementById('vendors-table')). -->
+<div id="vendors-table"
      x-data="vendorsList()">
 
-    <!-- Filter bar -->
-    <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
 
-        <select class="form-select form-select-sm"
-                x-model="filters.vendor_type"
-                @change="goPage(1)">
-            <option value="">All Types</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="repair">Repair</option>
-            <option value="parts">Parts</option>
-            <option value="inspection">Inspection</option>
-            <option value="towing">Towing</option>
-            <option value="other">Other</option>
-        </select>
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search name or contact…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="goPage(1)"
+                   maxlength="255"
+                   style="min-width:220px;"
+                   aria-label="Search vendors">
 
-        <select class="form-select form-select-sm"
-                x-model="filters.is_preferred"
-                @change="goPage(1)">
-            <option value="">All Vendors</option>
-            <option value="1">Preferred Only</option>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.vendor_type"
+                    @change="goPage(1)"
+                    aria-label="Filter by type">
+                <option value="">All Types</option>
+                <option value="maintenance">Maintenance</option>
+                <option value="repair">Repair</option>
+                <option value="parts">Parts</option>
+                <option value="inspection">Inspection</option>
+                <option value="towing">Towing</option>
+                <option value="other">Other</option>
+            </select>
 
-        <input type="text"
-               class="form-control"
-               style="max-width:220px;height:32px;font-size:0.875rem;"
-               placeholder="Search name or contact…"
-               x-model="filters.q"
-               @input.debounce.400ms="goPage(1)">
+            <select class="form-select form-control-sm"
+                    x-model="filters.is_preferred"
+                    @change="goPage(1)"
+                    aria-label="Filter by preferred">
+                <option value="">All Vendors</option>
+                <option value="1">Preferred Only</option>
+            </select>
 
-        <button class="btn btn-secondary btn-sm"
-                @click="resetFilters()">Reset</button>
+            <button class="btn btn-secondary btn-sm"
+                    @click="resetFilters()">Reset</button>
+        </div>
 
-        <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-            <select class="form-select form-select-sm"
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total > 0 ? total + ' vendor' + (total === 1 ? '' : 's') : ''"></span>
+
+            <select class="form-select form-control-sm"
                     x-model="sort"
-                    @change="goPage(1)">
+                    @change="goPage(1)"
+                    aria-label="Sort by">
                 <optgroup label="Name">
                     <option value="name">Name</option>
                 </optgroup>
@@ -171,17 +185,21 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="updated_at">Updated</option>
                 </optgroup>
             </select>
-            <select class="form-select form-select-sm"
+
+            <select class="form-select form-control-sm"
                     x-model="dir"
                     @change="goPage(1)"
+                    aria-label="Sort direction"
                     style="width:auto;">
-                <option value="ASC">↑ Asc</option>
                 <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
             </select>
-            <span class="text-secondary" style="font-size:0.875rem;white-space:nowrap;"
-                  x-text="total > 0 ? total + ' vendor' + (total === 1 ? '' : 's') : ''"></span>
         </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
     <!-- Loading -->
     <div class="card-body" x-show="loading" style="text-align:center;padding:32px;">
@@ -281,7 +299,9 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
-</div><!-- /card -->
+    </div><!-- /card -->
+
+</div><!-- /vendors-table -->
 
 <script>
 function vendorsKpis() {

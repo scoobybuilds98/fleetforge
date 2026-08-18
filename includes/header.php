@@ -166,7 +166,14 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
         };
     </script>
 </head>
-<body data-density="<?= e($_displayDensity) ?>">
+<?php
+// S-TOPBAR-CREATE-ALL: list pages whose "create" lives in an in-page modal
+// declare `$createModalEvent = '…'` before including this file. It is
+// published on <body> so app.js can turn a `?new=1` deep link from the
+// topbar "New" menu into that page's open-modal window event.
+$_ffNewEvent = isset($createModalEvent) ? trim((string) $createModalEvent) : '';
+?>
+<body data-density="<?= e($_displayDensity) ?>"<?= $_ffNewEvent !== '' ? ' data-ff-new-event="' . e($_ffNewEvent) . '"' : '' ?>>
 
 <!-- Skip navigation — visually hidden, appears on keyboard focus (S025 / WCAG 2.4.1) -->
 <a href="#main-content" class="skip-nav">Skip to main content</a>

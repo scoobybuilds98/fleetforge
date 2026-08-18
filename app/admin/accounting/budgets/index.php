@@ -80,22 +80,38 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<form method="get" class="card" style="padding:14px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-    <div>
-        <label style="display:block;font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:3px;">Year</label>
-        <input type="number" name="year" value="<?= e((string) ($year ?? '')) ?>" class="form-input" style="padding:7px 9px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;min-width:100px;" placeholder="<?= (int) date('Y') ?>">
-    </div>
-    <div>
-        <label style="display:block;font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:3px;">Status</label>
-        <select name="status" class="form-input" style="padding:7px 9px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
-            <option value="">All</option>
+<!-- ── FILTER TOOLBAR ────────────────────────────────────────────────────── -->
+<!-- S-LIST-TOOLBAR: was a filter card of labelled fields with hand-rolled
+     inline input styling; now the standard .table-toolbar shape and the shared
+     .form-control/.form-select pills. Status auto-submits; Apply covers the
+     free-typed year box. -->
+<form method="get" class="table-toolbar">
+
+    <div class="table-toolbar-left">
+        <input type="number" name="year" value="<?= e((string) ($year ?? '')) ?>"
+               class="form-control form-control-sm"
+               style="min-width:110px;"
+               placeholder="Year — <?= (int) date('Y') ?>"
+               aria-label="Filter by year">
+
+        <select name="status" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by status">
+            <option value="">All Statuses</option>
             <option value="draft"    <?= $status === 'draft'    ? 'selected' : '' ?>>Draft</option>
             <option value="active"   <?= $status === 'active'   ? 'selected' : '' ?>>Active</option>
             <option value="archived" <?= $status === 'archived' ? 'selected' : '' ?>>Archived</option>
         </select>
+
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        <a href="<?= base_url('accounting/budgets') ?>" class="btn btn-secondary btn-sm">Reset</a>
     </div>
-    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
-    <a href="<?= base_url('accounting/budgets') ?>" class="btn btn-secondary btn-sm">Reset</a>
+
+    <div class="table-toolbar-right">
+        <span class="text-secondary text-sm">
+            <?= number_format($total) ?> budget<?= $total === 1 ? '' : 's' ?>
+        </span>
+    </div>
+
 </form>
 
 <?php if ($total === 0): ?>

@@ -129,19 +129,39 @@ $typeLabels = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABE
     </div>
 </div>
 
-<!-- ── Status filter pills ─────────────────────────────────────── -->
-<div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-    <span class="text-sm text-secondary">Status:</span>
-    <?php foreach (['open', 'in_review', 'resolved', 'closed', 'all'] as $s):
-        $active = $s === $statusFilter;
-    ?>
-        <a href="?status=<?= e($s) ?>"
-           class="badge <?= $active ? 'badge-primary' : 'badge-secondary' ?>"
-           style="text-decoration:none;cursor:pointer;<?= $active ? '' : 'background:var(--bg-secondary);color:var(--text-secondary);' ?>">
-            <?= e($s) ?>
-        </a>
-    <?php endforeach; ?>
-</div>
+<!-- ── FILTER TOOLBAR ──────────────────────────────────────────── -->
+<!-- S-LIST-TOOLBAR: was a card of status pills; now the standard
+     .table-toolbar with a status select, so this list reads the same as
+     customers/invoices. Filtering is a plain GET, so the select navigates
+     on change — no submit button needed for a single control. -->
+<form method="GET" action="" class="table-toolbar">
+
+    <div class="table-toolbar-left table-toolbar-left--wrap">
+        <select name="status" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by status">
+            <?php foreach ([
+                'open'      => 'Open',
+                'in_review' => 'In Review',
+                'resolved'  => 'Resolved',
+                'closed'    => 'Closed',
+                'all'       => 'All Statuses',
+            ] as $s => $label): ?>
+                <option value="<?= e($s) ?>" <?= $s === $statusFilter ? 'selected' : '' ?>>
+                    <?= e($label) ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+
+        <a href="?status=open" class="btn btn-secondary btn-sm">Reset</a>
+    </div>
+
+    <div class="table-toolbar-right">
+        <span class="text-secondary text-sm">
+            <?= number_format($total) ?> request<?= $total === 1 ? '' : 's' ?>
+        </span>
+    </div>
+
+</form>
 
 <!-- ── Main table ─────────────────────────────────────────────── -->
 <div class="card" style="padding:0;">

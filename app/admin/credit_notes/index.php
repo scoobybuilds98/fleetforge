@@ -113,7 +113,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="stat-delta" x-text="kpis.issued_cnt + ' note' + (kpis.issued_cnt !== 1 ? 's' : '')"></div>
     </div>
     <div class="stat-card stat-card--green" style="cursor:pointer;"
-         @click="activeTile = activeTile === 'applied' ? '' : 'applied'; drill('status', activeTile === 'applied' ? 'fully_applied' : '')"
+         @click="activeTile = activeTile === 'applied' ? '' : 'applied'; drill('status', activeTile === 'applied' ? 'fully_used' : '')"
          :class="{ 'ring-active': activeTile === 'applied' }">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Fully Applied This Month</div>
@@ -137,37 +137,84 @@ require_once FF_ROOT . '/includes/header.php';
 </style>
 
 <!-- Credit notes table — Alpine.js -->
-<div class="card" id="credit-notes-table" x-data="creditNotesList()">
+<!-- S-LIST-TOOLBAR: bare Alpine root so the filter toolbar sits ABOVE the table
+     card, matching customers/invoices. id stays on the x-data element — the KPI
+     tiles' drill() resolves the component via Alpine.$data(). -->
+<div id="credit-notes-table" x-data="creditNotesList()">
 
-    <!-- Filters -->
-    <div class="card-header" style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
-        <select class="form-select" style="width:160px;" x-model="filters.status" @change="goPage(1)">
-            <option value="">All Statuses</option>
-            <option value="active">Active</option>
-            <option value="partially_used">Partially Used</option>
-            <option value="fully_used">Fully Used</option>
-            <option value="expired">Expired</option>
-            <option value="void">Void</option>
-        </select>
-        <select class="form-select" style="width:130px;" x-model="filters.currency" @change="goPage(1)">
-            <option value="">All Currencies</option>
-            <option value="CAD">CAD</option>
-            <option value="USD">USD</option>
-        </select>
-        <select class="form-select" style="width:190px;" x-model="filters.source" @change="goPage(1)">
-            <option value="">All Sources</option>
-            <option value="mileage_overpayment">Mileage Overpayment</option>
-            <option value="invoice_adjustment">Invoice Adjustment</option>
-            <option value="damage_resolution">Damage Resolution</option>
-            <option value="goodwill">Goodwill</option>
-            <option value="payment_returned">Payment Returned</option>
-            <option value="other">Other</option>
-        </select>
-        <div style="margin-left:auto; display:flex; gap:0.5rem; align-items:center;">
-            <span x-show="loading" style="color:var(--text-secondary); font-size:0.875rem;">Loading…</span>
-            <span x-show="!loading && total > 0" style="color:var(--text-secondary); font-size:0.875rem;" x-text="total + ' result' + (total !== 1 ? 's' : '')"></span>
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left">
+            <select class="form-select form-control-sm"
+                    x-model="filters.status" @change="goPage(1)"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="active">Active</option>
+                <option value="partially_used">Partially Used</option>
+                <option value="fully_used">Fully Used</option>
+                <option value="expired">Expired</option>
+                <option value="void">Void</option>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.currency" @change="goPage(1)"
+                    aria-label="Filter by currency">
+                <option value="">All Currencies</option>
+                <option value="CAD">CAD</option>
+                <option value="USD">USD</option>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.source" @change="goPage(1)"
+                    aria-label="Filter by source">
+                <option value="">All Sources</option>
+                <option value="mileage_overpayment">Mileage Overpayment</option>
+                <option value="invoice_adjustment">Invoice Adjustment</option>
+                <option value="damage_resolution">Damage Resolution</option>
+                <option value="goodwill">Goodwill</option>
+                <option value="payment_returned">Payment Returned</option>
+                <option value="other">Other</option>
+            </select>
+
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters = { status: '', currency: '', source: '' }; goPage(1)">Reset</button>
         </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total + ' result' + (total !== 1 ? 's' : '')"></span>
+
+            <select class="form-select form-control-sm"
+                    x-model="sort" @change="goPage(1)"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="created_at">Date created</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="credit_note_number">CN #</option>
+                    <option value="status">Status</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="amount">Amount</option>
+                    <option value="amount_remaining">Remaining</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="goPage(1)"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
     <!-- Table -->
     <div style="overflow-x:auto;">
@@ -242,7 +289,9 @@ require_once FF_ROOT . '/includes/header.php';
             <button class="btn btn-sm btn-secondary" :disabled="page >= totalPages" @click="goPage(page + 1)">Next →</button>
         </div>
     </div>
-</div>
+    </div><!-- /card -->
+
+</div><!-- /credit-notes-table -->
 
 <script>
 function creditNotesKpis() {
@@ -304,13 +353,28 @@ function creditNotesList() {
             if (this.filters.currency) params.set('currency', this.filters.currency);
             if (this.filters.source)   params.set('source', this.filters.source);
 
+            // Envelope contract: json_paginated() emits
+            //   { success, data: { items, pagination: { total, total_pages, ... } } }
+            // — the same shape invoices/leases/customers/equipment already read.
+            // This page used to read `data.data` / `data.total` / `data.last_page`,
+            // none of which exist at those paths, so `rows` was assigned the
+            // {items, pagination} OBJECT instead of the row array. Two user-visible
+            // consequences, both of which looked like Alpine bugs:
+            //   1. `rows.length` was undefined, so `rows.length === 0` was never
+            //      true and the "No credit notes found" x-if never rendered.
+            //   2. x-for iterated the object's 2 keys, and `:key="cn.id"` was
+            //      undefined for both, so the keyed diff collapsed them into a
+            //      single all-dashes phantom row (href `...?id=undefined`).
+            // Gate on r.success so an API error empties the list (showing the real
+            // empty state) rather than leaving stale rows on screen.
             FF_Api.get('<?= base_url('api/v1/credit_notes/index') ?>?' + params.toString())
-                .then(data => {
-                    this.rows       = data.data || [];
-                    this.total      = data.total || 0;
-                    this.totalPages = data.last_page || 1;
+                .then(r => {
+                    if (!r.success) { this.rows = []; this.total = 0; this.totalPages = 1; return; }
+                    this.rows       = r.data.items || [];
+                    this.total      = r.data.pagination?.total ?? this.rows.length;
+                    this.totalPages = r.data.pagination?.total_pages || 1;
                 })
-                .catch(() => { this.rows = []; })
+                .catch(() => { this.rows = []; this.total = 0; this.totalPages = 1; })
                 .finally(() => { this.loading = false; });
         },
 

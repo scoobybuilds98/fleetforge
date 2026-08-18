@@ -34,10 +34,15 @@ require_auth();
 
 $pageTitle      = 'Documents';
 $helpModuleSlug = 'documents';
+// S-TOPBAR-CREATE-ALL: uploads happen in an in-page modal, so the topbar
+// "Upload Document" link arrives as ?new=1 and app.js dispatches this event
+// (listened for on the FF_Documents root below).
+$createModalEvent = 'open-document-upload';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div x-data="FF_Documents()" x-cloak>
+<div x-data="FF_Documents()" x-cloak
+     @open-document-upload.window="openUploadModal()">
 
     <!-- ── Page header ──────────────────────────────────────────── -->
     <div class="page-header">
@@ -53,11 +58,24 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Filter bar ───────────────────────────────────────────── -->
-    <div class="filter-bar">
-        <div class="filter-bar__left">
-            <select class="form-select form-select-sm" x-model="filters.entity_type"
-                    @change="applyFilters()">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: was the legacy .filter-bar alias; now the same
+         .table-toolbar shape as customers/invoices, with the sort + direction
+         pair the sortable column headers already write to. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left">
+            <input type="search" class="form-control form-control-sm"
+                   placeholder="Search title or filename…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="applyFilters()"
+                   maxlength="255"
+                   style="min-width:220px;"
+                   aria-label="Search documents">
+
+            <select class="form-select form-control-sm" x-model="filters.entity_type"
+                    @change="applyFilters()"
+                    aria-label="Filter by type">
                 <option value="">All Types</option>
                 <option value="customer">Customers</option>
                 <option value="equipment_unit">Equipment</option>
@@ -65,15 +83,38 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="inspection">Inspections</option>
                 <option value="damage_claim">Damage Claims</option>
             </select>
-            <input type="search" class="form-control form-control-sm"
-                   placeholder="Search title or filename…"
-                   x-model="filters.q"
-                   @input.debounce.400ms="applyFilters()">
+
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters.q = ''; filters.entity_type = ''; applyFilters()">Reset</button>
         </div>
-        <div class="filter-bar__right">
+
+        <div class="table-toolbar-right">
             <span class="text-secondary text-sm"
                   x-show="!loading" x-text="total + ' document' + (total !== 1 ? 's' : '')"></span>
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.sort" @change="applyFilters()"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="uploaded_at">Uploaded</option>
+                    <option value="expiration_date">Expiration</option>
+                </optgroup>
+                <optgroup label="Document">
+                    <option value="title">Title</option>
+                    <option value="document_type">Type</option>
+                    <option value="file_size_kb">File size</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.dir" @change="applyFilters()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
         </div>
+
     </div>
 
     <!-- ── Table ────────────────────────────────────────────────── -->

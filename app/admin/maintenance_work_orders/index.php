@@ -97,54 +97,103 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Table (Alpine.js) ──────────────────────────────────────────────────── -->
-<div class="card"
-     x-data="woList()"
+<!-- S-LIST-TOOLBAR: bare Alpine root so the filter toolbar sits ABOVE the table
+     card, matching customers/invoices. id stays on the x-data element —
+     setFilter() below reads el._x_dataStack on exactly this node. -->
+<div x-data="woList()"
      id="wo-table-card">
 
-    <!-- Filter bar -->
-    <div class="card-header" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
 
-        <select class="form-select form-select-sm" x-model="filters.status" @change="goPage(1)">
-            <option value="">All Statuses</option>
-            <option value="open">Open</option>
-            <option value="in_progress">In Progress</option>
-            <option value="waiting_parts">Waiting Parts</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-        </select>
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search title or WO#…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="goPage(1)"
+                   maxlength="255"
+                   style="min-width:200px;"
+                   aria-label="Search work orders">
 
-        <select class="form-select form-select-sm" x-model="filters.work_type" @change="goPage(1)">
-            <option value="">All Types</option>
-            <option value="scheduled_service">Scheduled Service</option>
-            <option value="repair">Repair</option>
-            <option value="inspection">Inspection</option>
-            <option value="tire">Tire</option>
-            <option value="electrical">Electrical</option>
-            <option value="body_damage">Body Damage</option>
-            <option value="breakdown">Breakdown</option>
-            <option value="other">Other</option>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.status" @change="goPage(1)"
+                    aria-label="Filter by status">
+                <option value="">All Statuses</option>
+                <option value="open">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="waiting_parts">Waiting Parts</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+            </select>
 
-        <select class="form-select form-select-sm" x-model="filters.priority" @change="goPage(1)">
-            <option value="">All Priorities</option>
-            <option value="emergency">Emergency</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-        </select>
+            <select class="form-select form-control-sm"
+                    x-model="filters.work_type" @change="goPage(1)"
+                    aria-label="Filter by work type">
+                <option value="">All Types</option>
+                <option value="scheduled_service">Scheduled Service</option>
+                <option value="repair">Repair</option>
+                <option value="inspection">Inspection</option>
+                <option value="tire">Tire</option>
+                <option value="electrical">Electrical</option>
+                <option value="body_damage">Body Damage</option>
+                <option value="breakdown">Breakdown</option>
+                <option value="other">Other</option>
+            </select>
 
-        <input type="text"
-               class="form-control"
-               style="max-width:220px;height:32px;font-size:0.875rem;"
-               placeholder="Search title or WO#…"
-               x-model="filters.q"
-               @input.debounce.400ms="goPage(1)">
+            <select class="form-select form-control-sm"
+                    x-model="filters.priority" @change="goPage(1)"
+                    aria-label="Filter by priority">
+                <option value="">All Priorities</option>
+                <option value="emergency">Emergency</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+            </select>
 
-        <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
+            <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
+        </div>
 
-        <span class="text-secondary" style="margin-left:auto;font-size:0.875rem;white-space:nowrap;"
-              x-text="total > 0 ? total + ' work order' + (total === 1 ? '' : 's') : ''"></span>
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="total > 0 ? total + ' work order' + (total === 1 ? '' : 's') : ''"></span>
+
+            <!-- Sort mirrors the sortable column headers below; both write the
+                 same sort/dir pair the API allowlists. -->
+            <select class="form-select form-control-sm"
+                    x-model="sort" @change="goPage(1)"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="requested_date">Requested</option>
+                    <option value="scheduled_date">Scheduled</option>
+                    <option value="completed_date">Completed</option>
+                    <option value="updated_at">Last updated</option>
+                </optgroup>
+                <optgroup label="Identifier">
+                    <option value="work_order_number">WO #</option>
+                    <option value="status">Status</option>
+                    <option value="priority">Priority</option>
+                    <option value="vendor_name">Vendor</option>
+                </optgroup>
+                <optgroup label="Financial">
+                    <option value="total_cost">Cost</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="goPage(1)"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
 
     <!-- Loading -->
     <div class="card-body" x-show="loading" style="text-align:center;padding:32px;">
@@ -269,7 +318,9 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </template>
 
-</div><!-- /card -->
+    </div><!-- /card -->
+
+</div><!-- /wo-table-card -->
 
 <script>
 function woKpis() {

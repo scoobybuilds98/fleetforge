@@ -97,15 +97,20 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 <!-- Filter + Table (Alpine.js) -->
 <!-- TILES-1: @ff-mileage-filter.window listens for the KPI tile clicks above
      and sets filters.log_type from event.detail.log_type, then reloads. -->
-<div class="card" x-data="FF_MileageLogs()" x-init="load()"
+<!-- S-LIST-TOOLBAR: bare Alpine root so the filter toolbar sits ABOVE the table
+     card, matching customers/invoices. The window listener stays on the x-data
+     element so the KPI tiles keep driving filters.log_type. -->
+<div x-data="FF_MileageLogs()" x-init="load()"
      @ff-mileage-filter.window="filters.log_type = (filters.log_type === $event.detail.log_type) ? '' : $event.detail.log_type; load(1)">
 
-    <!-- Filter bar -->
-    <div class="card-header" style="flex-wrap:wrap;gap:.75rem;">
-        <div class="card-title">Log Entries</div>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-left:auto;">
-            <select class="form-control form-control-sm" style="width:240px;"
-                    x-model="filters.equipment_unit_id" @change="load()">
+    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <select class="form-select form-control-sm"
+                    style="min-width:200px;"
+                    x-model="filters.equipment_unit_id" @change="load()"
+                    aria-label="Filter by unit">
                 <option value="">All Units</option>
                 <?php foreach ($filterUnits as $u): ?>
                 <?php // [SELECTOR-1] Filter — every status visible & selectable. ?>
@@ -114,8 +119,10 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                 </option>
                 <?php endforeach; ?>
             </select>
-            <select class="form-control form-control-sm" style="width:160px;"
-                    x-model="filters.log_type" @change="load()">
+
+            <select class="form-select form-control-sm"
+                    x-model="filters.log_type" @change="load()"
+                    aria-label="Filter by log type">
                 <option value="">All Types</option>
                 <option value="manual">Manual</option>
                 <option value="gps_sync">GPS Sync</option>
@@ -123,13 +130,51 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                 <option value="lease_end">Lease End</option>
                 <option value="service">Service</option>
             </select>
+
             <input type="date" class="form-control form-control-sm"
-                   x-model="filters.date_from" @change="load()" title="From date">
+                   x-model="filters.date_from" @change="load()"
+                   title="From date" aria-label="From date">
             <input type="date" class="form-control form-control-sm"
-                   x-model="filters.date_to" @change="load()" title="To date">
-            <button class="btn btn-ghost btn-sm" @click="clearFilters()">Clear</button>
+                   x-model="filters.date_to" @change="load()"
+                   title="To date" aria-label="To date">
+
+            <button class="btn btn-secondary btn-sm" @click="clearFilters()">Reset</button>
         </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-show="!loading"
+                  x-text="pagination.total !== undefined
+                      ? pagination.total + ' log' + (pagination.total !== 1 ? 's' : '')
+                      : ''"></span>
+
+            <select class="form-select form-control-sm"
+                    x-model="sort" @change="load(1)"
+                    aria-label="Sort by">
+                <optgroup label="Dates">
+                    <option value="log_date">Log date</option>
+                    <option value="created_at">Date created</option>
+                </optgroup>
+                <optgroup label="Reading">
+                    <option value="odometer_reading">Odometer</option>
+                    <option value="log_type">Type</option>
+                </optgroup>
+            </select>
+
+            <select class="form-select form-control-sm"
+                    x-model="dir" @change="load(1)"
+                    aria-label="Sort direction"
+                    style="width:auto;">
+                <option value="DESC">↓ Desc</option>
+                <option value="ASC">↑ Asc</option>
+            </select>
+        </div>
+
     </div>
+
+    <!-- ── TABLE CARD ────────────────────────────────────────────── -->
+    <div class="card">
+        <div class="card-header"><div class="card-title">Log Entries</div></div>
 
     <div class="card-body" style="padding:0;">
 
@@ -255,7 +300,9 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
         </template>
 
     </div><!-- /card-body -->
-</div><!-- /card -->
+    </div><!-- /card -->
+
+</div><!-- /mileage-logs root -->
 
 <script>
 function FF_MileageLogs() {

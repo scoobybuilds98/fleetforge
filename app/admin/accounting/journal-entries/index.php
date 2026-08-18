@@ -36,6 +36,10 @@ $currentUserId     = (int) (current_user_id() ?? 0);
 $canApprove        = in_array($currentRole, ['super_admin', 'manager', 'accountant'], true);
 
 $pageTitle = 'Journal Entries';
+// S-TOPBAR-CREATE-ALL: JEs are created in an in-page modal, so the topbar
+// "New Journal Entry" link arrives as ?new=1 and app.js dispatches this
+// event — the same one the page's own + button dispatches.
+$createModalEvent = 'open-je-create';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 

@@ -182,35 +182,33 @@ require_once FF_ROOT . '/includes/header.php';
     </div><!-- /ff-charts-grid -->
 
     <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
-    <div class="toolbar" style="margin-bottom:16px;">
-        <div class="toolbar-left" style="flex-wrap:wrap;gap:8px;">
+    <!-- S-LIST-TOOLBAR: was the generic .toolbar alias with a hand-rolled
+         search-icon wrapper; now the same .table-toolbar shape and control
+         sizing as customers/invoices. -->
+    <div class="table-toolbar">
 
-            <!-- Search -->
-            <div style="position:relative;">
-                <input type="search"
-                       class="form-input"
-                       style="padding-left:32px;min-width:220px;"
-                       placeholder="Search contact or company…"
-                       x-model="filters.q"
-                       @input.debounce.400ms="applyFilters()">
-                <svg style="position:absolute;left:8px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:var(--text-muted);"
-                     fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
-                </svg>
-            </div>
+        <div class="table-toolbar-left">
+            <input type="search"
+                   class="form-control form-control-sm"
+                   placeholder="Search contact or company…"
+                   x-model="filters.q"
+                   @input.debounce.400ms="applyFilters()"
+                   maxlength="255"
+                   style="min-width:220px;"
+                   aria-label="Search reservations">
 
-            <!-- Pickup date filter -->
             <input type="date"
-                   class="form-input"
-                   style="min-width:160px;"
+                   class="form-control form-control-sm"
+                   style="min-width:150px;"
                    x-model="filters.pickup_date"
                    @change="applyFilters()"
-                   title="Filter by pickup date">
+                   title="Filter by pickup date"
+                   aria-label="Filter by pickup date">
 
-            <!-- Priority filter -->
-            <select class="form-select" style="min-width:130px;"
+            <select class="form-select form-control-sm"
                     x-model="filters.priority"
-                    @change="applyFilters()">
+                    @change="applyFilters()"
+                    aria-label="Filter by priority">
                 <option value="">All Priorities</option>
                 <option value="urgent">Urgent</option>
                 <option value="high">High</option>
@@ -218,13 +216,21 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="low">Low</option>
             </select>
 
+            <button class="btn btn-secondary btn-sm"
+                    x-show="hasActiveFilters()"
+                    @click="clearFilters()">
+                Reset
+            </button>
         </div>
-        <div class="toolbar-right">
 
-            <!-- Sort -->
-            <select class="form-select" style="min-width:160px;"
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="(kpis.total || 0) + ' reservation' + ((kpis.total || 0) !== 1 ? 's' : '')"></span>
+
+            <select class="form-select form-control-sm"
                     x-model="filters.sort"
-                    @change="if (filters.sort !== 'company_name') filters.customer_filter = ''; applyFilters()">
+                    @change="if (filters.sort !== 'company_name') filters.customer_filter = ''; applyFilters()"
+                    aria-label="Sort by">
                 <optgroup label="Date">
                     <option value="pickup_date">Pickup Date</option>
                     <option value="created_at">Created</option>
@@ -251,22 +257,16 @@ require_once FF_ROOT . '/includes/header.php';
                    style="min-width:160px;"
                    aria-label="Filter by customer name">
 
-            <!-- Direction -->
-            <select class="form-select" style="width:auto;"
+            <select class="form-select form-control-sm"
                     x-model="filters.dir"
-                    @change="applyFilters()">
+                    @change="applyFilters()"
+                    aria-label="Sort direction"
+                    style="width:auto;">
                 <option value="ASC">↑ Asc</option>
                 <option value="DESC">↓ Desc</option>
             </select>
-
-            <!-- Clear -->
-            <button class="btn btn-ghost btn-sm"
-                    x-show="hasActiveFilters()"
-                    @click="clearFilters()">
-                Clear
-            </button>
-
         </div>
+
     </div>
 
     <!-- ================================================================

@@ -1521,14 +1521,27 @@ kbd {
     position: absolute;
     top: calc(100% + 8px);
     left: 0;
-    min-width: 192px;
+    min-width: 208px;
     background: var(--bg-surface);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xl);
     z-index: var(--z-dropdown);
-    overflow: hidden;
+    /* S-TOPBAR-CREATE-ALL: the menu now lists every creatable record grouped
+       into sections, so it can outgrow short viewports — cap it at the space
+       below the topbar and scroll. overflow-x stays hidden to preserve the
+       rounded corners against the item hover fill. */
+    max-height: calc(100vh - var(--topbar-height, 56px) - 24px);
+    overflow-y: auto;
+    overflow-x: hidden;
     padding: 6px 0;
+}
+
+/* Section rule — only between groups, never above the first label. */
+.topbar-create-item + .topbar-dropdown-label {
+    margin-top: 6px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
 }
 
 .topbar-dropdown-label {
@@ -3561,6 +3574,16 @@ textarea.form-input {
     flex: 1;
     min-width: 0;
     width: auto;
+}
+
+/* S-LIST-TOOLBAR: dense filter sets (5+ controls, e.g. Audit, Compliance,
+   Work Orders) wrap onto a second line instead of squeezing every control
+   below its readable width. The default stays nowrap — most lists carry
+   three filters and read better on one row. */
+.table-toolbar-left--wrap { flex-wrap: wrap; }
+.table-toolbar-left--wrap .form-control,
+.table-toolbar-left--wrap .form-select {
+    flex: 0 1 auto;
 }
 
 .table-toolbar-right {
@@ -7359,8 +7382,20 @@ dl.detail-grid dd {
     .table-toolbar-right {
         width: 100%;
     }
+    /* S-LIST-TOOLBAR: the desktop rule pins both groups to `nowrap` so filters
+       stay on one row. At phone width that forced every control onto a single
+       320px line and pushed the page into a horizontal scroll — so let them
+       wrap here, and give selects the same full-width treatment inputs and
+       buttons already had (a .form-select without it kept its `width: auto`
+       from the desktop override and sat stranded at half width). */
+    .table-toolbar-left,
+    .table-toolbar-right {
+        flex-wrap: wrap;
+    }
     .table-toolbar-left .form-control,
     .table-toolbar-right .form-control,
+    .table-toolbar-left .form-select,
+    .table-toolbar-right .form-select,
     .table-toolbar-left .btn,
     .table-toolbar-right .btn {
         width: 100%;

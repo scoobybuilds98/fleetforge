@@ -161,31 +161,43 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         </div>
     </div>
 
-    <!-- ── Filter bar ──────────────────────────────────────────── -->
-    <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <!-- Source-type chip group (D-QBO-23-3): All / Fixed Asset / Tax
-             Remittance — mutually exclusive radio-style; sets source_filter
-             param on reload. Replaces S-QBO-22's single "Show FA only" toggle. -->
-        <div class="text-sm text-secondary">Source type:</div>
-        <div style="display:inline-flex;gap:6px;">
-            <template x-for="sf in [{k:'',label:'All'},{k:'fa',label:'Fixed Asset'},{k:'tax_remittance',label:'Tax Remittance'}]" :key="sf.k">
-                <button
-                    class="btn btn-sm"
-                    :class="filters.sourceFilter === sf.k ? 'btn-primary' : 'btn-secondary'"
-                    @click="filters.sourceFilter = sf.k; page=1; reload()"
-                    x-text="sf.label"></button>
+    <!-- ── FILTER TOOLBAR ──────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: same .table-toolbar shape as customers/invoices.
+         Source type stays a mutually-exclusive chip group and Status stays a
+         checkbox set — a <select> would collapse the multi-select. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <!-- Source-type chip group (D-QBO-23-3): All / Fixed Asset / Tax
+                 Remittance — mutually exclusive radio-style; sets source_filter
+                 param on reload. Replaces S-QBO-22's single "Show FA only" toggle. -->
+            <span class="text-secondary text-sm" style="white-space:nowrap;">Source type:</span>
+            <div style="display:inline-flex;gap:6px;">
+                <template x-for="sf in [{k:'',label:'All'},{k:'fa',label:'Fixed Asset'},{k:'tax_remittance',label:'Tax Remittance'}]" :key="sf.k">
+                    <button
+                        class="btn btn-sm"
+                        :class="filters.sourceFilter === sf.k ? 'btn-primary' : 'btn-secondary'"
+                        @click="filters.sourceFilter = sf.k; page=1; reload()"
+                        x-text="sf.label"></button>
+                </template>
+            </div>
+
+            <span class="text-secondary text-sm" style="white-space:nowrap;margin-left:6px;">Status:</span>
+            <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','skipped_voided','skipped_by_mode']" :key="s">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
+                    <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
+                    <span x-text="s"></span>
+                </label>
             </template>
         </div>
-        <div class="text-sm text-secondary" style="margin-left:12px;">Status:</div>
-        <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','skipped_voided','skipped_by_mode']" :key="s">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
-                <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
-                <span x-text="s"></span>
-            </label>
-        </template>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" @click="filters.statuses = []; filters.sourceFilter = ''; page=1; reload()">
-            Clear filters
-        </button>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="total + ' row' + (total === 1 ? '' : 's')"></span>
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters.statuses = []; filters.sourceFilter = ''; page=1; reload()">Reset</button>
+        </div>
+
     </div>
 
     <!-- ── Main table ──────────────────────────────────────────── -->

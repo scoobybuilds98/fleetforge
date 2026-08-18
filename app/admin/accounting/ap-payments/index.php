@@ -123,11 +123,17 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── Filters ───────────────────────────────────────────────────────────── -->
-<form method="get" class="card" style="padding:14px;margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-    <div style="min-width:180px;">
-        <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor</label>
-        <select name="vendor_id" class="form-input" style="width:100%;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+<!-- ── FILTER TOOLBAR ────────────────────────────────────────────────────── -->
+<!-- S-LIST-TOOLBAR: was a filter card of labelled fields with hand-rolled
+     inline input styling; now the standard .table-toolbar shape and the shared
+     .form-control/.form-select pills. Server-side GET filtering, so the
+     toolbar IS the form — selects auto-submit, Apply covers the date fields. -->
+<form method="get" class="table-toolbar">
+
+    <div class="table-toolbar-left table-toolbar-left--wrap">
+        <select name="vendor_id" class="form-select form-control-sm"
+                style="min-width:180px;"
+                onchange="this.form.submit()" aria-label="Filter by vendor">
             <option value="">All vendors</option>
             <?php foreach ($vendors as $v): ?>
                 <option value="<?= (int) $v['id'] ?>" <?= ($filterVendor === (int) $v['id']) ? 'selected' : '' ?>>
@@ -135,28 +141,30 @@ require_once FF_ROOT . '/includes/header.php';
                 </option>
             <?php endforeach; ?>
         </select>
-    </div>
-    <div style="min-width:140px;">
-        <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Status</label>
-        <select name="status" class="form-input" style="width:100%;padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
-            <option value="">All</option>
+
+        <select name="status" class="form-select form-control-sm"
+                onchange="this.form.submit()" aria-label="Filter by status">
+            <option value="">All Statuses</option>
             <?php foreach ($validStatuses as $s): ?>
                 <option value="<?= e($s) ?>" <?= ($filterStatus === $s) ? 'selected' : '' ?>><?= ucfirst($s) ?></option>
             <?php endforeach; ?>
         </select>
-    </div>
-    <div>
-        <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">From</label>
-        <input type="date" name="date_from" value="<?= e((string) $filterDateFrom) ?>" class="form-input" style="padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
-    </div>
-    <div>
-        <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">To</label>
-        <input type="date" name="date_to" value="<?= e((string) $filterDateTo) ?>" class="form-input" style="padding:7px 10px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
-    </div>
-    <div>
+
+        <input type="date" name="date_from" value="<?= e((string) $filterDateFrom) ?>"
+               class="form-control form-control-sm" title="From date" aria-label="From date">
+        <input type="date" name="date_to" value="<?= e((string) $filterDateTo) ?>"
+               class="form-control form-control-sm" title="To date" aria-label="To date">
+
         <button type="submit" class="btn btn-primary btn-sm">Apply</button>
         <a href="<?= base_url('accounting/ap-payments') ?>" class="btn btn-secondary btn-sm">Reset</a>
     </div>
+
+    <div class="table-toolbar-right">
+        <span class="text-secondary text-sm">
+            <?= number_format($total) ?> payment<?= $total === 1 ? '' : 's' ?>
+        </span>
+    </div>
+
 </form>
 
 <!-- ── Results table or empty state ──────────────────────────────────────── -->

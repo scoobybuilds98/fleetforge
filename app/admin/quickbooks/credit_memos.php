@@ -109,17 +109,30 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 
     <!-- ── Filter bar ──────────────────────────────────────────── -->
-    <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <div class="text-sm text-secondary">Filter by status:</div>
-        <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','skipped_voided','skipped_by_mode','skipped_soft_deleted']" :key="s">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
-                <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
-                <span x-text="s"></span>
-            </label>
-        </template>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" @click="filters.statuses = []; page=1; reload()">
-            Clear filters
-        </button>
+    <!-- ── FILTER TOOLBAR ──────────────────────────────────────── -->
+    <!-- S-LIST-TOOLBAR: same .table-toolbar shape as customers/invoices. The
+         status control stays a checkbox set rather than becoming a <select>:
+         push status is genuinely multi-select here, and a single-value select
+         would drop that. Clear + row count sit on the right. -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <span class="text-secondary text-sm" style="white-space:nowrap;">Status:</span>
+            <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','skipped_voided','skipped_by_mode','skipped_soft_deleted']" :key="s">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
+                    <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
+                    <span x-text="s"></span>
+                </label>
+            </template>
+        </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="total + ' row' + (total === 1 ? '' : 's')"></span>
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters.statuses = []; page=1; reload()">Reset</button>
+        </div>
+
     </div>
 
     <!-- ── Main table ──────────────────────────────────────────── -->
@@ -257,18 +270,26 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         </div>
     </div>
 
-    <!-- Filter bar -->
-    <div class="card" style="padding:12px 18px;margin-bottom:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <div class="text-sm text-secondary">Filter by status:</div>
-        <template x-for="s in ['pending','pushed','failed','failed_preflight','skipped_by_mode']" :key="s">
-            <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
-                <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
-                <span x-text="s"></span>
-            </label>
-        </template>
-        <button class="btn btn-secondary btn-sm" style="margin-left:auto;" @click="filters.statuses = []; page=1; reload()">
-            Clear filters
-        </button>
+    <!-- ── FILTER TOOLBAR (refund receipts section) ────────────── -->
+    <div class="table-toolbar">
+
+        <div class="table-toolbar-left table-toolbar-left--wrap">
+            <span class="text-secondary text-sm" style="white-space:nowrap;">Status:</span>
+            <template x-for="s in ['pending','pushed','failed','failed_preflight','skipped_by_mode']" :key="s">
+                <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
+                    <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
+                    <span x-text="s"></span>
+                </label>
+            </template>
+        </div>
+
+        <div class="table-toolbar-right">
+            <span class="text-secondary text-sm"
+                  x-text="total + ' row' + (total === 1 ? '' : 's')"></span>
+            <button class="btn btn-secondary btn-sm"
+                    @click="filters.statuses = []; page=1; reload()">Reset</button>
+        </div>
+
     </div>
 
     <!-- Main table -->
