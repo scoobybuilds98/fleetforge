@@ -334,7 +334,7 @@ function FF_DepreciationRuns() {
                 if (typeof r.error === 'string') return r.error;
                 if (r.error.message) return r.error.message;
             }
-            if (r && r.message) return r.message;
+            if (r && r.error?.message) return r.error?.message;
             return fallback || 'Something went wrong.';
         },
         _clearErrors(errorsObj, bannerKey) {

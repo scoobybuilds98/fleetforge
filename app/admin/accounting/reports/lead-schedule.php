@@ -220,7 +220,7 @@ function leadSchedule() {
                 const url = '<?= base_url('api/v1/accounting/reports/lead-schedule') ?>?code=' + encodeURIComponent(this.code) + '&period_id=' + this.periodId;
                 const r = await FF_Api.get(url);
                 if (r.success) this.data = r.data;
-                else this.error = r.message || 'Failed to load lead schedule.';
+                else this.error = r.error?.message || 'Failed to load lead schedule.';
             } catch (e) { this.error = 'Network error.'; }
             this.loading = false;
         },

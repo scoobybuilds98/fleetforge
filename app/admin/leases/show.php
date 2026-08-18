@@ -2620,7 +2620,7 @@ function FF_LeaseDetail() {
                 if (r.success) {
                     this.documents = this.documents.filter(d => d.id !== id);
                 } else {
-                    FF_Toast.error(r.message || 'Delete failed.');
+                    FF_Toast.error(r.error?.message || 'Delete failed.');
                 }
             } catch(e) {
                 FF_Toast.error('Network error. Please try again.');
@@ -2769,7 +2769,7 @@ function FF_LeaseDetail() {
                     // before the reload wipes the page.
                     setTimeout(() => window.location.reload(), 1400);
                 } else {
-                    this.actionError = r.message || 'Failed to activate lease.';
+                    this.actionError = r.error?.message || 'Failed to activate lease.';
                 }
             } catch(e) {
                 this.actionError = 'Network error. Please try again.';
@@ -2797,7 +2797,7 @@ function FF_LeaseDetail() {
                     if (window.FF_Toast) window.FF_Toast.success('Lease reopened', 'Status is now Active.');
                     window.location.reload();
                 } else {
-                    this.actionError = (r.error && r.error.message) || r.message || 'Failed to reopen lease.';
+                    this.actionError = (r.error && r.error.message) || 'Failed to reopen lease.';
                 }
             } catch(e) {
                 this.actionError = 'Network error. Please try again.';
@@ -2947,7 +2947,7 @@ function FF_LeaseDetail() {
                     this.retroOdo.banner = { type: 'success', message: '✓ Starting odometer saved. Refreshing…' };
                     setTimeout(() => { window.location.reload(); }, 800);
                 } else {
-                    this.retroOdo.banner = { type: 'warning', message: r.error?.message || r.message || 'Could not save.' };
+                    this.retroOdo.banner = { type: 'warning', message: r.error?.message || 'Could not save.' };
                 }
             } catch (e) {
                 this.retroOdo.banner = { type: 'warning', message: 'Network error — could not save.' };
@@ -3109,7 +3109,7 @@ function FF_LeaseDetail() {
                     }
                     window.location.reload();
                 } else {
-                    this.actionError = (r.error && r.error.message) || r.message || 'Failed to close lease.';
+                    this.actionError = (r.error && r.error.message) || 'Failed to close lease.';
                 }
             } catch(e) {
                 this.actionError = 'Network error. Please try again.';
@@ -3137,7 +3137,7 @@ function FF_LeaseDetail() {
                 if (r.success) {
                     window.location.reload();
                 } else {
-                    this.markRefundError = r.message || 'Failed to mark refund as settled.';
+                    this.markRefundError = r.error?.message || 'Failed to mark refund as settled.';
                 }
             } catch(e) {
                 this.markRefundError = 'Network error. Please try again.';

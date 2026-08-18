@@ -523,7 +523,7 @@ function FF_CreatePayment() {
                     FF_Validate.applyApi(form, res.error);
                     FF_Validate.scrollToFirst(form);
                 } else {
-                    FF_Validate.banner(form, res.error?.message || res.message || 'Failed to record payment. Please try again.');
+                    FF_Validate.banner(form, res.error?.message || 'Failed to record payment. Please try again.');
                     FF_Validate.scrollToFirst(form);
                 }
             } catch (e) {

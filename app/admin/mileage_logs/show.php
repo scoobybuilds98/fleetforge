@@ -298,7 +298,7 @@ document.getElementById('edit-form').addEventListener('submit', async function(e
             if (code === 'STALE_DATA') {
                 mlogEditPaint({}, 'This entry was modified by another user. Please refresh the page and try again.');
             } else {
-                mlogEditPaint(fields, err.message || data.message || 'Update failed.');
+                mlogEditPaint(fields, err.message || data.error?.message || 'Update failed.');
             }
             btn.disabled = false; btn.textContent = 'Save Changes';
             return;
@@ -357,7 +357,7 @@ async function confirmDelete() {
             const err = data.error || {};
             const fields = err.fields || {};
             const msgs = Object.values(fields);
-            errEl.textContent = msgs.length ? msgs.join(' ') : (err.message || data.message || 'Delete failed.');
+            errEl.textContent = msgs.length ? msgs.join(' ') : (err.message || data.error?.message || 'Delete failed.');
             errEl.style.display = 'block';
             btn.disabled = false; btn.textContent = 'Delete';
             return;

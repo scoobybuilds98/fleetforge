@@ -794,7 +794,7 @@ function FF_AiChat() {
             try {
                 const r = await FF_Api.delete('<?= base_url('api/v1/ai/chat-session') ?>?id=' + id);
                 if (r.error) {
-                    FF_Toast.error(r.message || 'Failed to delete chat.');
+                    FF_Toast.error(r.error?.message || 'Failed to delete chat.');
                     return;
                 }
                 // Remove from local list without re-fetching
@@ -957,7 +957,7 @@ function FF_AiChat() {
                     this.loadSessions();
                 } else {
                     // json_error puts the text at r.error.message, not r.message.
-                    this.messages.push({ role: 'assistant', content: 'Error: ' + (r.error?.message || r.message || 'Something went wrong.') });
+                    this.messages.push({ role: 'assistant', content: 'Error: ' + (r.error?.message || 'Something went wrong.') });
                 }
             } catch(e) {
                 this.messages.push({ role: 'assistant', content: 'Failed to reach the AI service. Please try again.' });
@@ -981,7 +981,7 @@ function FF_AiChat() {
                     this.reportResult = r.report;
                     this.reportTokens = r.tokens_used || 0;
                 } else {
-                    this.reportResult = 'Error: ' + (r.error?.message || r.message || 'Failed to generate report.');
+                    this.reportResult = 'Error: ' + (r.error?.message || 'Failed to generate report.');
                 }
             } catch(e) {
                 this.reportResult = 'Network error. Please try again.';
@@ -1022,7 +1022,7 @@ function FF_AiChat() {
                     this.docFileName = data.file_name || this.docFile.name;
                     this.docTokens = data.tokens_used || 0;
                 } else {
-                    this.docResult = 'Error: ' + (data.error?.message || data.message || 'Analysis failed.');
+                    this.docResult = 'Error: ' + (data.error?.message || 'Analysis failed.');
                 }
             } catch(e) {
                 this.docResult = 'Network error. Please try again.';

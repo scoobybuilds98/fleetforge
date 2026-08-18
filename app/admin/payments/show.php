@@ -533,7 +533,7 @@ function FF_PaymentActions() {
                 this.showEdit = false;
                 window.location.reload();
             } else {
-                this.editError = res.message ?? 'Save failed.';
+                this.editError = res.error?.message ?? 'Save failed.';
             }
         },
 
@@ -552,7 +552,7 @@ function FF_PaymentActions() {
             if (res.success) {
                 window.location.href = '<?= base_url('/payments') ?>';
             } else {
-                this.deleteError = res.message ?? 'Removal failed.';
+                this.deleteError = res.error?.message ?? 'Removal failed.';
             }
         },
     };

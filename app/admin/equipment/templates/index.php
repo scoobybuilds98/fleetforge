@@ -248,7 +248,7 @@ function FF_Templates() {
                     this.templates  = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
-                    this.loadError = r.message || 'Failed to load equipment types.';
+                    this.loadError = r.error?.message || 'Failed to load equipment types.';
                 }
             } catch(e) {
                 this.loadError = 'Network error.';
@@ -268,7 +268,7 @@ function FF_Templates() {
                     await this.load();
                     FF_Toast.success('Equipment type deleted.');
                 } else {
-                    FF_Toast.error(r.message || 'Failed to delete equipment type.');
+                    FF_Toast.error(r.error?.message || 'Failed to delete equipment type.');
                 }
             } catch(e) {
                 FF_Toast.error('Network error.');

@@ -589,7 +589,7 @@ function FF_CreateUnit() {
                     FF_Validate.applyApi(form, r.error);
                     FF_Validate.scrollToFirst(form);
                 } else {
-                    FF_Validate.banner(form, r.error?.message || r.message || 'Failed to create unit.');
+                    FF_Validate.banner(form, r.error?.message || 'Failed to create unit.');
                     FF_Validate.scrollToFirst(form);
                 }
             } catch(e) {

@@ -529,7 +529,7 @@ function FF_EditUnit() {
                     FF_Validate.applyApi(form, r.error);
                     FF_Validate.scrollToFirst(form);
                 } else {
-                    FF_Validate.banner(form, r.error?.message || r.message || 'Failed to save changes.');
+                    FF_Validate.banner(form, r.error?.message || 'Failed to save changes.');
                     FF_Validate.scrollToFirst(form);
                 }
             } catch(e) {

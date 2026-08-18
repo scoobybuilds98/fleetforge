@@ -463,7 +463,7 @@ function extractError(d, fallback) {
     const keys = Object.keys(f);
     if (keys.length === 1) return f[keys[0]];
     if (keys.length > 1)   return keys.map(k => f[k]).join(' ');
-    return d.error.message || d.message || fallback;
+    return d.error.message || fallback;
 }
 
 // ── Save standard section condition + notes ──────────────────────────────

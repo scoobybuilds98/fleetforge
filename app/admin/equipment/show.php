@@ -3043,7 +3043,7 @@ function FF_UnitDetail() {
             if (r.success) {
                 this.documents = this.documents.filter(d => d.id !== id);
             } else {
-                FF_Toast.error(r.message || 'Could not remove document.');
+                FF_Toast.error(r.error?.message || 'Could not remove document.');
             }
         },
 

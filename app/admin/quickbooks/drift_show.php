@@ -366,11 +366,18 @@ function driftShow() {
                     action: this.modal.action,
                     resolution_note: note,
                 });
-                if (res && res.action) {
+                // Envelope contract: drift_resolve.php answers
+                // json_success(['action' => …]), which nests the payload under
+                // `data`. Reading res.action off the envelope was always
+                // undefined, so a SUCCESSFUL resolve reported "Unexpected
+                // response." and never reloaded — the event was resolved
+                // server-side while the UI insisted it had failed.
+                const d = (res && res.data) || {};
+                if (res && res.success && d.action) {
                     this.flash = { msg: 'Done — reloading…', ok: true };
                     setTimeout(() => window.location.reload(), 800);
                 } else {
-                    this.modal.err = (res && res.message) || 'Unexpected response.';
+                    this.modal.err = res?.error?.message || 'Unexpected response.';
                 }
             } catch (err) {
                 this.modal.err = (err && err.message) || 'Request failed.';
@@ -388,12 +395,14 @@ function driftShow() {
                     id: <?= $id ?>,
                     action: 'resync',
                 });
-                if (res && res.action === 'resync_enqueued') {
+                // Envelope contract — same class as resolve() above.
+                const d = (res && res.data) || {};
+                if (d.action === 'resync_enqueued') {
                     this.flash = { msg: 'Re-enqueued. The event auto-resolves on the next parity check if the push succeeds.', ok: true };
-                } else if (res && res.action === 'resync_skipped') {
-                    this.flash = { msg: 'Skipped: ' + (res.reason || '?'), ok: false };
+                } else if (d.action === 'resync_skipped') {
+                    this.flash = { msg: 'Skipped: ' + (d.reason || '?'), ok: false };
                 } else {
-                    this.flash = { msg: (res && res.message) || 'Unexpected response.', ok: false };
+                    this.flash = { msg: res?.error?.message || 'Unexpected response.', ok: false };
                 }
             } catch (err) {
                 this.flash = { msg: (err && err.message) || 'Request failed.', ok: false };

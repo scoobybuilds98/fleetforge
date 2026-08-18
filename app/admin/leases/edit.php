@@ -1193,7 +1193,7 @@ function FF_EditLease() {
                 } else if (r.error?.code === 'VALIDATION_ERROR' && r.error?.fields) {
                     FF_Validate.applyApi(f, r.error);
                 } else {
-                    FF_Validate.banner(f, r.error?.message || r.message || 'Failed to save changes.');
+                    FF_Validate.banner(f, r.error?.message || 'Failed to save changes.');
                     FF_Validate.scrollToFirst(f);
                 }
             } catch(e) {

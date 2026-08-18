@@ -803,7 +803,7 @@ function damageClaimShow() {
                 claim_id: <?= (int)$claim['id'] ?>,
             }).then(d => {
                 if (d && d.error) {
-                    FF_Toast.error(d.message ?? d.data?.message ?? 'Failed to delete photo.');
+                    FF_Toast.error(d.error?.message ?? d.data?.message ?? 'Failed to delete photo.');
                 } else {
                     this.photos = this.photos.filter(p => p.id !== photoId);
                 }
@@ -821,7 +821,7 @@ function damageClaimShow() {
                 id: <?= (int)$claim['id'] ?>,
             }).then(d => {
                 if (d && d.error) {
-                    this.deleteError = d.message ?? d.data?.message ?? 'Delete failed.';
+                    this.deleteError = d.error?.message ?? d.data?.message ?? 'Delete failed.';
                     this.deleting    = false;
                 } else {
                     window.location = '<?= base_url('damage_claims') ?>';

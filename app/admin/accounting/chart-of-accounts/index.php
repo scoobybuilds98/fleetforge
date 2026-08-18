@@ -513,7 +513,7 @@ function FF_ChartOfAccounts() {
         _extractError(r, fallback) {
             if (!r) return fallback || 'An unexpected error occurred.';
             if (r.error && r.error.message) return r.error.message;
-            if (r.message) return r.message;
+            if (r.error?.message) return r.error?.message;
             return fallback || 'An unexpected error occurred.';
         },
 
@@ -619,7 +619,7 @@ function FF_ChartOfAccounts() {
                     // WHY: Auto-expand first level so the tree is useful on load.
                     this.treeAccounts.forEach(a => { this.expanded[a.id] = true; });
                 } else {
-                    this.loadError = r.message || 'Failed to load accounts.';
+                    this.loadError = r.error?.message || 'Failed to load accounts.';
                 }
             } catch (e) {
                 this.loadError = 'Network error. Please try again.';
@@ -892,7 +892,7 @@ function FF_ChartOfAccounts() {
                             FF_Toast.success('Account ' + action + 'd successfully.');
                             await this.loadAccounts();
                         } else {
-                            FF_Toast.error(r.message || 'Failed to ' + action + ' account.');
+                            FF_Toast.error(r.error?.message || 'Failed to ' + action + ' account.');
                         }
                     } catch (e) {
                         FF_Toast.error('Network error. Please try again.');

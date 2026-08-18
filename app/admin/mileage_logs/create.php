@@ -326,7 +326,7 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
             // VALID-2 envelope: data.error = {code, message, fields}
             const err = data.error || {};
             const fields = err.fields || data.data?.fields || {};
-            const top = err.message || data.message || 'Failed to save. Please check your input.';
+            const top = err.message || data.error?.message || 'Failed to save. Please check your input.';
             mileagePaintErrors(fields, top);
             btn.disabled = false;
             btn.textContent = 'Save Entry';

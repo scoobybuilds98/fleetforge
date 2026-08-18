@@ -816,10 +816,17 @@ function FF_JournalEntries() {
             try {
                 var r = await FF_Api.get('<?= base_url('api/v1/accounting/journal_entries') ?>?' + params);
                 if (r.success) {
-                    this.entries    = r.data.items || r.data || [];
-                    this.pagination = r.data.pagination || r.pagination || {};
+                    // Envelope contract: json_paginated() emits
+                    // data.items + data.pagination. The old `|| r.data` fallback
+                    // would hand the {items, pagination} OBJECT to x-for if
+                    // items were ever absent — the exact shape that produced the
+                    // Credit Notes phantom row — and `|| r.pagination` was dead
+                    // (never a top-level key). Both dropped.
+                    this.entries    = r.data?.items || [];
+                    this.pagination = r.data?.pagination || {};
                 } else {
-                    this.loadError = r.message || 'Failed to load journal entries.';
+                    // json_error() nests under `error`, not at the top level.
+                    this.loadError = r.error?.message || 'Failed to load journal entries.';
                 }
             } catch(e) {
                 this.loadError = 'Network error. Please try again.';
@@ -957,7 +964,7 @@ function FF_JournalEntries() {
             var f = r.error.fields || r.error.errors || {};
             var keys = Object.keys(f);
             if (keys.length) return keys.map(function(k){ return f[k]; }).join(' ');
-            return r.error.message || r.message || fallback;
+            return r.error.message || fallback;
         },
 
         validateCreateEntry() {
@@ -1102,7 +1109,7 @@ function FF_JournalEntries() {
                     this.viewLines     = r.data.lines || [];
                     this.showViewModal = true;
                 } else {
-                    FF_Toast.error(r.message || 'Failed to load entry details.');
+                    FF_Toast.error(r.error?.message || 'Failed to load entry details.');
                 }
             } catch(e) {
                 FF_Toast.error('Network error. Please try again.');

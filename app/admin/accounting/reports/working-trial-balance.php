@@ -349,7 +349,7 @@ function workingTrialBalance() {
                     this.data = r.data;
                     await this.loadAnnotations();
                 } else {
-                    this.error = r.message || 'Failed to load WTB.';
+                    this.error = r.error?.message || 'Failed to load WTB.';
                 }
             } catch (e) {
                 this.error = 'Network error.';

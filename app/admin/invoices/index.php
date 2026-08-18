@@ -619,7 +619,7 @@ function FF_Invoices() {
                     this.invoices   = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
-                    this.loadError = r.message || 'Failed to load invoices.';
+                    this.loadError = r.error?.message || 'Failed to load invoices.';
                 }
             } catch(e) {
                 this.loadError = 'Network error. Please try again.';

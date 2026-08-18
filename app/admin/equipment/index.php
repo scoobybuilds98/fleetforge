@@ -518,7 +518,7 @@ function FF_Equipment() {
                     this.units      = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
-                    this.loadError = r.message || 'Failed to load equipment.';
+                    this.loadError = r.error?.message || 'Failed to load equipment.';
                 }
             } catch(e) {
                 this.loadError = 'Network error. Check your connection.';

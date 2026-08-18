@@ -3587,16 +3587,23 @@ function qboSyncPanel(mappingId) {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/quickbooks/invoices/retry') ?>', { id: mappingId });
                 if (r.success) {
-                    if (r.action === 'enqueued') {
+                    // Envelope contract: json_success(['action' => …]) nests the
+                    // payload under `data`. Reading r.action off the envelope was
+                    // always undefined, so EVERY successful re-enqueue took the
+                    // else branch and told the operator "Skipped: gate refused"
+                    // — and skipped the reload that shows the new state.
+                    const d = r.data || {};
+                    if (d.action === 'enqueued') {
                         this.flash = 'Re-enqueued for push — reloading…';
                         this.flashType = 'success';
                         setTimeout(() => window.location.reload(), 600);
                     } else {
-                        this.flash = 'Skipped: ' + (r.reason || 'gate refused');
+                        this.flash = 'Skipped: ' + (d.reason || 'gate refused');
                         this.flashType = 'danger';
                     }
                 } else {
-                    this.flash = 'Retry failed: ' + (r.message || 'unknown error');
+                    // json_error() nests under `error`, not at the top level.
+                    this.flash = 'Retry failed: ' + (r.error?.message || 'unknown error');
                     this.flashType = 'danger';
                 }
             } catch (e) {

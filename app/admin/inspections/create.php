@@ -408,7 +408,7 @@ function createInspection() {
                         if (serverFields && Object.keys(serverFields).length) {
                             this.errors = Object.assign({}, this.errors, serverFields);
                         }
-                        this.formError  = d.error.message || d.message || 'Failed to create inspection.';
+                        this.formError  = d.error.message || 'Failed to create inspection.';
                         this.submitting = false;
                     } else {
                         if (this._draft) this._draft.clear(true); // S-FORM-DRAFT-ROLLOUT

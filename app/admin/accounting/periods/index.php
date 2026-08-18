@@ -237,7 +237,7 @@ function FF_Periods() {
                         _acting: false
                     }));
                 } else {
-                    this.loadError = r.message || 'Failed to load periods.';
+                    this.loadError = r.error?.message || 'Failed to load periods.';
                 }
             } catch (e) {
                 this.loadError = 'Network error. Please try again.';
@@ -262,7 +262,7 @@ function FF_Periods() {
                             FF_Toast.success(period.name + ' closed successfully.');
                             await this.load();
                         } else {
-                            FF_Toast.error(r.message || 'Failed to close period.');
+                            FF_Toast.error(r.error?.message || 'Failed to close period.');
                         }
                     } catch (e) {
                         FF_Toast.error('Network error. Please try again.');
@@ -289,7 +289,7 @@ function FF_Periods() {
                             FF_Toast.success(period.name + ' locked successfully.');
                             await this.load();
                         } else {
-                            FF_Toast.error(r.message || 'Failed to lock period.');
+                            FF_Toast.error(r.error?.message || 'Failed to lock period.');
                         }
                     } catch (e) {
                         FF_Toast.error('Network error. Please try again.');

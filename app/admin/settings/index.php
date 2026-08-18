@@ -2607,7 +2607,13 @@ function FF_AiTest() {
             try {
                 const r = await FF_Api.post('<?= base_url('api/v1/ai/test-connection') ?>');
                 this.connected = r.success === true;
-                this.message = r.message || (r.success ? 'Connected.' : 'Test failed.');
+                // EXCEPTION to the envelope contract: api/v1/ai/test-connection.php
+                // does not answer through json_success() — it echoes ClaudeClient::
+                // testConnection() verbatim, which carries top-level `success`,
+                // `message` and `details`. So the test result really does live at
+                // r.message. The auth / method guards on that endpoint DO use
+                // json_error(), hence the r.error?.message second term.
+                this.message = r.message || r.error?.message || (r.success ? 'Connected.' : 'Test failed.');
                 this.details = r.details || {};
             } catch(e) {
                 this.connected = false; this.message = 'Network error.';

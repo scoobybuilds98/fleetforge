@@ -523,7 +523,7 @@ function FF_Leases() {
                     this.leases     = r.data.items;
                     this.pagination = r.data.pagination;
                 } else {
-                    this.loadError = r.message || 'Failed to load leases.';
+                    this.loadError = r.error?.message || 'Failed to load leases.';
                 }
             } catch(e) {
                 this.loadError = 'Network error. Please try again.';

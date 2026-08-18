@@ -590,7 +590,7 @@ function FF_AccDashboard() {
                     // WHY: Load totals for visible entries in parallel for performance.
                     await this._loadEntryTotals();
                 } else {
-                    this.loadError = r.message || 'Failed to load journal entries.';
+                    this.loadError = r.error?.message || 'Failed to load journal entries.';
                 }
             } catch(e) {
                 this.loadError = 'Network error. Please try again.';
@@ -630,7 +630,7 @@ function FF_AccDashboard() {
                     je.status = 'posted';
                     FF_Toast.success('Journal entry ' + je.entry_number + ' posted.');
                 } else {
-                    FF_Toast.error(r.message || 'Failed to post journal entry.');
+                    FF_Toast.error(r.error?.message || 'Failed to post journal entry.');
                 }
             } catch(e) {
                 FF_Toast.error('Network error. Please try again.');

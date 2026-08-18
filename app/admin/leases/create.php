@@ -1886,7 +1886,7 @@ function FF_CreateLease() {
                     if (r.error && (r.error.code === 'VALIDATION_ERROR' || r.error.code === 'UNIT_UNAVAILABLE') && r.error.fields) {
                         FF_Validate.applyApi(form, r.error);
                     } else {
-                        FF_Validate.banner(form, r.error?.message || r.message || 'Failed to create lease.');
+                        FF_Validate.banner(form, r.error?.message || 'Failed to create lease.');
                         FF_Validate.scrollToFirst(form);
                     }
                 }

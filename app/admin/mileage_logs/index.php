@@ -332,7 +332,7 @@ function FF_MileageLogs() {
 
                 const res  = await fetch(`<?= base_url('api/v1/mileage_logs/index') ?>?${params}`);
                 const data = await res.json();
-                if (!data.success) throw new Error(data.message || 'API error');
+                if (!data.success) throw new Error(data.error?.message || 'API error');
 
                 this.items      = data.data?.items ?? [];
                 this.pagination = data.data?.pagination ?? this.pagination;
