@@ -189,6 +189,11 @@ class FixedAssetService
                 'monthly_licensing_cost'    => $data['monthly_licensing_cost']    ?? '0.00',
                 'monthly_registration_cost' => $data['monthly_registration_cost'] ?? '0.00',
                 'acquisition_bill_id'      => $data['acquisition_bill_id'] ?? null,
+                // S-FA-IMPORT: 1 = the asset predates the system, so its
+                // acquisition_date is a book-entry date rather than a cash
+                // event. Cash flow excludes these; every other report treats
+                // them as ordinary assets. Defaults 0 for the normal flow.
+                'is_opening_balance'       => !empty($data['is_opening_balance']) ? 1 : 0,
                 'vendor_id'                => $data['vendor_id'] ?? null,
                 'depreciation_method'      => $method,
                 'useful_life_years'        => $data['useful_life_years'] ?? null,
@@ -1458,7 +1463,11 @@ class FixedAssetService
         string $entityLabel,
         string $notes
     ): void {
-        $userName = null;
+        // audit_log.user_name is NOT NULL (DEFAULT 'system'), and db_insert sends
+        // the column explicitly — so a null here overrides the default and throws
+        // 1048. Web callers always pass current_user_id(), which is why this only
+        // ever bit CLI/system callers that legitimately have no user.
+        $userName = 'system';
         if ($userId) {
             $u = \db_row("SELECT name FROM users WHERE id = ?", [$userId]);
             if ($u) $userName = $u['name'];

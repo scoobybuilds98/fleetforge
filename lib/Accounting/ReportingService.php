@@ -655,10 +655,15 @@ class ReportingService
 
     private static function sumAssetAcquisitions(string $from, string $to): string
     {
+        // S-FA-IMPORT: opening-balance assets predate the system — their
+        // acquisition_date is when they were booked, not when cash moved, and
+        // there is no GL entry behind them. Counting them here would report an
+        // investing outflow that never happened and break the cash tie-out.
         $row = \db_row(
             "SELECT COALESCE(SUM(acquisition_cost), 0) AS total
                FROM acc_fixed_assets
-              WHERE acquisition_date BETWEEN ? AND ?",
+              WHERE acquisition_date BETWEEN ? AND ?
+                AND is_opening_balance = 0",
             [$from, $to]
         );
         return (string) ($row['total'] ?? '0.00');

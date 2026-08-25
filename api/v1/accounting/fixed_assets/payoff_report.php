@@ -155,7 +155,9 @@ $revRows = db_select(
      WHERE l.equipment_unit_id IN ({$placeholders})
        AND l.deleted_at IS NULL
        AND i.deleted_at IS NULL
-       AND i.status NOT IN ('void', 'written_off')
+       -- Draft is NOT revenue — same predicate as the payoff page and API so
+       -- the fleet-wide report cannot disagree with the per-unit view.
+       AND i.status NOT IN ('void', 'written_off', 'draft')
        AND ili.is_credit = 0
      GROUP BY l.equipment_unit_id",
     $unitIdList
@@ -211,7 +213,9 @@ $rev6Rows = db_select(
      WHERE l.equipment_unit_id IN ({$placeholders})
        AND l.deleted_at IS NULL
        AND i.deleted_at IS NULL
-       AND i.status NOT IN ('void', 'written_off')
+       -- Draft is NOT revenue — same predicate as the payoff page and API so
+       -- the fleet-wide report cannot disagree with the per-unit view.
+       AND i.status NOT IN ('void', 'written_off', 'draft')
        AND ili.is_credit = 0
        AND i.invoice_date >= (CURDATE() - INTERVAL 6 MONTH)
      GROUP BY l.equipment_unit_id",

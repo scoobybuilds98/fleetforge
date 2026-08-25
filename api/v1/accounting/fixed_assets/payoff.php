@@ -232,7 +232,11 @@ $revenueRow = db_row(
      WHERE l.equipment_unit_id = ?
        AND l.deleted_at IS NULL
        AND i.deleted_at IS NULL
-       AND i.status NOT IN ('void', 'written_off')
+       -- Draft is NOT revenue (project reporting policy, and the same filter
+       -- app/admin/equipment/payoff.php uses to server-render the hero KPIs).
+       -- Omitting 'draft' here made the projection cards and charts disagree
+       -- with the hero on the very same page.
+       AND i.status NOT IN ('void', 'written_off', 'draft')
        AND ili.is_credit = 0",
     [$eqUnitId]
 );
@@ -298,7 +302,11 @@ $monthlyRows = db_select(
      WHERE l.equipment_unit_id = ?
        AND l.deleted_at IS NULL
        AND i.deleted_at IS NULL
-       AND i.status NOT IN ('void', 'written_off')
+       -- Draft is NOT revenue (project reporting policy, and the same filter
+       -- app/admin/equipment/payoff.php uses to server-render the hero KPIs).
+       -- Omitting 'draft' here made the projection cards and charts disagree
+       -- with the hero on the very same page.
+       AND i.status NOT IN ('void', 'written_off', 'draft')
        AND ili.is_credit = 0
        AND i.invoice_date >= (CURDATE() - INTERVAL 13 MONTH)
      GROUP BY ym
