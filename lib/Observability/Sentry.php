@@ -52,6 +52,20 @@ class Sentry
         }
         self::$initialized = true;
 
+        // Ad-hoc CLI invocations — `php < script.php` and `php -r '…'` — are
+        // diagnostics run by a human at a terminal, not production code paths.
+        // PHP reports both as SCRIPT_NAME 'Standard input code', while a real
+        // entry point (cron/*.php, scripts/*.php) carries its actual filename,
+        // so crons keep reporting exactly as before.
+        //
+        // WHY this guard exists: a mistyped column in a throwaway read-only
+        // query was raising production Sentry issues that look identical to
+        // real application faults — same db.php frame, same 'production'
+        // environment — which buries genuine incidents in triage noise.
+        if (PHP_SAPI === 'cli' && ($_SERVER['SCRIPT_NAME'] ?? '') === 'Standard input code') {
+            return;
+        }
+
         $dsn = defined('FF_SENTRY_DSN') ? FF_SENTRY_DSN : (function_exists('env') ? env('SENTRY_DSN', '') : ($_ENV['SENTRY_DSN'] ?? getenv('SENTRY_DSN') ?: ''));
 
         if ($dsn === '') {
