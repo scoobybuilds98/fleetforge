@@ -180,7 +180,10 @@ const FF_Api = {
             headers: this._headers(),
             credentials: 'same-origin',
         });
-        return this._guide(await res.json());
+        // Not auto-popped: a GET is a page load or a background poll, not
+        // something the operator just clicked. The guidance still rides in the
+        // payload, so a page that wants it can call FF_Guidance.show() itself.
+        return await res.json();
     },
 
     /**
@@ -189,14 +192,17 @@ const FF_Api = {
      * @param {object} data
      * @returns {Promise<object>}
      */
-    async post(url, data = {}) {
+    async post(url, data = {}, opts = {}) {
         const res = await fetch(url, {
             method: 'POST',
             headers: this._headers(),
             credentials: 'same-origin',
             body: JSON.stringify(data),
         });
-        return this._guide(await res.json());
+        // opts.quiet = true for a call the operator did not initiate (a
+        // background save, a retry loop) where a modal would interrupt
+        // something they are in the middle of.
+        return opts.quiet ? await res.json() : this._guide(await res.json());
     },
 
     /**
@@ -206,13 +212,13 @@ const FF_Api = {
      * @param {string} url
      * @returns {Promise<object>}
      */
-    async delete(url) {
+    async delete(url, opts = {}) {
         const res = await fetch(url, {
             method: 'DELETE',
             headers: this._headers(),
             credentials: 'same-origin',
         });
-        return this._guide(await res.json());
+        return opts.quiet ? await res.json() : this._guide(await res.json());
     },
 
     /**
@@ -260,6 +266,15 @@ const FF_Api = {
             console.error('[FF_Api] guidance modal failed:', err);
         }
         return json;
+    },
+
+    /**
+     * Show the guidance modal for a response the caller fetched with get()
+     * (which never auto-pops). Returns true if a modal was shown.
+     */
+    guide(json) {
+        this._guide(json);
+        return !!(json && json.error && json.error.guidance);
     },
 
     /** Build an absolute URL under FF_BASE_PATH.
@@ -895,8 +910,21 @@ window.FF_Confirm = FF_Confirm;
 //
 //   FF_Guidance.show({ title, summary, cause, steps: [], actions: [{label,url}], detail })
 const FF_Guidance = {
+    // Repeat-suppression window (ms). Every module can raise a popup now, and
+    // a retried action or a re-fired request must not stack or machine-gun
+    // modals — the same explanation twice in a row helps nobody.
+    _repeatWindowMs: 15000,
+    _last: { key: '', at: 0 },
+
     show(detail = {}) {
+        const key = String(detail.title || '') + '|' + String(detail.summary || '');
+        const now = Date.now();
+        if (key === this._last.key && (now - this._last.at) < this._repeatWindowMs) {
+            return false;
+        }
+        this._last = { key: key, at: now };
         window.dispatchEvent(new CustomEvent('ff-guidance', { detail }));
+        return true;
     },
 };
 

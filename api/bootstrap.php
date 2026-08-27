@@ -79,15 +79,34 @@ set_exception_handler(function (Throwable $e): void {
         ? $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')'
         : 'An unexpected error occurred. Please try again.';
 
+    // S-ERROR-GUIDANCE-ALL: the crash path needs the popup MORE than the
+    // handled paths — this is the exact response that left the operator
+    // staring at "AN UNEXPECTED ERROR OCCURRED" nine times on FLEETFORGE-1E.
+    // It says plainly that it is our fault, that the action may not have
+    // completed (so check before repeating it), and that it is already
+    // reported. Best-effort: a guidance failure must never replace a 500
+    // with a blank response.
+    $error = ['code' => 'INTERNAL_ERROR', 'message' => $message];
+    try {
+        $guidance = \FleetForge\Support\ErrorGuidance::build('INTERNAL_ERROR', $message, 500, []);
+        if ($guidance !== null) {
+            // Super-admins/debug see the real exception behind the toggle;
+            // everyone else gets the class name only, never a file path.
+            $guidance['detail'] = $verboseAllowed
+                ? $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')'
+                : 'Reference: ' . get_class($e);
+            $error['guidance'] = $guidance;
+        }
+    } catch (\Throwable $guidanceError) {
+        error_log('[FF API] ErrorGuidance failed on the 500 path: ' . $guidanceError->getMessage());
+    }
+
     http_response_code(500);
     // json_error() may not be defined if the error occurred before this
     // file finished loading; use raw json_encode as a safe fallback.
     echo json_encode([
         'success' => false,
-        'error'   => [
-            'code'    => 'INTERNAL_ERROR',
-            'message' => $message,
-        ],
+        'error'   => $error,
     ]);
     exit;
 });
@@ -218,6 +237,31 @@ function json_error(
     if (function_exists('db_rollback_if_active')) {
         db_rollback_if_active();
     }
+
+    // S-ERROR-GUIDANCE-ALL: attach the explain-and-fix payload the front-end
+    // modal renders (app.js FF_Api._guide → FF_Guidance). Done HERE, once, so
+    // every one of the ~1,478 json_error() call sites across every module is
+    // covered without touching any of them — and a new endpoint reusing an
+    // existing code inherits the explanation automatically.
+    //
+    // A call site that already built its own richer guidance (e.g.
+    // BillingRateGuidance, which knows the actual rate numbers) always wins.
+    // ErrorGuidance returns null where a popup would be the wrong surface —
+    // a field-level VALIDATION_ERROR belongs on the field, not in a modal.
+    //
+    // Never allowed to break the error response it is decorating: any throw
+    // here is swallowed, and the caller still gets its original error envelope.
+    if (!isset($extra['guidance'])) {
+        try {
+            $guidance = \FleetForge\Support\ErrorGuidance::build($code, $message, $status, $extra);
+            if ($guidance !== null) {
+                $extra['guidance'] = $guidance;
+            }
+        } catch (\Throwable $guidanceError) {
+            error_log('[FF API] ErrorGuidance failed for ' . $code . ': ' . $guidanceError->getMessage());
+        }
+    }
+
     http_response_code($status);
     echo json_encode(
         [
