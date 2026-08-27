@@ -456,6 +456,33 @@ require_once FF_ROOT . '/includes/header.php';
                             <span class="input-group-suffix" x-text="(_mileageUnit === 'km' ? 'km' : 'miles') + '/day'"></span>
                         </div>
                         <div class="form-error" x-show="errors.estimated_mileage_per_day" x-text="errors.estimated_mileage_per_day"></div>
+                        <?php
+                        // S-MILEAGE-EST-RATE-HOLE: a per-day estimate on a lease with NO
+                        // mileage rate has nothing to price it with — api/v1/leases/update.php
+                        // now rejects that save (D133), and a lease that slipped through
+                        // before the gate existed is one the billing engine refuses to invoice
+                        // at all (FLEETFORGE-1E). Warn at the input rather than at save time.
+                        // The rate is read-only here, so this is a server-rendered gate on the
+                        // persisted rate, exactly like S-MILEAGE-MODE-OFF-WARN below.
+                        // Tested on the PERSISTED km mirror, exactly like the API gate
+                        // (billing prices the estimate off mileage_rate_km alone), not on
+                        // the derived display value above — otherwise a lease could show
+                        // no warning and still have its save rejected.
+                        $eHasMileageRate = $lease['mileage_rate_km'] !== null
+                            && $lease['mileage_rate_km'] !== ''
+                            && (float) $lease['mileage_rate_km'] > 0;
+                        ?>
+                        <?php if (!$eHasMileageRate): ?>
+                        <div x-show="Number(form.estimated_mileage_per_day) > 0"
+                             class="alert alert-danger"
+                             style="margin:8px 0 0;padding:0.5rem 0.75rem;font-size:0.8125rem;">
+                            ⚠️ This lease has <strong>no mileage rate</strong>, so an estimated
+                            mileage per day cannot be billed — saving will be rejected. Set a rate
+                            first via the
+                            <a href="<?= e(base_url('leases/show?id=' . $leaseId)) ?>#amendments" class="text-link">Rate Amendment workflow</a>,
+                            or leave this at 0.
+                        </div>
+                        <?php endif; ?>
                         <div class="form-hint" style="margin-top:6px;">Each invoice bills an estimate (days &times; this &times; rate), then trues up against the actual distance driven — adding a charge or credit. 0 = bill only actual mileage.</div>
                     </div>
                 </div>

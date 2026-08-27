@@ -190,66 +190,89 @@ if ($fields) {
 $generator = new \FleetForge\Billing\InvoiceGenerator();
 $batch     = null;
 
-db_transaction(function () use (
-    $generator, $leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $body,
-    $odoStart, $odoEnd, $odoSource, $odoFetchedAt, $hoursStart, $hoursEnd, $allowOverlap, $lease,
-    &$batch
-) {
-    $batch = $generator->generateForLease([
-        'lease_id'          => $leaseId,
-        'period_start'      => $periodStart,
-        'period_end'        => $periodEnd,
-        'billing_type'      => $billingType,
-        'invoice_type'      => $invoiceType,
-        'allow_overlap'     => $allowOverlap,
-        // R2 §3.6: the in-order month picker bills exactly ONE calendar-month
-        // segment (the submitted period) instead of fanning out to the extent.
-        'single_segment'    => !empty($body['single_segment']),
-        'po_number'         => clean_string($body['po_number'] ?? null),
-        'notes'             => clean_string($body['notes'] ?? null, 2000),
-        'internal_notes'    => clean_string($body['internal_notes'] ?? null, 2000),
-        'created_by'        => current_user_id(),
-        'generation_source' => 'manual',
-        // SAMSARA-3 — applied to the final segment only by the orchestrator.
-        'odometer_at_period_start_km' => $odoStart,
-        'odometer_at_period_end_km'   => $odoEnd,
-        'odometer_source'             => $odoSource,
-        'odometer_fetched_at'         => $odoFetchedAt,
-        // S-LEASE-HOURLY-BILLING — manual engine hours (final segment only).
-        'engine_hours_at_period_start' => $hoursStart,
-        'engine_hours_at_period_end'   => $hoursEnd,
-    ]);
-
-    $companyName = $lease['company_name_snapshot'] ?? 'customer';
-    foreach ($batch['invoices'] as $inv) {
-        // Audit log inside same transaction (FIX #19) — one row per invoice.
-        db_insert('audit_log', [
-            'user_id'      => current_user_id(),
-            'user_name'    => current_user()['name'] ?? 'System',
-            'action'       => 'create',
-            'module'       => 'invoices',
-            'entity_type'  => 'invoice',
-            'entity_id'    => $inv['invoice_id'],
-            'entity_label' => $inv['invoice_number'],
-            'notes'        => "Invoice {$inv['invoice_number']} created for lease #{$leaseId}",
-            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+// S-MILEAGE-EST-RATE-HOLE: a BillingRateException is a LEASE CONFIGURATION
+// problem (a rate hole the engine refuses to bill through), not a server fault.
+// Unhandled it reached the global handler as a 500 + a Sentry issue per attempt
+// while the operator saw "An unexpected error occurred" — five events in two
+// minutes on FLEETFORGE-1E as they retried. The batch paths
+// (batch_generate.php, batch_runs/generate.php) already treat it as a per-lease
+// skip reason; this returns the same diagnostic to the operator as a 422 they
+// can act on. Caught OUTSIDE db_transaction so the rollback has already run.
+try {
+    db_transaction(function () use (
+        $generator, $leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $body,
+        $odoStart, $odoEnd, $odoSource, $odoFetchedAt, $hoursStart, $hoursEnd, $allowOverlap, $lease,
+        &$batch
+    ) {
+        $batch = $generator->generateForLease([
+            'lease_id'          => $leaseId,
+            'period_start'      => $periodStart,
+            'period_end'        => $periodEnd,
+            'billing_type'      => $billingType,
+            'invoice_type'      => $invoiceType,
+            'allow_overlap'     => $allowOverlap,
+            // R2 §3.6: the in-order month picker bills exactly ONE calendar-month
+            // segment (the submitted period) instead of fanning out to the extent.
+            'single_segment'    => !empty($body['single_segment']),
+            'po_number'         => clean_string($body['po_number'] ?? null),
+            'notes'             => clean_string($body['notes'] ?? null, 2000),
+            'internal_notes'    => clean_string($body['internal_notes'] ?? null, 2000),
+            'created_by'        => current_user_id(),
+            'generation_source' => 'manual',
+            // SAMSARA-3 — applied to the final segment only by the orchestrator.
+            'odometer_at_period_start_km' => $odoStart,
+            'odometer_at_period_end_km'   => $odoEnd,
+            'odometer_source'             => $odoSource,
+            'odometer_fetched_at'         => $odoFetchedAt,
+            // S-LEASE-HOURLY-BILLING — manual engine hours (final segment only).
+            'engine_hours_at_period_start' => $hoursStart,
+            'engine_hours_at_period_end'   => $hoursEnd,
         ]);
 
-        // ── In-app notification (NOTIF-1) ──────────────────────
-        try {
-            \FleetForge\Notifications\NotificationService::notify(
-                type:       'invoice.created',
-                title:      "New invoice {$inv['invoice_number']}",
-                message:    "Invoice {$inv['invoice_number']} created for {$companyName} — \$" . number_format((float) $inv['total_amount'], 2),
-                entityType: 'invoice',
-                entityId:   (int) $inv['invoice_id'],
-                url:        '/fleetforge/invoices/show?id=' . $inv['invoice_id']
-            );
-        } catch (\Throwable $e) {
-            error_log('[NOTIF invoice.created] ' . $e->getMessage());
+        $companyName = $lease['company_name_snapshot'] ?? 'customer';
+        foreach ($batch['invoices'] as $inv) {
+            // Audit log inside same transaction (FIX #19) — one row per invoice.
+            db_insert('audit_log', [
+                'user_id'      => current_user_id(),
+                'user_name'    => current_user()['name'] ?? 'System',
+                'action'       => 'create',
+                'module'       => 'invoices',
+                'entity_type'  => 'invoice',
+                'entity_id'    => $inv['invoice_id'],
+                'entity_label' => $inv['invoice_number'],
+                'notes'        => "Invoice {$inv['invoice_number']} created for lease #{$leaseId}",
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+
+            // ── In-app notification (NOTIF-1) ──────────────────────
+            try {
+                \FleetForge\Notifications\NotificationService::notify(
+                    type:       'invoice.created',
+                    title:      "New invoice {$inv['invoice_number']}",
+                    message:    "Invoice {$inv['invoice_number']} created for {$companyName} — \$" . number_format((float) $inv['total_amount'], 2),
+                    entityType: 'invoice',
+                    entityId:   (int) $inv['invoice_id'],
+                    url:        '/fleetforge/invoices/show?id=' . $inv['invoice_id']
+                );
+            } catch (\Throwable $e) {
+                error_log('[NOTIF invoice.created] ' . $e->getMessage());
+            }
         }
-    }
-});
+    });
+} catch (\FleetForge\Billing\BillingRateException $e) {
+    error_log("[invoices/create] Lease #{$leaseId} rate hole: " . $e->getMessage());
+    json_error(
+        'BILLING_RATE_INCOMPLETE',
+        'No invoice was created — this lease has an incomplete rate configuration and the '
+        . 'billing engine refuses to bill through it (a configured estimate with no rate to '
+        . 'price it). Set the missing rate via the Rate Amendment workflow, or clear the '
+        . 'matching estimate on the lease, then create the invoice again.',
+        422,
+        // The engine diagnostic (lease, period, the exact estimate/rate pair) is
+        // for the log + a support view, not the operator banner.
+        ['lease_id' => $leaseId, 'detail' => $e->getMessage(), 'billing_context' => $e->context]
+    );
+}
 
 // The "primary" invoice for the legacy single-invoice response shape is the
 // first (earliest) one created; the full set is returned under `invoices`.

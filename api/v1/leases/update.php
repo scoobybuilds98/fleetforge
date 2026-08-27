@@ -67,9 +67,20 @@ if (!$updatedAt) json_error('MISSING_REQUIRED', 'updated_at is required for opti
 // attempt to change precharge_enabled / precharge_amount after the
 // precharge line has been billed on Invoice 1 (immutability rule —
 // CRA D14 spirit: dollars billed are frozen).
+//
+// S-MILEAGE-EST-RATE-HOLE: the rate + estimate columns are here for the two
+// rate-completeness gates below (mileage D133, engine hours). Both compare the
+// request against the lease's CURRENT row — and the edit form sends a
+// dirty-only payload (S-LEASE-EDIT-DIRTY-ONLY), so the stored side of that
+// comparison is never in $body. The hours gate already read
+// $existing['hourly_rate'] while this SELECT did not fetch it: it saw null and
+// rejected EVERY per-day hours edit on a lease that has an hourly rate.
 $existing = db_row(
     "SELECT id, status, contract_number, company_name_snapshot, updated_at,
-            precharge_invoiced_at, cartage_billed_at
+            precharge_invoiced_at, cartage_billed_at,
+            mileage_rate_km, hourly_rate,
+            estimated_mileage, estimated_mileage_km, estimated_mileage_miles,
+            estimated_mileage_per_day, precharge_enabled
      FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -381,7 +392,9 @@ if (array_key_exists('estimated_engine_hours_per_day', $body)) {
     $newPerDayHours = ($d !== null && bccomp($d, '0', 2) >= 0) ? bcround($d, 2) : '0.00';
     // Rate-completeness (parallel to create): a per-day estimate needs a rate to
     // price it. The effective rate is this request's hourly_rate if being set,
-    // else the lease's current value.
+    // else the lease's current value — which the $existing SELECT above now
+    // actually fetches (S-MILEAGE-EST-RATE-HOLE; it previously did not, so this
+    // gate fired on every hours-only edit no matter what rate the lease carried).
     if (bccomp($newPerDayHours, '0', 2) > 0) {
         $effRate = array_key_exists('hourly_rate', $data)
             ? $data['hourly_rate']
@@ -705,6 +718,93 @@ if (array_key_exists('mileage_at_end', $data) && $data['mileage_at_end'] !== nul
     $startMileage = (int) ($data['mileage_at_start'] ?? $currentLease['mileage_at_start'] ?? 0);
     if ((int) $data['mileage_at_end'] < $startMileage) {
         $fields['mileage_at_end'] = 'End mileage must be greater than or equal to start mileage.';
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// S-MILEAGE-EST-RATE-HOLE — D133 mileage rate-completeness on the EDIT path.
+//
+// create.php enforces "mileage intent ⇒ mileage_rate > 0" (D133, S-MILEAGE-
+// RATE-VALIDATION) and amend_rate.php now mirrors it on the rate side. This
+// endpoint was the remaining way to re-open the hole from the ESTIMATE side:
+// rate fields are blocked here (they route to the amendment workflow) while
+// estimated_mileage_per_day / estimated_mileage / precharge stay freely
+// editable, so adding a per-day estimate to a rate-0 lease was a 200.
+//
+// The result is a lease InvoiceGenerator refuses to bill AT ALL: its D-B hard
+// guard throws BillingRateException for every manual invoice, close invoice
+// and cron run (FLEETFORGE-1E — lease #528, 100 mi/day = 160.9344 km/day
+// configured against mileage_rate_km = 0.0000; five 500s in two minutes as
+// the operator retried).
+//
+// Evaluated on the EFFECTIVE post-update row (request value where supplied,
+// else the stored one) and only when this request TOUCHES a mileage-intent
+// field, which keeps both exits open: an unrelated edit (notes, dates) to an
+// already-holed lease still saves, and clearing the estimate to 0 is always
+// allowed. The other exit is a rate amendment.
+//
+// Precharge counts as intent only when this request TURNS IT ON (create.php's
+// D133 trigger set includes it). An already-on precharge deliberately does NOT
+// hold the gate shut: it is not what InvoiceGenerator refuses to bill — the
+// estimate columns are — and once billed it is frozen (PRECHARGE_LOCKED), so
+// counting it would trap the operator, blocking the very "set the estimate
+// back to 0" edit that clears the billing block.
+// ════════════════════════════════════════════════════════════════════════
+$mileageIntentCols = [
+    'estimated_mileage_per_day',
+    'estimated_mileage',
+    'estimated_mileage_km',
+    'estimated_mileage_miles',
+];
+$mileageIntentTouched = array_key_exists('precharge_enabled', $body);
+foreach ($mileageIntentCols as $col) {
+    if (array_key_exists($col, $body)) { $mileageIntentTouched = true; }
+}
+
+if ($mileageIntentTouched) {
+    // Effective value: this request's, else the stored one (NULL columns → 0).
+    $effEstimate = static function (string $col) use ($data, $existing): string {
+        $v = $data[$col] ?? $existing[$col] ?? '0';
+        return ($v === null || $v === '') ? '0' : (string) $v;
+    };
+    $prechargeTurnedOn = array_key_exists('precharge_enabled', $body)
+        && (int) ($data['precharge_enabled'] ?? 0) === 1
+        && (int) ($existing['precharge_enabled'] ?? 0) !== 1;
+
+    $positiveIntentCol = null;
+    foreach ($mileageIntentCols as $col) {
+        if (bccomp($effEstimate($col), '0', 4) > 0) { $positiveIntentCol = $col; break; }
+    }
+    $intentPresent = $positiveIntentCol !== null || $prechargeTurnedOn;
+
+    // Rate columns are immutable on this endpoint, so the effective rate is
+    // always the stored one — and the column that decides is the km-canonical
+    // mirror, not the trio: InvoiceGenerator prices the estimate off
+    // mileage_rate_km alone, so a rate living only in the legacy/miles columns
+    // is the same hole. create.php and amend_rate.php always write all three
+    // together, so a row where only the mirror is 0/NULL is a legacy one that
+    // billing already refuses — correct to block an estimate on.
+    $anyMileageRate = bccomp((string) ($existing['mileage_rate_km'] ?? '0'), '0', 4) > 0;
+
+    if ($intentPresent && !$anyMileageRate) {
+        // Attribute the error to a field the operator is actually editing —
+        // preferring the one carrying the intent, so the edit form highlights
+        // the input they just filled in.
+        $target = null;
+        if ($positiveIntentCol !== null && array_key_exists($positiveIntentCol, $body)) {
+            $target = $positiveIntentCol;
+        } else {
+            foreach ($mileageIntentCols as $col) {
+                if (array_key_exists($col, $body)) { $target = $col; break; }
+            }
+            $target ??= 'precharge_enabled';
+        }
+        if (!isset($fields[$target])) {
+            $fields[$target] = 'This lease has no mileage rate, so an estimated mileage '
+                . '(per-day or allowance) or precharge cannot be billed — invoice generation '
+                . 'would be refused outright. Set a mileage rate first via the Rate Amendment '
+                . 'workflow, or leave the estimate at 0.';
+        }
     }
 }
 
