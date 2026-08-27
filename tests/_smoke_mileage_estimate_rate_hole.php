@@ -34,6 +34,9 @@ declare(strict_types=1);
  *       succeeds (200) — the gate is scoped to amendments touching that rate.
  *   E1  invoices/create on a holed lease (planted by direct SQL, exactly how
  *       #528 exists) → 422 BILLING_RATE_INCOMPLETE, not a 500, and no invoice.
+ *   E2  that same 422 carries `error.guidance` — the explain-and-fix modal's
+ *       content (summary, steps, lease-scoped fix links). Its branch logic is
+ *       pinned separately in tests/_smoke_billing_guidance_payload.php.
  *   F1  leases/close on that same lease → 422 BILLING_RATE_INCOMPLETE and the
  *       lease still ACTIVE. The close-time final invoice runs the same engine,
  *       so a holed lease could be neither invoiced NOR closed — #528 hit both.
@@ -238,14 +241,25 @@ try {
         'invoicing a holed lease → ' . ($e1['error']['code'] ?? 'CREATED') . ", invoices={$e1Count} "
         . '(expect BILLING_RATE_INCOMPLETE 422, 0 invoices — was INTERNAL_ERROR 500 + a Sentry issue)');
 
+    // S-BILLING-GUIDANCE: the response must carry what the explain-and-fix modal
+    // renders. (The payload's own branch logic is pinned dependency-free in
+    // tests/_smoke_billing_guidance_payload.php; this proves the ENDPOINT emits it.)
+    $e1g = $e1['error']['guidance'] ?? null;
+    ck('E2', is_array($e1g) && !empty($e1g['summary']) && !empty($e1g['steps'])
+            && !empty($e1g['actions']) && str_contains((string) ($e1g['actions'][0]['url'] ?? ''), (string) $lidE),
+        'the 422 carries guidance for the modal — '
+        . (is_array($e1g) ? count($e1g['actions'] ?? []) . ' fix link(s), first: ' . ($e1g['actions'][0]['url'] ?? 'none')
+                          : 'MISSING'));
+
     // ── F1: and it can't be CLOSED either — same engine, same guard ────────
     $f1 = $call('api/v1/leases/close.php', [
         'id' => $lidE, 'actual_return_date' => '2026-08-25',
     ]);
     $f1Status = (string) db_row("SELECT status FROM leases WHERE id=?", [$lidE])['status'];
-    ck('F1', ($f1['error']['code'] ?? '') === 'BILLING_RATE_INCOMPLETE' && $f1Status === 'active',
+    ck('F1', ($f1['error']['code'] ?? '') === 'BILLING_RATE_INCOMPLETE' && $f1Status === 'active'
+            && !empty($f1['error']['guidance']['actions']),
         'closing a holed lease → ' . ($f1['error']['code'] ?? 'CLOSED') . ", status={$f1Status} "
-        . '(expect BILLING_RATE_INCOMPLETE 422, lease untouched — was INTERNAL_ERROR 500)');
+        . '(expect BILLING_RATE_INCOMPLETE 422 + guidance, lease untouched — was INTERNAL_ERROR 500)');
 
 } catch (\Throwable $e) {
     ck('FATAL', false, $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());

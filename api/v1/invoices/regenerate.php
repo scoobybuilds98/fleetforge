@@ -333,7 +333,13 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
         . 'through. Set the missing rate (Rate Amendment) or clear the estimate on the '
         . 'lease, then regenerate again.',
         422,
-        ['lease_id' => (int) $invoice['lease_id'], 'detail' => $e->getMessage(), 'billing_context' => $e->context]
+        // S-BILLING-GUIDANCE: drives the explain-and-fix modal (app.js FF_Guidance).
+        \FleetForge\Billing\BillingRateGuidance::payload(
+            $e,
+            (int) $invoice['lease_id'],
+            'regenerate this draft',
+            db_row("SELECT contract_number FROM leases WHERE id = ?", [(int) $invoice['lease_id']])['contract_number'] ?? null
+        )
     );
 } catch (\RuntimeException $e) {
     if (str_starts_with($e->getMessage(), 'CONCURRENT_MODIFICATION')) {

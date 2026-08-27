@@ -267,9 +267,13 @@ try {
         . 'price it, which the billing engine refuses to bill through. Set the missing rate '
         . '(Rate Amendment) or clear the estimate on the lease, then try again.',
         422,
-        // The engine diagnostic (lease, period, the exact estimate/rate pair) is
-        // for the log + a support view, not the operator banner.
-        ['lease_id' => $leaseId, 'detail' => $e->getMessage(), 'billing_context' => $e->context]
+        // S-BILLING-GUIDANCE: `guidance` drives the explain-and-fix modal in
+        // app.js (FF_Api → FF_Guidance) — what happened, the numbers behind it,
+        // and the links that fix it. The engine diagnostic rides along in
+        // `detail` for the log + the modal's technical-detail toggle.
+        \FleetForge\Billing\BillingRateGuidance::payload(
+            $e, $leaseId, 'create this invoice', $lease['contract_number'] ?? null
+        )
     );
 }
 

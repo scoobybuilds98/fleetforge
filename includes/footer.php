@@ -151,6 +151,85 @@
     <div class="modal-backdrop" @click="cancel()" aria-hidden="true"></div>
 </div>
 
+<!-- ============================================================
+     GUIDANCE MODAL — explain-and-fix dialog (S-BILLING-GUIDANCE)
+     For errors the operator CAN fix but a one-line banner can't explain.
+     Pops automatically for any API error carrying `error.guidance`
+     (FF_Api._guide → FF_Guidance.show → this) — no page-level wiring —
+     or by hand via FF_Guidance.show({ title, summary, cause, steps,
+     actions, detail }). Payload shape: lib/Billing/BillingRateGuidance.php.
+     ============================================================ -->
+<div id="ff-guidance-modal"
+     class="modal-overlay"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="ff-guidance-title"
+     x-data="FF_GuidanceModal()"
+     x-show="open"
+     x-cloak
+     @ff-guidance.window="show($event.detail)"
+     @keydown.escape.window="close()">
+
+    <div class="modal" @click.stop>
+        <div class="modal-header">
+            <h2 class="modal-title" id="ff-guidance-title" x-text="title"></h2>
+        </div>
+
+        <div class="modal-body">
+            <p x-text="summary" style="margin:0 0 1rem;"></p>
+
+            <!-- The specific numbers behind the refusal. -->
+            <div x-show="cause"
+                 class="alert alert-warning"
+                 style="margin:0 0 1rem;padding:0.625rem 0.75rem;font-size:0.875rem;">
+                <span x-text="cause"></span>
+            </div>
+
+            <!-- What to do, in order. -->
+            <template x-if="steps.length">
+                <div style="margin-bottom:1rem;">
+                    <div class="form-label" style="margin-bottom:0.5rem;">How to fix it</div>
+                    <ol style="margin:0;padding-left:1.25rem;line-height:1.6;">
+                        <template x-for="(step, i) in steps" :key="i">
+                            <li x-text="step" style="margin-bottom:0.35rem;"></li>
+                        </template>
+                    </ol>
+                </div>
+            </template>
+
+            <!-- The engine's own words — for support, collapsed by default. -->
+            <template x-if="detail">
+                <div>
+                    <button type="button"
+                            class="btn btn-link btn-sm"
+                            style="padding:0;font-size:0.8125rem;"
+                            @click="showDetail = !showDetail"
+                            :aria-expanded="showDetail"
+                            x-text="showDetail ? 'Hide technical detail' : 'Show technical detail'">
+                    </button>
+                    <pre x-show="showDetail"
+                         x-text="detail"
+                         style="margin:0.5rem 0 0;padding:0.625rem;background:var(--bg-muted);
+                                border-radius:4px;font-size:0.75rem;white-space:pre-wrap;
+                                word-break:break-word;max-height:180px;overflow:auto;"></pre>
+                </div>
+            </template>
+        </div>
+
+        <div class="modal-footer">
+            <button class="btn btn-secondary btn-md" @click="close()">Close</button>
+            <template x-for="(action, i) in actions" :key="i">
+                <a :href="action.url"
+                   class="btn btn-md"
+                   :class="action.primary ? 'btn-primary' : 'btn-secondary'"
+                   x-text="action.label"></a>
+            </template>
+        </div>
+    </div>
+
+    <div class="modal-backdrop" @click="close()" aria-hidden="true"></div>
+</div>
+
 <!-- ── AI Chat Widget (floating bubble — replaces team chat popup) ──── -->
 <?php require_once FF_ROOT . '/includes/partials/ai-chat-widget.php'; ?>
 

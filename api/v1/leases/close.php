@@ -1840,7 +1840,13 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         . 'this lease has an estimate configured with no rate to price it. Set the missing '
         . 'rate (Rate Amendment) or clear the estimate (Edit Lease), then close again.',
         422,
-        ['lease_id' => $id, 'detail' => $e->getMessage(), 'billing_context' => $e->context]
+        // S-BILLING-GUIDANCE: drives the explain-and-fix modal (app.js FF_Guidance).
+        // The lease row lives inside the rolled-back closure, so re-read the one
+        // field the modal heading needs.
+        \FleetForge\Billing\BillingRateGuidance::payload(
+            $e, $id, 'close this lease',
+            db_row("SELECT contract_number FROM leases WHERE id = ?", [$id])['contract_number'] ?? null
+        )
     );
 }
 
