@@ -10,7 +10,7 @@ and the server stops accepting writes.
 
 Production web applications generate continuous log output — PHP-FPM, Nginx, MySQL, cron
 jobs, and application-level scripts all write to disk without any built-in size cap. On a
-Lightsail instance with a fixed disk (160 GB), unmanaged logs routinely consume multiple
+Lightsail instance with a fixed disk (78 GB on this host), unmanaged logs routinely consume multiple
 gigabytes per month at production traffic levels.
 
 When disk usage reaches 100 %:
@@ -32,13 +32,23 @@ running processes open fresh file handles on the new file — no restart require
 All application logs live under the `logs/` directory in the project root
 (`/var/www/fleetforge/logs/`).
 
-| Log file | Written by |
-|---|---|
-| `logs/cron.log` | All cron jobs (backup_db, send_invoices, reconciliation, etc.) |
-| `logs/mail.log` | Outbound SES / SMTP email delivery results |
-| `logs/error.log` | Application-level PHP errors caught by the error handler |
-| `logs/reconciliation/*.log` | Per-run reconciliation reports (one file per execution) |
-| Any other `logs/` contents | Future scripts that append to this directory |
+| Log file | Written by | Typical volume |
+|---|---|---|
+| `logs/gps.log` | `cron/samsara_sync.php` — runs every 5 minutes over every linked unit | **Highest by far.** Reached 422 MB / 5.0 M lines in ~3.5 months before rotation existed |
+| `logs/cron.log` | All other cron jobs (backup_db, invoice_*, late_fee_apply, etc.) | ~700 KB |
+| `logs/ai.log` | AI digest / anomaly-scan jobs | ~20 KB |
+| `logs/mail.log` | Outbound SES / SMTP email delivery results | ~300 B |
+| `logs/reconciliation/*.log` | Per-run reconciliation reports (one file per execution) | ~600 KB total |
+| Any other `logs/*.log` | Future scripts that append to this directory | — |
+
+> **`gps.log` is the one that matters.** It is written by the 5-minute Samsara sync and is
+> the reason this runbook exists. It was omitted from v1.0.0 of this config, which is why the
+> file was still unrotated months after the runbook was written. The `logs/*.log` glob below
+> now covers it — and any future log — automatically.
+>
+> Its growth was also cut at the source: `samsara_sync.php` used to log one line per unit per
+> tick even when the unit had not moved (~48,000 lines/day, 83% of the file). That line is now
+> gated behind `FF_SAMSARA_VERBOSE_LOG=1` and off by default.
 
 The `logs/reconciliation/` glob pattern (`logs/reconciliation/*.log`) is included in the
 logrotate config below so new per-run files are automatically covered without updating the
@@ -73,54 +83,71 @@ copy-pastable as-is; adjust `/var/www/fleetforge` if the project root differs.
 
 ```
 # /etc/logrotate.d/fleetforge
-# FleetForge application and system log rotation
+# FleetForge application log rotation
 # Managed by runbook: docs/runbooks/logrotate_setup.md
 
-/var/www/fleetforge/logs/cron.log
-/var/www/fleetforge/logs/mail.log
-/var/www/fleetforge/logs/error.log
+# Glob, not an explicit list: gps.log was missed by the explicit list in v1.0.0
+# and grew to 422 MB unrotated. A glob cannot be forgotten by a future script.
+/var/www/fleetforge/logs/*.log
 /var/www/fleetforge/logs/reconciliation/*.log
-/var/log/nginx/access.log
-/var/log/nginx/error.log
-/var/log/php8.2-fpm.log
 {
+    # REQUIRED. logs/ is group-writable and owned by www-data, so logrotate
+    # refuses to touch it without an explicit su directive:
+    #   "parent directory has insecure permissions"
+    su www-data www-data
+
     daily
-    rotate 30
+    rotate 14
+    maxsize 100M
     compress
     delaycompress
     missingok
     notifempty
-    create 644 ubuntu ubuntu
-    sharedscripts
 
-    postrotate
-        # Tell PHP-FPM to reopen its log file handles after rotation.
-        # Without this, PHP-FPM keeps writing to the rotated (now renamed) file.
-        if [ -f /run/php/php8.2-fpm.pid ]; then
-            kill -USR1 $(cat /run/php/php8.2-fpm.pid)
-        fi
-
-        # Tell Nginx to reopen its log file handles.
-        if [ -f /var/run/nginx.pid ]; then
-            kill -USR1 $(cat /var/run/nginx.pid)
-        fi
-    endscript
+    # MUST be www-data:www-data 0664 -- php-fpm and every cron job run as
+    # www-data and append via file_put_contents(). v1.0.0 of this runbook said
+    # `create 644 ubuntu ubuntu`, which would have handed www-data a file it
+    # cannot write: logging would have stopped silently after the first
+    # rotation, with no error anywhere.
+    create 0664 www-data www-data
 }
 ```
+
+> **No `postrotate` here, deliberately.** The application appends with
+> `file_put_contents(..., FILE_APPEND)`, which opens and closes the file on every write, so it
+> picks up the new file on its own with no signal needed. Nginx and PHP-FPM *do* need SIGUSR1,
+> but they are already handled by their own distro-shipped configs — see the warning below.
+
+> ### Do not add nginx / php-fpm / mysql paths to this file
+>
+> v1.0.0 of this runbook listed `/var/log/nginx/access.log`, `/var/log/nginx/error.log`, and
+> `/var/log/php8.2-fpm.log` in the FleetForge config. Those paths are **already covered** by
+> the distro-shipped configs that ship with the packages:
+>
+> | Path | Already handled by | Its policy |
+> |---|---|---|
+> | `/var/log/nginx/*.log` | `/etc/logrotate.d/nginx` | daily, rotate 14, `create 0640 www-data adm` |
+> | `/var/log/php8.2-fpm.log` | `/etc/logrotate.d/php8.2-fpm` | weekly, rotate 12, reopens via `php8.2-fpm-reopenlogs` |
+> | `/var/log/mysql/error.log` | `/etc/logrotate.d/mysql-server` | shipped with the mysql-server package |
+>
+> Listing them twice makes logrotate abort that run with
+> `duplicate log entry for /var/log/nginx/access.log`, which would have silently disabled
+> rotation for the FleetForge logs in the same config. This file covers **application logs
+> only**.
 
 **Config option explanations:**
 
 | Option | Effect |
 |---|---|
 | `daily` | Rotate once per day (triggered by `/etc/cron.daily/logrotate`) |
-| `rotate 30` | Keep 30 days of rotated archives before deleting the oldest |
+| `rotate 14` | Keep 14 days of rotated archives before deleting the oldest |
 | `compress` | Compress rotated files with gzip (`.gz` extension) |
 | `delaycompress` | Do not compress the most-recently rotated file — leaves it readable for one day in case a process still has it open |
 | `missingok` | Do not error if a log file is absent (e.g., cron has not run yet) |
 | `notifempty` | Skip rotation if the log file is empty — avoids accumulating zero-byte archives |
-| `create 644 ubuntu ubuntu` | After rotation, create a fresh empty log file owned by `ubuntu:ubuntu` with permissions `644` so application scripts can append without sudo |
-| `sharedscripts` | Run `postrotate` once for all matched files, not once per file |
-| `postrotate` / `kill -USR1` | SIGUSR1 tells PHP-FPM and Nginx to reopen their log file handles on the new (empty) file without dropping connections |
+| `create 0664 www-data www-data` | After rotation, create a fresh empty log file owned by `www-data:www-data` with permissions `0664`. **This must match the user php-fpm and cron run as**, or appends fail silently |
+| `su www-data www-data` | Rotate as `www-data`. Required because `logs/` is group-writable; without it logrotate refuses the directory as insecure |
+| `maxsize 100M` | Rotate early if a file hits 100 MB before the daily run — a backstop against a runaway loop filling the disk between rotations |
 
 > **Why `delaycompress`?** If a long-running PHP-FPM worker still has the previous log
 > file open at rotation time, it will keep writing to it for up to one request cycle.
@@ -222,9 +249,16 @@ if ($diskFreePercent < 20) {
 ```
 
 The 20 % threshold gives enough headroom to diagnose and remediate before a complete fill.
-At typical log volume, a 20 % buffer on a 160 GB disk represents ~32 GB — roughly 30+ days
+At typical log volume, a 20 % buffer on this 78 GB disk represents ~15 GB — many months
 of runway even if logrotate stopped working entirely.
 
 ---
 
-*Runbook version: 1.0.0 — Last updated: 2026-05-02*
+*Runbook version: 1.1.0 — Last updated: 2026-08-26*
+
+**v1.1.0 changes** — corrections found when the config was finally applied to production:
+1. Added `logs/gps.log` (and `ai.log`) via a `*.log` glob. The explicit v1.0.0 list omitted gps.log, the single largest log on the box at 422 MB.
+2. Fixed `create 644 ubuntu ubuntu` → `create 0664 www-data www-data`. The old value would have stopped all application logging after the first rotation.
+3. Added the required `su www-data www-data` directive.
+4. Removed the nginx / php-fpm paths, which duplicate distro configs and would have aborted the run.
+5. `rotate 30` → `rotate 14`, plus a `maxsize 100M` backstop.

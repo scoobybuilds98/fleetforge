@@ -91,6 +91,32 @@ function ff_samsara_log(string $level, string $msg): void
     );
 }
 
+/**
+ * Whether to emit a log line for EVERY unit on EVERY tick, including the
+ * ones that did not move.
+ *
+ * WHY this is off by default: this cron runs every 5 minutes over ~167 units,
+ * and on a normal tick almost none of them have moved. Logging each one cost
+ * ~48,000 lines/day -- 83% of gps.log -- all of them saying nothing happened,
+ * which buried the CRON_MOVED / CRON_SKIP / error lines that are actually
+ * worth reading. The CRON_END summary already reports the processed count,
+ * so the per-unit line adds no information the operator does not already get.
+ *
+ * Set FF_SAMSARA_VERBOSE_LOG=1 in .env to restore per-unit tracing while
+ * debugging a specific unit.
+ */
+function ff_samsara_verbose_log(): bool
+{
+    static $verbose = null;
+    if ($verbose === null) {
+        $raw = function_exists('env')
+            ? env('FF_SAMSARA_VERBOSE_LOG', '')
+            : ($_ENV['FF_SAMSARA_VERBOSE_LOG'] ?? getenv('FF_SAMSARA_VERBOSE_LOG') ?: '');
+        $verbose = in_array(strtolower((string) $raw), ['1', 'true', 'yes', 'on'], true);
+    }
+    return $verbose;
+}
+
 try {
     $client = new SamsaraClient();
 
@@ -209,7 +235,9 @@ try {
                     (float) ($gps['lng'] ?? 0),
                     (string) ($gps['address'] ?? 'no address')
                 ));
-            } else {
+            } elseif (ff_samsara_verbose_log()) {
+                // Only traced when FF_SAMSARA_VERBOSE_LOG=1 -- see
+                // ff_samsara_verbose_log() for why this is off by default.
                 ff_samsara_log('CRON_SYNC', "Unit $unitNum: telemetry updated (no movement)");
             }
 
