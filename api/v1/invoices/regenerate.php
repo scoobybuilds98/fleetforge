@@ -328,10 +328,10 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
     error_log("[invoices/regenerate] Invoice #{$id} rate hole: " . $e->getMessage());
     json_error(
         'BILLING_RATE_INCOMPLETE',
-        'The draft was NOT regenerated (and is unchanged) — this lease has an incomplete '
-        . 'rate configuration and the billing engine refuses to bill through it (a configured '
-        . 'estimate with no rate to price it). Set the missing rate via the Rate Amendment '
-        . 'workflow, or clear the matching estimate on the lease, then regenerate again.',
+        'The draft was not regenerated and is unchanged — this lease has an estimate '
+        . 'configured with no rate to price it, which the billing engine refuses to bill '
+        . 'through. Set the missing rate (Rate Amendment) or clear the estimate on the '
+        . 'lease, then regenerate again.',
         422,
         ['lease_id' => (int) $invoice['lease_id'], 'detail' => $e->getMessage(), 'billing_context' => $e->context]
     );

@@ -34,6 +34,9 @@ declare(strict_types=1);
  *       succeeds (200) — the gate is scoped to amendments touching that rate.
  *   E1  invoices/create on a holed lease (planted by direct SQL, exactly how
  *       #528 exists) → 422 BILLING_RATE_INCOMPLETE, not a 500, and no invoice.
+ *   F1  leases/close on that same lease → 422 BILLING_RATE_INCOMPLETE and the
+ *       lease still ACTIVE. The close-time final invoice runs the same engine,
+ *       so a holed lease could be neither invoiced NOR closed — #528 hit both.
  *
  * Run: php tests/_smoke_mileage_estimate_rate_hole.php
  *
@@ -125,7 +128,8 @@ try {
     $cleanup['customers'][] = $cust;
 
     // Rental tiers are always complete (D132); only the MILEAGE rate varies.
-    $mkLease = function (array $extra) use ($call, $cust, $tmplId, $freeUnits, &$cleanup) {
+    // $freeUnits BY REFERENCE — each lease must consume a different unit.
+    $mkLease = function (array $extra) use ($call, $cust, $tmplId, &$freeUnits, &$cleanup) {
         $unit = (int) array_shift($freeUnits);
         $r = $call('api/v1/leases/create.php', $extra + [
             'customer_id' => $cust, 'equipment_unit_id' => $unit,
@@ -233,6 +237,15 @@ try {
     ck('E1', ($e1['error']['code'] ?? '') === 'BILLING_RATE_INCOMPLETE' && $e1Count === 0,
         'invoicing a holed lease → ' . ($e1['error']['code'] ?? 'CREATED') . ", invoices={$e1Count} "
         . '(expect BILLING_RATE_INCOMPLETE 422, 0 invoices — was INTERNAL_ERROR 500 + a Sentry issue)');
+
+    // ── F1: and it can't be CLOSED either — same engine, same guard ────────
+    $f1 = $call('api/v1/leases/close.php', [
+        'id' => $lidE, 'actual_return_date' => '2026-08-25',
+    ]);
+    $f1Status = (string) db_row("SELECT status FROM leases WHERE id=?", [$lidE])['status'];
+    ck('F1', ($f1['error']['code'] ?? '') === 'BILLING_RATE_INCOMPLETE' && $f1Status === 'active',
+        'closing a holed lease → ' . ($f1['error']['code'] ?? 'CLOSED') . ", status={$f1Status} "
+        . '(expect BILLING_RATE_INCOMPLETE 422, lease untouched — was INTERNAL_ERROR 500)');
 
 } catch (\Throwable $e) {
     ck('FATAL', false, $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());

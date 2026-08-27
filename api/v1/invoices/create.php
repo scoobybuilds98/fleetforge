@@ -263,10 +263,9 @@ try {
     error_log("[invoices/create] Lease #{$leaseId} rate hole: " . $e->getMessage());
     json_error(
         'BILLING_RATE_INCOMPLETE',
-        'No invoice was created — this lease has an incomplete rate configuration and the '
-        . 'billing engine refuses to bill through it (a configured estimate with no rate to '
-        . 'price it). Set the missing rate via the Rate Amendment workflow, or clear the '
-        . 'matching estimate on the lease, then create the invoice again.',
+        'No invoice was created — this lease has an estimate configured with no rate to '
+        . 'price it, which the billing engine refuses to bill through. Set the missing rate '
+        . '(Rate Amendment) or clear the estimate on the lease, then try again.',
         422,
         // The engine diagnostic (lease, period, the exact estimate/rate pair) is
         // for the log + a support view, not the operator banner.
