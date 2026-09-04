@@ -180,7 +180,10 @@ const FF_Api = {
             headers: this._headers(),
             credentials: 'same-origin',
         });
-        return res.json();
+        // Not auto-popped: a GET is a page load or a background poll, not
+        // something the operator just clicked. The guidance still rides in the
+        // payload, so a page that wants it can call FF_Guidance.show() itself.
+        return await res.json();
     },
 
     /**
@@ -189,14 +192,17 @@ const FF_Api = {
      * @param {object} data
      * @returns {Promise<object>}
      */
-    async post(url, data = {}) {
+    async post(url, data = {}, opts = {}) {
         const res = await fetch(url, {
             method: 'POST',
             headers: this._headers(),
             credentials: 'same-origin',
             body: JSON.stringify(data),
         });
-        return res.json();
+        // opts.quiet = true for a call the operator did not initiate (a
+        // background save, a retry loop) where a modal would interrupt
+        // something they are in the middle of.
+        return opts.quiet ? await res.json() : this._guide(await res.json());
     },
 
     /**
@@ -206,13 +212,13 @@ const FF_Api = {
      * @param {string} url
      * @returns {Promise<object>}
      */
-    async delete(url) {
+    async delete(url, opts = {}) {
         const res = await fetch(url, {
             method: 'DELETE',
             headers: this._headers(),
             credentials: 'same-origin',
         });
-        return res.json();
+        return opts.quiet ? await res.json() : this._guide(await res.json());
     },
 
     /**
@@ -232,7 +238,43 @@ const FF_Api = {
             credentials: 'same-origin',
             body: formData,
         });
-        return res.json();
+        return this._guide(await res.json());
+    },
+
+    /**
+     * S-BILLING-GUIDANCE: pop the explain-and-fix modal for any error payload
+     * that carries `error.guidance`, then hand the response back untouched.
+     *
+     * WHY here: a dead-end error is a dead end on EVERY page that hits the
+     * endpoint. Doing it in the one wrapper every caller already goes through
+     * means an endpoint opts in purely server-side — attach `guidance` to its
+     * json_error() and the modal appears, with no page-level JS. Callers keep
+     * their own inline banner (it persists after the modal is dismissed); the
+     * modal carries the part a banner has no room for — the numbers behind the
+     * error and the links that fix it.
+     *
+     * Never throws: a malformed payload must not take down the caller's own
+     * error handling.
+     */
+    _guide(json) {
+        try {
+            if (json && json.success === false && json.error && json.error.guidance
+                && window.FF_Guidance) {
+                window.FF_Guidance.show(json.error.guidance);
+            }
+        } catch (err) {
+            console.error('[FF_Api] guidance modal failed:', err);
+        }
+        return json;
+    },
+
+    /**
+     * Show the guidance modal for a response the caller fetched with get()
+     * (which never auto-pops). Returns true if a modal was shown.
+     */
+    guide(json) {
+        this._guide(json);
+        return !!(json && json.error && json.error.guidance);
     },
 
     /** Build an absolute URL under FF_BASE_PATH.
@@ -851,6 +893,42 @@ const FF_Confirm = {
 };
 
 window.FF_Confirm = FF_Confirm;
+
+
+// ============================================================
+// 05a2. FF_Guidance — the explain-and-fix modal (S-BILLING-GUIDANCE)
+// ============================================================
+// For errors the OPERATOR can fix but a one-line banner can't explain:
+// what happened, the numbers behind it, the steps, and the links that do
+// it. Rendered in footer.php as FF_GuidanceModal(), so it is available on
+// every admin page.
+//
+// Usually you never call this by hand — FF_Api pops it automatically for
+// any API error carrying `error.guidance` (see FF_Api._guide). An endpoint
+// opts in server-side; see lib/Billing/BillingRateGuidance.php for the
+// payload shape.
+//
+//   FF_Guidance.show({ title, summary, cause, steps: [], actions: [{label,url}], detail })
+const FF_Guidance = {
+    // Repeat-suppression window (ms). Every module can raise a popup now, and
+    // a retried action or a re-fired request must not stack or machine-gun
+    // modals — the same explanation twice in a row helps nobody.
+    _repeatWindowMs: 15000,
+    _last: { key: '', at: 0 },
+
+    show(detail = {}) {
+        const key = String(detail.title || '') + '|' + String(detail.summary || '');
+        const now = Date.now();
+        if (key === this._last.key && (now - this._last.at) < this._repeatWindowMs) {
+            return false;
+        }
+        this._last = { key: key, at: now };
+        window.dispatchEvent(new CustomEvent('ff-guidance', { detail }));
+        return true;
+    },
+};
+
+window.FF_Guidance = FF_Guidance;
 
 
 // ============================================================
@@ -4583,6 +4661,60 @@ window.FF_ConfirmModal = function () {
             this._callback = null;
             this._cancelCb = null;
             this.open = false;
+        },
+    };
+};
+
+
+/**
+ * FF_GuidanceModal — backing component for the explain-and-fix dialog
+ * in footer.php (S-BILLING-GUIDANCE).
+ *
+ * Consumed via:  x-data="FF_GuidanceModal()"
+ * Triggered via: FF_Guidance.show({ ... })  — or automatically by
+ *                FF_Api._guide() for any error carrying `error.guidance`.
+ */
+window.FF_GuidanceModal = function () {
+    return {
+        open:        false,
+        title:       '',
+        summary:     '',
+        cause:       '',
+        steps:       [],
+        actions:     [],
+        detail:      '',
+        showDetail:  false,
+
+        show(d) {
+            d = d || {};
+            this.title      = d.title   || 'This needs your attention';
+            this.summary    = d.summary || '';
+            this.cause      = d.cause   || '';
+            this.steps      = Array.isArray(d.steps) ? d.steps.filter((s) => typeof s === 'string') : [];
+            this.detail     = typeof d.detail === 'string' ? d.detail : '';
+            this.showDetail = false;
+            // Links come from an API payload, so only same-origin destinations
+            // are rendered — a relative path, or an absolute URL on this host.
+            // An action without a usable URL is dropped rather than rendered
+            // as a dead button.
+            this.actions = (Array.isArray(d.actions) ? d.actions : [])
+                .filter((a) => a && typeof a.label === 'string' && this._safeUrl(a.url))
+                .map((a) => ({ label: a.label, url: this._safeUrl(a.url), primary: !!a.primary }));
+            this.open = true;
+        },
+
+        close() { this.open = false; },
+
+        _safeUrl(url) {
+            if (typeof url !== 'string' || url === '') return null;
+            try {
+                const resolved = new URL(url, window.location.origin);
+                if (resolved.origin !== window.location.origin) return null;
+                if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return null;
+                return resolved.href;
+            } catch (err) {
+                return null;
+            }
         },
     };
 };

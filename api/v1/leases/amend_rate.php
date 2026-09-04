@@ -226,11 +226,16 @@ db_transaction(function () use (
     $leaseId, $updatedAt, $provided, $reason, &$response
 ) {
     // 1 — fetch + lock lease row
+    // S-MILEAGE-EST-RATE-HOLE: mileage_rate + the estimate/precharge columns
+    // feed the D133 completeness gate below (an amendment must not zero a rate
+    // the lease still has billing intent for).
     $lease = db_row(
         "SELECT id, status, contract_number, company_name_snapshot,
                 billing_cycle,
                 daily_rate, weekly_rate, monthly_rate,
                 mileage_rate_km, mileage_rate_miles, gps_cost, hourly_rate,
+                estimated_mileage, estimated_mileage_per_day,
+                estimated_engine_hours_per_day, precharge_enabled,
                 updated_at
          FROM leases
          WHERE id = ? AND deleted_at IS NULL
@@ -336,6 +341,64 @@ db_transaction(function () use (
                     )]
                 );
             }
+        }
+    }
+
+    // ── D133 mileage / hours rate-completeness (mirror of leases/create.php) ──
+    // S-MILEAGE-EST-RATE-HOLE: the tier rule above protects the rental ladder;
+    // this protects the usage rates. An amendment must not zero out a rate the
+    // lease still has billing INTENT for — a mileage estimate (per-day or
+    // allowance) or precharge with mileage_rate = 0, or a per-day engine-hours
+    // estimate with hourly_rate = 0, is a lease InvoiceGenerator refuses to
+    // bill at all: its D-B hard guards throw BillingRateException on every
+    // invoice, close and cron run (FLEETFORGE-1E). create.php blocks that
+    // combination at creation and update.php now blocks it from the estimate
+    // side; amend_rate.php is the one path that could still open it from the
+    // rate side.
+    //
+    // Only checked when the amendment TOUCHES the rate in question — a
+    // daily/weekly/monthly-only amendment on an already-holed lease must stay
+    // possible (it is part of how an operator digs one out).
+    if (array_key_exists('mileage_rate_km', $provided) || array_key_exists('mileage_rate_miles', $provided)) {
+        // The km mirror is what decides: InvoiceGenerator prices mileage off
+        // mileage_rate_km alone. The block above already derived the whole
+        // triple from whichever unit was submitted, so this reads the
+        // post-amendment value.
+        $effMileageRateKm = (string) ($newRates['mileage_rate_km'] ?? '0');
+        $mileageRatePositive = bccomp($effMileageRateKm, '0', 4) > 0;
+
+        $mileageIntent = bccomp((string) ($lease['estimated_mileage_per_day'] ?? '0'), '0', 4) > 0
+            || bccomp((string) ($lease['estimated_mileage'] ?? '0'), '0', 4) > 0
+            || (int) ($lease['precharge_enabled'] ?? 0) === 1;
+
+        if ($mileageIntent && !$mileageRatePositive) {
+            json_error('RATE_TIER_INCOMPLETE',
+                'This amendment would set the mileage rate to zero while the lease still '
+                . 'carries mileage billing intent (estimated mileage per day = '
+                . (string) ($lease['estimated_mileage_per_day'] ?? '0') . ', allowance = '
+                . (string) ($lease['estimated_mileage'] ?? '0') . ', precharge '
+                . (((int) ($lease['precharge_enabled'] ?? 0) === 1) ? 'on' : 'off')
+                . ') — invoice generation would be refused outright (D133). Clear the '
+                . 'estimate on the lease first, or keep a mileage rate > 0.',
+                422,
+                ['fields' => ['new_mileage_rate_km' => 'Must be > 0 while the lease has an estimated mileage or precharge.']]
+            );
+        }
+    }
+
+    if (array_key_exists('hourly_rate', $provided)) {
+        $effHourly = (string) ($newRates['hourly_rate'] ?? '0');
+        if (bccomp((string) ($lease['estimated_engine_hours_per_day'] ?? '0'), '0', 2) > 0
+            && bccomp($effHourly, '0', 4) <= 0
+        ) {
+            json_error('RATE_TIER_INCOMPLETE',
+                'This amendment would set the hourly rate to zero while the lease still '
+                . 'estimates ' . (string) $lease['estimated_engine_hours_per_day']
+                . ' engine hours per day — invoice generation would be refused outright. '
+                . 'Clear the estimate on the lease first, or keep an hourly rate > 0.',
+                422,
+                ['fields' => ['new_hourly_rate' => 'Must be > 0 while the lease has a per-day engine-hours estimate.']]
+            );
         }
     }
 

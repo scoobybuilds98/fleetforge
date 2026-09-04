@@ -494,6 +494,17 @@ function legacy_append_mileage_to_full_month_draft(
 
 $result = null;
 
+// S-MILEAGE-EST-RATE-HOLE: the close-time final invoice runs the same engine as
+// every other billing path, so a lease with an estimate and no rate to price it
+// makes the CLOSE fail too — the operator can neither invoice nor close it
+// (FLEETFORGE-1E, lease #528: the same exception from create.php:198 and from
+// close.php:1366 an hour apart). A rate hole is an operator-fixable
+// configuration problem, so answer with the fix instead of a 500 + a Sentry
+// issue behind "An unexpected error occurred". Caught outside db_transaction,
+// which has already rolled the whole close back — the lease stays active and
+// no partial close is left behind. The try wraps the call without re-indenting
+// the 1,300-line closure, matching invoices/regenerate.php.
+try {
 db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mileageAtEnd, $closeNotes, $odoAtClose, $odoSource, $odoFetchedAt, $hoursAtClose, $closeoutLines, $reconMode, $prechargeRefund, $billingDaysRemoved, $confirmExtendedReturn, &$result) {
     // ── Fetch lease ────────────────────────────────────────────
     // SAMSARA-3: include odometer_start_km so we can derive the period
@@ -1821,6 +1832,23 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         error_log('[NOTIF lease.closed] ' . $e->getMessage());
     }
 });
+} catch (\FleetForge\Billing\BillingRateException $e) {
+    error_log("[leases/close] Lease #{$id} rate hole: " . $e->getMessage());
+    json_error(
+        'BILLING_RATE_INCOMPLETE',
+        'The lease was not closed and is unchanged — its final invoice cannot be billed: '
+        . 'this lease has an estimate configured with no rate to price it. Set the missing '
+        . 'rate (Rate Amendment) or clear the estimate (Edit Lease), then close again.',
+        422,
+        // S-BILLING-GUIDANCE: drives the explain-and-fix modal (app.js FF_Guidance).
+        // The lease row lives inside the rolled-back closure, so re-read the one
+        // field the modal heading needs.
+        \FleetForge\Billing\BillingRateGuidance::payload(
+            $e, $id, 'close this lease',
+            db_row("SELECT contract_number FROM leases WHERE id = ?", [$id])['contract_number'] ?? null
+        )
+    );
+}
 
 // ── S-ACCT-LESSOR-3: lease termination JE ────────────────────────────
 // Post-commit hook — fires only for capital classifications (sales_type

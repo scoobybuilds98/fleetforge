@@ -317,6 +317,30 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
 
     return ['id' => $newId, 'invoice_number' => $created['invoice_number'], 'total_amount' => $newRow['total_amount'] ?? null];
 });
+} catch (\FleetForge\Billing\BillingRateException $e) {
+    // S-MILEAGE-EST-RATE-HOLE: the engine refused to bill this lease's rate
+    // hole (e.g. a per-day mileage estimate with mileage_rate = 0). That is an
+    // operator-fixable configuration problem, not a server fault — and this
+    // catch must precede the \RuntimeException one below, which BillingRate-
+    // Exception extends: without it the rethrow turned every attempt into a
+    // 500 + a Sentry issue (FLEETFORGE-1E) behind a generic "unexpected error".
+    // The draft is untouched — db_transaction already rolled back.
+    error_log("[invoices/regenerate] Invoice #{$id} rate hole: " . $e->getMessage());
+    json_error(
+        'BILLING_RATE_INCOMPLETE',
+        'The draft was not regenerated and is unchanged — this lease has an estimate '
+        . 'configured with no rate to price it, which the billing engine refuses to bill '
+        . 'through. Set the missing rate (Rate Amendment) or clear the estimate on the '
+        . 'lease, then regenerate again.',
+        422,
+        // S-BILLING-GUIDANCE: drives the explain-and-fix modal (app.js FF_Guidance).
+        \FleetForge\Billing\BillingRateGuidance::payload(
+            $e,
+            (int) $invoice['lease_id'],
+            'regenerate this draft',
+            db_row("SELECT contract_number FROM leases WHERE id = ?", [(int) $invoice['lease_id']])['contract_number'] ?? null
+        )
+    );
 } catch (\RuntimeException $e) {
     if (str_starts_with($e->getMessage(), 'CONCURRENT_MODIFICATION')) {
         json_error('CONCURRENT_MODIFICATION', substr($e->getMessage(), strlen('CONCURRENT_MODIFICATION: ')), 409);
