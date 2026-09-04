@@ -8,7 +8,12 @@ declare(strict_types=1);
  *
  * Business rules:
  *   - Valid target statuses: active, inactive, suspended.
- *   - Cannot set 'locked' or 'invited' via this endpoint.
+ *   - Cannot set 'locked' or 'invited' via this endpoint (see
+ *     api/v1/users/lock.php for the super_admin-only hard-lock path).
+ *   - Moving a user OUT of 'locked' via this endpoint (e.g. the Lockout
+ *     tab's "Unlock" button posting status='active') clears locked_at/
+ *     locked_by/lock_reason and the brute-force login_attempts/locked_until
+ *     pair -- see S-USER-LOCKOUT.
  *   - Cannot deactivate yourself (would lock you out).
  *   - Audit log: action='status_change', old_values/new_values.
  *
@@ -77,9 +82,23 @@ if ($user['status'] === $newStatus) {
 // -----------------------------------------------------------------------
 // 5. Update status inside transaction + audit log
 // -----------------------------------------------------------------------
+// S-USER-LOCKOUT: this is also how a locked-out user gets un-locked (the
+// Lockout tab's "Unlock" button posts status='active' here rather than a
+// bespoke endpoint). Whenever the OLD status was 'locked', clear the lock
+// bookkeeping columns and the unrelated brute-force lockout counter too --
+// otherwise a user unlocked through this generic endpoint would still show
+// a stale "locked by X because Y" and could still be blocked by a leftover
+// locked_until from an earlier failed-login streak.
 db_transaction(function () use ($id, $newStatus, $user) {
+    $wasLocked = $user['status'] === 'locked';
+
     db_execute(
-        "UPDATE users SET status = ? WHERE id = ?",
+        $wasLocked
+            ? "UPDATE users
+                  SET status = ?, locked_at = NULL, locked_by = NULL, lock_reason = NULL,
+                      login_attempts = 0, locked_until = NULL
+                WHERE id = ?"
+            : "UPDATE users SET status = ? WHERE id = ?",
         [$newStatus, $id]
     );
 

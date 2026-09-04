@@ -582,6 +582,7 @@ if (is_array($decoded)) {
 $userCount = db_count("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL");
 $portalUserCount = db_count("SELECT COUNT(*) FROM portal_users");
 $recentAuditCount = db_count("SELECT COUNT(*) FROM audit_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)");
+$lockedUserCount = db_count("SELECT COUNT(*) FROM users WHERE status = 'locked' AND deleted_at IS NULL");
 
 // ── Credit Application tab: application log + badge count ─────────────────────
 // Trap 7: token_hash / signature_path / form_data / rendered_html excluded.
@@ -635,6 +636,15 @@ $tabPermMap = [
     'credit_application' => 'settings_general', // same permission as General
     'backup'             => 'settings_system',  // S-BACKUP-3b — backups are a system concern
     'customer_notifications' => 'settings_customer_notifications', // S-CUSTOMER-NOTIFICATIONS
+    // S-USER-LOCKOUT: intentionally NOT added to config/permissions.php for
+    // any role — super_admin reaches it via can()'s unconditional bypass,
+    // every other role falls through to `?? false`. There is no per-user/
+    // per-role override UI for it either (not listed in
+    // config/permission_actions.php), so this permission key can never be
+    // granted away from super_admin through the normal admin UI. The tab
+    // button itself is also hidden outright (not greyed-out) for anyone
+    // who isn't is_super_admin() — see the tab-bar block below.
+    'lockout'            => 'settings_lockout',
 ];
 $validTabs = array_keys($tabPermMap);
 if (!in_array($defaultTab, $validTabs, true)) $defaultTab = 'general';
@@ -730,6 +740,17 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
             role="tab" <?= $_can ? '' : 'title="You don\'t have access to Users settings"' ?>>
         Users<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$userCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
     </button>
+
+    <?php /* S-USER-LOCKOUT: deliberately NOT the standard grey-lock treatment
+             every other tab gets when the viewer lacks permission — this
+             button is omitted from the DOM entirely for anyone who isn't
+             is_super_admin(), so the feature's existence isn't advertised
+             to accounts it might one day be used against. */ ?>
+    <?php if ($isSuperAdmin): ?>
+    <button class="tab-btn" :class="{ 'is-active': activeTab === 'lockout' }" @click="activeTab = 'lockout'" role="tab">
+        Lockout<?= $lockedUserCount > 0 ? ' <span class="tab-badge" style="font-size:0.7rem;background:var(--color-danger);color:#fff;">' . e((string)$lockedUserCount) . '</span>' : '' ?>
+    </button>
+    <?php endif; ?>
 
     <?php $_can = can('settings_portal', 'view'); ?>
     <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
@@ -1255,6 +1276,16 @@ $_graceMinutes = settings_get('lease.return_grace_minutes', '0') ?? '0';
         </div>
     </div>
 </div>
+
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<!-- TAB: USER LOCKOUT (S-USER-LOCKOUT) — hidden from the nav bar above for   -->
+<!-- anyone who isn't is_super_admin(); lockout.php re-checks independently. -->
+<!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if ($isSuperAdmin): ?>
+<div x-show="activeTab === 'lockout'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/lockout.php'; ?>
+</div>
+<?php endif; ?>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TAB 3: PORTAL USERS                                                      -->

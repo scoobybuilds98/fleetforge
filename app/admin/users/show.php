@@ -8,17 +8,25 @@ declare(strict_types=1);
  * Server-renders user header, detail card (view + inline edit), and actions panel.
  *
  * View/Edit mode: Alpine.js toggle with D19 optimistic lock via updated_at.
- * Actions: Resend Invite, Activate, Deactivate, Suspend.
+ * Actions: Resend Invite, Activate, Deactivate, Suspend, Lock Out (S-USER-LOCKOUT).
  *
  * D5: SOFT_DELETE — deleted_at IS NULL guard.
  * D19: updated_at submitted with every save.
  * D30: asset_url() / base_url().
  * D32: Only CSS classes confirmed in app.css.
  *
+ * S-USER-LOCKOUT: "Lock Out" (super_admin only, any non-self, non-already-
+ * locked status) posts to api/v1/users/lock.php with a mandatory reason.
+ * The primary control surface for this feature is the dedicated Settings →
+ * Lockout tab (app/admin/settings/lockout.php); this page's button is a
+ * convenience for acting on a user while already viewing their profile.
+ * "Unlock" reuses the existing Activate button/update_status.php path.
+ *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
- *           api/v1/users/update.php, api/v1/users/update_status.php, api/v1/users/invite.php
+ *           api/v1/users/update.php, api/v1/users/update_status.php,
+ *           api/v1/users/invite.php, api/v1/users/lock.php
  * @decisions D5/D7/D19/D30/D32
- * @session  S017
+ * @session  S017, S-USER-LOCKOUT
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -72,11 +80,14 @@ $user = db_row(
          u.invite_sent_at, u.created_at, u.updated_at,
          u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
          u.created_by,
+         u.locked_at, u.lock_reason,
          creator.name AS created_by_name,
+         locker.name AS locked_by_name,
          ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
      JOIN user_roles ur ON ur.id = u.role_id
      LEFT JOIN users creator ON creator.id = u.created_by
+     LEFT JOIN users locker ON locker.id = u.locked_by
      WHERE u.id = ? AND u.deleted_at IS NULL",
     [$userId]
 );
@@ -332,10 +343,16 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="card-header" style="font-weight:600;font-size:0.875rem;">Change Status</div>
         <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:8px;">
 
-            <?php if (in_array($user['status'], ['inactive', 'suspended'], true)): ?>
+            <?php /* S-USER-LOCKOUT: 'locked' added here so the existing Activate
+                     button also reactivates a locked-out user — reusing
+                     update_status.php, which S-USER-LOCKOUT taught to clear
+                     locked_at/locked_by/lock_reason (and the unrelated
+                     login_attempts/locked_until brute-force pair) whenever the
+                     prior status was 'locked'. */ ?>
+            <?php if (in_array($user['status'], ['inactive', 'suspended', 'locked'], true)): ?>
             <button class="btn btn-secondary w-full"
                     onclick="changeStatus('active')">
-                Activate
+                <?= $user['status'] === 'locked' ? 'Unlock' : 'Activate' ?>
             </button>
             <?php endif; ?>
 
@@ -355,6 +372,23 @@ require_once FF_ROOT . '/includes/header.php';
                     onclick="changeStatus('inactive')">
                 Set Inactive
             </button>
+            <?php endif; ?>
+
+            <?php if (is_super_admin() && $user['status'] === 'locked'): ?>
+            <div style="font-size:0.75rem;color:var(--text-tertiary);border-top:1px solid var(--border-color,#333);padding-top:8px;margin-top:2px;">
+                Locked <?= $user['locked_at'] ? e(format_datetime($user['locked_at'])) : '' ?>
+                by <?= e($user['locked_by_name'] ?? 'unknown') ?><?php if ($user['lock_reason']): ?><br>&ldquo;<?= e($user['lock_reason']) ?>&rdquo;<?php endif; ?>
+            </div>
+            <?php endif; ?>
+
+            <?php if (is_super_admin() && $user['status'] !== 'locked'): ?>
+            <button class="btn btn-danger w-full" style="margin-top:4px;"
+                    onclick="lockUser()">
+                Lock Out
+            </button>
+            <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0;">
+                Immediately blocks login and password reset, and ends any session they have open. Requires a reason.
+            </p>
             <?php endif; ?>
 
             <div id="status-msg" style="font-size:0.8125rem;margin-top:4px;display:none;"></div>
@@ -723,6 +757,38 @@ async function changeStatus(newStatus) {
         msg.style.color = 'var(--color-danger)';
         msg.style.display = 'block';
     }
+}
+
+// ── Lock out (S-USER-LOCKOUT) ───────────────────────────────────────────────
+// WHY: FF_Api.post resolves (never rejects) on a 4xx/5xx JSON error response
+// -- unlike changeStatus() above, this checks res.success explicitly rather
+// than relying on try/catch, which would otherwise silently treat a rejected
+// lock request (e.g. "already locked") as a success.
+async function lockUser() {
+    const msg = document.getElementById('status-msg');
+    msg.style.display = 'none';
+
+    const reason = await FF_Confirm.askText({
+        title: 'Lock out ' + <?= json_encode($user['name']) ?>,
+        message: 'This immediately blocks login and password reset, and force-ends any session '
+               + 'they currently have open. Reason (required):',
+        confirmLabel: 'Lock Out',
+        placeholder: 'e.g. Access revoked -- contract ended',
+    });
+    if (!reason || !reason.trim()) return;
+
+    const res = await FF_Api.post('<?= base_url('api/v1/users/lock.php') ?>', {
+        user_id: <?= $userId ?>,
+        reason:  reason.trim(),
+    });
+
+    if (!res.success) {
+        msg.textContent = res.error?.message ?? 'Lockout failed.';
+        msg.style.color = 'var(--color-danger)';
+        msg.style.display = 'block';
+        return;
+    }
+    window.location.reload();
 }
 </script>
 
