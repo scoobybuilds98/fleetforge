@@ -2667,7 +2667,22 @@ class InvoiceGenerator
                 (string)$lease['start_date'], $target, $target,
                 (string)$lease['daily_rate'], (string)$lease['weekly_rate'], (string)$lease['monthly_rate']
             );
-            $spanning = ($cls['basis'] === 'monthly_multi_month');
+            // S-PICKER-OPEN-LEASE: when the extent is NOT definitive ($target is the
+            // operator's submitted period_end, not a known end of lease), the
+            // whole-lease caps ('monthly_single_month' / 'monthly_short_flat') are
+            // not yet a claim about the lease's final total, so they must not
+            // suppress the per-month fan-out. This is the generator half of the
+            // same guard in api/v1/leases/billable_months.php — without it the
+            // picker's "Generate all due" (which posts the whole remaining span
+            // with single_segment=false) would promise N month rows and write ONE
+            // flat invoice instead. The count(...) > 1 test keeps this a provable
+            // no-op for any span that does not cross a calendar-month boundary, so
+            // single-month and single-day periods still take the one-invoice path.
+            // Money is unchanged either way: each segment bills
+            // cumulative_correct − already_billed, so the lease total is invariant.
+            $spanning = ($cls['basis'] === 'monthly_multi_month')
+                || (!$extentDefinitive
+                    && count($this->holistic->segmentsFor($fanStart, $target)) > 1);
 
             if (!$spanning) {
                 // ONE invoice for the whole [fan_start, target] span.

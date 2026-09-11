@@ -21,13 +21,20 @@ declare(strict_types=1);
  *       lease → ONE picker segment (single_period), generation writes ONE flat
  *       $1,500 invoice (NOT two months with a $0 second). Picker now mirrors
  *       generateForLease's spanning decision (basis branch in ff_billable_months).
+ *   P12 S-PICKER-OPEN-LEASE: an OPEN-ENDED lease that started last month shows
+ *       TWO rows (was ONE collapsed row that wrongly read "fully billed").
+ *   P13 no-op guard: an open lease inside ONE calendar month still shows ONE
+ *       'single_period' row — payload unchanged.
+ *   P14 a DEFINITIVE extent still gets the flat cap (S-MONTHLY-SHORT-FLAT intact).
+ *   P15 a VOID segment arms next_due_index and can actually be regenerated.
+ *   P16 generator agrees: fan-out on an open cross-month span, same lease total.
  *   P11 sub-month WEEKLY cross-month (9-day Jul28→Aug05): monthly tier does NOT
  *       apply, so generation writes ONE weekly_math invoice → picker shows ONE
  *       segment too (the latent non-monthly divergence, fixed by the same branch).
  *
  * Run: php tests/_smoke_invoice_month_picker.php   (0 = pass, 1 = fail)
  *
- * @session S-BILLING-INVOICE-DISPLAY-PICKER
+ * @session S-BILLING-INVOICE-DISPLAY-PICKER, S-PICKER-OPEN-LEASE
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -291,6 +298,140 @@ if (preg_match('/function ff_calc_breakdown_html.*?return \(string\) ob_get_clea
 } else {
     ok(false, 'P9 could not extract ff_calc_breakdown_html for runtime render');
 }
+
+
+// ── P12–P16: S-PICKER-OPEN-LEASE — an OPEN-ENDED lease must fan out per
+//    calendar month, a VOID segment must be re-billable, and the generator
+//    must agree with the picker. Before this fix a still-running lease whose
+//    extent was merely "today" got the whole-lease flat cap applied to a
+//    moving horizon: it collapsed to ONE growing segment, the first invoice
+//    tagged it 'billed' by any-overlap, fully_billed went true and create.php
+//    DISABLED Generate — the operator could not bill the current month at all.
+// ─────────────────────────────────────────────────────────────
+
+// P12 — the exact production shape (prod lease 538 / MTTS484): open-ended lease
+// that started in the PREVIOUS calendar month, with one invoice covering
+// start..end-of-that-month. Must show TWO rows with the current month next due.
+DbState::inTransaction(function () use ($gen) {
+    $firstOfThisMonth = date('Y-m-01');
+    $start = date('Y-m-d', strtotime($firstOfThisMonth . ' -5 day')); // always previous month
+    $endOfStartMonth  = date('Y-m-t', strtotime($start));
+    $lease = r2_lease(['start_date' => $start, 'end_date' => null]);  // OPEN-ENDED
+
+    $m = ff_billable_months($lease);
+    ok($m['extent_definitive'] === false, 'P12 open-ended lease → extent_definitive=false');
+    eqs(date('Y-m-d'), $m['extent'], 'P12 extent is today');
+    eqs('2', count($m['months']), 'P12 open cross-month lease → TWO segments (was ONE before the fix)');
+    eqs($start,           $m['months'][0]['period_start'], 'P12 seg0 starts at lease start');
+    eqs($endOfStartMonth, $m['months'][0]['period_end'],   'P12 seg0 ends at end of the start month');
+    eqs($firstOfThisMonth, $m['months'][1]['period_start'], 'P12 seg1 starts on the 1st of this month');
+    eqs(date('Y-m-d'),     $m['months'][1]['period_end'],   'P12 seg1 ends at today (extent)');
+    ok($m['months'][1]['is_final'] === false, 'P12 no segment is final on an open lease');
+
+    // Bill ONLY the first month, exactly as the picker drives it.
+    $seg0 = $m['months'][0];
+    $b = $gen->generateForLease([
+        'lease_id' => $lease, 'single_segment' => true,
+        'period_start' => $seg0['period_start'], 'period_end' => $seg0['period_end'],
+        'billing_type' => $seg0['billing_type'], 'invoice_type' => 'regular',
+        'created_by' => null, 'generation_source' => 'manual',
+    ]);
+    eqs('1', $b['count'], 'P12 billing month 1 writes exactly ONE invoice');
+
+    $m = ff_billable_months($lease);
+    eqs('billed',   $m['months'][0]['status'], 'P12 seg0 now billed');
+    eqs('unbilled', $m['months'][1]['status'], 'P12 seg1 STILL unbilled (the whole bug)');
+    eqs('1', $m['next_due_index'], 'P12 next_due advances to the current month');
+    ok($m['fully_billed'] === false, 'P12 NOT fully billed — Generate stays enabled');
+});
+
+// P13 — the no-op guard: an open-ended lease that has not yet crossed a month
+// boundary must still render exactly ONE 'single_period' row, byte-identical to
+// the pre-fix payload.
+DbState::inTransaction(function () {
+    $start = date('Y-m-01');                       // 1st of the current month
+    if ($start === date('Y-m-d')) { $pass_note = true; }  // day 1: span is a single day
+    $lease = r2_lease(['start_date' => $start, 'end_date' => null]);
+    $m = ff_billable_months($lease);
+    eqs('1', count($m['months']), 'P13 open lease inside ONE calendar month → ONE segment');
+    eqs('single_period', $m['months'][0]['billing_type'], 'P13 billing_type still single_period');
+    eqs($start, $m['months'][0]['period_start'], 'P13 segment starts at lease start');
+    eqs(date('Y-m-d'), $m['months'][0]['period_end'], 'P13 segment ends at today');
+    ok($m['months'][0]['complete'] === false, 'P13 complete=false, unchanged');
+});
+
+// P14 — a DEFINITIVE extent still gets the whole-lease flat cap: the ≤1-month
+// straddle from P10 must keep collapsing to ONE segment. This is the guard that
+// S-MONTHLY-SHORT-FLAT is not weakened by the fix.
+DbState::inTransaction(function () {
+    $lease = r2_lease(['start_date' => '2026-07-24', 'end_date' => '2026-08-14']);
+    $m = ff_billable_months($lease);
+    ok($m['extent_definitive'] === true, 'P14 end_date set → extent_definitive=true');
+    eqs('1', count($m['months']), 'P14 definite ≤1-month straddle STILL one segment (cap intact)');
+    eqs('single_period', $m['months'][0]['billing_type'], 'P14 still single_period');
+});
+
+// P15 — voiding the only invoice must RE-OPEN its segment. Before the fix the
+// 'void' branch never armed next_due_index, so fully_billed stayed true and the
+// void-then-regenerate recovery create.php advertises was a dead end.
+DbState::inTransaction(function () use ($gen) {
+    $lease = r2_lease(['start_date' => '2026-06-07', 'end_date' => '2026-07-07']);
+    $m   = ff_billable_months($lease);
+    $jun = $m['months'][0];
+    $b = $gen->generateForLease([
+        'lease_id' => $lease, 'single_segment' => true,
+        'period_start' => $jun['period_start'], 'period_end' => $jun['period_end'],
+        'billing_type' => $jun['billing_type'], 'invoice_type' => 'regular',
+        'created_by' => null, 'generation_source' => 'manual',
+    ]);
+    $invId = (int)$b['invoices'][0]['invoice_id'];
+    $m = ff_billable_months($lease);
+    eqs('billed', $m['months'][0]['status'], 'P15 June billed before the void');
+
+    db_update('invoices', ['status' => 'void'], 'id = ?', [$invId]);
+
+    $m = ff_billable_months($lease);
+    eqs('void', $m['months'][0]['status'], 'P15 June segment now void');
+    eqs('0', $m['next_due_index'], 'P15 void segment ARMS next_due (was null → dead end)');
+    ok($m['fully_billed'] === false, 'P15 not fully billed — void is re-billable');
+
+    // And regeneration over that void period must actually be allowed.
+    $b2 = $gen->generateForLease([
+        'lease_id' => $lease, 'single_segment' => true,
+        'period_start' => $m['months'][0]['period_start'], 'period_end' => $m['months'][0]['period_end'],
+        'billing_type' => $m['months'][0]['billing_type'], 'invoice_type' => 'regular',
+        'created_by' => null, 'generation_source' => 'manual',
+    ]);
+    eqs('1', $b2['count'], 'P15 regenerating over the void period succeeds');
+    eqs('1200.00', base_net((int)$b2['invoices'][0]['invoice_id']), 'P15 regenerated June bills the full $1,200');
+});
+
+// P16 — generator half of the same guard: "Generate all due" posts the whole
+// remaining span with single_segment=false. On an open-ended cross-month lease
+// the generator must fan out to match what the picker promised, and the two
+// invoices must sum to the same lease total the single flat invoice would have.
+DbState::inTransaction(function () use ($gen) {
+    $firstOfThisMonth = date('Y-m-01');
+    $start = date('Y-m-d', strtotime($firstOfThisMonth . ' -5 day'));
+    $today = date('Y-m-d');
+    $lease = r2_lease(['start_date' => $start, 'end_date' => null]);
+
+    $eng = new \FleetForge\Billing\HolisticLeaseEngine();
+    $truth = $eng->cumulativeCorrect($start, $today, $today, '100.00', '500.00', '1500.00');
+
+    $b = $gen->generateForLease([
+        'lease_id' => $lease, 'single_segment' => false,
+        'period_start' => $start, 'period_end' => $today,
+        'billing_type' => 'single_period', 'invoice_type' => 'regular',
+        'created_by' => null, 'generation_source' => 'manual',
+    ]);
+    eqs('2', $b['count'], 'P16 open cross-month fan-out → TWO invoices (matches the picker)');
+    ok($b['fanned'] === true, 'P16 fanned=true');
+
+    $sum = '0.00';
+    foreach ($b['invoices'] as $inv) { $sum = bcadd($sum, base_net((int)$inv['invoice_id']), 2); }
+    eqs($truth['amount'], $sum, 'P16 the two invoices sum to the SAME lease total (money invariant)');
+});
 
 echo "\n----------------------------------------------------------------------\n";
 echo "TOTAL: {$pass} pass / {$fail} fail\n";

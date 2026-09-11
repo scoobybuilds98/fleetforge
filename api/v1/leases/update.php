@@ -1014,8 +1014,11 @@ if (!$leasePrecharge) {
     }
     require_once FF_ROOT . '/api/v1/leases/billable_months.php';
     $bm = ff_billable_months($id);
+    // S-PICKER-OPEN-LEASE: 'void' counts as needing an invoice — the segment has
+    // no LIVE invoice covering it and is re-billable (findOverlappingInvoice
+    // ignores void). Matches monthSelectable() in the create form.
     foreach (($bm['months'] ?? []) as $m) {
-        if (($m['status'] ?? '') === 'unbilled') {
+        if (in_array($m['status'] ?? '', ['unbilled', 'void'], true)) {
             $newBillableMonths[] = [
                 'period_start' => $m['period_start'],
                 'period_end'   => $m['period_end'],

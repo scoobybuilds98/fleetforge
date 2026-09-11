@@ -158,8 +158,15 @@ require_once FF_ROOT . '/includes/header.php';
             <label class="form-label">Billing Month</label>
             <div class="text-secondary text-sm" style="margin-bottom:8px;">
                 Bill one calendar month at a time, in order.
-                <template x-if="monthsFullyBilled">
+                <!-- S-PICKER-OPEN-LEASE: "fully billed" is only ever TRUE for a lease
+                     with a known end. On a still-running lease the extent is just
+                     today, so say what is actually billed and that more is coming —
+                     never "nothing new to generate". -->
+                <template x-if="monthsFullyBilled && monthsExtentDefinitive">
                     <span class="text-success">This lease is fully billed through <span x-text="monthsExtent"></span> — nothing new to generate.</span>
+                </template>
+                <template x-if="monthsFullyBilled && !monthsExtentDefinitive">
+                    <span class="text-secondary">Billed through <span x-text="monthsExtent"></span>. This lease is still running, so the next month becomes billable as it accrues.</span>
                 </template>
             </div>
             <div style="display:flex; flex-direction:column; gap:6px;">
@@ -388,7 +395,7 @@ require_once FF_ROOT . '/includes/header.php';
          (one atomic transaction) as an explicit choice, not the silent default. -->
     <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
         <button type="submit" class="btn btn-primary"
-                :disabled="submitting || !form.lease_id || !form.period_start || !form.period_end || (monthsLoaded && monthsFullyBilled)">
+                :disabled="submitting || !form.lease_id || !form.period_start || !form.period_end || (monthsLoaded && monthsFullyBilled && monthsExtentDefinitive)">
             <span x-show="!submitting" x-text="primaryGenerateLabel()"></span>
             <span x-show="submitting">Generating…</span>
         </button>
@@ -443,6 +450,7 @@ function FF_InvoiceCreate() {
         monthsNextDue:      null,     // index of the first unbilled month (the only generatable one — gate 4.5)
         monthsFullyBilled:  false,    // every billable month already has a non-void invoice
         monthsExtent:       '',       // the known extent the months run through
+        monthsExtentDefinitive: false, // S-PICKER-OPEN-LEASE: extent is a REAL end (return/end_date), not just today
         selectedMonthIndex: null,     // which month the operator has selected (drives the form period)
         submitting:         false,
         showSuccessOverlay: false,
@@ -681,6 +689,7 @@ function FF_InvoiceCreate() {
             this.billableMonths     = [];
             this.monthsNextDue      = null;
             this.monthsFullyBilled  = false;
+            this.monthsExtentDefinitive = false;
             this.selectedMonthIndex = null;
             this.form.single_segment = false;
             try {
@@ -691,6 +700,7 @@ function FF_InvoiceCreate() {
                 this.monthsNextDue     = (d.next_due_index === undefined ? null : d.next_due_index);
                 this.monthsFullyBilled = !!d.fully_billed;
                 this.monthsExtent      = d.extent || '';
+                this.monthsExtentDefinitive = !!d.extent_definitive;
                 this.monthsLoaded      = this.billableMonths.length > 0;
                 // Default = next due month (in-order). When fully billed, leave
                 // the fully-billed banner from _autoFillPeriodDatesFromCtx as-is.
@@ -708,7 +718,7 @@ function FF_InvoiceCreate() {
         // single calendar-month segment and flags single-segment generation.
         pickMonth(idx) {
             const m = this.billableMonths[idx];
-            if (!m || m.status !== 'unbilled' || idx !== this.monthsNextDue) return;
+            if (!m || (m.status !== 'unbilled' && m.status !== 'void') || idx !== this.monthsNextDue) return;
             this.selectedMonthIndex  = idx;
             this.form.period_start   = m.period_start;
             this.form.period_end     = m.period_end;
@@ -721,6 +731,7 @@ function FF_InvoiceCreate() {
         },
         monthStatusLabel(m) {
             if (m.status === 'billed') return 'Billed · ' + (m.invoice_number || '');
+            if (m.status === 'void' && m.index === this.monthsNextDue) return 'Void · ' + (m.invoice_number || '') + ' — next to bill';
             if (m.status === 'void')   return 'Void · ' + (m.invoice_number || '') + ' (re-billable)';
             return (m.index === this.monthsNextDue) ? 'Next to bill' : 'Upcoming';
         },
@@ -729,21 +740,26 @@ function FF_InvoiceCreate() {
             if (m.status === 'void')   return 'badge-secondary';
             return (m.index === this.monthsNextDue) ? 'badge-primary' : 'badge-no-dot';
         },
+        // S-PICKER-OPEN-LEASE: 'void' is re-billable — findOverlappingInvoice()
+        // ignores void invoices, so generation over that period is allowed, and
+        // billable_months.php now arms next_due_index for it. Without this the
+        // void-then-regenerate recovery the page itself advertises is a dead end.
         monthSelectable(m) {
-            return m.status === 'unbilled' && m.index === this.monthsNextDue;
+            return (m.status === 'unbilled' || m.status === 'void') && m.index === this.monthsNextDue;
         },
         fmtDate(s) {
             if (!s) return '';
             const d = new Date(s + 'T00:00:00');
             return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
         },
-        // Number of still-unbilled months in the picker (drives "Generate all due").
+        // Number of still-billable months in the picker (drives "Generate all due").
+        // S-PICKER-OPEN-LEASE: void segments count — they are re-billable.
         get unbilledCount() {
-            return this.billableMonths.filter(m => m.status === 'unbilled').length;
+            return this.billableMonths.filter(m => m.status === 'unbilled' || m.status === 'void').length;
         },
         // Primary-button label: name the selected month when the picker is driving.
         primaryGenerateLabel() {
-            if (this.monthsLoaded && this.monthsFullyBilled) return 'Fully billed';
+            if (this.monthsLoaded && this.monthsFullyBilled && this.monthsExtentDefinitive) return 'Fully billed';
             if (this.selectedMonthIndex !== null && this.billableMonths[this.selectedMonthIndex]) {
                 return 'Generate ' + this.billableMonths[this.selectedMonthIndex].label;
             }
@@ -755,7 +771,7 @@ function FF_InvoiceCreate() {
             if (this.monthsNextDue === null) return;
             const first = this.billableMonths[this.monthsNextDue];
             let lastEnd = first.period_end;
-            this.billableMonths.forEach(m => { if (m.status === 'unbilled') lastEnd = m.period_end; });
+            this.billableMonths.forEach(m => { if (m.status === 'unbilled' || m.status === 'void') lastEnd = m.period_end; });
             this.form.period_start   = first.period_start;
             this.form.period_end     = lastEnd;
             this.form.single_segment = false;   // fan out the whole remaining span
@@ -881,6 +897,7 @@ function FF_InvoiceCreate() {
             this.monthsLoaded       = false;
             this.monthsNextDue      = null;
             this.monthsFullyBilled  = false;
+            this.monthsExtentDefinitive = false;
             this.selectedMonthIndex = null;
             this.form.single_segment = false;
         },

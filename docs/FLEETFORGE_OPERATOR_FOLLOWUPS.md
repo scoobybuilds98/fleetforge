@@ -12,11 +12,69 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
+
+### F69 — Deploy S-PICKER-OPEN-LEASE to unlock 6 live leases, then re-bill 9 void-stuck leases 🔴 BLOCKING (LIVE NOW)
+
+**Surfaced by:** S-PICKER-OPEN-LEASE (2026-09-12) — Mike La Pore reported the invoice create page offering
+"Aug 26 → Sep 11" when he wanted to bill only to the end of August, and Generate greyed out.
+**Affects:** billing on every open-ended lease younger than one calendar month, plus every lease whose only
+invoice was voided. Diagnosed read-only on prod; **the fix is committed but NOT deployed, so prod is still
+locked.**
+
+**Operator action:**
+1. Deploy the latest `main` to prod. No migration, no schema change, no `FF_ASSET_VERSION` bump needed
+   (PHP only; `create.php` is server-rendered and carries no new CSS).
+2. Confirm the six locked leases now offer September. They were, at diagnosis time:
+
+   | Lease | Contract | Start | Blocked base rental |
+   |-------|----------|-------|---------------------|
+   | 533 | MTTS480 | 2026-08-20 | $138.57 |
+   | 534 | MTTS479 | 2026-08-20 | $138.57 |
+   | 535 | MTTS481 | 2026-08-27 | $500.00 |
+   | 537 | MTTS483 | 2026-08-27 | $500.00 |
+   | 538 | MTTS484 | 2026-08-26 | $450.00 |
+   | 532 | MTTS478 | 2026-08-14 | $0.00 (already at the flat cap; blocked but owes no more base rent) |
+   | | | **total** | **$1,727.14** |
+
+   Each will now show two rows, with the current month selectable. Note these figures move as the month
+   runs on; re-read the page rather than billing from this table.
+3. **Then re-bill the 9 void-stuck completed leases.** Their only invoice was voided, and before this fix
+   the picker refused to re-offer the period, so they have never been billed at all:
+   305/MTTS398 $550.00, 321/MTTS206 $200.00, 173/MTTS184 $60.00, 178/MTTS191 $50.00, 240/MTTS290 $50.00,
+   531/MTTS477 $50.00, 175/MTTS186 $30.00, 278/MTTS326 $25.00, 435/MTTS323 $25.00 — **$1,040.00 total.**
+   These are `completed` leases, so Batch Invoicing will not take them (`batch_generate.php:165` rejects
+   non-active). Use Invoices → Create on each lease; the void row now reads "Void · INV-… — next to bill".
+4. **Before the deploy lands**, the only working route for the six active leases is Invoices → Batch
+   Invoicing with period **September 1 → today**. Do NOT use September 1 → 30: `createFromLease` treats
+   the submitted period end as the lease's extent, so a month-end period bills forward past what has been
+   earned.
+5. **Do not void an invoice to try to unblock a lease.** That was the dead end this session fixed; on an
+   un-deployed prod it still makes the page permanently unusable for that lease.
+
+---
+
+### F70 — Decide whether MTTS485's draft should bill September in advance 🟡 PARTIAL (money decision, draft only)
+
+**Surfaced by:** S-PICKER-OPEN-LEASE (2026-09-12).
+**Affects:** one draft invoice. Nothing has been sent.
+**Detail:** lease 539/MTTS485 started 2026-09-08 and is open-ended. Its activation invoice
+**INV-2026-02128** bills 2026-09-08 → 2026-09-30: base rental $750.00 plus 23 days of GPS, subtotal
+$767.25. The amount is **arithmetically correct for the period it covers** (23 days in one calendar month
+is the flat monthly rate), so this is advance billing rather than an error. But it charges three weeks
+that have not happened yet, on a rental four days old.
+**Why it looks inconsistent:** `activate.php:401` always bills `[start .. last day of the start month]`.
+For a late-month start that is a small daily-rate invoice (MTTS484 got 6 days / $300); for an early-month
+start it is a full flat month. Same rule, very different customer experience.
+**Operator action:** decide whether activation should bill the start month in advance. If yes, no change
+needed. If no, this needs a session to change `activate.php`'s period rule. Either way, review
+INV-2026-02128 before sending it.
+
+---
 
 ### F31 — Deploy + run pending migrations on prod to end the lease-activation schema-drift cascade 🔴 BLOCKING (LIVE NOW)
 
