@@ -12,7 +12,8 @@ declare(strict_types=1);
  *   - rating, if provided, must be 1–5 inclusive.
  *   - specializations, if provided, must be a JSON array of strings.
  *   - hourly_rate uses D16 bcmath via clean_decimal().
- *   - total_spent always starts at 0.00 — updated by work order module.
+ *   - total_spent always starts at 0.00 — maintained by FleetForge\Accounting\VendorSpend
+ *     (approved bills + unbilled completed work orders; recomputed, never incremented).
  *   - Audit log: action='create', module='maintenance', entity_type='vendor'.
  *
  * @method  POST

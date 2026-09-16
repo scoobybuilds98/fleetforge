@@ -14,6 +14,13 @@
 -- Idempotent: INSERT IGNORE skips rows whose `key` already exists.
 -- This means re-running this file will NOT overwrite admin changes.
 
+-- WHY SET NAMES: seeds are applied with the mysql CLI (`mysql db < file.sql`),
+-- whose connection charset defaults to latin1 on a stock install. Without this
+-- line every non-ASCII character in this file (em dash, arrows, <=) is read as
+-- latin1 bytes and stored DOUBLE-ENCODED (an em dash lands as the 3-char
+-- mojibake "a-circumflex, euro, right-quote"). utf8mb4 matches includes/db.php.
+SET NAMES utf8mb4;
+
 INSERT IGNORE INTO settings (`key`, `value`, value_type, group_name, label, description, is_public) VALUES
 
 -- ----------------------------------------------------------------

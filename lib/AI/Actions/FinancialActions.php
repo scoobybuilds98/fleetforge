@@ -349,6 +349,24 @@ class FinancialActions
             // Revenue JE — posted inside the txn; failure rolls back the send.
             \FleetForge\Accounting\AutoEntryBridge::onInvoiceSent($id, $userId);
 
+            // Damage recovery (bug #8): a claim can be marked 'invoiced' against a
+            // DRAFT recovery invoice, which has no revenue JE to classify yet. Now
+            // that the JE exists, link it to every invoiced claim that points at
+            // this invoice. onDamageRecoveryBilled is idempotent (one live
+            // damage_recovery JE per claim) and only re-tags the send JE — no new
+            // money moves. Never blocks the send: the revenue is already booked.
+            foreach (db_select(
+                "SELECT id FROM damage_claims
+                  WHERE invoice_id = ? AND status = 'invoiced' AND deleted_at IS NULL",
+                [$id]
+            ) as $dc) {
+                try {
+                    \FleetForge\Accounting\AutoEntryBridge::onDamageRecoveryBilled((int) $dc['id'], $id, $userId);
+                } catch (\Throwable $e) {
+                    error_log('[S-ACCT-DMG onInvoiceSent link] claim ' . $dc['id'] . ': ' . $e->getMessage());
+                }
+            }
+
             try {
                 $companyName = $invoice['company_name_snapshot'] ?? 'customer';
                 \FleetForge\Notifications\NotificationService::notify(

@@ -131,13 +131,13 @@ require_once FF_ROOT . '/includes/header.php';
                 <div style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">annualized / OEC</div>
             </div>
             <div class="card" style="padding:14px;text-align:center;"
-                 :style="kpis.maintenance_benchmark_flag === 'high' ? 'border-color:#b8860b;' : (kpis.maintenance_benchmark_flag === 'low' ? 'border-color:#1e5e1e;' : '')">
+                 :style="kpis.maintenance_benchmark_flag === 'high' ? 'border-color:var(--color-warning);' : (kpis.maintenance_benchmark_flag === 'low' ? 'border-color:var(--color-success);' : '')">
                 <div style="font-size:0.7rem;color:var(--text-secondary);text-transform:uppercase;letter-spacing:0.04em;">Maintenance Ratio</div>
                 <div style="font-size:1.5rem;font-weight:600;margin-top:4px;font-family:var(--font-mono,monospace);"
-                     :style="kpis.maintenance_benchmark_flag === 'high' ? 'color:#b8860b;' : ''"
+                     :style="kpis.maintenance_benchmark_flag === 'high' ? 'color:var(--color-warning);' : ''"
                      x-text="parseFloat(kpis.maintenance_cost_ratio_pct).toFixed(1) + '%'"></div>
                 <div style="font-size:0.7rem;margin-top:2px;"
-                     :style="kpis.maintenance_benchmark_flag === 'high' ? 'color:#b8860b;font-weight:600;' : 'color:var(--text-secondary);'"
+                     :style="kpis.maintenance_benchmark_flag === 'high' ? 'color:var(--color-warning);font-weight:600;' : 'color:var(--text-secondary);'"
                      x-text="kpis.maintenance_benchmark_flag === 'high' ? '⚠ Above 20%' : (kpis.maintenance_benchmark_flag === 'low' ? '✓ Below 15%' : 'Within band')"></div>
             </div>
             <div class="card" style="padding:14px;text-align:center;">
@@ -189,9 +189,13 @@ require_once FF_ROOT . '/includes/header.php';
                                 <th style="width:40px;"></th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <!-- WHY one <tbody> per unit: an x-for iteration must render ONE
+                             root element. The root used to be a bare nested <template>
+                             (unit row + drill-down row), which Alpine clones as an inert
+                             element — so no unit row ever rendered and the table looked
+                             empty under a "Per-Unit P&L (N)" tab count. -->
                             <template x-for="u in report.units" :key="u.unit_id">
-                                <template>
+                                <tbody>
                                     <tr>
                                         <td class="font-mono" x-text="u.unit_number"></td>
                                         <td style="color:var(--text-secondary);font-size:0.75rem;" x-text="u.display_label"></td>
@@ -201,7 +205,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <td class="font-mono text-right" x-text="u.contribution_margin_pct !== null ? parseFloat(u.contribution_margin_pct).toFixed(1) + '%' : '—'"></td>
                                         <td class="font-mono text-right" x-text="'$' + money(u.overhead_allocated)"></td>
                                         <td class="font-mono text-right" style="font-weight:600;"
-                                            :style="parseFloat(u.ebit) > 0 ? 'color:#1e5e1e;' : (parseFloat(u.ebit) < 0 ? 'color:#a30000;' : 'color:#666;')"
+                                            :style="parseFloat(u.ebit) > 0 ? 'color:var(--color-success);' : (parseFloat(u.ebit) < 0 ? 'color:var(--color-danger);' : 'color:var(--text-secondary);')"
                                             x-text="'$' + money(u.ebit)"></td>
                                         <td class="font-mono text-right" x-text="u.roic_pct !== null ? parseFloat(u.roic_pct).toFixed(2) + '%' : '—'"></td>
                                         <td>
@@ -254,9 +258,8 @@ require_once FF_ROOT . '/includes/header.php';
                                             </td>
                                         </tr>
                                     </template>
-                                </template>
+                                </tbody>
                             </template>
-                        </tbody>
                         <tfoot>
                             <tr style="background:var(--bg-subtle);font-weight:600;">
                                 <td colspan="2">Fleet Total</td>

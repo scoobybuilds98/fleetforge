@@ -374,7 +374,10 @@ class ReportPdfRenderer
         $renderSection = static function (string $label, array $rows, string $total) {
             $h = '<tr class="group"><td colspan="2"><strong>' . htmlspecialchars($label) . '</strong></td></tr>';
             foreach ($rows as $r) {
-                $h .= '<tr><td class="acct">' . htmlspecialchars($r['code'] . ' &mdash; ' . $r['name']) . '</td>';
+                // Computed equity lines (net income YTD, unclosed prior-year
+                // earnings) have no account code — show the name alone.
+                $rowLabel = ($r['code'] ?? '') !== '' ? $r['code'] . ' — ' . $r['name'] : $r['name'];
+                $h .= '<tr><td class="acct">' . htmlspecialchars($rowLabel) . '</td>';
                 $h .= '<td class="amt">' . self::money($r['amount']) . '</td></tr>';
             }
             $h .= '<tr class="total"><td><strong>Total ' . htmlspecialchars($label) . '</strong></td>';
@@ -392,8 +395,10 @@ class ReportPdfRenderer
         $html .= '<tr class="grand"><td><strong>Total Liabilities</strong></td>';
         $html .= '<td class="amt"><strong>' . self::money($report['total_liabilities']) . '</strong></td></tr>';
 
+        // Net income YTD (and any unclosed prior-year earnings) are rows INSIDE
+        // the equity section now, so the section adds up to Total Equity; the
+        // old trailing "Net Income (YTD, injected)" line would double-show it.
         $html .= $renderSection('Equity', $report['equity'], $report['total_equity']);
-        $html .= '<tr><td>Net Income (YTD, injected)</td><td class="amt">' . self::money($report['net_income_injected']) . '</td></tr>';
         $html .= '<tr class="grand"><td><strong>Total Liabilities + Equity</strong></td>';
         $html .= '<td class="amt"><strong>' . self::money($report['total_liabilities_and_equity']) . '</strong></td></tr>';
         $html .= '</table>';

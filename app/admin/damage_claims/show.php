@@ -12,6 +12,13 @@ declare(strict_types=1);
  *   - Notes / Resolution notes edit form
  *   - Delete button (reported/assessed only)
  *
+ * Recovery invoice link (bug #8): the status panel requires picking the
+ * customer's (sent) recovery invoice when moving to 'invoiced', and the edit
+ * form can set / fix the link — damage_claims/update.php validates it and fires
+ * AutoEntryBridge::onDamageRecoveryBilled so the recovery is classified in the
+ * GL. Options are the claim customer's non-void invoices, rendered server-side;
+ * amounts only for users who pass can_view_financials().
+ *
  * All writes go through Alpine.js → API endpoints.
  * File upload uses FormData (multipart) to upload_photo.php.
  *
@@ -90,6 +97,51 @@ if (!$claim) {
     http_response_code(404);
     die('Damage claim not found.');
 }
+
+// ── Recovery invoice options (bug #8) ────────────────────────────────────────
+// The claim customer's non-void invoices, newest first. A draft may be linked:
+// the recovery posts to the GL when that invoice is sent
+// (FinancialActions::sendInvoice → AutoEntryBridge::onDamageRecoveryBilled).
+$canSeeMoney     = can_view_financials();
+$invoiceOptions  = [];
+if ($claim['customer_id']) {
+    $invoiceOptions = db_select(
+        "SELECT id, invoice_number, status, invoice_date, total_amount
+           FROM invoices
+          WHERE customer_id = ? AND deleted_at IS NULL AND status <> 'void'
+          ORDER BY invoice_date DESC, id DESC
+          LIMIT 200",
+        [$claim['customer_id']]
+    );
+}
+$linkedInvoice = $claim['invoice_id']
+    ? db_row("SELECT id, invoice_number, status FROM invoices WHERE id = ?", [$claim['invoice_id']])
+    : null;
+// Live GL classification for this claim (idempotency marker of the bridge).
+$recoveryJe = db_row(
+    "SELECT id, entry_number FROM acc_journal_entries
+      WHERE source_type = 'damage_recovery' AND source_id = ?
+        AND is_reversal = 0 AND reversed_by_id IS NULL
+      LIMIT 1",
+    [$id]
+);
+/**
+ * Human label for a recovery-invoice <option>.
+ *
+ * @param array $inv          invoices row (invoice_number, status, invoice_date, total_amount)
+ * @param bool  $canSeeMoney  include the total only for financial viewers
+ * @return string
+ */
+$invoiceOptionLabel = static function (array $inv, bool $canSeeMoney): string {
+    $label = $inv['invoice_number'] . ' · ' . ($inv['invoice_date'] ?? '') . ' · ' . str_replace('_', ' ', (string) $inv['status']);
+    if ($canSeeMoney) {
+        $label .= ' · ' . format_currency($inv['total_amount']);
+    }
+    if ($inv['status'] === 'draft') {
+        $label .= ' (draft — posts to GL when sent)';
+    }
+    return $label;
+};
 
 // Vendors list for edit form dropdown
 $vendorsList = db_select(
@@ -277,15 +329,32 @@ require_once FF_ROOT . '/includes/header.php';
         <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
             <div class="form-group" style="min-width:200px;">
                 <label class="form-label">New Status</label>
-                <select class="form-select" x-model="newStatus">
+                <select class="form-select" x-model="newStatus" @change="statusError = ''">
                     <option value="">— Select —</option>
                     <?php foreach ($nextStates as $s): ?>
                     <option value="<?= e($s) ?>"><?= e(ucwords(str_replace('_', ' ', $s))) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if (in_array('invoiced', $nextStates, true)): ?>
+            <!-- Bug #8: 'invoiced' requires the recovery invoice — the link is what posts to the GL (on send for a draft). -->
+            <div class="form-group" style="min-width:320px;" x-show="newStatus === 'invoiced'" x-cloak>
+                <label class="form-label" for="status_invoice_id">Recovery Invoice <span class="text-danger">*</span></label>
+                <?php if ($claim['customer_id']): ?>
+                <select id="status_invoice_id" class="form-select" x-model="statusInvoiceId" @change="statusError = ''">
+                    <option value="">— Select the customer's invoice —</option>
+                    <?php foreach ($invoiceOptions as $inv): ?>
+                    <option value="<?= (int) $inv['id'] ?>"><?= e($invoiceOptionLabel($inv, $canSeeMoney)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-hint"><?= $invoiceOptions ? 'Linking the invoice posts the damage recovery to the general ledger (a draft posts when it is sent).' : 'This customer has no invoices yet — create and send the recovery invoice first.' ?></div>
+                <?php else: ?>
+                <div class="form-hint">Link this claim to a customer (Edit → Customer) first — the recovery invoice must belong to that customer.</div>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
             <button class="btn btn-primary"
-                    :disabled="!newStatus || statusSaving"
+                    :disabled="!newStatus || statusSaving || (newStatus === 'invoiced' && !statusInvoiceId)"
                     @click="changeStatus()">
                 <span x-text="statusSaving ? 'Saving…' : 'Apply'"></span>
             </button>
@@ -325,7 +394,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <dt>Work Order</dt>
                 <dd>
                     <?php if ($claim['work_order_id']): ?>
-                    <a href="<?= base_url('maintenance/show') ?>?id=<?= e($claim['work_order_id']) ?>"
+                    <a href="<?= base_url('maintenance_work_orders/show') ?>?id=<?= e($claim['work_order_id']) ?>"
                        class="link">#<?= e($claim['work_order_id']) ?></a>
                     <?php else: ?>—<?php endif; ?>
                 </dd>
@@ -334,7 +403,15 @@ require_once FF_ROOT . '/includes/header.php';
                 <dd>
                     <?php if ($claim['invoice_id']): ?>
                     <a href="<?= base_url('invoices/show') ?>?id=<?= e($claim['invoice_id']) ?>"
-                       class="link">#<?= e($claim['invoice_id']) ?></a>
+                       class="link"><?= e($linkedInvoice['invoice_number'] ?? ('#' . $claim['invoice_id'])) ?></a>
+                    <?php if ($linkedInvoice): ?>
+                    <span class="badge badge-neutral" style="margin-left:6px;"><?= e(ucwords(str_replace('_', ' ', $linkedInvoice['status']))) ?></span>
+                    <?php endif; ?>
+                    <?php if ($recoveryJe && $canSeeMoney): ?>
+                    <span class="text-secondary" style="margin-left:6px;font-size:0.8rem;">recovery posted to GL (<?= e($recoveryJe['entry_number']) ?>)</span>
+                    <?php endif; ?>
+                    <?php elseif ($claim['status'] === 'invoiced'): ?>
+                    <span class="text-danger">Not linked — edit the claim and pick the recovery invoice so it posts to the general ledger.</span>
                     <?php else: ?>—<?php endif; ?>
                 </dd>
 
@@ -467,6 +544,33 @@ require_once FF_ROOT . '/includes/header.php';
                         <?php endforeach; ?>
                     </select>
                     <div class="field-error" data-error-for="vendor_id"></div>
+                </div>
+
+                <!-- Bug #8: recovery invoice link (was API-only — no UI could set it). -->
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label class="form-label" for="edit_invoice_id">Recovery Invoice</label>
+                    <select id="edit_invoice_id" name="invoice_id" class="form-select" x-model="editForm.invoice_id"
+                            <?= (!$claim['customer_id'] || ($recoveryJe && $claim['invoice_id'])) ? 'disabled' : '' ?>>
+                        <option value="">— None —</option>
+                        <?php
+                        $optionIds = array_map(static fn($i) => (int) $i['id'], $invoiceOptions);
+                        if ($linkedInvoice && !in_array((int) $linkedInvoice['id'], $optionIds, true)): ?>
+                        <option value="<?= (int) $linkedInvoice['id'] ?>"><?= e($linkedInvoice['invoice_number'] . ' · ' . str_replace('_', ' ', $linkedInvoice['status'])) ?></option>
+                        <?php endif; ?>
+                        <?php foreach ($invoiceOptions as $inv): ?>
+                        <option value="<?= (int) $inv['id'] ?>"><?= e($invoiceOptionLabel($inv, $canSeeMoney)) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <div class="form-hint">
+                        <?php if (!$claim['customer_id']): ?>
+                        Save a customer on this claim first — the recovery invoice must belong to the claim's customer.
+                        <?php elseif ($recoveryJe && $claim['invoice_id']): ?>
+                        Locked: the recovery is already posted to the general ledger against this invoice.
+                        <?php else: ?>
+                        The customer's invoice that bills this damage. Linking it posts the recovery to the general ledger (a draft posts when it is sent).
+                        <?php endif; ?>
+                    </div>
+                    <div class="field-error" data-error-for="invoice_id"></div>
                 </div>
 
                 <div style="display:flex;gap:12px;">
@@ -609,6 +713,7 @@ function damageClaimShow() {
 
         // Status change
         newStatus:    '',
+        statusInvoiceId: <?= json_encode($claim['invoice_id'] ? (string) $claim['invoice_id'] : '') ?>,
         statusSaving: false,
         statusError:  '',
 
@@ -626,6 +731,7 @@ function damageClaimShow() {
             customer_liable_amount: <?= json_encode($claim['customer_liable_amount'] ?? '') ?>,
             insurance_claim_amount: <?= json_encode($claim['insurance_claim_amount'] ?? '') ?>,
             vendor_id:              <?= json_encode($claim['vendor_id'] ? (string)$claim['vendor_id'] : '') ?>,
+            invoice_id:             <?= json_encode($claim['invoice_id'] ? (string)$claim['invoice_id'] : '') ?>,
         },
         editSaving: false,
         staleError: false,
@@ -657,13 +763,20 @@ function damageClaimShow() {
             this.statusSaving = true;
             this.statusError  = '';
 
-            FF_Api.post('<?= base_url('api/v1/damage_claims/update.php') ?>', {
+            const payload = {
                 id:         <?= (int)$claim['id'] ?>,
                 updated_at: this.updatedAt,
                 status:     this.newStatus,
-            }).then(r => {
+            };
+            // Bug #8: the recovery invoice travels with the 'invoiced' transition.
+            if (this.newStatus === 'invoiced') {
+                payload.invoice_id = this.statusInvoiceId ? parseInt(this.statusInvoiceId) : null;
+            }
+
+            FF_Api.post('<?= base_url('api/v1/damage_claims/update.php') ?>', payload).then(r => {
                 if (!r.success) {
-                    this.statusError  = (r.error && r.error.message) || 'Failed to change status.';
+                    const f = (r.error && r.error.fields) || {};
+                    this.statusError  = f.invoice_id || f.status || (r.error && r.error.message) || 'Failed to change status.';
                     this.statusSaving = false;
                 } else {
                     window.location.reload();
@@ -737,6 +850,11 @@ function damageClaimShow() {
             payload.customer_id   = this.editForm.customer_id   ? parseInt(this.editForm.customer_id)   : null;
             payload.customer_name = this.editForm.customer_name ? this.editForm.customer_name.trim() || null : null;
             payload.vendor_id     = this.editForm.vendor_id     ? parseInt(this.editForm.vendor_id)     : null;
+<?php if ($claim['customer_id'] && !($recoveryJe && $claim['invoice_id'])): ?>
+            // Bug #8: only sent when the picker is editable, so a locked / customer-less
+            // claim never re-submits (or clears) its link by accident.
+            payload.invoice_id    = this.editForm.invoice_id    ? parseInt(this.editForm.invoice_id)    : null;
+<?php endif; ?>
 
             FF_Api.post('<?= base_url('api/v1/damage_claims/update.php') ?>', payload)
                 .then(r => {

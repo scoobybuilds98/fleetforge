@@ -303,7 +303,10 @@ function qboDrift(opts) {
         loading: false,
         summary: null,
         flash: { message: '', type: 'success' },
-        filters: { status: 'unresolved', category: '', entity: '', source: '', range: '30' },
+        // range defaults to 'all': the "Unresolved" card counts EVERY open event
+        // regardless of age, so a 30d default hid older open events and the page
+        // read "3 unresolved" over an empty list. An open event stays actionable.
+        filters: { status: 'unresolved', category: '', entity: '', source: '', range: 'all' },
         // S-QBO-25: per-event action modal (resolve/accept/suppress/reopen).
         // resync uses a separate inline flow (no note required, no modal).
         actionTarget: null,

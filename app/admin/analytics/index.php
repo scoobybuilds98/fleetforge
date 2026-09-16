@@ -14,6 +14,15 @@ declare(strict_types=1);
  * Required by: sidebar navigation (module: analytics)
  * Requires:    includes/auth.php, includes/header.php, app.css, app.js, ApexCharts v3
  *
+ * Chart rendering: a chart is drawn only once its container has width (see
+ * drawWhenVisible). The old code rendered while the container was still
+ * x-show-hidden (loading=true until after render), so every chart measured
+ * 0 px and stayed blank until the window was resized.
+ * "Refresh All" lives in the page header, OUTSIDE the FF_Analytics() scope, so
+ * it talks to the component through window events (ff-analytics-refresh /
+ * ff-analytics-busy) — calling refreshAll() directly threw
+ * "refreshAll is not defined".
+ *
  * Spec ref: §7.11 Analytics, §9 Analytics Module Charts (8), PROGRESS.md S023
  * Decisions: D7 (base_url/FF_BASE_PATH), D32 (only confirmed CSS classes),
  *            D41 (cssVar() for chart colors — no hardcoded hex in ApexCharts)
@@ -190,10 +199,12 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
     <div class="page-header-actions">
         <?= help_button('analytics') ?>
+        <!-- Outside the FF_Analytics() scope: drive it by window event, mirror its busy state back -->
         <button class="btn btn-secondary btn-sm"
-                @click.prevent="refreshAll()"
-                :disabled="anyLoading"
-                x-data>
+                x-data="{ busy: false }"
+                @ff-analytics-busy.window="busy = !!$event.detail"
+                @click.prevent="window.dispatchEvent(new CustomEvent('ff-analytics-refresh'))"
+                :disabled="busy">
             <svg width="14" height="14"><use href="#icon-arrow-path"/></svg>
             Refresh All
         </button>
@@ -209,7 +220,7 @@ $aiVizCompact  = false;
 include FF_ROOT . '/includes/partials/ai-report-generator.php';
 ?>
 
-<div x-data="FF_Analytics()" x-cloak>
+<div x-data="FF_Analytics()" x-cloak @ff-analytics-refresh.window="refreshAll()">
 
     <!-- ════════════════════════════════════════════════════════════════════
          PANEL 1 — Revenue Forecast  (full width)
@@ -296,7 +307,7 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             <div class="an-panel-header">
                 <div>
                     <div class="an-panel-title">Utilization Efficiency Matrix</div>
-                    <div class="an-panel-subtitle">Each unit: utilization % vs revenue per day — grouped by category</div>
+                    <div class="an-panel-subtitle">Trailing 12 months — each unit's on-rent days ÷ days available (overlapping leases merged) vs revenue per on-rent day</div>
                 </div>
                 <span x-show="loading.utilization_matrix" class="rpt-spinner"></span>
             </div>
@@ -406,7 +417,7 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
             <div class="an-panel-header">
                 <div>
                     <div class="an-panel-title">Seasonal Revenue Pattern</div>
-                    <div class="an-panel-subtitle">Average revenue by month of year — all-time data</div>
+                    <div class="an-panel-subtitle">Average monthly revenue for each calendar month across all years (CAD; current month excluded until complete)</div>
                 </div>
                 <span x-show="loading.seasonal_pattern" class="rpt-spinner"></span>
             </div>
@@ -701,9 +712,11 @@ include FF_ROOT . '/includes/partials/ai-report-generator.php';
 <script>
 function FF_Analytics() {
     // ── Default date range helpers ─────────────────────────────────────────
-    const today  = new Date().toISOString().slice(0, 10);
-    const from12 = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const from24 = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    // Business-local dates: toISOString() is the UTC day (tomorrow after ~5pm Pacific).
+    const localDay = (d) => (window.FF_localDate ? window.FF_localDate(d) : d.toLocaleDateString('en-CA'));
+    const today  = localDay(new Date());
+    const from12 = localDay(new Date(Date.now() - 365 * 24 * 60 * 60 * 1000));
+    const from24 = localDay(new Date(Date.now() - 730 * 24 * 60 * 60 * 1000));
 
     const ALL_VIEWS = [
         'revenue_forecast', 'utilization_matrix', 'concentration_risk',
@@ -747,6 +760,8 @@ function FF_Analytics() {
 
         // ── Init: load all 8 views in parallel ─────────────────────────────
         init() {
+            // Mirror the busy state to the header "Refresh All" button (outside this scope).
+            this.$watch('anyLoading', (v) => window.dispatchEvent(new CustomEvent('ff-analytics-busy', { detail: v })));
             ALL_VIEWS.forEach(v => this.loadView(v));
         },
 
@@ -788,8 +803,10 @@ function FF_Analytics() {
             this.loading[view] = true;
             this.errors[view]  = false;
 
-            // Destroy existing chart instance before re-rendering
+            // Destroy existing chart instance (and cancel a pending draw) before re-rendering
             // WHY: ApexCharts throws if you render into a non-empty element
+            const chartEl = document.getElementById('chart-' + view.replace(/_/g, '-'));
+            if (chartEl && chartEl._ffPendingRO) { chartEl._ffPendingRO.disconnect(); chartEl._ffPendingRO = null; }
             if (this.charts[view]) {
                 try { this.charts[view].destroy(); } catch(e) {}
                 this.charts[view] = null;
@@ -821,7 +838,10 @@ function FF_Analytics() {
                 this.kpis[view]     = json.data.kpis || {};
                 this.excluded[view] = json.data.excluded || null;
 
-                // Wait for DOM to paint KPI strip before rendering chart
+                // Reveal the chart container FIRST (its x-show waits on
+                // !loading), let Alpine apply it, THEN draw. Drawing while it
+                // was still display:none gave ApexCharts a 0 px width → blank.
+                this.loading[view] = false;
                 await this.$nextTick();
                 this.renderChart(view, json.data.chart_data || {});
 
@@ -955,8 +975,11 @@ function FF_Analytics() {
                         xaxis: {
                             ...base.xaxis,
                             title: { text: 'Utilization %', style: { color: txtMuted, fontSize: '11px' } },
-                            min: 0, max: 100,
-                            labels: { ...base.xaxis.labels, formatter: v => v + '%' },
+                            // Utilization is bounded 0–100 by construction (merged
+                            // occupancy ÷ availability). Whole-number ticks: the raw
+                            // formatter printed "8.333333333334%".
+                            min: 0, max: 100, tickAmount: 10,
+                            labels: { ...base.xaxis.labels, formatter: v => Math.round(Number(v) || 0) + '%' },
                         },
                         yaxis: {
                             ...base.yaxis,
@@ -1086,9 +1109,26 @@ function FF_Analytics() {
 
             if (!opts) return;
 
-            const chart = new ApexCharts(el, opts);
-            chart.render();
-            this.charts[view] = chart;
+            this.drawWhenVisible(view, el, opts);
+        },
+
+        // Draw into `el` once it has a width. If it is still hidden (e.g. the
+        // draft notice is covering it, or Alpine has not revealed it yet) wait
+        // for a ResizeObserver tick instead of rendering a 0 px chart.
+        drawWhenVisible(view, el, opts) {
+            if (el._ffPendingRO) { el._ffPendingRO.disconnect(); el._ffPendingRO = null; }
+            const draw = () => {
+                el.replaceChildren();   // drop any orphaned canvas
+                const chart = new ApexCharts(el, opts);
+                chart.render();
+                this.charts[view] = chart;
+            };
+            if (el.offsetWidth > 0 || typeof ResizeObserver !== 'function') { draw(); return; }
+            const ro = new ResizeObserver(() => {
+                if (el.offsetWidth > 0) { ro.disconnect(); el._ffPendingRO = null; draw(); }
+            });
+            el._ffPendingRO = ro;
+            ro.observe(el);
         },
 
         // ── Money formatter helper ─────────────────────────────────────────

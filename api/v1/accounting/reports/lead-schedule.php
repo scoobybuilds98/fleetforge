@@ -61,13 +61,14 @@ foreach ($accounts as $acct) {
     $closing = AccountingService::accountBalance($aid, $period['end_date']);
 
     // Activity in this period: posted JE lines grouped by source_type.
+    // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
     $activity = db_select(
         "SELECT je.id AS je_id, je.entry_number, je.entry_date, je.entry_type,
                 je.source_type, je.source_id, je.description AS je_description,
                 jel.description AS line_description, jel.debit, jel.credit
            FROM acc_journal_entry_lines jel
            JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-          WHERE je.status = 'posted'
+          WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
             AND je.period_id = ?
             AND jel.account_id = ?
           ORDER BY je.entry_date ASC, je.id ASC, jel.line_number ASC",

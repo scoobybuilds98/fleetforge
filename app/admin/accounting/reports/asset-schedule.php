@@ -74,8 +74,12 @@ require_once FF_ROOT . '/includes/header.php';
                         <th style="padding:8px 10px;text-align:center;">Detail</th>
                     </tr>
                 </thead>
-                <tbody>
+                <!-- One <tbody> per class: an x-for iteration may render only ONE root
+                     element. With the class row + drill-down row as two roots, Alpine
+                     dropped the second ("x-for templates require a single root element")
+                     so the ▾ Detail button toggled nothing. -->
                     <template x-for="cls in report.classes" :key="cls.asset_class">
+                        <tbody>
                         <tr style="border-bottom:1px solid var(--border-default);">
                             <td style="padding:6px 10px;text-transform:capitalize;" x-text="cls.asset_class.replace(/_/g,' ')"></td>
                             <td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(cls.opening_cost)"></td>
@@ -121,8 +125,8 @@ require_once FF_ROOT . '/includes/header.php';
                                 </table>
                             </td>
                         </tr>
+                        </tbody>
                     </template>
-                </tbody>
             </table>
         </div>
     </template>
@@ -132,7 +136,7 @@ require_once FF_ROOT . '/includes/header.php';
 function asReport() {
     const apiBase = '<?= e(base_url('api/v1/accounting')) ?>';
     return {
-        form: { as_of: new Date().toISOString().slice(0,10), category: 'all' },
+        form: { as_of: FF_localDate(), category: 'all' },
         report: null,
         loading: false,
         drillClass: null,

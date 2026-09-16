@@ -211,8 +211,13 @@ $gpsConfigured = ($samsaraKey !== '');
                 </template>
                 <template x-if="!loading && filteredMapUnits.length === 0">
                     <div style="padding:24px 12px;text-align:center;color:var(--text-muted);font-size:0.8125rem;">
+                        <!-- The map list only holds units WITH a GPS fix, so an empty list does
+                             not mean nothing is linked — say which case it is (it used to read
+                             "No linked units yet" while 25 linked units simply had no position). -->
                         <span x-show="mapSearch">No units match "<span x-text="mapSearch"></span>"</span>
-                        <span x-show="!mapSearch">No linked units yet. Link units from their detail page.</span>
+                        <span x-show="!mapSearch && linked.length === 0">No linked units yet. Link units from their detail page.</span>
+                        <span x-show="!mapSearch && linked.length > 0"
+                              x-text="linked.length + ' linked unit' + (linked.length === 1 ? '' : 's') + ', but none has reported a GPS position yet. Positions appear after the next Samsara sync returns a location.'"></span>
                     </div>
                 </template>
             </div>

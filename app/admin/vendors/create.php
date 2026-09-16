@@ -250,6 +250,8 @@ require_once FF_ROOT . '/includes/header.php';
 <?php
 $overlayTitle    = 'Vendor Created!';
 $overlaySubtitle = 'Redirecting to vendor details…';
+// This component's in-flight flag is `saving`, not the overlay's default `submitting`.
+$overlaySubmittingVar = 'saving';
 require_once FF_ROOT . '/includes/success_overlay.php';
 ?>
 

@@ -609,8 +609,8 @@ function bankAccountsPage() {
         importPreview: {},
         importSelected: [],
         importResult: {},
-        manualTxnForm: { transaction_date: new Date().toISOString().slice(0,10), description: '', amount: '', transaction_type: 'bank_charge', reference: '', expense_account_id: '' },
-        transferForm: { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: new Date().toISOString().slice(0,10), reference: '' },
+        manualTxnForm: { transaction_date: FF_localDate(), description: '', amount: '', transaction_type: 'bank_charge', reference: '', expense_account_id: '' },
+        transferForm: { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: FF_localDate(), reference: '' },
         nsfForm: { payment_id: '', nsf_fee: '0.00' },
 
         // Per-form error state
@@ -950,7 +950,7 @@ function bankAccountsPage() {
         },
 
         openTransferModal() {
-            this.transferForm = { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: new Date().toISOString().slice(0,10), reference: '' };
+            this.transferForm = { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: FF_localDate(), reference: '' };
             this._clearErrors(this.transferErrors, 'transferFormError');
             this.showTransferModal = true;
         },

@@ -29,6 +29,34 @@ require_permission('settings', 'view');
 $canEdit     = can('settings', 'edit');
 $isSuperAdmin = can('settings', 'delete'); // WHY: only super_admin has delete on settings
 
+// ── Retired (dead) setting keys — bug #23 ───────────────────────────────────
+// These rows still carry a label, so the generic General-tab loop rendered them
+// as editable controls — but a repo-wide grep (api app lib includes cron config
+// portal scripts) finds NO code that reads any of them. Changing one did
+// nothing, and several actively lied (e.g. "Email Notifications Enabled" showed
+// OFF while mail was being sent). They are hidden from BOTH the render query
+// and the save queries below: render-only hiding would let a group-path save
+// (no _form_keys) treat them as "absent from POST" and reset them to ''/0.
+// The DB rows are left intact (no schema/data change). Before re-adding one,
+// wire a real reader first.
+$retiredSettingKeys = [
+    'notifications.email_enabled',      // "master toggle" never consulted; Mailer sends regardless
+    'notifications.smtp_host',          // real SMTP config is email.* on the Integrations tab
+    'notifications.smtp_port',
+    'notifications.smtp_user',
+    'notifications.smtp_pass',          // was also rendered as a plain-text input
+    'notifications.smtp_from',
+    'notifications.smtp_from_name',
+    'invoice.late_fee_percentage',      // late fees come from late_fee_rules rows (cron/late_fee_apply.php)
+    'alerts.lease_end_reminder_days',   // superseded by Customer Emails → lease_ending_soon lead days
+    'alerts.overdue_invoice_days',      // cron/collections_auto_escalate.php hard-codes 15/45 days
+    'yard.default',                     // no unit/lease dropdown pre-selects from it
+    'billing.engine_version',           // HolisticLeaseEngine is the only engine; ProRateCalculator deleted
+    'lease.sweep_charge_default',       // close form defaults sweep/wash to blank since 2026-06-23
+    'lease.wash_charge_default',
+];
+$retiredKeyPh = implode(',', array_fill(0, count($retiredSettingKeys), '?'));
+
 // ── Flash message from previous save ────────────────────────────────────────
 $saveFlash = $_SESSION['settings_flash'] ?? null;
 $saveError = $_SESSION['settings_error'] ?? null;
@@ -196,9 +224,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                     // the render scope. Apply the SAME guard here, or a crafted
                     // _form_keys[] could address a deliberately-hidden NULL-label
                     // row (e.g. security.rate_limit.*) that the form never shows.
+                    // Bug #23: retired keys are never writable from this form either.
                     $groupKeys = db_select(
-                        "SELECT `key`, value_type FROM settings WHERE `key` IN ($ph) AND label IS NOT NULL",
-                        $cleanKeys
+                        "SELECT `key`, value_type FROM settings WHERE `key` IN ($ph) AND label IS NOT NULL
+                            AND `key` NOT IN ($retiredKeyPh)",
+                        array_merge($cleanKeys, $retiredSettingKeys)
                     );
                 } else {
                     $groupKeys = [];
@@ -217,9 +247,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 // forced to 0 every time the Security/MFA card was saved —
                 // which disabled IP + MFA rate limiting (window/threshold 0).
                 // Only persist what the operator could actually see and edit.
+                // Bug #23: exclude retired keys too — they are no longer rendered,
+                // so without this a group save would reset them to ''/0.
                 $groupKeys = db_select(
-                    "SELECT `key`, value_type FROM settings WHERE group_name = ? AND label IS NOT NULL",
-                    [$groupName]
+                    "SELECT `key`, value_type FROM settings WHERE group_name = ? AND label IS NOT NULL
+                        AND `key` NOT IN ($retiredKeyPh)",
+                    array_merge([$groupName], $retiredSettingKeys)
                 );
             }
 
@@ -486,12 +519,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
 // same generic mechanism as the sibling billing.max_advance_periods key
 // (which lives in group 'invoices'). Without 'billing' here the row would
 // never reach $grouped and the card below would render empty.
+// Bug #23: retired (no-reader) keys are filtered out — see $retiredSettingKeys.
 $allSettings = db_select(
     "SELECT `key`, `value`, value_type, group_name, label, description
      FROM settings
      WHERE group_name IN ('company','invoices','leases','maintenance','alerts','notifications','gps','ai','yards','email','storage','aws','currency','security','slack','twilio','credit_application','lease','billing')
        AND label IS NOT NULL
-     ORDER BY group_name ASC, `key` ASC"
+       AND `key` NOT IN ($retiredKeyPh)
+     ORDER BY group_name ASC, `key` ASC",
+    $retiredSettingKeys
 );
 
 $grouped = [];

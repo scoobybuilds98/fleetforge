@@ -163,9 +163,10 @@ class StatusActions
     ];
 
     /**
-     * Transition a maintenance work order. On completion: stamps completed_date/
-     * _by + optional resolution_notes, and bumps vendors.total_spent +
-     * equipment_units.total_maintenance_cost by total_cost (Trap 6, same txn).
+     * Transition a maintenance work order. On completion: stamps completed_date
+     * (company-local day) /_by + optional resolution_notes, recomputes
+     * vendors.total_spent via VendorSpend (bills-first, no double count), and
+     * bumps equipment_units.total_maintenance_cost by total_cost (Trap 6, same txn).
      * Mirrors api/v1/maintenance_work_orders/update_status.php.
      *
      * @throws ActionException  NOT_FOUND / INVALID_TRANSITION / VALIDATION_ERROR
@@ -204,7 +205,11 @@ class StatusActions
             $setClause = 'status = ?';
             $setParams = [$newStatus];
             if ($newStatus === 'completed') {
-                $setClause .= ', completed_date = CURDATE(), completed_by = ?';
+                // Bug #10: stamp the company-local business day. The PDO session is
+                // UTC, so CURDATE() rolled to "tomorrow" for completions after
+                // ~5pm Pacific; PHP date() runs in APP_TIMEZONE.
+                $setClause .= ', completed_date = ?, completed_by = ?';
+                $setParams[] = date('Y-m-d');
                 $setParams[] = $userId;
                 if ($resNotes !== null) {
                     $setClause .= ', resolution_notes = ?';
@@ -217,7 +222,10 @@ class StatusActions
             if ($newStatus === 'completed') {
                 $totalCost = $wo['total_cost'] ?? '0.00';
                 if ($wo['vendor_id'] !== null) {
-                    db_execute("UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?", [$totalCost, $wo['vendor_id']]);
+                    // Bug #7: recompute from the canonical rule instead of adding
+                    // total_cost — the vendor's approved bill for this work order
+                    // (if any) already counts it, so "+= total_cost" double-counted.
+                    \FleetForge\Accounting\VendorSpend::recompute((int) $wo['vendor_id']);
                 }
                 if ($wo['equipment_unit_id'] !== null) {
                     db_execute("UPDATE equipment_units SET total_maintenance_cost = total_maintenance_cost + ?, updated_at = NOW() WHERE id = ?", [$totalCost, $wo['equipment_unit_id']]);

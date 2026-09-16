@@ -84,7 +84,10 @@ ok(str_contains($bootstrap, "'error'   => array_merge("), 'json_error nests unde
 // FF_Api must still hand back the raw envelope — the whole premise.
 $appJs = (string) file_get_contents($root . '/public/assets/js/app.js');
 ok(
-    (bool) preg_match('/async\s+get\s*\([^)]*\)\s*\{(?:[^{}]|\{[^{}]*\})*?return\s+res\.json\(\)/s', $appJs)
+    // `await` is optional: since 4c11f0f (error guidance) get() reads
+    // `return await res.json();` — still the whole envelope, and post() passes
+    // that same envelope through _guide(), which returns it unchanged.
+    (bool) preg_match('/async\s+get\s*\([^)]*\)\s*\{(?:[^{}]|\{[^{}]*\})*?return\s+(?:await\s+)?res\.json\(\)/s', $appJs)
     || str_contains($appJs, 'return res.json();'),
     'FF_Api returns the whole envelope, not the unwrapped payload'
 );

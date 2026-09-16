@@ -179,7 +179,7 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function apAgingPage() {
     return {
-        asOfDate: new Date().toISOString().slice(0, 10),
+        asOfDate: FF_localDate(),
         data: null, recon: null, loading: false, expanded: null,
 
         async load() {

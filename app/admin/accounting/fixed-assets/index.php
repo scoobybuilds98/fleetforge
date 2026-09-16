@@ -1242,7 +1242,7 @@ function FF_FixedAssets() {
             this.createForm = {
                 name: '',
                 asset_class: 'fleet_equipment',
-                acquisition_date: new Date().toISOString().slice(0, 10),
+                acquisition_date: FF_localDate(),
                 acquisition_cost: '',
                 salvage_value: '0.00',
                 depreciation_method: 'straight_line',
@@ -1472,7 +1472,7 @@ function FF_FixedAssets() {
 
         // ── Dispose ────────────────────────────────────────────
         openDispose() {
-            this.disposeForm = { disposal_date: new Date().toISOString().slice(0,10), disposal_type: 'sale', proceeds: '', buyer_name: '', notes: '' };
+            this.disposeForm = { disposal_date: FF_localDate(), disposal_type: 'sale', proceeds: '', buyer_name: '', notes: '' };
             this.disposeErrors = {};
             this.disposeFormError = '';
             this.disposeOpen = true;
@@ -1536,7 +1536,7 @@ function FF_FixedAssets() {
 
         // ── Impair ─────────────────────────────────────────────
         openImpair() {
-            this.impairForm = { impairment_date: new Date().toISOString().slice(0,10), impairment_loss: '', reason: '' };
+            this.impairForm = { impairment_date: FF_localDate(), impairment_loss: '', reason: '' };
             this.impairErrors = {};
             this.impairFormError = '';
             this.impairOpen = true;

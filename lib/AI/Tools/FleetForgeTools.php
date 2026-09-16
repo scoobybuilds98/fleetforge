@@ -1111,8 +1111,10 @@ class FleetForgeTools
     // ────────────────────────────────────────────────────────────
     // getExpiringDocuments
     //
-    // Equipment compliance documents (CVI, registration, MVI,
-    // insurance) expiring within the next N days.
+    // Equipment compliance documents (CVI, registration) expiring
+    // within the next N days. MVI + insurance are no longer tracked
+    // (removed from every compliance UI, S-UNIT-COMPLIANCE-HIDE-MVI-INS),
+    // so the assistant must not report them as compliance items.
     // ────────────────────────────────────────────────────────────
     private static function getExpiringDocuments(array $input): array
     {
@@ -1123,7 +1125,7 @@ class FleetForgeTools
         $deadline = date('Y-m-d', strtotime("+{$daysAhead} days"));
         $today    = date('Y-m-d');
 
-        // WHY: UNION ALL across four compliance date columns to capture all expiry types
+        // WHY: UNION ALL across the tracked compliance date columns to capture all expiry types
         return db_select(
             "SELECT * FROM (
                 SELECT eu.id AS unit_id, eu.unit_number, 'CVI' AS document_type,
@@ -1145,32 +1147,10 @@ class FleetForgeTools
                   AND eu.registration_expiry BETWEEN ? AND ?
                   AND eu.status NOT IN ('decommissioned', 'inactive')
                   AND eu.deleted_at IS NULL
-
-                UNION ALL
-
-                SELECT eu.id AS unit_id, eu.unit_number, 'MVI' AS document_type,
-                       eu.mvi_expiry AS expiry_date,
-                       DATEDIFF(eu.mvi_expiry, CURDATE()) AS days_until_expiry
-                FROM equipment_units eu
-                WHERE eu.mvi_expiry IS NOT NULL
-                  AND eu.mvi_expiry BETWEEN ? AND ?
-                  AND eu.status NOT IN ('decommissioned', 'inactive')
-                  AND eu.deleted_at IS NULL
-
-                UNION ALL
-
-                SELECT eu.id AS unit_id, eu.unit_number, 'Insurance' AS document_type,
-                       eu.insurance_expiry AS expiry_date,
-                       DATEDIFF(eu.insurance_expiry, CURDATE()) AS days_until_expiry
-                FROM equipment_units eu
-                WHERE eu.insurance_expiry IS NOT NULL
-                  AND eu.insurance_expiry BETWEEN ? AND ?
-                  AND eu.status NOT IN ('decommissioned', 'inactive')
-                  AND eu.deleted_at IS NULL
             ) AS expiring
             ORDER BY days_until_expiry ASC
             LIMIT {$limit}",
-            [$today, $deadline, $today, $deadline, $today, $deadline, $today, $deadline]
+            [$today, $deadline, $today, $deadline]
         );
     }
 
@@ -1294,7 +1274,8 @@ class FleetForgeTools
             ];
         }
 
-        // Upcoming compliance alerts (next 30 days)
+        // Upcoming compliance alerts (next 30 days) — CVI + Registration only
+        // (MVI/Insurance no longer tracked, S-UNIT-COMPLIANCE-HIDE-MVI-INS).
         $complianceAlerts = db_count(
             "SELECT COUNT(*) FROM (
                 SELECT id FROM equipment_units
@@ -1302,14 +1283,8 @@ class FleetForgeTools
                 UNION ALL
                 SELECT id FROM equipment_units
                 WHERE registration_expiry BETWEEN ? AND ? AND status NOT IN ('decommissioned','inactive') AND deleted_at IS NULL
-                UNION ALL
-                SELECT id FROM equipment_units
-                WHERE mvi_expiry BETWEEN ? AND ? AND status NOT IN ('decommissioned','inactive') AND deleted_at IS NULL
-                UNION ALL
-                SELECT id FROM equipment_units
-                WHERE insurance_expiry BETWEEN ? AND ? AND status NOT IN ('decommissioned','inactive') AND deleted_at IS NULL
             ) AS alerts",
-            [$today, $in30Days, $today, $in30Days, $today, $in30Days, $today, $in30Days]
+            [$today, $in30Days, $today, $in30Days]
         );
 
         // Active customers
@@ -1921,7 +1896,10 @@ class FleetForgeTools
              LEFT JOIN acc_journal_entry_lines jel ON jel.account_id = a.id
              LEFT JOIN acc_journal_entries je      ON je.id = jel.journal_entry_id
                 AND je.entry_date <= ?
-                AND je.status = 'posted'
+                -- posted + reversed: a reversed original is OFFSET by its posted
+                -- reversal, not removed — counting only 'posted' left the reversal
+                -- alone and negated the entry (AccountingService::LEDGER_STATUSES_SQL).
+                AND je.status IN ('posted', 'reversed')
              WHERE a.is_active = 1 AND a.is_header = 0
              GROUP BY a.id, a.code, a.name, a.account_type, a.normal_balance
              HAVING balance != 0
@@ -1963,7 +1941,7 @@ class FleetForgeTools
                     COALESCE(SUM(jel.debit - jel.credit), 0) AS net_balance
              FROM acc_journal_entry_lines jel
              JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-             WHERE jel.account_id = ? AND je.status = 'posted'",
+             WHERE jel.account_id = ? AND je.status IN ('posted', 'reversed')",
             [$accountId]
         );
 

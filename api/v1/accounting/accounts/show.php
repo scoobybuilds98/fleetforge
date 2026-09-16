@@ -78,6 +78,7 @@ if ((int) $account['is_header'] === 1) {
 // -----------------------------------------------------------------------
 // 4. Load recent transactions — last 20 posted JE lines for this account
 // -----------------------------------------------------------------------
+// reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
 $account['recent_transactions'] = db_select(
     "SELECT
         jel.id           AS line_id,
@@ -95,7 +96,7 @@ $account['recent_transactions'] = db_select(
      FROM acc_journal_entry_lines jel
      JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
      WHERE jel.account_id = ?
-       AND je.status = 'posted'
+       AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
      ORDER BY je.entry_date DESC, je.id DESC
      LIMIT 20",
     [$id]

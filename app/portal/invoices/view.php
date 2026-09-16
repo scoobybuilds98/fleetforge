@@ -67,8 +67,11 @@ if ($inv['status'] === 'overdue' && $inv['due_date']) {
     $daysOverdue = max(0, (int) floor((time() - strtotime($inv['due_date'])) / 86400));
 }
 
-// Payment instructions from settings
-$paymentInstructions = settings_get('company.payment_instructions', '');
+// Payment instructions from settings.
+// Bug #23: invoice.payment_instructions (Settings → General → Invoices & Billing)
+// had no reader at all; it now wins on every invoice surface (portal + PDF),
+// falling back to the company-wide company.payment_instructions.
+$paymentInstructions = (string) (settings_get('invoice.payment_instructions', '') ?: settings_get('company.payment_instructions', ''));
 $bankName    = settings_get('company.bank_name', '');
 $bankAccount = settings_get('company.bank_account', '');
 $checkPayable = settings_get('company.check_payable_to', '');
@@ -120,7 +123,10 @@ require_once dirname(__DIR__) . '/includes/header.php';
             <?php endif; ?>
         </p>
     </div>
-    <div class="portal-detail-actions" x-data="payOnlineButton(<?= (int) $invoiceId ?>, <?= $showPayOnline ? 'true' : 'false' ?>)">
+    <?php /* payOnlineButton() is only defined (script below) when Pay Online is
+             offered — binding it unconditionally threw "payOnlineButton is not
+             defined" on every other invoice. An empty scope keeps the div inert. */ ?>
+    <div class="portal-detail-actions" x-data="<?= $showPayOnline ? 'payOnlineButton(' . (int) $invoiceId . ', true)' : '{}' ?>">
         <?php if ($showPayOnline): ?>
             <!-- S-QBO-15 Pay Online — generates Intuit Payments hosted URL + redirects -->
             <button class="btn btn-success btn-sm" @click="payOnline()" :disabled="loading">

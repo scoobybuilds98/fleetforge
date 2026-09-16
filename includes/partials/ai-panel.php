@@ -280,7 +280,7 @@ function <?= e($_panelId) ?>() {
 
         download() {
             if (!this.summary) return;
-            const ts       = new Date().toISOString().slice(0, 10);
+            const ts       = FF_localDate();
             const filename = <?= json_encode(strtolower(str_replace(' ', '-', $_title))) ?> + '-' + ts + '.md';
             const header   = '# ' + <?= json_encode($_title) ?> + '\n_Generated ' + new Date().toLocaleString('en-CA') + '_\n\n';
             const blob     = new Blob([header + this.summary], { type: 'text/markdown' });

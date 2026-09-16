@@ -29,6 +29,13 @@
 -- logs (template_id is FK SET NULL on delete).
 -- ============================================================
 
+-- WHY SET NAMES: seeds are applied with the mysql CLI (`mysql db < file.sql`),
+-- whose connection charset defaults to latin1 on a stock install. Without this
+-- line every non-ASCII character in this file (em dash, arrows, <=) is read as
+-- latin1 bytes and stored DOUBLE-ENCODED (an em dash lands as the 3-char
+-- mojibake "a-circumflex, euro, right-quote"). utf8mb4 matches includes/db.php.
+SET NAMES utf8mb4;
+
 INSERT INTO email_templates
   (name, slug, subject, body_html, body_text, category, variables, is_active)
 VALUES

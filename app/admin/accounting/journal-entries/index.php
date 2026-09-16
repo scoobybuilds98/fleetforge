@@ -572,7 +572,7 @@ require_once FF_ROOT . '/includes/header.php';
                                                 <option value="">-- Select Account --</option>
                                                 <template x-for="acct in accounts" :key="acct.id">
                                                     <option :value="acct.id"
-                                                            x-text="acct.account_code + ' — ' + acct.account_name"></option>
+                                                            x-text="acct.code + ' — ' + acct.name"></option>
                                                 </template>
                                             </select>
                                             <div class="field-error" x-show="lineErrors[idx] && lineErrors[idx].account_id" x-cloak x-text="lineErrors[idx] ? lineErrors[idx].account_id : ''"></div>
@@ -742,7 +742,7 @@ function FF_JournalEntries() {
         lineErrors:   [],  // parallel array to form.lines: each entry {account_id, description, debit, credit, amounts}
 
         form: {
-            entry_date:       new Date().toISOString().split('T')[0],
+            entry_date:       FF_localDate(),
             description:      '',
             entry_type:       'manual',
             reference:        '',
@@ -942,7 +942,7 @@ function FF_JournalEntries() {
         // -- Create entry -------------------------------------------------
         openCreate() {
             this.form = {
-                entry_date:       new Date().toISOString().split('T')[0],
+                entry_date:       FF_localDate(),
                 description:      '',
                 entry_type:       'manual',
                 reference:        '',

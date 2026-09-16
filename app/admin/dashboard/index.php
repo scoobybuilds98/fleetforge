@@ -77,19 +77,23 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="kpi-spark" aria-hidden="true"></div>
         </a>
 
-        <!-- Fleet Utilization -->
+        <!-- On Lease Now — a point-in-time SNAPSHOT (units whose status is on_lease
+             right now ÷ fleet). Deliberately NOT labelled "Utilization": period
+             utilization (occupied ÷ available unit-days) is the Utilization Trend
+             chart below, Reports → Fleet and Analytics, which all share
+             lib/Reports/FleetUtilization.php. The two measure different things. -->
         <a href="<?= base_url('equipment') ?>"
            class="stat-card stat-card--link"
-           aria-label="Fleet Utilization — click to view equipment">
+           aria-label="On lease now — share of the fleet currently on lease; click to view equipment">
             <div class="stat-card__header">
-                <div class="stat-label">Fleet Utilization</div>
+                <div class="stat-label">On Lease Now</div>
                 <div class="stat-card__icon stat-card__icon--success">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12"/></svg>
                 </div>
             </div>
             <div class="stat-value" x-text="kpisLoaded ? kpis.fleet_utilization + '%' : '—'">—</div>
             <div class="stat-delta text-secondary" x-show="kpisLoaded"
-                 x-text="kpisLoaded ? kpis.on_lease_count + ' of ' + kpis.total_active_units + ' units' : ''"></div>
+                 x-text="kpisLoaded ? kpis.on_lease_count + ' of ' + kpis.total_active_units + ' units right now' : ''"></div>
             <div class="stat-skeleton" x-show="!kpisLoaded" aria-hidden="true"></div>
             <!-- S-LUX-2: sparkline hook (D-LUX2-4) — populated in a later session; hidden while empty. -->
             <div class="kpi-spark" aria-hidden="true"></div>
@@ -645,6 +649,7 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="card chart-card">
             <div class="card-header">
                 <span class="card-title">Utilization Trend</span>
+                <span class="text-secondary" style="font-size:0.75rem;margin-left:8px;">occupied ÷ available unit-days per month</span>
             </div>
             <div class="card-body">
                 <div x-show="!chartsLoaded" class="chart-skeleton" aria-hidden="true"

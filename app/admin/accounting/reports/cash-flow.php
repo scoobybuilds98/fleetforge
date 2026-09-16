@@ -112,12 +112,13 @@ require_once FF_ROOT . '/includes/header.php';
                         <td class="font-mono" style="padding:8px 10px;text-align:right;" x-text="fmt(report.financing.net)"></td>
                     </tr>
 
-                    <tr style="border-top:2px solid var(--border-default);background:#d8e6ff;">
+                    <!-- grand-total rows: --bg-selected is the brand tint defined in BOTH theme blocks (the old hardcoded light blue left white-on-pale text unreadable in dark mode) -->
+                    <tr style="border-top:2px solid var(--border-default);background:var(--bg-selected);">
                         <td style="padding:10px;font-weight:700;">Net Change in Cash</td>
                         <td class="font-mono" style="padding:10px;text-align:right;font-weight:700;" x-text="fmt(report.net_change)"></td>
                     </tr>
                     <tr><td style="padding:6px 14px;">Opening Cash</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.opening_cash)"></td></tr>
-                    <tr style="background:#d8e6ff;font-weight:700;">
+                    <tr style="background:var(--bg-selected);font-weight:700;">
                         <td style="padding:10px;">Closing Cash (calc)</td>
                         <td class="font-mono" style="padding:10px;text-align:right;" x-text="fmt(report.closing_cash_calc)"></td>
                     </tr>
@@ -131,7 +132,7 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function cfReport() {
     const apiBase = '<?= e(base_url('api/v1/accounting')) ?>';
-    const todayIso = new Date().toISOString().slice(0,10);
+    const todayIso = FF_localDate();
     const yearStart = todayIso.slice(0,4) + '-01-01';
     return {
         form: { from: yearStart, to: todayIso },

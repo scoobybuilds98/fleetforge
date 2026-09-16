@@ -100,8 +100,6 @@ try {
             eu.samsara_odometer_km,
             eu.cvi_expiry,
             eu.registration_expiry,
-            eu.mvi_expiry,
-            eu.insurance_expiry,
             eu.health_score AS old_score,
             eu.updated_at,
             EXISTS(
@@ -273,11 +271,12 @@ function compute_unit_health_score(
 
     // Compliance: stack per doc (D-A). Each doc evaluated independently;
     // the worst applicable bucket fires for that doc, then move on.
+    // Tracked docs = CVI + Registration only: MVI/Insurance were removed from
+    // every compliance UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS), so penalising a unit
+    // for a date the operator can neither see nor edit is not actionable.
     $docDates = [
         $unit['cvi_expiry'] ?? null,
         $unit['registration_expiry'] ?? null,
-        $unit['mvi_expiry'] ?? null,
-        $unit['insurance_expiry'] ?? null,
     ];
     foreach ($docDates as $expiry) {
         if ($expiry === null) continue;

@@ -31,7 +31,7 @@ $activeWo  = db_count(
 );
 
 $topSpendRow = db_row(
-    "SELECT name, total_spent FROM vendors
+    "SELECT id, name, total_spent FROM vendors
      WHERE deleted_at IS NULL AND total_spent > 0
      ORDER BY total_spent DESC LIMIT 1"
 );
@@ -40,6 +40,9 @@ json_success([
     'total'            => $total,
     'preferred'        => $preferred,
     'active_wo'        => $activeWo,
+    // The index page's "Top Vendor by Spend" tile links to this id; it was never
+    // returned, so the tile always fell back to the work-order list.
+    'top_vendor_id'    => isset($topSpendRow['id']) ? (int) $topSpendRow['id'] : null,
     'top_vendor_name'  => $topSpendRow['name'] ?? null,
     'top_vendor_spent' => $topSpendRow['total_spent'] ?? '0.00',
 ]);

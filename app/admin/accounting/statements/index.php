@@ -87,8 +87,8 @@ function statementsPage() {
     const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
     return {
         customerId: '',
-        dateFrom: threeMonthsAgo.toISOString().slice(0, 10),
-        dateTo: now.toISOString().slice(0, 10),
+        dateFrom: FF_localDate(threeMonthsAgo),
+        dateTo: FF_localDate(now),
         busy: false,
 
         // VALID-2 error state

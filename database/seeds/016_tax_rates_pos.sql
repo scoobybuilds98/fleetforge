@@ -16,6 +16,13 @@
 --     on disk in tax_rates.province.
 -- ---------------------------------------------------------------------------
 
+-- WHY SET NAMES: seeds are applied with the mysql CLI (`mysql db < file.sql`),
+-- whose connection charset defaults to latin1 on a stock install. Without this
+-- line every non-ASCII character in this file (em dash, arrows, <=) is read as
+-- latin1 bytes and stored DOUBLE-ENCODED (an em dash lands as the 3-char
+-- mojibake "a-circumflex, euro, right-quote"). utf8mb4 matches includes/db.php.
+SET NAMES utf8mb4;
+
 -- ── 1. NS HST historic row (15% pre-2025-04-01) ────────────────────────────
 -- Inserts the historic row only when no NS row with that effective window
 -- exists already. The current 14% row (id=7, effective_from=2025-04-01)

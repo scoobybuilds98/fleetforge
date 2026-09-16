@@ -378,7 +378,7 @@ function collectionsPage() {
         can_create: <?= can('journal_entries', 'create') ? 'true' : 'false' ?>,
         can_edit: <?= can('journal_entries', 'edit') ? 'true' : 'false' ?>,
         dunningBusy: false,
-        noteForm: { note_date: new Date().toISOString().slice(0,10), contact_method: 'phone', outcome: 'no_answer', note: '', follow_up_date: '', contact_person: '' },
+        noteForm: { note_date: FF_localDate(), contact_method: 'phone', outcome: 'no_answer', note: '', follow_up_date: '', contact_person: '' },
         promiseForm: { promise_date: '', promised_amount: '', promised_by: '', notes: '' },
         dunningForm: { letter_type: 'reminder_30', sent_method: 'email' },
 

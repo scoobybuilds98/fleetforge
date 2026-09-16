@@ -380,7 +380,7 @@ class ToolRegistry
             // ── Compliance Tools ────────────────────────────────
             [
                 'name' => 'get_expiring_documents',
-                'description' => 'Get equipment compliance documents (CVI, registration, MVI, insurance) expiring within the next N days.',
+                'description' => 'Get equipment compliance documents (CVI, registration) expiring within the next N days. MVI and insurance are not tracked compliance items.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [

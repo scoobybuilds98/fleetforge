@@ -54,7 +54,8 @@ if (!$arCheck['is_reconciled']) {
                 "SELECT COALESCE(SUM(jel.debit), 0) AS td, COALESCE(SUM(jel.credit), 0) AS tc
                  FROM acc_journal_entry_lines jel
                  JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-                 WHERE jel.account_id = ? AND jel.customer_id = ? AND je.status = 'posted'",
+                 WHERE jel.account_id = ? AND jel.customer_id = ?
+                   AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")",
                 [$arAccountId, $ct['id']]
             );
             $glBalance = $glRow ? bcsub($glRow['td'], $glRow['tc'], 2) : '0.00';

@@ -63,6 +63,33 @@ if (!$lease) {
     exit;
 }
 
+// Money tiles are derived LIVE from this lease's invoices, not from the
+// denormalized leases.total_invoiced / total_paid / outstanding_balance counters.
+// Those counters drift: leases.outstanding_balance is incremented on send but
+// never decremented by payments (non-canonical — customers.outstanding_balance is
+// the AR truth), and any payment/invoice written outside payments/create +
+// allocate (imports, seeders, QBO webhooks, manual fixes) never touches them — so
+// a lease with paid and overdue invoices showed Total Paid $0.00 / Outstanding
+// $0.00. Definitions:
+//   invoiced    = every non-void invoice (drafts included — same scope the
+//                 counter always had; the tile links to the full invoice list)
+//   paid        = amount_paid on non-void invoices
+//   outstanding = balance_due on SENT invoices only (sent / partially_paid /
+//                 overdue), matching the canonical customer AR rule (D45 Path B)
+// All invoices on a lease share the lease currency, so the sums are same-currency.
+$_leaseMoney = db_row(
+    "SELECT COALESCE(SUM(total_amount), 0) AS invoiced,
+            COALESCE(SUM(amount_paid), 0)  AS paid,
+            COALESCE(SUM(CASE WHEN status IN ('sent', 'partially_paid', 'overdue')
+                              THEN balance_due ELSE 0 END), 0) AS outstanding
+       FROM invoices
+      WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'",
+    [$leaseId]
+);
+$lease['total_invoiced']      = $_leaseMoney['invoiced'] ?? '0.00';
+$lease['total_paid']          = $_leaseMoney['paid'] ?? '0.00';
+$lease['outstanding_balance'] = $_leaseMoney['outstanding'] ?? '0.00';
+
 /** Returns badge CSS class for a given lease status. */
 function leaseBadgeClass(string $status): string
 {
@@ -175,7 +202,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     </a>
 
     <a class="stat-card<?= (float)($lease['outstanding_balance'] ?? 0) > 0 ? ' stat-card--danger' : '' ?>"
-       href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>&status=overdue"
+       href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>&status=outstanding"
        style="cursor:pointer;text-decoration:none"
        title="View outstanding invoices for this lease">
         <div class="stat-label">Outstanding</div>
@@ -449,12 +476,16 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                     <div class="ff-rate-cell" x-show="parseInt(lease.warranty_opt_in) === 1 && parseFloat(lease.warranty_cost) > 0"><div class="ff-rate-label">Warranty</div><div class="ff-rate-value ff-rate-value--sm" x-text="'$' + parseFloat(lease.warranty_cost).toFixed(2)"></div></div>
                                 </div>
 
-                                <!-- S-LEASE-RATES-REDESIGN: total distance driven over the lease (closed leases) -->
+                                <!-- S-LEASE-RATES-REDESIGN: total distance driven over the lease (closed leases).
+                                     x-show only HIDES the block — Alpine still evaluates the x-text
+                                     bindings inside it, so drivenKm() === null (active lease, or no
+                                     reading) threw "Cannot read properties of null (reading
+                                     'toLocaleString')" on every lease page. Bindings coalesce to 0. -->
                                 <div class="ff-rate-driven" x-show="lease.status === 'completed' && drivenKm() !== null">
                                     <div>
                                         <div class="ff-rate-label">Total distance driven</div>
-                                        <div class="ff-show-primary" x-text="drivenKm().toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
-                                        <div class="ff-show-secondary" x-text="'≈ ' + (drivenKm() * (Number(lease.km_to_miles_conversion) || 0.621371)).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
+                                        <div class="ff-show-primary" x-text="(drivenKm() || 0).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' km'"></div>
+                                        <div class="ff-show-secondary" x-text="'≈ ' + ((drivenKm() || 0) * (Number(lease.km_to_miles_conversion) || 0.621371)).toLocaleString('en-CA', {maximumFractionDigits:0}) + ' miles'"></div>
                                     </div>
                                     <div class="ff-show-caption" style="margin-top:0;">
                                         <template x-if="lease.odometer_start_km != null && lease.odometer_end_km != null">
@@ -2090,7 +2121,8 @@ function FF_LeaseDetail() {
         },
 
         closeForm: {
-            actual_return_date: new Date().toISOString().slice(0,10),
+            // Company-local "today" (toISOString() is the UTC day → tomorrow after 5pm Pacific).
+            actual_return_date: FF_localDate(),
             actual_return_time: '',  // S-LEASE-RENTAL-DAY-TIME; empty = not captured
             mileage_at_end:     '',
             close_notes:        '',
@@ -2814,18 +2846,39 @@ function FF_LeaseDetail() {
         openCloseModal() {
             this.showCloseModal       = true;
             this.closeFormSamsaraHint = '';
-            if (this.lease && this.lease.samsara_odometer_km !== null && this.closeForm.mileage_at_end === '') {
+            if (this.lease && this.lease.samsara_odometer_km !== null && this.closeForm.mileage_at_end === ''
+                && (this.closeForm.odometer_at_close_km === '' || this.closeForm.odometer_at_close_km === null)) {
                 this.prefillMileageFromSamsara();
             }
         },
 
-        // Convert the cron-cached samsara_odometer_km into the lease's
-        // mileage_unit and drop it into the form. Updates the hint line so
-        // the user knows the source. Manual button on the modal also calls
-        // this so people can re-pull after a fresh cron tick.
+        // Pre-fill from the cron-cached samsara_odometer_km.
+        // S-CLOSE-MILEAGE-SEMANTICS: that value is an absolute odometer READING,
+        // but "Actual Mileage (for billing)" is the DISTANCE driven on every lease
+        // except a true legacy one (mileage_at_start captured, no decimal starting
+        // odometer). Dropping 412,300 km into the distance field billed the whole
+        // odometer (manual bridge / estimate true-up read it as distance), so the
+        // reading now goes into the Closing Odometer field and the distance is
+        // derived from it exactly as when the operator types a reading.
         prefillMileageFromSamsara() {
             if (!this.lease || this.lease.samsara_odometer_km === null) return;
             const km   = this.lease.samsara_odometer_km;
+            const legacyReading = this.lease.mileage_at_start !== null && this.lease.mileage_at_start !== undefined
+                && (this.lease.odometer_start_km === null || this.lease.odometer_start_km === undefined);
+            if (!legacyReading) {
+                this.closeForm.odometer_at_close_km = Number(km).toFixed(2);
+                this.closeForm.odometer_source      = 'gps';
+                this.closeForm.odometer_fetched_at  = this.lease.samsara_last_synced_at || null;
+                this.closeOdoSource                 = 'gps';
+                this.autoFillMileageFromClosingOdo();
+                this.closeOdoBanner = {
+                    type: 'success',
+                    message: 'Closing odometer pre-filled from the last Samsara reading'
+                        + (this.lease.samsara_last_synced_at ? ' (' + this.formatRelative(this.lease.samsara_last_synced_at) + ')' : '')
+                        + '. Fetch for a live reading or type over it.'
+                };
+                return;
+            }
             const unit = (this.lease.mileage_unit || 'km').toLowerCase();
             // Samsara reports km natively; convert to miles only if the
             // lease was contracted in miles. 1 km = 0.621371 miles.

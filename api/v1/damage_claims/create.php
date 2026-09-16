@@ -12,13 +12,16 @@ declare(strict_types=1);
  *   - equipment_unit_id is required and must exist (not soft-deleted).
  *   - customer_id is optional (claim may be pre-customer or unit-only).
  *   - lease_id (optional): if provided, must not be soft-deleted.
+ *   - inspection_id (optional, bug #8b): the inspection the damage was found on
+ *     ("+ Create Damage Claim" on inspections/show). Must exist and be for the
+ *     same equipment unit; stored in damage_claims.inspection_id.
  *   - D16: monetary amounts via clean_decimal() / bcmath.
  *   - Initial status is always 'reported'.
  *   - reported_by defaults to the current logged-in user.
  *
  * @method  POST
  * @body    JSON: equipment_unit_id (required), description (required),
- *               severity (required), customer_id?, lease_id?,
+ *               severity (required), customer_id?, lease_id?, inspection_id?,
  *               damage_location?, estimated_repair_cost?,
  *               customer_liable_amount?, insurance_claim_amount?,
  *               notes?
@@ -64,6 +67,7 @@ $customerId   = clean_int($body['customer_id'] ?? null);
 $customerName = clean_string($body['customer_name'] ?? null, 255);   // free-text fallback
 $leaseId      = clean_int($body['lease_id'] ?? null);
 $vendorId     = clean_int($body['vendor_id'] ?? null);
+$inspectionId = clean_int($body['inspection_id'] ?? null);
 
 // customer_id and customer_name are mutually exclusive — clear name when ID is set
 if ($customerId) {
@@ -153,6 +157,24 @@ if ($leaseId) {
     }
 }
 
+// Bug #8b: link the source inspection. It must be of the SAME unit so a stale
+// or hand-edited URL can't attach an unrelated inspection.
+if ($inspectionId) {
+    $inspection = db_row(
+        "SELECT id, equipment_unit_id FROM inspections WHERE id = ?",
+        [$inspectionId]
+    );
+    if (!$inspection) {
+        json_validation_error(['inspection_id' => 'Inspection not found.'], 'Inspection not found.');
+    }
+    if ((int) $inspection['equipment_unit_id'] !== (int) $unitId) {
+        json_validation_error(
+            ['equipment_unit_id' => 'The linked inspection is for a different equipment unit.'],
+            'The linked inspection is for a different equipment unit.'
+        );
+    }
+}
+
 if ($vendorId) {
     $vendor = db_row(
         "SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL",
@@ -171,7 +193,7 @@ if ($vendorId) {
 $result = null;
 
 db_transaction(function () use (
-    $unitId, $customerId, $customerName, $leaseId, $vendorId, $description, $severity,
+    $unitId, $customerId, $customerName, $leaseId, $vendorId, $inspectionId, $description, $severity,
     $damageLocation, $notes,
     $estimatedRepairCost, $customerLiableAmount, $insuranceClaimAmount,
     $unit, $customer, $vendor, &$result
@@ -213,6 +235,7 @@ db_transaction(function () use (
         'customer_id'           => $customerId,
         'customer_name'         => $customerName,
         'lease_id'              => $leaseId,
+        'inspection_id'         => $inspectionId,
         'vendor_id'             => $vendorId,
         'description'           => $description,
         'damage_location'       => $damageLocation,

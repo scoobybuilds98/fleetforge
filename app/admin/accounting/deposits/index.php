@@ -182,7 +182,7 @@ function depositsPage() {
         totalHeld: '0.00',
         totalApplied: '0.00',
         totalRefunded: '0.00',
-        createForm: { customer_id: '', amount: '', received_date: new Date().toISOString().slice(0,10), deposit_type: 'security', notes: '' },
+        createForm: { customer_id: '', amount: '', received_date: FF_localDate(), deposit_type: 'security', notes: '' },
         formError: '',
         errors: { customer_id: '', amount: '', received_date: '', deposit_type: '' },
 
@@ -226,7 +226,12 @@ function depositsPage() {
                 const r = await fetch(FF_Api.url(url));
                 const j = await r.json();
                 if (j.success) {
-                    this.deposits = j.data.data || j.data;
+                    // json_paginated() nests the rows under data.items. The old
+                    // `j.data.data || j.data` handed the {items, pagination} OBJECT
+                    // to the table + calcTotals() ("this.deposits.forEach is not a
+                    // function"), so the list and the Held/Applied/Refunded tiles
+                    // never filled.
+                    this.deposits = j.data?.items || [];
                     this.calcTotals();
                 }
             } catch(e) { console.error(e); }

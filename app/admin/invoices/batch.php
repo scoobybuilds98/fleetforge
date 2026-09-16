@@ -1428,6 +1428,7 @@ function BatchInvoicing(cfg) {
         search: '',
         statusFilter: 'unbilled',
         selected: {},           // leaseId -> true
+        seenLeases: {},         // leaseId -> true once shown for the current period (see loadEligible)
         customerEmailOverrides: {}, // customerId -> email string (this run only)
 
         // ── Presets / dry-run / download / approval ─────────────
@@ -1542,6 +1543,7 @@ function BatchInvoicing(cfg) {
             this.reviewItems = []; this.reviewSelected = {}; this.overrides = {};
             this.previewResult = null; this.reviewOpen = false; this.restoredFrom = null;
             this.selectionRestored = false;
+            this.seenLeases = {};
         },
 
         // ==========================================================
@@ -1914,6 +1916,10 @@ function BatchInvoicing(cfg) {
          *  selection so auto-select defaults apply to the new period. */
         onPeriodChanged() {
             this.selectionRestored = false;
+            // A new period has a different eligible set: forget what was shown and
+            // selected for the old one so unbilled leases default ON again.
+            this.seenLeases = {};
+            this.selected = {};
             this.updatePeriod();
             this.loadEligible();
         },
@@ -1928,25 +1934,43 @@ function BatchInvoicing(cfg) {
                 if (res.success) {
                     this.customers = res.data.customers;
                     this.eligSummary = res.data.summary;
-                    // Auto-select unbilled leases so "Generate" has sane defaults.
+                    // Auto-select unbilled leases so "Generate" has sane defaults —
+                    // but only the FIRST time a lease is shown for this period.
                     //
-                    // EXCEPT on the first load after restoring a session: a
-                    // deselected lease is stored as an ABSENT key, not false, so
-                    // the `!== false` default below would happily re-select every
-                    // lease the operator had just excluded — restoring 4 as 21.
-                    // Honour the restored set verbatim once, then resume defaults.
+                    // A deselected lease is stored as an ABSENT key, not false, so
+                    // the old `selected[l.id] !== false` default re-selected every
+                    // lease the operator had excluded on EVERY reload: press Clear,
+                    // type in the customer search (which reloads), and all unbilled
+                    // leases came back selected. seenLeases remembers which leases
+                    // already got their default, so later reloads keep the
+                    // operator's choice. A restored session is honoured verbatim
+                    // (its leases count as seen).
                     const honourRestored = this.selectionRestored;
 
-                    const stillValid = {};
+                    const next = {};
+                    const inResults = {};
                     this.customers.forEach(c => c.leases.forEach(l => {
+                        inResults[l.id] = true;
+                        const firstSighting = !this.seenLeases[l.id];
+                        this.seenLeases[l.id] = true;
                         if (l.billing_status !== 'unbilled') return;
-                        if (honourRestored) {
-                            if (this.selected[l.id]) stillValid[l.id] = true;
-                        } else if (this.selected[l.id] !== false) {
-                            stillValid[l.id] = true;
+                        if (honourRestored || !firstSighting) {
+                            if (this.selected[l.id]) next[l.id] = true;
+                        } else {
+                            next[l.id] = true;
                         }
                     }));
-                    this.selected = stillValid;
+                    // The search box narrows the VIEW; it must not change the
+                    // selection. Keep selected leases that this (searched) response
+                    // simply didn't include. An unsearched response is the full
+                    // eligible set, so anything absent from it is dropped.
+                    if (this.search) {
+                        Object.keys(this.selected).forEach(id => {
+                            if (this.selected[id] && !inResults[id]) next[id] = true;
+                        });
+                    }
+                    this.selected = next;
+                    this.selectionRestored = false;
                     this.rebuildDisplay();
                 } else {
                     this.customers = [];

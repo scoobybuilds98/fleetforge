@@ -8,10 +8,18 @@ declare(strict_types=1);
  *
  * Behavior:
  *   1. Advisory-lock ('ff_acct_recurring') — skip if another instance running.
- *   2. Fetch every active acc_recurring_entries row in-window for $today.
- *   3. For each: if RecurringEntryService::isDueToday() → postTemplate().
- *   4. Per-template exceptions are caught and logged; one failure does
- *      not abort the batch (STOP conditions are template-local).
+ *   2. Fetch every active template with next_post_date <= today
+ *      (RecurringEntryService::fetchDueTemplates()).
+ *   3. For each: RecurringEntryService::catchUp() posts EVERY due occurrence
+ *      from next_post_date through today, oldest first, each dated on its own
+ *      scheduled date (idempotent per month via the reference key).
+ *      WHY: this used to post only when today's day-of-month matched
+ *      (isDueToday()). One missed run — server down on the 1st, the job
+ *      toggled off that day, a closed period — lost that month for good,
+ *      and the next successful run moved next_post_date past the gap.
+ *   4. A template stops at its first failing occurrence (closed period, bad
+ *      account…) and stays overdue with the reason logged; one template's
+ *      failure does not abort the batch.
  *   5. Summary audit_log row at end.
  *
  * Spec ref: FLEETFORGE_ACCOUNTING_SPEC.md §22.3
@@ -32,7 +40,13 @@ if (!$lock || (int) $lock['ok'] !== 1) {
     exit(0);
 }
 
-$today = date('Y-m-d');
+// Business-local "today" (settings.company.timezone) — the same day source the
+// billing engine uses — so a 03:00 run can't pick up tomorrow's occurrence.
+$today = \FleetForge\Accounting\AccountingService::businessToday();
+
+// Safety cap per template per run. A long outage just takes a few nightly runs
+// (or one "Post Now" per template) to drain; it never posts an unbounded burst.
+const RECURRING_CATCHUP_LIMIT = 24;
 $posted  = 0;
 $skipped = 0;
 $failed  = 0;
@@ -47,41 +61,35 @@ try {
     );
     $systemUserId = $systemUser ? (int) $systemUser['id'] : 1;
 
-    $templates = RecurringEntryService::fetchActiveTemplates($today);
+    $templates = RecurringEntryService::fetchDueTemplates($today);
     foreach ($templates as $t) {
-        if (!RecurringEntryService::isDueToday($t, $today)) {
-            $skipped++;
-            continue;
+        try {
+            $result = RecurringEntryService::catchUp($t, $today, $systemUserId, RECURRING_CATCHUP_LIMIT);
+        } catch (\Throwable $e) {
+            $result = ['posted' => [], 'skipped' => [], 'error' => $e->getMessage(), 'failed_date' => null, 'remaining' => 0];
         }
 
-        try {
-            $result = RecurringEntryService::postTemplate($t, $today, $systemUserId);
-            if ($result['created']) {
-                $posted++;
-                echo sprintf(
-                    "POSTED  template=%d %s  ref=%s  je=%s\n",
-                    (int) $t['id'],
-                    $t['name'],
-                    $result['je']['reference'] ?? '?',
-                    $result['je']['entry_number'] ?? '?'
-                );
-            } else {
-                $skipped++;
-                echo sprintf(
-                    "SKIP    template=%d %s  reason=%s\n",
-                    (int) $t['id'],
-                    $t['name'],
-                    $result['skipped_reason'] ?? '?'
-                );
-            }
-        } catch (\Throwable $e) {
+        foreach ($result['posted'] as $p) {
+            $posted++;
+            echo sprintf("POSTED  template=%d %s  date=%s  je=%s\n", (int) $t['id'], $t['name'], $p['date'], $p['entry_number'] ?? '?');
+        }
+        foreach ($result['skipped'] as $sk) {
+            $skipped++;
+            echo sprintf("SKIP    template=%d %s  date=%s  reason=%s\n", (int) $t['id'], $t['name'], $sk['date'], $sk['reason'] ?? '?');
+        }
+        if (!empty($result['error'])) {
             $failed++;
-            $msg = "template=" . (int) $t['id'] . " " . $t['name'] . ": " . $e->getMessage();
+            $msg = "template=" . (int) $t['id'] . " " . $t['name']
+                 . ($result['failed_date'] ? " occurrence={$result['failed_date']}" : '')
+                 . ": " . $result['error'];
             $failureMessages[] = $msg;
             error_log("cron/accounting_recurring_entries: {$msg}");
-            \FleetForge\Observability\Sentry::captureException($e);
+            \FleetForge\Observability\Sentry::captureException(new \RuntimeException($msg));
             echo "FAIL    {$msg}\n";
             // Continue to next template — one failure must not abort the batch.
+        } elseif (($result['remaining'] ?? 0) > 0) {
+            echo sprintf("MORE    template=%d %s  %d occurrence(s) still due — capped at %d per run\n",
+                (int) $t['id'], $t['name'], (int) $result['remaining'], RECURRING_CATCHUP_LIMIT);
         }
     }
 

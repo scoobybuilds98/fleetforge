@@ -85,6 +85,19 @@ return [
                 'module' => 'invoices',
                 'badge'  => null,
             ],
+            [
+                // Credit notes had no sidebar entry at all (only reachable via the
+                // New menu or a customer's Account Credit tile). They live under
+                // the invoices permission scope (§12 matrix — every credit_notes
+                // page/API gates on invoices:*), so they nest here. '/credit_notes'
+                // shares no prefix with '/invoices', so highlighting stays exact
+                // and a credit-note page still expands this group.
+                'label'  => 'Credit Notes',
+                'icon'   => 'receipt-percent',
+                'url'    => '/credit_notes',
+                'module' => 'invoices',
+                'badge'  => null,
+            ],
         ],
     ],
     [

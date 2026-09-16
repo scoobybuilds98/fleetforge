@@ -1781,10 +1781,15 @@ $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
                 <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
                         x-model="workOrdersFilters.work_type" @change="applyWorkOrdersFilters()">
                     <option value="">All Types</option>
+                    <?php /* Bug #25 sibling: mirror the maintenance_work_orders.work_type ENUM
+                             ('preventive'/'emergency' are not work types, so they matched everything). */ ?>
+                    <option value="scheduled_service">Scheduled Service</option>
                     <option value="repair">Repair</option>
-                    <option value="preventive">Preventive</option>
                     <option value="inspection">Inspection</option>
-                    <option value="emergency">Emergency</option>
+                    <option value="tire">Tire</option>
+                    <option value="electrical">Electrical</option>
+                    <option value="body_damage">Body Damage</option>
+                    <option value="breakdown">Breakdown</option>
                     <option value="other">Other</option>
                 </select>
                 <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
@@ -1977,7 +1982,7 @@ $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
             <div x-show="docsLoaded && !docsLoading && documents.length === 0" class="card-body">
                 <div class="empty-state">
                     <p class="empty-state-title">No documents</p>
-                    <p class="empty-state-text">Upload CVI, registration, insurance, or other compliance files for this unit.</p>
+                    <p class="empty-state-text">Upload CVI, registration, or other compliance files for this unit.</p>
                 </div>
             </div>
 

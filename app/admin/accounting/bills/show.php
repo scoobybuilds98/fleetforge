@@ -245,7 +245,10 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                                     → Expensed (repair)
                                 </span>
                             <?php else: ?>
-                            <div x-data="classifyLine(<?= (int) $l['id'] ?>, <?= (int) $l['asset_id'] ?>, <?= json_encode((string) $l['amount']) ?>)" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                            <?php /* e(json_encode()): the raw double quotes json_encode emits closed this
+                                     double-quoted x-data attribute early ("Unexpected token" on any bill line
+                                     with an asset). The HTML parser decodes &quot; back before Alpine reads it. */ ?>
+                            <div x-data="classifyLine(<?= (int) $l['id'] ?>, <?= (int) $l['asset_id'] ?>, <?= e(json_encode((string) $l['amount'])) ?>)" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
                                 <details style="font-size:0.75rem;color:var(--text-secondary);">
                                     <summary style="cursor:pointer;">ASPE 3061.14 rule</summary>
                                     <div style="margin-top:4px;max-width:480px;">

@@ -303,8 +303,8 @@ function qboSyncLog() {
             const days = parseInt(this.filters.range, 10) || 7;
             const today = new Date();
             const from  = new Date(today.getTime() - days * 86400000);
-            this.filters.date_from = from.toISOString().slice(0, 10);
-            this.filters.date_to   = today.toISOString().slice(0, 10);
+            this.filters.date_from = FF_localDate(from);
+            this.filters.date_to   = FF_localDate(today);
         },
 
         async reload() {

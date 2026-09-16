@@ -41,9 +41,10 @@ $allowedSorts = [
 ];
 $sort = in_array($_GET['sort'] ?? '', $allowedSorts) ? $_GET['sort'] : 'created_at';
 $dir  = strtoupper($_GET['dir'] ?? '') === 'ASC' ? 'ASC' : 'DESC';
-// billed_through is a subquery alias; every other allowlisted sort is a real
-// leases column and keeps the l. prefix.
-$orderBy = $sort === 'billed_through' ? 'billed_through' : "l.$sort";
+// billed_through, outstanding_balance and total_invoiced are SELECT aliases
+// (live invoice aggregates — see the SELECT); every other allowlisted sort is a
+// real leases column and keeps the l. prefix.
+$orderBy = in_array($sort, ['billed_through', 'outstanding_balance', 'total_invoiced'], true) ? $sort : "l.$sort";
 
 // ── Filters ────────────────────────────────────────────────────
 $where  = ['l.deleted_at IS NULL'];
@@ -128,8 +129,19 @@ $rows = db_select(
         l.monthly_rate,
         l.currency,
         l.billing_cycle,
-        l.outstanding_balance,
-        l.total_invoiced,
+        -- Live aggregates, not the denormalized counters: leases.outstanding_balance
+        -- is incremented on send but never decremented by payments, and invoices
+        -- written outside the payment/send endpoints never touch either counter,
+        -- so the list showed $0 against leases with overdue invoices. Same
+        -- definitions as the lease detail tiles (app/admin/leases/show.php):
+        -- outstanding = balance_due on SENT invoices; invoiced = non-void total.
+        (SELECT COALESCE(SUM(CASE WHEN io.status IN ('sent', 'partially_paid', 'overdue')
+                                  THEN io.balance_due ELSE 0 END), 0)
+           FROM invoices io
+          WHERE io.lease_id = l.id AND io.deleted_at IS NULL AND io.status <> 'void') AS outstanding_balance,
+        (SELECT COALESCE(SUM(it.total_amount), 0)
+           FROM invoices it
+          WHERE it.lease_id = l.id AND it.deleted_at IS NULL AND it.status <> 'void') AS total_invoiced,
         l.next_billing_date,
         l.po_number,
         -- S-LEASE-MILEAGE: surface mileage totals on the lease list so the

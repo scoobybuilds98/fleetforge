@@ -368,6 +368,18 @@ class InvoicePdfGenerator
             $html .= '<div class="notes-box"><strong>Notes</strong><br>' . nl2br($e($invoice['notes'])) . '</div>';
         }
 
+        // ── Payment instructions (bug #23) ──────────────────────────
+        // invoice.payment_instructions ("Default text shown at the bottom of
+        // all invoice PDFs") was an editable setting nothing read. Resolve it
+        // exactly like the customer portal does — invoice-specific text first,
+        // company-wide company.payment_instructions as the fallback — and omit
+        // the box entirely when both are blank (the shipped default), so PDFs
+        // for installs that never set either are byte-for-byte unchanged.
+        $paymentInstructions = trim((string) (\settings_get('invoice.payment_instructions', '') ?: \settings_get('company.payment_instructions', '')));
+        if ($paymentInstructions !== '') {
+            $html .= '<div class="notes-box"><strong>Payment Instructions</strong><br>' . nl2br($e($paymentInstructions)) . '</div>';
+        }
+
         $html .= '<div class="footer">' . $e($companyName) . ($companyWebsite ? ' &middot; ' . $e($companyWebsite) : '') . ($companyEmail ? ' &middot; ' . $e($companyEmail) : '') . '</div>';
 
         return $html;

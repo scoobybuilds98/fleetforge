@@ -7,7 +7,12 @@ declare(strict_types=1);
  * Compliance alerts cron — runs nightly at 6:00 AM.
  *
  * Scans all active (non-deleted, non-inactive/decommissioned) equipment units
- * and creates in-app notifications for:
+ * and creates in-app notifications for CVI + Registration documents only.
+ * MVI and Insurance are NOT evaluated: they were removed from every compliance
+ * UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS — no grid, editor or upload type), so
+ * alerting on dates nobody can see or edit contradicted the Compliance page and
+ * the sidebar badge. The columns are retained; only the alerting stopped.
+ * Alerts:
  *   - Expired documents (past today)
  *   - Documents expiring within 7 days  → critical severity
  *   - Documents expiring within 30 days → warning severity
@@ -60,9 +65,10 @@ try {
     $inWarning   = date('Y-m-d', strtotime("+{$warnDays} days"));
 
     // -----------------------------------------------------------------------
-    // Fetch all units that have at least one expiry within 30 days OR already expired.
-    // Indexes idx_cvi_expiry / idx_reg_expiry / idx_mvi_expiry / idx_ins_expiry
-    // make these comparisons efficient (created in PASS-10 schema migration).
+    // Fetch all units that have a CVI or Registration expiry within the warning
+    // window OR already expired (MVI/Insurance deliberately excluded — see header).
+    // Indexes idx_cvi_expiry / idx_reg_expiry make these comparisons efficient
+    // (created in PASS-10 schema migration).
     // -----------------------------------------------------------------------
     $units = db_select(
         "SELECT
@@ -70,20 +76,16 @@ try {
              eu.unit_number,
              eu.status,
              eu.cvi_expiry,
-             eu.registration_expiry,
-             eu.mvi_expiry,
-             eu.insurance_expiry
+             eu.registration_expiry
          FROM equipment_units eu
          WHERE eu.deleted_at IS NULL
            AND eu.status NOT IN ('inactive','decommissioned')
            AND (
                (eu.cvi_expiry IS NOT NULL          AND eu.cvi_expiry          <= ?)
                OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= ?)
-               OR (eu.mvi_expiry IS NOT NULL          AND eu.mvi_expiry          <= ?)
-               OR (eu.insurance_expiry IS NOT NULL     AND eu.insurance_expiry     <= ?)
            )
          ORDER BY eu.unit_number ASC",
-        [$inWarning, $inWarning, $inWarning, $inWarning]
+        [$inWarning, $inWarning]
     );
 
     foreach ($units as $unit) {
@@ -96,8 +98,6 @@ try {
         $docChecks = [
             'CVI'          => $unit['cvi_expiry'],
             'Registration' => $unit['registration_expiry'],
-            'MVI'          => $unit['mvi_expiry'],
-            'Insurance'    => $unit['insurance_expiry'],
         ];
 
         $alertDocs = [];    // ['doc' => 'CVI', 'expiry' => '2026-01-15', 'urgency' => 'expired|critical|warning']
@@ -255,8 +255,6 @@ try {
              eu.unit_number,
              eu.cvi_expiry,
              eu.registration_expiry,
-             eu.mvi_expiry,
-             eu.insurance_expiry,
              c.id AS customer_id,
              c.company_name,
              c.email AS customer_email,
@@ -282,11 +280,9 @@ try {
            AND (
                (eu.cvi_expiry IS NOT NULL          AND eu.cvi_expiry          <= ?)
                OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= ?)
-               OR (eu.mvi_expiry IS NOT NULL          AND eu.mvi_expiry          <= ?)
-               OR (eu.insurance_expiry IS NOT NULL    AND eu.insurance_expiry    <= ?)
            )
          ORDER BY c.id ASC, eu.unit_number ASC",
-        [$inWarning, $inWarning, $inWarning, $inWarning]
+        [$inWarning, $inWarning]
     );
 
     // Group rows by customer_id; collect per-unit affected-doc lists.
@@ -311,13 +307,11 @@ try {
         }
 
         // slug => [display label, expiry] so each document can be toggled
-        // independently in Settings → Customer Emails (e.g. silence Insurance
-        // while keeping CVI/registration/MVI).
+        // independently in Settings → Customer Emails. MVI/Insurance are no longer
+        // tracked (see header), so their toggles there have nothing to gate.
         $docChecks = [
             'cvi'          => ['CVI',          $row['cvi_expiry']],
             'registration' => ['Registration', $row['registration_expiry']],
-            'mvi'          => ['MVI',          $row['mvi_expiry']],
-            'insurance'    => ['Insurance',    $row['insurance_expiry']],
         ];
         $unitDocs = [];
         foreach ($docChecks as $docSlug => [$docLabel, $expiryDate]) {

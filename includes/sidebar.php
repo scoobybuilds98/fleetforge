@@ -68,14 +68,17 @@ function sidebar_badge_count(string $key): int
                 "SELECT COUNT(*) FROM invoices WHERE status = 'overdue' AND deleted_at IS NULL",
                 []
             ),
+            // Compliance tracks CVI + Registration ONLY — MVI and Insurance were
+            // removed from every compliance UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS), so
+            // counting them made the badge disagree with the Compliance page. Same
+            // predicate as api/v1/compliance/index.php?window=30: company-local
+            // today (MySQL session is UTC), expiry <= today+30 inclusive.
             'compliance_alerts' => db_count(
                 "SELECT COUNT(DISTINCT id) FROM equipment_units
                  WHERE deleted_at IS NULL AND status NOT IN ('inactive','decommissioned')
-                 AND (cvi_expiry < CURDATE() + INTERVAL 30 DAY
-                   OR registration_expiry < CURDATE() + INTERVAL 30 DAY
-                   OR mvi_expiry < CURDATE() + INTERVAL 30 DAY
-                   OR insurance_expiry < CURDATE() + INTERVAL 30 DAY)",
-                []
+                 AND ((cvi_expiry IS NOT NULL AND cvi_expiry <= ?)
+                   OR (registration_expiry IS NOT NULL AND registration_expiry <= ?))",
+                [date('Y-m-d', strtotime('+30 days')), date('Y-m-d', strtotime('+30 days'))]
             ),
             // Open damage claims: reported + assessed + repair_ordered (not yet resolved/written_off)
             'open_damage_claims' => db_count(

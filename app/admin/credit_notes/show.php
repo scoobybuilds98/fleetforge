@@ -10,7 +10,9 @@ declare(strict_types=1);
  * Sections:
  *   - Summary header (CN number, status badge, customer, amount)
  *   - Detail card (source, lease, reason, expiry, created by)
- *   - Apply to Invoice form (shows when status is active or partially_used)
+ *   - Apply to Invoice form (shows when status is active or partially_used) —
+ *     FF_RecordPicker limited to this customer's sent/partially_paid/overdue
+ *     invoices (number + balance), Max = min(credit remaining, invoice balance)
  *   - Applications history table
  *   - Void modal (requires reason)
  *
@@ -105,6 +107,11 @@ $sourceLabels = [
     'damage_resolution'   => 'Damage Resolution',
     'goodwill'            => 'Goodwill',
     'payment_returned'    => 'Payment Returned',
+    // System-minted sources (credit_notes.source ENUM) — previously rendered raw.
+    'overpayment'         => 'Overpayment',
+    'hours_overpayment'   => 'Hours Overpayment',
+    'precharge_refund'    => 'Pre-charge Refund',
+    'base_rental_reconciliation_overflow' => 'Rental Reconciliation Credit',
     'other'               => 'Other',
 ];
 
@@ -271,19 +278,47 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 
             <div style="display:flex; flex-direction:column; gap:0.75rem;">
                 <div>
-                    <label class="form-label">Invoice ID</label>
-                    <input class="form-input" type="number" min="1" x-model="invoiceId"
-                           placeholder="e.g. 42" :disabled="submitting">
-                    <div class="form-hint">Enter the invoice ID from the invoice detail page.</div>
+                    <label class="form-label">Invoice</label>
+                    <?php
+                    // Invoice picker (replaces a raw "Invoice ID" number box that made staff
+                    // copy a database id off another page). Scoped server-side to what
+                    // api/v1/credit_notes/apply.php will accept: THIS customer's invoices in
+                    // a payable status (sent / partially_paid / overdue), oldest due first.
+                    // Currency can't be filtered by invoices/index.php, so a mismatch is
+                    // flagged in the sublabel and blocked on pick (D18).
+                    $_cnCurJs     = json_encode((string) $cn['currency']);
+                    $pickerConfig = [
+                        'endpoint'    => '/api/v1/invoices/index.php',
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 15,
+                        'extraParams' => 'customer_id=' . (int) $cn['customer_id']
+                                       . '&statuses=sent,partially_paid,overdue&sort=due_date&dir=ASC',
+                        'placeholder' => 'Search this customer’s open invoices…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number, sublabel: [r.currency + ' ' + Number(r.balance_due || 0).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' due', r.due_date ? ('due ' + r.due_date) : '', String(r.status || '').replace('_', ' '), r.currency !== {$_cnCurJs} ? 'different currency — cannot apply' : ''].filter(Boolean).join(' · '), raw: r })",
+                    ];
+                    $pickerOnPicked  = 'onInvoicePicked($event.detail.raw)';
+                    $pickerOnCleared = 'onInvoiceCleared()';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    unset($_cnCurJs);
+                    ?>
+                    <div class="form-hint" x-show="!invoice">Only this customer’s sent, partially paid and overdue invoices are listed.</div>
+                    <div class="form-hint" x-show="invoice" x-cloak>
+                        Invoice balance:
+                        <strong class="font-mono" x-text="invoice ? (invoice.currency + ' ' + money(invoice.balance_due)) : ''"></strong>
+                        <span x-show="invoice && invoice.due_date" x-text="invoice ? (' · due ' + invoice.due_date) : ''"></span>
+                    </div>
                 </div>
                 <div>
                     <label class="form-label">Amount to Apply (<?= e($cn['currency']) ?>)</label>
                     <div style="display:flex; gap:0.5rem;">
                         <input class="form-input font-mono" type="text" x-model="amount"
                                placeholder="0.00" :disabled="submitting">
+                        <!-- Max = the smaller of the credit remaining and the picked invoice's
+                             balance (apply.php rejects anything above either). -->
                         <button type="button" class="btn btn-sm btn-secondary"
-                                @click="amount = '<?= e($cn['amount_remaining']) ?>'"
-                                :disabled="submitting">Full</button>
+                                @click="fillMax()"
+                                :disabled="submitting">Max</button>
                     </div>
                 </div>
                 <button class="btn btn-primary btn-md" @click="submit()" :disabled="submitting || !invoiceId || !amount">
@@ -448,21 +483,99 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 
 <script>
 function applyForm() {
+    // Credit still available on this note, in integer cents (server-rendered).
+    const CN_REMAINING_CENTS = <?= (int) bcmul((string) $cn['amount_remaining'], '100', 0) ?>;
+    const CN_CURRENCY        = <?= json_encode((string) $cn['currency']) ?>;
+
     return {
+        // NOTE: every key the nested invoice picker's @record-picked / @record-cleared
+        // handlers write must be declared HERE — Alpine's merged-scope setter writes an
+        // undeclared key onto the innermost (picker) scope, where this form never sees it.
         invoiceId: '',
+        invoice: null,      // raw invoices/index.php row for the picked invoice
         amount: '',
         submitting: false,
         error: '',
         success: '',
 
+        /**
+         * Picker selection → remember the invoice; block a currency mismatch up front
+         * (apply.php 422s it anyway — D18).
+         * @param {object} raw invoices/index.php row
+         */
+        onInvoicePicked(raw) {
+            this.error = '';
+            this.success = '';
+            if (!raw) { this.onInvoiceCleared(); return; }
+            this.invoiceId = raw.id;
+            this.invoice   = raw;
+            if (raw.currency !== CN_CURRENCY) {
+                this.error = 'Invoice ' + raw.invoice_number + ' is in ' + raw.currency
+                    + '; this credit note is ' + CN_CURRENCY + '. Pick an invoice in ' + CN_CURRENCY + '.';
+            }
+        },
+
+        onInvoiceCleared() {
+            this.invoiceId = '';
+            this.invoice   = null;
+            this.error     = '';
+        },
+
+        /**
+         * Parse a money string/number to integer cents (NaN when not numeric).
+         * @param {string|number} v
+         * @returns {number}
+         */
+        cents(v) {
+            const n = parseFloat(v);
+            return isNaN(n) ? NaN : Math.round(n * 100);
+        },
+
+        /**
+         * @param {string|number} v
+         * @returns {string} "$1,234.56"
+         */
+        money(v) {
+            const n = parseFloat(v);
+            if (isNaN(n)) return '—';
+            return '$' + n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        /** Fill the largest amount apply.php will accept: min(credit remaining, invoice balance). */
+        fillMax() {
+            let max = CN_REMAINING_CENTS;
+            if (this.invoice) {
+                const bal = this.cents(this.invoice.balance_due);
+                if (!isNaN(bal)) max = Math.min(max, bal);
+            }
+            this.amount = (Math.max(0, max) / 100).toFixed(2);
+        },
+
         submit() {
             this.error = '';
             this.success = '';
             if (!this.invoiceId || !this.amount) return;
+
+            // Client-side mirror of apply.php's guards so the common mistakes explain
+            // themselves inline; the server re-checks everything under FOR UPDATE.
+            const amt = this.cents(this.amount);
+            if (isNaN(amt) || amt <= 0) { this.error = 'Enter an amount greater than zero.'; return; }
+            if (this.invoice && this.invoice.currency !== CN_CURRENCY) {
+                this.error = 'Invoice ' + this.invoice.invoice_number + ' is in ' + this.invoice.currency + '; this credit note is ' + CN_CURRENCY + '.';
+                return;
+            }
+            if (amt > CN_REMAINING_CENTS) {
+                this.error = 'Amount exceeds the credit remaining on this note (' + this.money(CN_REMAINING_CENTS / 100) + ').';
+                return;
+            }
+            if (this.invoice && !isNaN(this.cents(this.invoice.balance_due)) && amt > this.cents(this.invoice.balance_due)) {
+                this.error = 'Amount exceeds the balance due on ' + this.invoice.invoice_number + ' (' + this.money(this.invoice.balance_due) + ').';
+                return;
+            }
             this.submitting = true;
 
             FF_Api.post('<?= base_url('api/v1/credit_notes/apply') ?>', {
-                credit_note_id: parseInt(this.invoiceId, 10) ? <?= (int)$id ?> : <?= (int)$id ?>,
+                credit_note_id: <?= (int)$id ?>,
                 invoice_id: parseInt(this.invoiceId, 10),
                 amount: this.amount,
             })
@@ -474,7 +587,6 @@ function applyForm() {
                     return;
                 }
                 this.success = 'Applied ' + this.amount + ' to invoice ' + data.data.invoice_number + '. Invoice status: ' + data.data.invoice_status + '.';
-                this.invoiceId = '';
                 this.amount = '';
                 // Reload page to reflect updated balance
                 setTimeout(() => location.reload(), 1500);

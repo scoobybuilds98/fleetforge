@@ -576,9 +576,13 @@ $mkRecurring = function (string $name, string $desc, ?int $drAcct, ?int $crAcct,
     db_insert('acc_recurring_entry_lines', ['recurring_entry_id' => $rid, 'account_id' => $crAcct, 'line_number' => 2, 'description' => $desc, 'debit' => '0.00', 'credit' => money($amt)]);
     $recCount++;
 };
-$mkRecurring('Yard lease — Surrey', 'Monthly yard ground lease', acctLike('%Rent%'), acctId('1010'), 6800.00);
-$mkRecurring('Software subscriptions', 'Fleet telematics + accounting SaaS', acctLike('%Software%'), acctId('1010'), 940.00);
-$mkRecurring('Fleet insurance premium', 'Monthly commercial fleet policy instalment', acctLike('%Insurance%'), acctId('1010'), 7200.00);
+// Debit accounts are pinned to EXPENSE types. An untyped name LIKE matched the
+// wrong rows: '%Rent%' hit 1000 "CurRENT Assets" (a HEADER — the template can
+// never post: "cannot post to header account") and '%Insurance%' hit 1065
+// "Prepaid Insurance" (an asset, not the expense) because both sort first by code.
+$mkRecurring('Yard lease — Surrey', 'Monthly yard ground lease', acctLike('%Yard Rent%', 'operating_expense'), acctId('1010'), 6800.00);
+$mkRecurring('Software subscriptions', 'Fleet telematics + accounting SaaS', acctLike('%Software%', 'operating_expense'), acctId('1010'), 940.00);
+$mkRecurring('Fleet insurance premium', 'Monthly commercial fleet policy instalment', acctLike('%Fleet Insurance%', 'cost_of_revenue'), acctId('1010'), 7200.00);
 echo "  + {$recCount} recurring entry templates\n";
 
 // ── B9: Realism backdating + taxonomy backfill ───────────────────────────────

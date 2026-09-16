@@ -683,7 +683,11 @@ function FF_Capex() {
         // ── Complete ───────────────────────────────────────────
         completeOpen: false,
         completeBusy: false,
-        completeForm: {},
+        // Shape must exist before first render: the Complete modal is in the DOM
+        // (x-show, not x-if), so its x-model="completeForm.asset_data.*" bindings
+        // evaluate on page load. `{}` threw "Cannot read properties of undefined"
+        // ten times on every visit. resetCompleteForm() fills real defaults on open.
+        completeForm: { actual_amount: '', asset_data: {} },
         completeFormError: '',
         completeErrors: {
             actual_amount: '', name: '', acquisition_date: '', acquisition_cost: '', salvage_value: '',
@@ -913,7 +917,7 @@ function FF_Capex() {
                 actual_amount: '',
                 asset_data: {
                     name: '',
-                    acquisition_date: new Date().toISOString().slice(0, 10),
+                    acquisition_date: FF_localDate(),
                     acquisition_cost: '',
                     salvage_value: '0.00',
                     depreciation_method: 'straight_line',

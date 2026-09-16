@@ -8,6 +8,10 @@ declare(strict_types=1);
  *
  * Filters: status, work_type, priority, equipment_unit_id, vendor_id,
  *          date_from, date_to (on requested_date), q (LIKE on title/WO#).
+ *          status also accepts two roll-up values used by KPI tile drill-downs
+ *          (bug #25): 'active' = open + in_progress + waiting_parts (the vendor
+ *          pages' "Active Work Orders" tiles) and 'in_work' = in_progress +
+ *          waiting_parts (the work-order list's own "Active" tile).
  * Sort allowlist: requested_date, total_cost, work_order_number, status, priority,
  *                  completed_date, scheduled_date, updated_at, vendor_name.
  * Default sort: requested_date DESC.
@@ -38,11 +42,20 @@ $where  = ['mwo.deleted_at IS NULL'];
 $params = [];
 
 // Filter: status ENUM
+// Roll-up values let a tile drill to exactly the set its count covers — a single
+// status could never match "open / in progress / waiting parts".
+$statusRollups = [
+    'active'  => ['open', 'in_progress', 'waiting_parts'],
+    'in_work' => ['in_progress', 'waiting_parts'],
+];
 if ($status = clean_string($_GET['status'] ?? null)) {
     $validStatuses = ['open', 'in_progress', 'waiting_parts', 'completed', 'cancelled'];
     if (in_array($status, $validStatuses, true)) {
         $where[]  = 'mwo.status = ?';
         $params[] = $status;
+    } elseif (isset($statusRollups[$status])) {
+        $where[]  = 'mwo.status IN (' . implode(',', array_fill(0, count($statusRollups[$status]), '?')) . ')';
+        $params   = array_merge($params, $statusRollups[$status]);
     }
 }
 

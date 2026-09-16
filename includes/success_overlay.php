@@ -12,8 +12,20 @@ declare(strict_types=1);
  *                $overlayTitle    string  e.g. "Customer Created!"
  *                $overlaySubtitle string  e.g. "Redirecting to customer profile…"
  *
+ *              Optional PHP variable:
+ *                $overlaySubmittingVar string  name of the host component's
+ *                                              in-flight flag (default 'submitting').
+ *                                              Pages whose component uses e.g.
+ *                                              `saving` MUST pass 'saving'.
+ *
  *              Required Alpine state on the host component:
  *                showSuccessOverlay: false
+ *                <in-flight flag>:   false   (named by $overlaySubmittingVar)
+ *
+ *              PLACEMENT: the include MUST sit INSIDE the host x-data element
+ *              (before its closing </div>). Both <template x-if> blocks below
+ *              read component state; included outside the scope they throw
+ *              "submitting is not defined" and the overlay never renders.
  *
  *              On success in submit():
  *                this.showSuccessOverlay = true;
@@ -24,12 +36,20 @@ declare(strict_types=1);
 
 $overlayTitle    = htmlspecialchars($overlayTitle    ?? 'Done!',         ENT_QUOTES, 'UTF-8');
 $overlaySubtitle = htmlspecialchars($overlaySubtitle ?? 'Redirecting…',  ENT_QUOTES, 'UTF-8');
+
+// The flag name is interpolated into an Alpine expression, so only a plain JS
+// identifier is accepted; anything else falls back to the historical default.
+$overlaySubmittingVar = (string) ($overlaySubmittingVar ?? 'submitting');
+if (!preg_match('/^[A-Za-z_$][A-Za-z0-9_$]*$/', $overlaySubmittingVar)) {
+    $overlaySubmittingVar = 'submitting';
+}
 ?>
 
 <!-- ================================================================
      SUBMITTING OVERLAY — Immediate "Saving…" feedback (S-CREATE-FEEDBACK)
      Fires the instant submit() is called, before the API responds.
-     Shown when the host component's `submitting` is true AND
+     Shown when the host component's in-flight flag ($overlaySubmittingVar,
+     default `submitting`) is true AND
      `showSuccessOverlay` is false (i.e. mid-flight, not yet succeeded).
      Operator wanted clear visual feedback during the API wait so the
      click doesn't feel like it did nothing.
@@ -37,9 +57,9 @@ $overlaySubtitle = htmlspecialchars($overlaySubtitle ?? 'Redirecting…',  ENT_Q
      Disappears the moment either:
        (a) showSuccessOverlay = true → the truck animation below takes
            over (success path)
-       (b) submitting = false (failure path; form re-enables for retry)
+       (b) the flag = false (failure path; form re-enables for retry)
      ================================================================ -->
-<template x-if="submitting && !showSuccessOverlay">
+<template x-if="<?= $overlaySubmittingVar ?> && !showSuccessOverlay">
     <div class="ff-saving-overlay"
          style="position:fixed;inset:0;z-index:9998;background:rgba(10,15,28,0.55);
                 backdrop-filter:blur(2px);display:flex;align-items:center;

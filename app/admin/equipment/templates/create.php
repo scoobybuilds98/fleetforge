@@ -288,6 +288,16 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
 
     </form>
+
+<?php
+// The shared overlay must sit INSIDE the x-data scope: its <template x-if>
+// blocks read this component's submitting/showSuccessOverlay (it was previously
+// included outside the component and threw "submitting is not defined").
+$overlayTitle    = 'Equipment Type Created!';
+$overlaySubtitle = 'Redirecting to equipment type details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
 </div>
 
 <script>
@@ -462,11 +472,5 @@ function FF_CreateTemplate() {
     };
 }
 </script>
-
-<?php
-$overlayTitle    = 'Equipment Type Created!';
-$overlaySubtitle = 'Redirecting to equipment type details…';
-require_once FF_ROOT . '/includes/success_overlay.php';
-?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

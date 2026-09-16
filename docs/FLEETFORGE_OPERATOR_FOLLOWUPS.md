@@ -12,11 +12,46 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
+
+### F71 — Deploy S-TRAINING-VIDEO-BUGFIX, run its migration, then fix two prod drafts that bill mileage twice 🔴 BLOCKING (money — drafts only, nothing sent)
+
+**Surfaced by:** S-TRAINING-VIDEO-BUGFIX (2026-09-16), diagnosed read-only on prod.
+**Affects:** every lease close that carries an "Actual Mileage" value.
+**Detail:**
+- **Closes rejected:** any lease whose starting odometer is not 0 could not be closed with the dialog's pre-filled Actual Mileage ("End mileage cannot be less than start mileage"). Prod manual leases all started at 0 km so far, which is why nobody hit it — the first non-zero start would.
+- **Double-billed mileage (live on prod):** when a close generates a partial-month final invoice, the mileage was billed twice on that invoice — a `Mileage usage` line AND a `Mileage overage` line for the same distance. Two prod drafts carry it:
+  - **INV-2026-00795** (MTTS399): `Mileage usage 29,399 km × $0.04 = $1,175.96` **and** `Mileage overage … = $1,175.96`.
+  - **INV-2026-02131** (MTTS482): `Mileage usage 23.61 miles = $5.90` **and** `Mileage overage 24 miles = $6.00`.
+- **Lifetime re-bill risk:** 31 prod manual leases bill mileage month by month from odometer readings; closing any of them pre-fix would have re-billed the whole lease's distance again on the final invoice.
+**Operator action:**
+1. Deploy `main` (`sudo /var/www/fleetforge/bin/deploy.sh` — runs migrations). The migration `202609161756_S-TRAINING-VIDEO-BUGFIX_repair_double_encoded_seed_text.sql` is data-only: it repairs double-encoded seed text ("â€”" → "—") in email templates / CCA classes / tax notes and rewrites three settings descriptions. Verify: `php bin/migrate.php --status` → `pending: 0`.
+2. On each of the two drafts above, open the invoice → edit lines → **remove the `Mileage overage` line** (keep `Mileage usage`, which is the odometer-exact amount). Both are drafts, so this is counter-safe (update_lines.php).
+3. Optional read-only re-check afterwards: no live invoice should carry both line types —
+   `SELECT COUNT(DISTINCT i.id) FROM invoices i WHERE i.deleted_at IS NULL AND i.status<>'void' AND EXISTS(SELECT 1 FROM invoice_line_items a WHERE a.invoice_id=i.id AND a.item_type='mileage') AND EXISTS(SELECT 1 FROM invoice_line_items b WHERE b.invoice_id=i.id AND b.item_type='mileage_usage');` → **0**.
+
+---
+
+### F72 — Recompute vendor "Total Spent" on each deployment 🟡 PARTIAL (display counter)
+
+**Surfaced by:** S-TRAINING-VIDEO-BUGFIX (bug #7).
+**Detail:** `vendors.total_spent` was incremented at work-order completion AND again at bill approval for the same repair. It is now recomputed from one rule (`lib/Accounting/VendorSpend.php`: approved/scheduled/partially-paid/paid bills in CAD + completed work orders that no counted bill links to). Existing stored values keep their old drift until recomputed. Prod currently shows $0.00 for all 4 vendors. The GL was never affected (work-order completion posts no journal entry).
+**Operator action (after F71's deploy):** `sudo -u www-data php /var/www/fleetforge/scripts/recompute_vendor_total_spent.php` (dry run, prints stored vs correct), then re-run with `--apply`. Idempotent; writes one audit row per changed vendor. Same on Northland.
+
+---
+
+### F73 — Confirm three behaviour changes from S-TRAINING-VIDEO-BUGFIX 🟡 PARTIAL (product decisions, defaults already chosen)
+
+1. **Damage claims → "Invoiced" now needs the recovery invoice linked** (picker on the claim). A draft invoice is accepted; the recovery is linked in the GL when that invoice is sent. Previously a claim could be marked invoiced with no invoice and the GL step silently skipped.
+2. **Payment instructions now print on invoice PDFs** when `invoice.payment_instructions` (or the fallback `company.payment_instructions`) is set — the portal reads the same pair. If prod has `company.payment_instructions` filled, newly generated PDFs will show a "Payment Instructions" box.
+3. **Utilization numbers changed** everywhere (they were wrong — Analytics showed 357.9%): Reports, Analytics and the Dashboard trend now share one definition (days on rent ÷ days available, overlapping leases merged). The Dashboard tile is a right-now snapshot and is renamed **"On Lease Now"**.
+**Operator action:** none required unless you disagree with a default — say which and it is a small change.
+
+---
 
 ### F69 — Deploy S-PICKER-OPEN-LEASE to unlock 6 live leases, then re-bill 9 void-stuck leases 🔴 BLOCKING (LIVE NOW)
 

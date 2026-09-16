@@ -8,7 +8,7 @@ declare(strict_types=1);
  * CSV export exits the request with raw file output (no JSON wrapper).
  *
  * Required by: app/admin/reports/index.php (Financial tab)
- * Requires: api/bootstrap.php, lib/Reports/ReportBuilder.php (autoloaded)
+ * Requires: api/bootstrap.php, lib/Reports/ReportBuilder.php, lib/Reports/ArAging.php (autoloaded)
  *
  * GET params:
  *   preset      : date preset slug (default 'this_month')
@@ -26,6 +26,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
+use FleetForge\Reports\ArAging;
 use FleetForge\Reports\ReportBuilder;
 
 require_method('GET');
@@ -52,7 +53,10 @@ if (!in_array($format, ['json', 'csv'], true)) {
 }
 
 // ── Cache check (JSON only — CSV always regenerates for freshness) ───────────
-$cacheParams = ['date_from' => $dateFrom, 'date_to' => $dateTo, 'view' => $view];
+// 'calc' + 'today': AR aging's as-of date is capped at today and its maths moved
+// to the CAD-canonical shared helper, so a cached payload from yesterday or from
+// the old currency-blind query must not be served.
+$cacheParams = ['date_from' => $dateFrom, 'date_to' => $dateTo, 'view' => $view, 'calc' => 'rev-v2', 'today' => date('Y-m-d')];
 $cacheType   = 'revenue_' . $view;
 
 if ($format === 'json') {
@@ -308,47 +312,56 @@ switch ($view) {
         break;
 
     // ── AR Aging snapshot ────────────────────────────────────────────────────
-    // "As of date" = $dateTo. Shows all invoices with a balance_due > 0 as of that date.
-    // Bucket assignment is based on DATEDIFF(as_of_date, due_date).
+    // As-of date = the range end, capped at today: a future as-of would age
+    // invoices against days that have not happened yet ("This Month" ends on
+    // the 30th). Computed by lib/Reports/ArAging.php (shared with Accounting →
+    // AR Aging and the Dashboard): only invoices issued on/before the as-of
+    // date, balances rolled back to that date, every amount in CAD via each
+    // invoice's frozen exchange_rate_to_cad.
     case 'ar_aging':
-        $asOf = $dateTo;
-        $rows = db_select(
-            "SELECT
-                i.id,
-                i.invoice_number,
-                COALESCE(c.company_name, i.company_name_snapshot, 'Unknown') AS company_name,
-                i.customer_id,
-                i.invoice_date,
-                i.due_date,
-                i.total_amount,
-                i.amount_paid,
-                i.balance_due,
-                i.status,
-                DATEDIFF(?, i.due_date)                              AS days_overdue,
-                CASE
-                    WHEN DATEDIFF(?, i.due_date) <= 0  THEN 'current'
-                    WHEN DATEDIFF(?, i.due_date) <= 30 THEN '1_30'
-                    WHEN DATEDIFF(?, i.due_date) <= 60 THEN '31_60'
-                    WHEN DATEDIFF(?, i.due_date) <= 90 THEN '61_90'
-                    ELSE '90_plus'
-                END AS aging_bucket
-             FROM invoices i
-             LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
-             WHERE i.deleted_at IS NULL
-               AND i.balance_due > 0
-               AND i.status IN ('sent','partially_paid','overdue')
-               AND i.invoice_date <= ?
-             ORDER BY days_overdue DESC, i.customer_id ASC",
-            [$asOf, $asOf, $asOf, $asOf, $asOf, $asOf]
-        );
+        $asOf  = min($dateTo, date('Y-m-d'));
+        $aging = ArAging::asOf($asOf);
 
-        // Aggregate into 5 buckets for the chart
+        // Map the shared bucket keys onto this view's historical keys (the page
+        // badges + CSV use '1_30' etc.).
+        $bucketKey = [
+            'current'      => 'current',
+            'days_1_30'    => '1_30',
+            'days_31_60'   => '31_60',
+            'days_61_90'   => '61_90',
+            'days_90_plus' => '90_plus',
+        ];
+
+        $rows = [];
+        foreach ($aging['invoices'] as $inv) {
+            $rows[] = [
+                'id'                  => $inv['invoice_id'],
+                'invoice_number'      => $inv['invoice_number'],
+                'company_name'        => $inv['company_name'],
+                'customer_id'         => $inv['customer_id'],
+                'invoice_date'        => $inv['invoice_date'],
+                'due_date'            => $inv['due_date'],
+                'status'              => $inv['status'],
+                'currency'            => $inv['currency'],
+                'exchange_rate_to_cad'=> $inv['exchange_rate_to_cad'],
+                'total_amount'        => $inv['total_amount'],         // CAD
+                'total_amount_native' => $inv['total_amount_native'],
+                'balance_due'         => $inv['balance_due'],          // CAD, as of $asOf
+                'balance_due_native'  => $inv['balance_due_native'],
+                'days_overdue'        => $inv['days_past_due'],
+                'aging_bucket'        => $bucketKey[$inv['bucket']],
+            ];
+        }
+        // Most overdue first (matches the previous ordering).
+        usort($rows, fn($a, $b) => [$b['days_overdue'], $a['customer_id']] <=> [$a['days_overdue'], $b['customer_id']]);
+
+        // Aggregate into 5 buckets for the chart (CAD)
         $buckets = [
-            'current'  => ['label' => 'Current',     'count' => 0, 'amount' => '0'],
-            '1_30'     => ['label' => '1–30 Days',   'count' => 0, 'amount' => '0'],
-            '31_60'    => ['label' => '31–60 Days',  'count' => 0, 'amount' => '0'],
-            '61_90'    => ['label' => '61–90 Days',  'count' => 0, 'amount' => '0'],
-            '90_plus'  => ['label' => '90+ Days',    'count' => 0, 'amount' => '0'],
+            'current'  => ['label' => 'Current',     'count' => 0, 'amount' => '0.00'],
+            '1_30'     => ['label' => '1–30 Days',   'count' => 0, 'amount' => '0.00'],
+            '31_60'    => ['label' => '31–60 Days',  'count' => 0, 'amount' => '0.00'],
+            '61_90'    => ['label' => '61–90 Days',  'count' => 0, 'amount' => '0.00'],
+            '90_plus'  => ['label' => '90+ Days',    'count' => 0, 'amount' => '0.00'],
         ];
         foreach ($rows as $r) {
             $b = $r['aging_bucket'];
@@ -365,14 +378,17 @@ switch ($view) {
         if ($format === 'csv') {
             ReportBuilder::outputCsv(
                 'ar_aging_as_of_' . $asOf,
-                ['Invoice #', 'Customer', 'Invoice Date', 'Due Date', 'Total Amount', 'Paid', 'Balance Due', 'Days Overdue', 'Bucket'],
+                ['Invoice #', 'Customer', 'Invoice Date', 'Due Date', 'Currency', 'Total (native)', 'Balance Due (native)', 'FX Rate to CAD', 'Total (CAD)', 'Balance Due (CAD)', 'Days Overdue', 'Bucket'],
                 array_map(fn($r) => [
                     $r['invoice_number'],
                     $r['company_name'],
                     $r['invoice_date'],
                     $r['due_date'],
+                    $r['currency'],
+                    ReportBuilder::csvMoney($r['total_amount_native']),
+                    ReportBuilder::csvMoney($r['balance_due_native']),
+                    $r['exchange_rate_to_cad'] ?? '1',
                     ReportBuilder::csvMoney($r['total_amount']),
-                    ReportBuilder::csvMoney($r['amount_paid']),
                     ReportBuilder::csvMoney($r['balance_due']),
                     max(0, (int) $r['days_overdue']),
                     str_replace('_', '–', $r['aging_bucket']),
@@ -382,9 +398,13 @@ switch ($view) {
 
         $table  = $rows;
         $totals = [
-            'total_outstanding' => bcround((string) array_sum(array_column($rows, 'balance_due')), 2),
-            'invoice_count'     => count($rows),
-            'buckets'           => $buckets,
+            'total_outstanding'     => $aging['totals']['total'],   // CAD, bcmath
+            'invoice_count'         => count($rows),
+            'buckets'               => $buckets,
+            'as_of_date'            => $asOf,
+            'currency'              => 'CAD',
+            'native_totals'         => $aging['native_totals'],
+            'fx_rate_missing_count' => $aging['fx_rate_missing_count'],
         ];
         break;
 

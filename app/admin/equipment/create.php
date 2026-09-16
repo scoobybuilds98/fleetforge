@@ -330,35 +330,14 @@ require_once FF_ROOT . '/includes/header.php';
                             </button>
                         </div>
                     </div>
-                    <div class="form-group">
-                        <label class="form-label" for="mvi_expiry">MVI Expiry</label>
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            <input type="date" id="mvi_expiry" class="form-control" x-model="form.mvi_expiry"
-                                   min="<?= date('Y-m-d') ?>" x-ref="eqMviExp" style="flex:1;">
-                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqMviExp.showPicker ? $refs.eqMviExp.showPicker() : $refs.eqMviExp.click()">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
-                            </button>
-                        </div>
-                    </div>
+                    <!-- MVI Expiry removed from the create form to match the unit editor + show
+                         page (S-UNIT-COMPLIANCE-HIDE-MVI-INS): MVI/Insurance are no longer
+                         tracked, alerted or badged, so a date entered here would be invisible. -->
                 </div>
 
-                <div class="form-row-2">
-                    <div class="form-group">
-                        <label class="form-label" for="insurance_expiry">Insurance Expiry</label>
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            <input type="date" id="insurance_expiry" class="form-control" x-model="form.insurance_expiry"
-                                   min="<?= date('Y-m-d') ?>" x-ref="eqInsExp" style="flex:1;">
-                            <button type="button" class="btn btn-ghost btn-sm" style="padding:0 10px;height:38px;flex-shrink:0;" title="Open calendar" @click="$refs.eqInsExp.showPicker ? $refs.eqInsExp.showPicker() : $refs.eqInsExp.click()">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"/></svg>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label" for="insurance_interval_days">Insurance Renewal Interval (days)</label>
-                        <input type="number" id="insurance_interval_days" class="form-control font-mono"
-                               x-model="form.insurance_interval_days" min="1" placeholder="365">
-                    </div>
-                </div>
+                <!-- Insurance Expiry + Insurance Renewal Interval removed for the same reason.
+                     form.mvi_expiry / insurance_expiry / insurance_interval_days stay in the
+                     Alpine data object (empty → null server-side) so the payload shape is unchanged. -->
 
             </div>
         </div>
@@ -402,6 +381,17 @@ require_once FF_ROOT . '/includes/header.php';
         <div class="form-error-banner" data-form-error></div>
 
     </form>
+
+<?php
+// The shared overlay must sit INSIDE the x-data scope: its <template x-if>
+// blocks read this component's submitting/showSuccessOverlay. It used to be
+// included after </script>, outside the component, so it threw
+// "submitting is not defined" and never rendered.
+$overlayTitle    = 'Unit Added!';
+$overlaySubtitle = 'Redirecting to equipment details…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
 </div><!-- /x-data -->
 
 <script>
@@ -601,11 +591,5 @@ function FF_CreateUnit() {
     };
 }
 </script>
-
-<?php
-$overlayTitle    = 'Unit Added!';
-$overlaySubtitle = 'Redirecting to equipment details…';
-require_once FF_ROOT . '/includes/success_overlay.php';
-?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

@@ -37,6 +37,7 @@ if (!$period) {
 }
 
 // --- Summary: count of posted JEs and total debits/credits ---
+// reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
 $summary = db_row(
     "SELECT
         COUNT(DISTINCT je.id) AS total_entries,
@@ -45,7 +46,7 @@ $summary = db_row(
      FROM acc_journal_entries je
      LEFT JOIN acc_journal_entry_lines jel ON jel.journal_entry_id = je.id
      WHERE je.period_id = ?
-       AND je.status = 'posted'",
+       AND je.status IN (" . \FleetForge\Accounting\AccountingService::LEDGER_STATUSES_SQL . ")",
     [$id]
 );
 

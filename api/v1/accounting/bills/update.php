@@ -6,6 +6,12 @@ declare(strict_types=1);
  *
  * Update a draft AP bill. Only draft bills can be edited.
  * Uses optimistic locking (D19) via updated_at comparison.
+ * Rejects (422) a supplier invoice # (vendor_bill_number) already used on
+ * another live (non-void) bill from the SAME vendor (bug #9).
+ * vendor_bill_number / work_order_id / equipment_unit_id / notes keep their
+ * stored value when the key is absent from the payload (they used to be
+ * silently nulled, which also dropped the bill↔work-order link that
+ * VendorSpend relies on to avoid double-counting spend).
  *
  * @method  POST
  * @body    id, updated_at (optimistic lock), plus same fields as create
@@ -63,21 +69,31 @@ if (!optimistic_lock_matches($submittedUpdatedAt, $bill['updated_at'])) {
 $vendorId        = clean_int($input['vendor_id'] ?? null) ?? (int)$bill['vendor_id'];
 $billDate        = clean_date($input['bill_date'] ?? null) ?? $bill['bill_date'];
 $dueDate         = clean_date($input['due_date'] ?? null) ?? $bill['due_date'];
-$vendorBillNum   = clean_string($input['vendor_bill_number'] ?? null);
+// Absent key = keep the stored value; explicit empty string clears it.
+$vendorBillNum   = array_key_exists('vendor_bill_number', $input)
+    ? clean_string($input['vendor_bill_number'])
+    : $bill['vendor_bill_number'];
 
 // S-QBO-BILL-GOTCHAS-PAYDOWN D-QBO-BILL-GOTCHAS-2: enforce 21-char limit at
 // INPUT time — same as bills/create.php. Catches edits where operator
 // extends vendor_bill_number past the QBO Bill.DocNumber limit.
 if ($vendorBillNum !== null && strlen($vendorBillNum) > \FleetForge\QboPushers\QboFieldLimits::INVOICE_DOC_NUMBER_MAX) {
-    json_error('VALIDATION_ERROR', sprintf(
-        "vendor_bill_number must be %d characters or fewer (currently %d). QBO Bill.DocNumber limit.",
+    // Field-keyed so the bill form paints it under the Vendor Invoice # input.
+    json_validation_error(['vendor_bill_number' => sprintf(
+        "Vendor bill number must be %d characters or fewer (currently %d). QBO Bill.DocNumber limit.",
         \FleetForge\QboPushers\QboFieldLimits::INVOICE_DOC_NUMBER_MAX,
         strlen($vendorBillNum)
-    ), 422);
+    )]);
 }
-$workOrderId     = clean_int($input['work_order_id'] ?? null);
-$equipmentUnitId = clean_int($input['equipment_unit_id'] ?? null);
-$notes           = clean_string($input['notes'] ?? null, 2000);
+$workOrderId     = array_key_exists('work_order_id', $input)
+    ? clean_int($input['work_order_id'])
+    : ($bill['work_order_id'] !== null ? (int) $bill['work_order_id'] : null);
+$equipmentUnitId = array_key_exists('equipment_unit_id', $input)
+    ? clean_int($input['equipment_unit_id'])
+    : ($bill['equipment_unit_id'] !== null ? (int) $bill['equipment_unit_id'] : null);
+$notes           = array_key_exists('notes', $input)
+    ? clean_string($input['notes'], 2000)
+    : $bill['notes'];
 
 // Cross-field date check
 if ($billDate && $dueDate && strtotime($dueDate) < strtotime($billDate)) {
@@ -88,6 +104,21 @@ if ($billDate && $dueDate && strtotime($dueDate) < strtotime($billDate)) {
 $vendor = db_row("SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL", [$vendorId]);
 if (!$vendor) {
     json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+}
+
+// Bug #9: same supplier invoice # must not be on two live bills of one vendor.
+// Pre-check for a fast 422; re-checked under the vendor lock in the transaction.
+if ($dup = \FleetForge\Accounting\AccountingService::findDuplicateVendorBill($vendorId, $vendorBillNum, $id)) {
+    $dupMsg = "Supplier invoice # {$vendorBillNum} is already entered for {$vendor['name']} on bill {$dup['bill_number']} ({$dup['status']}). Open that bill instead of entering it twice.";
+    json_validation_error(['vendor_bill_number' => $dupMsg], $dupMsg);
+}
+
+// Validate optional work order / unit links (same rules as create.php)
+if ($workOrderId && !db_row("SELECT id FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL", [$workOrderId])) {
+    json_validation_error(['work_order_id' => 'Work order not found.'], 'Work order not found.');
+}
+if ($equipmentUnitId && !db_row("SELECT id FROM equipment_units WHERE id = ? AND deleted_at IS NULL", [$equipmentUnitId])) {
+    json_validation_error(['equipment_unit_id' => 'Equipment unit not found.'], 'Equipment unit not found.');
 }
 
 // Parse lines
@@ -191,6 +222,13 @@ $result = db_transaction(function () use (
     $equipmentUnitId, $notes, $subtotal, $taxGst, $taxPst, $taxHst,
     $taxTotal, $totalAmount, $validatedLines, $bill, $vendor
 ) {
+    // Race-safe twin of the duplicate supplier invoice pre-check.
+    db_row("SELECT id FROM vendors WHERE id = ? FOR UPDATE", [$vendorId]);
+    if ($dup = \FleetForge\Accounting\AccountingService::findDuplicateVendorBill($vendorId, $vendorBillNum, $id)) {
+        $dupMsg = "Supplier invoice # {$vendorBillNum} is already entered for {$vendor['name']} on bill {$dup['bill_number']} ({$dup['status']}). Open that bill instead of entering it twice.";
+        json_validation_error(['vendor_bill_number' => $dupMsg], $dupMsg);
+    }
+
     // Resolve period
     $period = \FleetForge\Accounting\AccountingService::periodForDate($billDate);
     if (!$period) {

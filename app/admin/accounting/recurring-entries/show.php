@@ -7,6 +7,11 @@
  * history. Pause/Unpause action via inline Alpine. Post-Now action
  * available to super_admin/manager only (matches the API gate).
  *
+ * Overdue banner: when next_post_date has passed, the page says how many
+ * occurrences are unposted, whether the nightly scheduler is switched off
+ * (Settings → Scheduled Jobs), and offers "Catch up now" — which posts each
+ * missed occurrence once, dated on its scheduled date.
+ *
  * @session S037-REC
  */
 
@@ -65,6 +70,14 @@ $roleSlug      = current_user()['role_slug'] ?? '';
 $canPostNow    = $canEdit && in_array($roleSlug, ['super_admin', 'manager'], true);
 $canBeDeleted  = count($history) === 0;
 
+// Overdue state — computed with the same engine the cron + Post Now use, so
+// the count shown is exactly what "Catch up now" would post.
+$today          = \FleetForge\Accounting\AccountingService::businessToday();
+$missedDates    = ((int) $template['is_active'] === 1)
+    ? \FleetForge\Accounting\RecurringEntryService::dueOccurrences($template, $today, 1000)
+    : [];
+$cronOn         = cron_enabled('accounting_recurring_entries');
+
 $sumDr = '0.00'; $sumCr = '0.00';
 foreach ($lines as $l) {
     $sumDr = bcadd($sumDr, (string) $l['debit'], 2);
@@ -100,6 +113,27 @@ require_once FF_ROOT . '/includes/header.php';
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
 <div x-data="recurringShow(<?= (int) $id ?>)">
+    <?php if ($missedDates): ?>
+    <!-- Overdue banner -->
+    <div class="alert alert-warning" role="status" style="margin-bottom:14px;">
+        <div style="font-weight:600;margin-bottom:4px;">
+            Overdue — <?= count($missedDates) ?> occurrence<?= count($missedDates) === 1 ? '' : 's' ?> not posted
+            (<?= e($missedDates[0]) ?><?= count($missedDates) > 1 ? ' → ' . e(end($missedDates)) : '' ?>)
+        </div>
+        <div style="font-size:0.8125rem;">
+            <?php if (!$cronOn): ?>
+                The nightly <strong>Recurring journal entries</strong> job is switched <strong>off</strong>
+                in Settings → Scheduled Jobs, so nothing posts automatically.
+            <?php else: ?>
+                The nightly job posts every missed occurrence on its next run (up to 24 per run).
+            <?php endif; ?>
+            <?php if ($canPostNow): ?>
+                “Catch up now” posts each one once, dated on its scheduled date<?= ((int) $template['auto_post']) === 1 ? '' : ' (as drafts for review — this template is not auto-post)' ?>.
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Header card -->
     <div class="card" style="padding:18px;margin-bottom:14px;">
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
@@ -125,7 +159,9 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <div>
                 <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Next Post</div>
-                <div class="font-mono"><?= e($template['next_post_date'] ?? '—') ?></div>
+                <div class="font-mono"><?= e($template['next_post_date'] ?? '—') ?>
+                    <?php if ($missedDates): ?><span class="badge badge-warning" style="margin-left:6px;font-size:0.65rem;">Overdue</span><?php endif; ?>
+                </div>
             </div>
             <div>
                 <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Last Posted</div>
@@ -148,8 +184,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <button class="btn btn-secondary btn-sm" @click="togglePause()" x-text="'<?= ((int) $template['is_active']) === 1 ? 'Pause' : 'Unpause' ?>'"></button>
             <?php endif; ?>
             <?php if ($canPostNow): ?>
-                <button class="btn btn-primary btn-sm" @click="postNow()" :disabled="posting"
-                        x-text="posting ? 'Posting…' : 'Post Now'">Post Now</button>
+                <button class="btn btn-primary btn-sm" @click="postNow(<?= count($missedDates) ?>)" :disabled="posting"
+                        x-text="posting ? 'Posting…' : '<?= $missedDates ? 'Catch up now (' . count($missedDates) . ')' : 'Post Now' ?>'"><?= $missedDates ? 'Catch up now' : 'Post Now' ?></button>
             <?php endif; ?>
             <?php if ($canDelete && $canBeDeleted): ?>
                 <button class="btn btn-danger btn-sm" @click="del()">Delete</button>
@@ -258,8 +294,11 @@ function recurringShow(id) {
                 else alert((j && j.error && j.error.message) || 'Toggle failed.');
             } catch (e) { alert('Toggle failed: ' + e.message); }
         },
-        async postNow() {
-            if (!confirm('Post this template now? Idempotent — re-running on the same year-month returns the existing JE.')) return;
+        async postNow(missed) {
+            const prompt = missed > 0
+                ? 'Post the ' + missed + ' missed occurrence(s) now? Each is posted once, dated on its scheduled date. Safe to re-run.'
+                : 'Post this template now? Idempotent — re-running on the same year-month returns the existing JE.';
+            if (!confirm(prompt)) return;
             this.posting = true; this.postMsg = ''; this.postIsError = false;
             try {
                 const csrf = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
@@ -268,16 +307,28 @@ function recurringShow(id) {
                     body: JSON.stringify({ id: this.id })
                 });
                 const j = await r.json();
-                if (j && j.success) {
-                    const created = j.data && j.data.created;
-                    const je = j.data && j.data.je;
+                const d = (j && j.data) || {};
+                if (j && j.success && d.mode === 'catch_up') {
+                    const n = (d.posted || []).length;
+                    this.postMsg = '✓ Posted ' + n + ' missed occurrence' + (n === 1 ? '' : 's')
+                        + (n ? ' (' + d.posted.map(p => p.entry_number).join(', ') + ')' : '')
+                        + ((d.skipped || []).length ? ' — ' + d.skipped.length + ' already posted' : '')
+                        + (d.remaining ? ' — ' + d.remaining + ' still due, run again' : '') + '.';
+                    setTimeout(() => window.location.reload(), 2000);
+                } else if (j && j.success) {
+                    const created = d.created;
+                    const je = d.je;
                     this.postMsg = created
                         ? '✓ Posted ' + (je ? je.entry_number : '(new JE)')
                         : 'Already posted (' + (je ? je.entry_number : 'existing JE') + ') — idempotent skip.';
                     setTimeout(() => window.location.reload(), 1500);
                 } else {
+                    // A catch-up that stopped part-way still posted the earlier months.
                     this.postMsg = (j && j.error && j.error.message) || 'Post failed.';
                     this.postIsError = true;
+                    if (j && j.error && j.error.result && (j.error.result.posted || []).length) {
+                        setTimeout(() => window.location.reload(), 4000);
+                    }
                 }
             } catch (e) { this.postMsg = 'Post failed: ' + e.message; this.postIsError = true; }
             this.posting = false;

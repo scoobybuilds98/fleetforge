@@ -5,7 +5,7 @@ declare(strict_types=1);
  * api/v1/compliance/update.php
  *
  * Update a compliance document's from/expiry dates for a single equipment unit.
- * Accepts a doc_type (cvi/registration/insurance) and sets both the from_date
+ * Accepts a doc_type (cvi/registration) and sets both the from_date
  * and expiry_date in one atomic write — the two dates are always updated together
  * so the UI can submit whatever the user typed without a second round-trip.
  *
@@ -13,7 +13,10 @@ declare(strict_types=1);
  *
  * @method  POST
  * @body    unit_id     (int, required)
- *          doc_type    (string, one of: cvi | registration | insurance)
+ *          doc_type    (string, one of: cvi | registration — 'insurance' dropped:
+ *                       insurance is no longer a tracked compliance document,
+ *                       S-UNIT-COMPLIANCE-HIDE-MVI-INS; the Compliance grid only
+ *                       ever sends cvi | registration)
  *          expiry_date (string Y-m-d | null — the "to" date)
  *          from_date   (string Y-m-d | null — the "valid from" date)
  *          updated_at  (string Y-m-d H:i:s, required — D19 optimistic lock)
@@ -45,10 +48,10 @@ if (!$unitId) {
 // -----------------------------------------------------------------------
 // 2. Validate doc_type
 // -----------------------------------------------------------------------
-$allowedDocTypes = ['cvi', 'registration', 'insurance'];
+$allowedDocTypes = ['cvi', 'registration'];
 $docType = clean_string($body['doc_type'] ?? null, 20);
 if (!$docType || !in_array($docType, $allowedDocTypes, true)) {
-    json_error('VALIDATION_ERROR', 'doc_type must be one of: cvi, registration, insurance.', 422);
+    json_error('VALIDATION_ERROR', 'doc_type must be one of: cvi, registration.', 422);
 }
 
 // -----------------------------------------------------------------------

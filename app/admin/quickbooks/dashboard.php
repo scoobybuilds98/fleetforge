@@ -107,9 +107,13 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-card__header text-secondary text-sm">Sync Queue</div>
             <div class="stat-card__value" style="font-size:2rem;font-weight:600;margin:4px 0;" x-text="data.cards ? data.cards.sync_queue.queued : '—'"></div>
             <div class="text-secondary text-sm">queued items</div>
-            <div class="text-secondary text-sm" style="margin-top:8px;font-size:0.75rem;" x-show="data.cards" x-cloak>
-                <span x-text="data.cards.sync_queue.processing"></span> processing · <span x-text="data.cards.sync_queue.failed"></span> failed
-            </div>
+            <?php // x-if, not x-show: x-show still evaluates the children, which read
+                  // data.cards.* while data.cards is null before loadMetrics() resolves. ?>
+            <template x-if="data.cards">
+                <div class="text-secondary text-sm" style="margin-top:8px;font-size:0.75rem;">
+                    <span x-text="data.cards.sync_queue.processing"></span> processing · <span x-text="data.cards.sync_queue.failed"></span> failed
+                </div>
+            </template>
         </a>
 
         <!-- Card 2: Unresolved Drift -->
@@ -127,9 +131,11 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="stat-card__header text-secondary text-sm">Last 24h Activity</div>
             <div class="stat-card__value" style="font-size:2rem;font-weight:600;margin:4px 0;" x-text="data.cards ? data.cards.activity_24h.total : '—'"></div>
             <div class="text-secondary text-sm">API calls</div>
-            <div class="text-secondary text-sm" style="margin-top:8px;font-size:0.75rem;" x-show="data.cards" x-cloak>
-                <span x-text="data.cards.activity_24h.ok"></span> ok · <span x-text="data.cards.activity_24h.errors"></span> errors
-            </div>
+            <template x-if="data.cards">
+                <div class="text-secondary text-sm" style="margin-top:8px;font-size:0.75rem;">
+                    <span x-text="data.cards.activity_24h.ok"></span> ok · <span x-text="data.cards.activity_24h.errors"></span> errors
+                </div>
+            </template>
         </a>
 
         <!-- Card 4: Master Sync Status -->

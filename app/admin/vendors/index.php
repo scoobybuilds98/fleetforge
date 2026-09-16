@@ -40,10 +40,11 @@ $kpis = [
 
 // Top total_spent vendor (for KPI tile headline)
 $topSpendRow = db_row(
-    "SELECT name, total_spent FROM vendors
+    "SELECT id, name, total_spent FROM vendors
      WHERE deleted_at IS NULL AND total_spent > 0
      ORDER BY total_spent DESC LIMIT 1"
 );
+$kpis['top_vendor_id']    = isset($topSpendRow['id']) ? (int) $topSpendRow['id'] : null; // tile links to the vendor
 $kpis['top_vendor_name']  = $topSpendRow['name'] ?? null;
 $kpis['top_vendor_spent'] = $topSpendRow['total_spent'] ?? '0.00';
 
@@ -89,10 +90,11 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- TILES-1: Active Work Orders drills to the maintenance list filtered
-         to open statuses; Top Vendor by Spend jumps to that vendor's show page
+         to the open + in-progress + waiting-parts roll-up (status=active, the
+         same set the count covers — bug #25); Top Vendor by Spend jumps to that vendor's show page
          when a top vendor exists, otherwise falls back to the maintenance list. -->
     <a class="stat-card stat-card--teal"
-       href="<?= base_url('maintenance_work_orders') ?>?status=open"
+       href="<?= base_url('maintenance_work_orders') ?>?status=active"
        style="cursor:pointer;text-decoration:none"
        title="Click to view open work orders">
         <span class="stat-icon stat-icon--teal"><svg><use href="#icon-wrench"/></svg></span>
@@ -310,6 +312,7 @@ function vendorsKpis() {
             total:            <?= json_encode($kpis['total']) ?>,
             preferred:        <?= json_encode($kpis['preferred']) ?>,
             active_wo:        <?= json_encode($kpis['active_wo']) ?>,
+            top_vendor_id:    <?= json_encode($kpis['top_vendor_id']) ?>,
             top_vendor_name:  <?= json_encode($kpis['top_vendor_name']) ?>,
             top_vendor_spent: <?= json_encode($kpis['top_vendor_spent']) ?>,
         },

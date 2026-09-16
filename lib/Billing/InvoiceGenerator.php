@@ -96,6 +96,10 @@ class InvoiceGenerator
      *   odometer_at_period_end_km:   ?string|float,
      *   odometer_source:             ?string ('gps'|'manual'|'estimated'),
      *   odometer_fetched_at:         ?string (ISO 8601)
+     *   // S-CLOSE-MILEAGE-SEMANTICS: true when the caller (lease close) already
+     *   // carries the close's mileage as an extra 'mileage' overage line — the
+     *   // legacy per-period mileage_usage emit then stands down (no double bill)
+     *   suppress_usage_mileage:      ?bool
      * }
      * @return array{invoice_id: int, invoice_number: string}
      */
@@ -1326,6 +1330,9 @@ class InvoiceGenerator
             } elseif ($estimateEmitAllowed && $prechargeGatePasses
                 && $periodDistanceKm !== null
                 && bccomp((string) $periodDistanceKm, '0', 2) > 0
+                // S-CLOSE-MILEAGE-SEMANTICS: lease close already put this
+                // distance on the invoice as its 'mileage' overage extra line.
+                && empty($params['suppress_usage_mileage'])
             ) {
                 // ═══ Legacy actual per-period usage (per-day estimate == 0) ═══
                 // Restores the pre-S-MILEAGE-EST-DAILY behavior for leases that

@@ -312,6 +312,34 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                     </dd>
                     <dt>Overpayment Resolved</dt>
                     <dd><?= $payment['overpayment_resolved'] ? '✓ Yes' : '✗ No' ?></dd>
+                    <?php
+                    // payments/create.php routes the excess to a credit note stamped with
+                    // source_payment_id — link it so staff can see/apply the account
+                    // credit without hunting through the credit-notes list. Gated on the
+                    // credit-notes module's own permission (invoices:view).
+                    $overpaymentCns = can('invoices', 'view')
+                        ? db_select(
+                            "SELECT id, credit_note_number, amount_remaining, currency, status
+                             FROM credit_notes
+                             WHERE source_payment_id = ? AND deleted_at IS NULL
+                             ORDER BY id ASC",
+                            [$id]
+                        )
+                        : [];
+                    ?>
+                    <?php if ($overpaymentCns): ?>
+                        <dt>Credit Note</dt>
+                        <dd>
+                            <?php foreach ($overpaymentCns as $_ocn): ?>
+                                <div>
+                                    <a href="<?= base_url('credit_notes/show') ?>?id=<?= (int) $_ocn['id'] ?>" class="link font-mono"><?= e($_ocn['credit_note_number']) ?></a>
+                                    <span style="font-size:0.8rem; color:var(--text-secondary);">
+                                        <?= format_currency($_ocn['amount_remaining']) ?> <?= e($_ocn['currency']) ?> remaining · <?= e(str_replace('_', ' ', $_ocn['status'])) ?>
+                                    </span>
+                                </div>
+                            <?php endforeach; ?>
+                        </dd>
+                    <?php endif; ?>
                 <?php endif; ?>
 
                 <?php if (bccomp((string)$payment['refund_amount'], '0', 2) > 0): ?>

@@ -81,7 +81,9 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     </div>
 </div>
 
-<div id="mileage-page-wrapper" x-data="{ showSuccessOverlay: false }">
+<?php // The form itself is vanilla JS; this wrapper only exists to host the shared
+      // success overlay, which reads BOTH `submitting` and `showSuccessOverlay`. ?>
+<div id="mileage-page-wrapper" x-data="{ submitting: false, showSuccessOverlay: false }">
 
 <div class="card" style="max-width:720px;">
     <div class="card-header">
@@ -286,7 +288,8 @@ function mileageValidate() {
     if (!f.log_date) {
         errs.log_date = 'Log date is required.';
     } else {
-        const today = new Date().toISOString().split('T')[0];
+        // Local calendar day — toISOString() is the UTC day (a day ahead after 5pm Pacific).
+        const today = FF_localDate();
         if (f.log_date > today) errs.log_date = 'Log date cannot be in the future.';
     }
     return errs;
@@ -306,6 +309,9 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
     const btn = document.getElementById('submit-btn');
     btn.disabled = true;
     btn.textContent = 'Saving…';
+    // Drive the shared "Saving…" overlay via the Alpine wrapper's flag.
+    const overlayState = Alpine.$data(document.getElementById('mileage-page-wrapper'));
+    overlayState.submitting = true;
 
     const form = new FormData(this);
     // Remove empty lease_id so API treats it as null
@@ -328,6 +334,7 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
             const fields = err.fields || data.data?.fields || {};
             const top = err.message || data.error?.message || 'Failed to save. Please check your input.';
             mileagePaintErrors(fields, top);
+            overlayState.submitting = false;
             btn.disabled = false;
             btn.textContent = 'Save Entry';
             return;
@@ -335,13 +342,14 @@ document.getElementById('mileage-form').addEventListener('submit', async functio
 
         // Show success overlay then redirect to the new entry
         const _newId = data.data.id;
-        Alpine.$data(document.getElementById('mileage-page-wrapper')).showSuccessOverlay = true;
+        overlayState.showSuccessOverlay = true;
         setTimeout(() => { window.location.href = '<?= base_url('mileage_logs/show') ?>?id=' + _newId; }, 3500);
 
     } catch (err) {
         const errEl = document.getElementById('js-error');
         errEl.textContent = 'Network error. Please try again.';
         errEl.style.display = 'block';
+        overlayState.submitting = false;
         btn.disabled = false;
         btn.textContent = 'Save Entry';
     }

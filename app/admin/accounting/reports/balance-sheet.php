@@ -65,7 +65,8 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="report && !report.is_balanced">
         <div class="alert alert-danger" style="margin-bottom:14px;font-size:0.85rem;">
             <strong>Balance sheet unbalanced</strong> — drift <span x-text="fmt(report.drift)"></span>.
-            This usually indicates an AR/AP reconciliation gap (known issue, deferred to S-QBO-27).
+            Assets, liabilities, equity and earnings are all read from the same posted ledger, so a
+            drift means a journal entry with unequal debits and credits — run the Trial Balance to find it.
         </div>
     </template>
 
@@ -85,15 +86,20 @@ require_once FF_ROOT . '/includes/header.php';
                         <template x-if="hasCompare()"><th style="padding:8px 10px;text-align:right;">Compare</th></template>
                     </tr>
                 </thead>
-                <tbody>
-                    <template x-for="(grp, gi) in sections" :key="gi">
-                        <template>
+                    <!-- WHY one <tbody> per section: an x-for iteration must render
+                         exactly ONE root element. This used a bare nested <template>
+                         as the root, which Alpine clones as an inert element — so no
+                         section header, account row or section total ever rendered;
+                         only the grand-total rows below showed. A table may hold any
+                         number of <tbody> elements, so each section gets its own. -->
+                <template x-for="(grp, gi) in sections" :key="gi">
+                    <tbody>
                             <tr style="background:var(--bg-elev);">
                                 <td colspan="3" style="padding:8px 10px;font-weight:600;" x-text="grp.label"></td>
                             </tr>
                             <template x-for="r in grp.rows" :key="r.account_id">
                                 <tr style="border-bottom:1px solid var(--border-default);">
-                                    <td style="padding:6px 14px;font-family:var(--font-mono);font-size:0.78rem;" x-text="r.code + ' — ' + r.name"></td>
+                                    <td style="padding:6px 14px;font-family:var(--font-mono);font-size:0.78rem;" x-text="r.code ? r.code + ' — ' + r.name : r.name"></td>
                                     <td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(r.amount)"></td>
                                     <template x-if="hasCompare()">
                                         <td class="font-mono" style="padding:6px 10px;text-align:right;color:var(--text-secondary);" x-text="fmt(r.compare_amount || '0.00')"></td>
@@ -105,14 +111,16 @@ require_once FF_ROOT . '/includes/header.php';
                                 <td class="font-mono" style="padding:6px 10px;text-align:right;font-weight:600;" x-text="fmt(grp.total)"></td>
                                 <template x-if="hasCompare()"><td></td></template>
                             </tr>
-                        </template>
-                    </template>
-                    <tr style="border-top:2px solid var(--border-default);background:#d8e6ff;">
+                    </tbody>
+                </template>
+                <tbody>
+                    <!-- grand-total rows: --bg-selected is the brand tint defined in BOTH theme blocks (the old hardcoded light blue left white-on-pale text unreadable in dark mode) -->
+                    <tr style="border-top:2px solid var(--border-default);background:var(--bg-selected);">
                         <td style="padding:10px 10px;font-weight:700;">Total Assets</td>
                         <td class="font-mono" style="padding:10px 10px;text-align:right;font-weight:700;" x-text="fmt(report.total_assets)"></td>
                         <template x-if="hasCompare()"><td></td></template>
                     </tr>
-                    <tr style="background:#d8e6ff;">
+                    <tr style="background:var(--bg-selected);">
                         <td style="padding:10px 10px;font-weight:700;">Total Liabilities + Equity</td>
                         <td class="font-mono" style="padding:10px 10px;text-align:right;font-weight:700;" x-text="fmt(report.total_liabilities_and_equity)"></td>
                         <template x-if="hasCompare()"><td></td></template>
@@ -127,7 +135,7 @@ require_once FF_ROOT . '/includes/header.php';
 function bsReport() {
     const apiBase = '<?= e(base_url('api/v1/accounting')) ?>';
     return {
-        form: { as_of: new Date().toISOString().slice(0,10), comparison: 'none' },
+        form: { as_of: FF_localDate(), comparison: 'none' },
         report: null,
         loading: false,
         aiLoading: false,

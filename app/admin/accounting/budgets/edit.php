@@ -94,14 +94,19 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <script>
+// WHY json_encode + JSON_HEX_* (not htmlspecialchars): these values land inside a
+// <script> block, where the HTML parser does NOT decode entities — htmlspecialchars
+// turned every JSON quote into &quot;, a JS syntax error ("Unexpected token '&'")
+// that left the whole Alpine component undefined. The JSON_HEX_* flags escape
+// < > & ' " as \u00XX so a budget name/note can't close the script tag.
 function budgetEdit() {
     return {
         form: {
             id: <?= (int) $id ?>,
-            updated_at: <?= htmlspecialchars(json_encode($budget['updated_at']), ENT_QUOTES) ?>,
-            name: <?= htmlspecialchars(json_encode($budget['name']), ENT_QUOTES) ?>,
-            version: <?= htmlspecialchars(json_encode($budget['version']), ENT_QUOTES) ?>,
-            notes: <?= htmlspecialchars(json_encode($budget['notes'] ?? ''), ENT_QUOTES) ?>
+            updated_at: <?= json_encode($budget['updated_at'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+            name: <?= json_encode($budget['name'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+            version: <?= json_encode($budget['version'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+            notes: <?= json_encode($budget['notes'] ?? '', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
         },
         saving: false,
         error: '',

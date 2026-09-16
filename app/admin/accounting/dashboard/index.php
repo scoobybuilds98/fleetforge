@@ -31,34 +31,25 @@ use FleetForge\Accounting\AccountingService;
 // 1. Current open period
 $currentPeriod = AccountingService::currentOpenPeriod();
 
-// 2. YTD Revenue — sum credits minus debits on revenue-type accounts (credit-normal)
-$ytdRevenue = db_row(
-    "SELECT COALESCE(SUM(jel.credit) - SUM(jel.debit), 0) AS total
-     FROM acc_journal_entry_lines jel
-     JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-     JOIN acc_accounts a ON a.id = jel.account_id
-     WHERE je.status = 'posted'
-       AND a.account_type = 'revenue'
-       AND YEAR(je.entry_date) = YEAR(CURDATE())",
-    []
-);
-
-// 3. YTD Expenses — sum debits minus credits on expense-type accounts (debit-normal)
-// WHY: Expense accounts include both operating_expense and cost_of_revenue types
-$ytdExpenses = db_row(
-    "SELECT COALESCE(SUM(jel.debit) - SUM(jel.credit), 0) AS total
-     FROM acc_journal_entry_lines jel
-     JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-     JOIN acc_accounts a ON a.id = jel.account_id
-     WHERE je.status = 'posted'
-       AND a.account_type IN ('operating_expense', 'cost_of_revenue', 'other_expense')
-       AND YEAR(je.entry_date) = YEAR(CURDATE())",
-    []
-);
-
-$revenueTotal  = $ytdRevenue['total'] ?? '0.00';
-$expenseTotal  = $ytdExpenses['total'] ?? '0.00';
-$netIncomeYtd  = bcsub($revenueTotal, $expenseTotal, 2);
+// 2–3. YTD Revenue / Expenses / Net Income — from the same engine as the
+// Profit & Loss report these tiles link to, so the numbers tie exactly.
+// WHY: these were hand-rolled SQL sums that (a) used the UTC calendar year
+// (YEAR(CURDATE()) — MySQL runs in UTC), (b) left other income out of revenue
+// and net income, and (c) read posted-only entries, so a reversed entry
+// counted as its own negative. ReportingService handles all three.
+// Revenue = revenue + other income; expenses = cost of revenue + opex + other
+// expense; revenue − expenses = the report's net income.
+$ytdFrom = substr(AccountingService::businessToday(), 0, 4) . '-01-01';
+$ytdPl   = \FleetForge\Accounting\ReportingService::profitAndLoss($ytdFrom, AccountingService::businessToday());
+$otherIncome  = '0.00';
+$otherExpense = '0.00';
+foreach ($ytdPl['other'] as $o) {
+    if ($o['account_type'] === 'other_expense') $otherExpense = bcadd($otherExpense, $o['amount'], 2);
+    else                                        $otherIncome  = bcadd($otherIncome, $o['amount'], 2);
+}
+$revenueTotal  = bcadd($ytdPl['revenue_total'], $otherIncome, 2);
+$expenseTotal  = bcadd(bcadd($ytdPl['direct_costs_total'], $ytdPl['opex_total'], 2), $otherExpense, 2);
+$netIncomeYtd  = $ytdPl['net_income'];
 
 // 4. AR Balance — from the configured AR control account
 $arAccountId = AccountingService::setting('accounting.ar_account_id');
@@ -159,7 +150,7 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
     </a>
 
     <!-- Revenue YTD → Income Statement -->
-    <a href="<?= base_url('accounting/statements') ?>"
+    <a href="<?= base_url('accounting/reports/profit-loss') ?>"
        class="stat-card stat-card--link stat-card--green"
        aria-label="Total Revenue YTD — open income statement">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span>
@@ -169,7 +160,7 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
     </a>
 
     <!-- Expenses YTD → Income Statement -->
-    <a href="<?= base_url('accounting/statements') ?>"
+    <a href="<?= base_url('accounting/reports/profit-loss') ?>"
        class="stat-card stat-card--link stat-card--red"
        aria-label="Total Expenses YTD — open income statement">
         <span class="stat-icon stat-icon--red"><svg><use href="#icon-chart-bar"/></svg></span>
@@ -179,7 +170,7 @@ require_once FF_ROOT . '/includes/partials/accounting-nav.php';
     </a>
 
     <!-- Net Income YTD → Income Statement -->
-    <a href="<?= base_url('accounting/statements') ?>"
+    <a href="<?= base_url('accounting/reports/profit-loss') ?>"
        class="stat-card stat-card--link stat-card--<?= bccomp($netIncomeYtd, '0.00', 2) >= 0 ? 'green' : 'red' ?>"
        aria-label="Net Income YTD — open income statement">
         <span class="stat-icon stat-icon--<?= bccomp($netIncomeYtd, '0.00', 2) >= 0 ? 'green' : 'red' ?>">
@@ -365,7 +356,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                             <template x-for="je in recentEntries" :key="je.id">
                                 <tr>
                                     <td>
-                                        <a :href="'<?= base_url('accounting/journal-entries') ?>?id=' + je.id"
+                                        <a :href="'<?= base_url('accounting/journal-entries/show') ?>?id=' + je.id"
                                            class="font-mono font-medium link"
                                            x-text="je.entry_number"></a>
                                     </td>
@@ -577,18 +568,17 @@ function FF_AccDashboard() {
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/accounting/journal_entries') ?>?per_page=10&sort=entry_date&dir=DESC');
                 if (r.success) {
-                    // WHY: The list API does not include line totals per entry.
-                    // Fetch each entry's total via a lightweight query of lines.
-                    // For dashboard display, we show the total debits (= total credits
-                    // on balanced entries) as the "amount".
-                    this.recentEntries = (r.data.items || []).map(je => ({
+                    // WHY: The list API already returns `debit_total` per entry
+                    // (a correlated SUM over its lines), and on a balanced entry
+                    // total debits = total credits, so that IS the entry amount.
+                    // This used to fire one `journal_entries/{id}` request per row
+                    // — a path-style URL no endpoint answers (404) — so every
+                    // amount silently fell back to $0.00.
+                    this.recentEntries = (r.data?.items || []).map(je => ({
                         ...je,
                         _posting: false,
-                        _total:   '0.00'
+                        _total:   je.debit_total ?? '0.00'
                     }));
-
-                    // WHY: Load totals for visible entries in parallel for performance.
-                    await this._loadEntryTotals();
                 } else {
                     this.loadError = r.error?.message || 'Failed to load journal entries.';
                 }
@@ -598,34 +588,13 @@ function FF_AccDashboard() {
             this.loading = false;
         },
 
-        /**
-         * Fetch line totals for each recent entry.
-         * WHY: The index endpoint returns entry metadata but not totals.
-         * We fetch each entry's detail to get the sum of debit lines.
-         */
-        async _loadEntryTotals() {
-            const promises = this.recentEntries.map(async (je) => {
-                try {
-                    const r = await FF_Api.get('<?= base_url('api/v1/accounting/journal_entries') ?>/' + je.id);
-                    if (r.success && r.data && r.data.lines) {
-                        let total = 0;
-                        for (const line of r.data.lines) {
-                            total += parseFloat(line.debit || 0);
-                        }
-                        je._total = total.toFixed(2);
-                    }
-                } catch(e) {
-                    // WHY: Non-critical — show $0.00 if individual fetch fails
-                }
-            });
-            await Promise.all(promises);
-        },
-
         // ── Quick-post a draft JE ─────────────────────────────────
         async quickPost(je) {
             je._posting = true;
             try {
-                const r = await FF_Api.post('<?= base_url('api/v1/accounting/journal_entries') ?>/' + je.id + '/post', {});
+                // post.php reads the entry id from the JSON body; there is no
+                // `journal_entries/{id}/post` path route (that URL 404'd).
+                const r = await FF_Api.post('<?= base_url('api/v1/accounting/journal_entries/post') ?>', { id: je.id });
                 if (r.success) {
                     je.status = 'posted';
                     FF_Toast.success('Journal entry ' + je.entry_number + ' posted.');

@@ -182,7 +182,9 @@ class AnomalyDetector
     // detectComplianceRisks
     //
     // Flags units with multiple compliance docs expiring within
-    // 14 days, or any already expired.
+    // 14 days, or any already expired. Tracked docs = CVI +
+    // Registration only: MVI/Insurance were removed from every
+    // compliance UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS).
     // ────────────────────────────────────────────────────────────
     private static function detectComplianceRisks(): array
     {
@@ -195,23 +197,17 @@ class AnomalyDetector
             "SELECT eu.id AS unit_id, eu.unit_number, CURDATE() AS db_today,
                     SUM(CASE WHEN eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS cvi_expiring,
                     SUM(CASE WHEN eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS reg_expiring,
-                    SUM(CASE WHEN eu.mvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS mvi_expiring,
-                    SUM(CASE WHEN eu.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS ins_expiring,
                     LEAST(
                         COALESCE(eu.cvi_expiry, '9999-12-31'),
-                        COALESCE(eu.registration_expiry, '9999-12-31'),
-                        COALESCE(eu.mvi_expiry, '9999-12-31'),
-                        COALESCE(eu.insurance_expiry, '9999-12-31')
+                        COALESCE(eu.registration_expiry, '9999-12-31')
                     ) AS earliest_expiry
              FROM equipment_units eu
              WHERE eu.status NOT IN ('decommissioned', 'inactive')
                AND eu.deleted_at IS NULL
                AND (eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
-                    OR eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
-                    OR eu.mvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
-                    OR eu.insurance_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY))
+                    OR eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY))
              GROUP BY eu.id, eu.unit_number
-             HAVING (cvi_expiring + reg_expiring + mvi_expiring + ins_expiring) >= 2
+             HAVING (cvi_expiring + reg_expiring) >= 2
                 OR earliest_expiry < CURDATE()"
         );
 
@@ -219,8 +215,7 @@ class AnomalyDetector
         foreach ($rows as $row) {
             $expired = $row['earliest_expiry'] < $row['db_today'];
             $severity = $expired ? 'high' : 'medium';
-            $expiringCount = (int) $row['cvi_expiring'] + (int) $row['reg_expiring']
-                           + (int) $row['mvi_expiring'] + (int) $row['ins_expiring'];
+            $expiringCount = (int) $row['cvi_expiring'] + (int) $row['reg_expiring'];
 
             $alerts[] = [
                 'alert_type'    => 'compliance_risk',

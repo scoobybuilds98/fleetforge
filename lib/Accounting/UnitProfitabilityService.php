@@ -14,7 +14,7 @@ declare(strict_types=1);
  *   GL-line attribution is available. Costs are pulled by JOINing
  *   acc_journal_entry_lines → acc_accounts WHERE
  *     jel.equipment_unit_id = $unitId
- *     AND je.status = 'posted'
+ *     AND je.status IN ('posted','reversed')
  *     AND je.entry_date BETWEEN $from AND $to
  *     AND a.account_type = 'cost_of_revenue'
  *   This is the canonical path; no fallback needed for this session.
@@ -158,6 +158,7 @@ class UnitProfitabilityService
         ];
 
         // 1. JE-line cost_of_revenue lines tagged with equipment_unit_id
+        // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
         $rows = \db_select(
             "SELECT a.code, a.name,
                     COALESCE(SUM(jel.debit), 0) AS total_debit,
@@ -166,7 +167,7 @@ class UnitProfitabilityService
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                JOIN acc_accounts a ON a.id = jel.account_id
               WHERE jel.equipment_unit_id = ?
-                AND je.status = 'posted'
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?
                 AND a.account_type = 'cost_of_revenue'
               GROUP BY a.id, a.code, a.name",
@@ -256,12 +257,13 @@ class UnitProfitabilityService
     /** Sum of operating_expense debits in [$from, $to] (the overhead pool). */
     public static function getOverheadPool(string $from, string $to): string
     {
+        // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
         $row = \db_row(
             "SELECT COALESCE(SUM(jel.debit - jel.credit), 0) AS pool
                FROM acc_journal_entry_lines jel
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                JOIN acc_accounts a ON a.id = jel.account_id
-              WHERE je.status = 'posted'
+              WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?
                 AND a.account_type = 'operating_expense'",
             [$from, $to]
@@ -583,12 +585,13 @@ class UnitProfitabilityService
         // maintenance as $0 absent a real ENUM value, and compute the ratio off GL
         // maintenance expense (account codes 6010-6030 per Mainland COA) against base
         // rental revenue — gives an operationally-meaningful ratio.
+        // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
         $maintRow = \db_row(
             "SELECT COALESCE(SUM(jel.debit - jel.credit), 0) AS total
                FROM acc_journal_entry_lines jel
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                JOIN acc_accounts a ON a.id = jel.account_id
-              WHERE je.status = 'posted'
+              WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?
                 AND a.code IN ('6010','6020','6030')",
             [$from, $to]

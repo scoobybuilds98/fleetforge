@@ -27,7 +27,9 @@ declare(strict_types=1);
  * @auth        Session required (require_auth_api)
  * @returns     { [chart_key]: { labels: [], series: [], ... } }
  *
- * @depends     api/bootstrap.php, includes/auth.php, includes/functions.php
+ * @depends     api/bootstrap.php, includes/auth.php, includes/functions.php,
+ *              lib/Reports/FleetUtilization.php (utilization_trend),
+ *              lib/Reports/ArAging.php (ar_aging)
  * @spec        FLEETFORGE_SPEC_FINAL.md §9 Charts & Analytics Specification
  * @design      FLEETFORGE_DESIGN_DETAILS.md §4 Dashboard Grid Layout
  * @session     S004
@@ -70,7 +72,11 @@ $cacheTtlMin  = 15;
 $results      = [];
 
 foreach ($chartsToFetch as $chartKey) {
-    $cacheHash = hash('sha256', 'dashboard_chart_' . $chartKey);
+    // Per-chart calc version: bumping it orphans a cached payload computed with
+    // superseded maths (utilization merge fix, CAD-canonical AR aging) instead
+    // of serving it for up to 15 more minutes.
+    $calcVersion = ['utilization_trend' => '|fleet-util-v2', 'ar_aging' => '|ar-aging-cad-v2'][$chartKey] ?? '';
+    $cacheHash = hash('sha256', 'dashboard_chart_' . $chartKey . $calcVersion);
 
     // ── Cache hit? ─────────────────────────────────────────────
     $cached = db_row(
@@ -234,54 +240,30 @@ function chart_fleet_status(): array
 }
 
 /**
- * AR aging — sum of balance_due bucketed into 4 age brackets.
+ * AR aging — horizontal bar, 4 buckets of outstanding balance as of today.
  *
- * Buckets are based on days between today and invoice due_date.
- * Only overdue / partially_paid / sent invoices are included.
+ * Built from lib/Reports/ArAging.php (the same calculation as Accounting →
+ * AR Aging and Reports → AR Aging), so amounts are CAD-canonical: each
+ * invoice's balance is converted with its own frozen exchange_rate_to_cad.
+ * WHY: the old inline query summed USD and CAD balances at face value.
+ * "0–30 days" folds not-yet-due (current) together with 1–30 days past due,
+ * as this chart always has.
  */
 function chart_ar_aging(): array
 {
-    $today = date('Y-m-d');
-
-    $rows = db_select(
-        "SELECT
-            DATEDIFF(?, due_date) AS days_overdue,
-            balance_due
-           FROM invoices
-          WHERE status IN ('overdue','partially_paid','sent')
-            AND deleted_at IS NULL
-            AND balance_due > 0",
-        [$today]
-    );
-
-    // WHY string init + bcadd loop: balance_due is monetary — D16 bcmath rule
-    $buckets = ['0-30' => '0.00', '31-60' => '0.00', '61-90' => '0.00', '90+' => '0.00'];
-
-    foreach ($rows as $row) {
-        $days = max(0, (int) $row['days_overdue']);
-        $amt  = (string) $row['balance_due'];
-
-        if ($days <= 30) {
-            $buckets['0-30']  = bcadd($buckets['0-30'],  $amt, 2);
-        } elseif ($days <= 60) {
-            $buckets['31-60'] = bcadd($buckets['31-60'], $amt, 2);
-        } elseif ($days <= 90) {
-            $buckets['61-90'] = bcadd($buckets['61-90'], $amt, 2);
-        } else {
-            $buckets['90+']   = bcadd($buckets['90+'],   $amt, 2);
-        }
-    }
+    $aging = \FleetForge\Reports\ArAging::asOf(date('Y-m-d'));
+    $t     = $aging['totals'];   // CAD, bcmath strings
 
     return [
         'labels' => ['0–30 days', '31–60 days', '61–90 days', '90+ days'],
         'series' => [
             [
-                'name' => 'Balance Due',
+                'name' => 'Balance Due (CAD)',
                 'data' => [
-                    (float) $buckets['0-30'],
-                    (float) $buckets['31-60'],
-                    (float) $buckets['61-90'],
-                    (float) $buckets['90+'],
+                    (float) bcadd($t['current'], $t['days_1_30'], 2),
+                    (float) $t['days_31_60'],
+                    (float) $t['days_61_90'],
+                    (float) $t['days_90_plus'],
                 ],
             ],
         ],
@@ -373,48 +355,31 @@ function chart_leases_trend(): array
 /**
  * Utilization trend — monthly fleet utilization % over the last 12 months.
  *
- * Approximation: each month counts units that had at least one active
- * lease day in that month vs total active units at month end.
- * This avoids a full lease-day expansion scan; acceptable for a dashboard chart.
+ * Each point = occupied unit-days ÷ available unit-days for that calendar
+ * month (the current month runs to today), computed by
+ * FleetForge\Reports\FleetUtilization — the same implementation behind
+ * Reports → Fleet and Analytics, so the three surfaces agree for a month.
+ *
+ * WHY (was an approximation): it counted a unit as "utilized" for the WHOLE
+ * month if it had even one lease day in it, and read end_date without
+ * actual_return_date — a 2-day rental counted like a 31-day one.
+ * One lease query serves all 12 months (FleetUtilization::forWindows).
  */
 function chart_utilization_trend(): array
 {
-    $labels = [];
-    $data   = [];
+    $labels  = [];
+    $windows = [];
+    $today   = date('Y-m-d');
 
     for ($i = 11; $i >= 0; $i--) {
-        $ts         = strtotime("-{$i} months");
-        $yr         = date('Y', $ts);
-        $mo         = date('n', $ts);
-        $monthStart = date('Y-m-01', $ts);
-        $monthEnd   = date('Y-m-t', $ts);
-        $labels[]   = date('M Y', $ts);
-
-        // Units on lease at any point during this month
-        $onLeaseRow = db_row(
-            "SELECT COUNT(DISTINCT equipment_unit_id) AS cnt
-               FROM leases
-              WHERE status IN ('active','completed')
-                AND deleted_at IS NULL
-                AND start_date <= ?
-                AND (end_date IS NULL OR end_date >= ?)",
-            [$monthEnd, $monthStart]
-        );
-        $onLease = (int) $onLeaseRow['cnt'];
-
-        // Total active fleet at month end (not decommissioned, not deleted before month end)
-        $totalRow = db_row(
-            "SELECT COUNT(*) AS cnt
-               FROM equipment_units
-              WHERE status != 'decommissioned'
-                AND deleted_at IS NULL
-                AND created_at <= ?",
-            [$monthEnd . ' 23:59:59']
-        );
-        $total = (int) $totalRow['cnt'];
-
-        $data[] = $total > 0 ? round(($onLease / $total) * 100, 1) : 0.0;
+        // 'first day of' anchors the month arithmetic so the 31st never skips a month.
+        $ts        = strtotime("first day of -{$i} months");
+        $labels[]  = date('M Y', $ts);
+        $windows[] = [date('Y-m-01', $ts), date('Y-m-t', $ts)];
     }
+
+    $results = \FleetForge\Reports\FleetUtilization::forWindows($windows, null, $today);
+    $data    = array_map(static fn(array $r) => (float) $r['utilization_pct'], $results);
 
     return [
         'labels' => $labels,

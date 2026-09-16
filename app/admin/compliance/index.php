@@ -67,13 +67,19 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $params[] = $statusFilter;
         }
     }
+    // Company-local "today", same as the grid API (api/v1/compliance/index.php):
+    // CURDATE() is the UTC day on this connection, so an evening export used a
+    // window one day later than the on-screen filter it was exported from.
+    $csvToday = date('Y-m-d');
     $window = clean_int($_GET['window'] ?? 0) ?? 0;
     if ($window > 0) {
         $where[]  = "(
-            (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
-            OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL ? DAY))
+            (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry <= DATE_ADD(?, INTERVAL ? DAY))
+            OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry <= DATE_ADD(?, INTERVAL ? DAY))
         )";
+        $params[] = $csvToday;
         $params[] = $window;
+        $params[] = $csvToday;
         $params[] = $window;
     }
 
@@ -101,7 +107,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     /** Returns 'Expired' | 'Expiring Soon' | 'Valid' | 'Not Set' */
     $expiryStatus = static function(?string $date) use ($today): string {
         if ($date === null) return 'Not Set';
-        if ($date <= $today) return 'Expired';
+        // Strictly before today = expired — same rule as the Expired KPI tile and
+        // the expired_only grid filter (a document expiring today is still valid).
+        if ($date < $today) return 'Expired';
         $threshold = date('Y-m-d', strtotime('+30 days'));
         if ($date <= $threshold) return 'Expiring Soon';
         return 'Valid';
@@ -713,8 +721,8 @@ function FF_Compliance() {
         // ── Cell colour ───────────────────────────────────────────────────────
         expiryStatus(date) {
             if (!date) return 'none';
-            const today = new Date().toISOString().slice(0, 10);
-            const in30  = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+            const today = FF_localDate();
+            const in30  = FF_localDate(Date.now() + 30 * 86400000);
             if (date <= today) return 'expired';
             if (date <= in30)  return 'warning';
             return 'ok';

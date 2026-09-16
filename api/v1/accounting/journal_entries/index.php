@@ -7,7 +7,7 @@
  * date range, and free-text search across entry_number, description, and reference.
  *
  * @method  GET
- * @query   status, type, period_id, date_from, date_to, search, sort, dir, page, per_page
+ * @query   status, entry_status, type, period_id, date_from, date_to, search|q, sort, dir, page, per_page
  * @auth    Session required; require_permission('journal_entries','view')
  * @returns 200 paginated list via json_paginated()
  *
@@ -67,8 +67,11 @@ if ($dateTo = clean_date($_GET['date_to'] ?? null)) {
     $params[] = $dateTo;
 }
 
-// WHY: Search across entry_number, description, and reference — all short text fields
-if ($search = clean_string($_GET['search'] ?? null)) {
+// WHY: Search across entry_number, description, and reference — all short text fields.
+// Accept both `search` (documented) and `q` (what the Journal Entries list page and
+// the app-wide list convention send). Reading only `search` made the list's search
+// box a silent no-op: every keystroke re-fetched the unfiltered list.
+if ($search = clean_string($_GET['search'] ?? $_GET['q'] ?? null)) {
     $where[]  = '(je.entry_number LIKE ? OR je.description LIKE ? OR je.reference LIKE ?)';
     $like     = '%' . addcslashes($search, '%_\\') . '%';
     $params[] = $like;

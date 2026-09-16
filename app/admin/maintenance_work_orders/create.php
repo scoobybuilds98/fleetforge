@@ -9,6 +9,9 @@ declare(strict_types=1);
  * Alpine.js handles the form submit via FF_Api.post() → redirect to show on success.
  *
  * Pre-populate equipment_unit_id from ?unit_id= query param (from equipment profile).
+ * Pre-populate vendor_id from ?vendor_id= (the vendor page's "+ New Work Order"
+ * button) — bug #25: the param used to be ignored, so the vendor had to be
+ * re-picked by hand.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/maintenance_work_orders/create.php
@@ -46,6 +49,21 @@ if ($prefilledUnitId) {
     }
 }
 
+// Bug #25: pre-select the vendor when arriving from vendors/show?id=N.
+// Soft-deleted / unknown ids are dropped so the form never posts a dead FK.
+$prefilledVendorId = clean_int($_GET['vendor_id'] ?? null);
+$preVendorLabel    = null;
+if ($prefilledVendorId) {
+    $preVendor = db_row(
+        "SELECT id, name FROM vendors WHERE id = ? AND deleted_at IS NULL",
+        [$prefilledVendorId]
+    );
+    if ($preVendor) {
+        $preVendorLabel = $preVendor['name'];
+    } else {
+        $prefilledVendorId = null;
+    }
+}
 
 $pageTitle = 'New Work Order';
 $helpModuleSlug = 'maintenance';
@@ -115,6 +133,10 @@ require_once FF_ROOT . '/includes/header.php';
                         'placeholder' => 'Search vendors…',
                         'mapResult'   => "r => ({ id: r.id, label: r.name, sublabel: r.vendor_type || '', raw: r })",
                     ];
+                    if ($prefilledVendorId && $preVendorLabel) {
+                        $pickerConfig['initialId']    = (int) $prefilledVendorId;
+                        $pickerConfig['initialLabel'] = $preVendorLabel;
+                    }
                     $pickerOnPicked  = 'form.vendor_id = $event.detail.id';
                     $pickerOnCleared = "form.vendor_id = ''";
                     $pickerError     = 'false';
@@ -311,6 +333,8 @@ require_once FF_ROOT . '/includes/header.php';
 <?php
 $overlayTitle    = 'Work Order Created!';
 $overlaySubtitle = 'Redirecting to work order details…';
+// This component's in-flight flag is `saving`, not the overlay's default `submitting`.
+$overlaySubmittingVar = 'saving';
 require_once FF_ROOT . '/includes/success_overlay.php';
 ?>
 
@@ -323,7 +347,7 @@ function woCreate() {
         showSuccessOverlay: false,
         form: {
             equipment_unit_id: '<?= e((string)($prefilledUnitId ?? '')) ?>',
-            vendor_id:         '',
+            vendor_id:         '<?= e((string)($prefilledVendorId ?? '')) ?>',
             title:             '',
             work_type:         '',
             priority:          'medium',

@@ -61,10 +61,11 @@ return [
         'default_channels'  => ['email'],
         'supports_docs'   => true,         // per-document toggles (see 'docs' below)
         'docs'            => [             // slug => default-on when the type is enabled
+            // Only the documents the unit screens + compliance page still track.
+            // MVI and insurance expiry were retired from the UI and from every
+            // compliance count/alert, so offering them here was a dead toggle.
             'cvi'          => true,
             'registration' => true,
-            'mvi'          => true,
-            'insurance'    => true,
         ],
         'dedup_type'      => 'customer_compliance_alert',
         'entity'          => 'customer',

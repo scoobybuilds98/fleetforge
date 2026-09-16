@@ -52,7 +52,13 @@ if ($currency = clean_string($_GET['currency'] ?? null)) {
 }
 
 if ($source = clean_string($_GET['source'] ?? null)) {
-    $validSources = ['mileage_overpayment', 'invoice_adjustment', 'damage_resolution', 'goodwill', 'payment_returned', 'other'];
+    // Mirrors the credit_notes.source ENUM. The system-minted sources were missing,
+    // so filtering by e.g. 'overpayment' (Record Payment's excess) was silently
+    // ignored and returned every note.
+    $validSources = [
+        'mileage_overpayment', 'invoice_adjustment', 'damage_resolution', 'goodwill', 'payment_returned',
+        'overpayment', 'hours_overpayment', 'precharge_refund', 'base_rental_reconciliation_overflow', 'other',
+    ];
     if (in_array($source, $validSources, true)) {
         $where[]  = 'cn.source = ?';
         $params[] = $source;

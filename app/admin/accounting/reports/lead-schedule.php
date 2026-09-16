@@ -48,7 +48,15 @@ require_once FF_ROOT . '/includes/header.php';
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="leadSchedule()" x-init="code = <?= json_encode($code) ?>; periodId = <?= (int) $periodId ?>; load()">
+<?php
+// WHY e(json_encode()): json_encode() wraps the string in raw double quotes, which
+// closed this double-quoted attribute early — every visit threw "Unexpected token"
+// (Alpine saw `code = `) and never loaded. $code is straight from the query string,
+// so the unescaped quote was also a reflected-XSS hole (`?code=x" onmouseover=…`).
+// htmlspecialchars() in an ATTRIBUTE is decoded back by the HTML parser before
+// Alpine evaluates it.
+?>
+<div x-data="leadSchedule()" x-init="code = <?= e(json_encode((string) $code)) ?>; periodId = <?= (int) $periodId ?>; load()">
 
     <template x-if="loading">
         <div class="card" style="padding:48px;text-align:center;">Loading lead schedule...</div>

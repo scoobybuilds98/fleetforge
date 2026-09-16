@@ -181,7 +181,7 @@ $provinces = ['BC','AB','SK','MB','ON','QC','NB','NS','PE','NL','YT','NT','NU'];
             </div>
 
             <div class="form-group">
-                <label class="form-label">Body (HTML supported)</label>
+                <label class="form-label">Body (plain text keeps line breaks; HTML supported)</label>
                 <textarea class="form-control" x-model="message.body_html" rows="14"
                           style="font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px;"></textarea>
                 <p class="form-hint">Use <code>{customer_name}</code>, <code>{company_name}</code>, etc. — replaced per recipient.</p>
@@ -227,7 +227,8 @@ $provinces = ['BC','AB','SK','MB','ON','QC','NB','NS','PE','NL','YT','NT','NU'];
                         <div class="email-preview-label">Subject</div>
                         <div class="email-preview-body" style="padding:8px 12px;font-weight:600;" x-text="message.subject"></div>
                         <div class="email-preview-label">Body</div>
-                        <div class="email-preview-body" x-html="message.body_html"></div>
+                        <!-- Plain-text bodies keep their line breaks — FF_emailBodyToHtml (app.js) applies the same rule EmailService::bodyToHtml() uses on send. -->
+                        <div class="email-preview-body" x-html="window.FF_emailBodyToHtml(message.body_html)"></div>
                     </div>
                 </div>
             </div>

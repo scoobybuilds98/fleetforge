@@ -17,7 +17,7 @@ $cid = portal_customer_id();
 $units = db_select(
     "SELECT eu.id, eu.unit_number, eu.vin, eu.license_plate,
             eu.samsara_vehicle_url, eu.mileage,
-            eu.cvi_expiry, eu.registration_expiry, eu.mvi_expiry, eu.insurance_expiry,
+            eu.cvi_expiry, eu.registration_expiry,
             eb.label AS brand, et.model, et.category, eu.year,
             l.id AS lease_id, l.contract_number, l.start_date,
             l.estimated_mileage, l.mileage_at_start, l.mileage_unit,
@@ -67,11 +67,13 @@ require_once dirname(__DIR__) . '/includes/header.php';
                 elseif ($mileagePct >= 80) $mileageClass = 'portal-mileage-fill--warning';
             }
 
-            // Compliance check
+            // Compliance check — CVI + Registration only. MVI and Insurance are no
+            // longer tracked anywhere in the admin UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS),
+            // so surfacing their (uneditable) dates to customers would be inconsistent.
             $complianceItems = [];
             $today = date('Y-m-d');
             $soon  = date('Y-m-d', strtotime('+30 days'));
-            foreach (['cvi_expiry', 'registration_expiry', 'mvi_expiry', 'insurance_expiry'] as $field) {
+            foreach (['cvi_expiry', 'registration_expiry'] as $field) {
                 if ($u[$field]) {
                     $label = strtoupper(str_replace('_expiry', '', $field));
                     if ($u[$field] < $today) {

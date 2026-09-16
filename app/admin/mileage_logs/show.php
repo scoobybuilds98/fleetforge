@@ -270,7 +270,7 @@ document.getElementById('edit-form').addEventListener('submit', async function(e
         cErrs.odometer_reading = 'Odometer cannot be negative.';
     }
     if (dt) {
-        const today = new Date().toISOString().split('T')[0];
+        const today = FF_localDate();
         if (dt > today) cErrs.log_date = 'Log date cannot be in the future.';
     }
     if (Object.keys(cErrs).length) {

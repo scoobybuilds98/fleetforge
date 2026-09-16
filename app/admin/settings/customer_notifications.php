@@ -333,7 +333,7 @@ $cnCategoryOrder = array_keys($cnCategories);
                         </label>
                         <?php endforeach; ?>
                     </div>
-                    <p class="text-muted" style="font-size:0.72rem;margin:6px 0 0;">Untick a document to stop emailing customers about it (e.g. insurance).</p>
+                    <p class="text-muted" style="font-size:0.72rem;margin:6px 0 0;">Untick a document to stop emailing customers about it.</p>
                 </div>
                 <?php endif; ?>
 

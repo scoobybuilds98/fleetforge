@@ -263,7 +263,10 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="">— Select entity type first —</option>
                             <!-- equipment_unit -->
                             <template x-if="uploadModal.entity_type === 'equipment_unit'">
-                                <template x-for="opt in [['cvi','CVI Certificate'],['registration','Registration'],['insurance','Insurance'],['other','Other']]" :key="opt[0]">
+                                <!-- No 'Insurance' option: insurance is no longer a tracked compliance document
+                                     (S-UNIT-COMPLIANCE-HIDE-MVI-INS) and uploading one wrote a hidden
+                                     equipment_units.insurance_expiry. Upload insurance files as Other. -->
+                                <template x-for="opt in [['cvi','CVI Certificate'],['registration','Registration'],['other','Other']]" :key="opt[0]">
                                     <option :value="opt[0]" x-text="opt[1]"></option>
                                 </template>
                             </template>

@@ -8,7 +8,8 @@ declare(strict_types=1);
  * Different from Reports: analytics is forecasting + patterns, not historical tables.
  *
  * Required by: app/admin/analytics/index.php (FF_Analytics component)
- * Requires:    api/bootstrap.php
+ * Requires:    api/bootstrap.php, lib/Reports/FleetUtilization.php (utilization_matrix),
+ *              lib/Reports/ReportBuilder.php (CAD conversion fragment)
  *
  * GET params:
  *   view : revenue_forecast | utilization_matrix | concentration_risk |
@@ -28,6 +29,9 @@ declare(strict_types=1);
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
+
+use FleetForge\Reports\FleetUtilization;
+use FleetForge\Reports\ReportBuilder;
 
 require_method('GET');
 require_auth_api();
@@ -287,75 +291,85 @@ function view_revenue_forecast(string $dateFrom, string $dateTo): array
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
+ * Per-unit (utilization %, revenue per on-rent day) scatter over the trailing
+ * 12 months, grouped by equipment category.
+ *
+ * Utilization comes from FleetForge\Reports\FleetUtilization — the same
+ * implementation Reports → Fleet and the Dashboard trend use — so the three
+ * pages agree for the same window.
+ *
+ * WHY the rewrite (was 357.9% average): the old single query LEFT JOINed
+ * leases AND invoices before SUMming lease days, so every lease's days were
+ * multiplied by its invoice count (fan-out), overlapping leases were summed
+ * rather than merged, and the denominator was a hard-coded 365 for a 366-day
+ * inclusive window. Revenue is now aggregated in its own grouped query, so no
+ * join can multiply it either.
+ *
  * @return array { chart_data: { series }, kpis }
  */
 function view_utilization_matrix(): array
 {
-    // Fixed 12-month window regardless of date params
-    $from12m   = date('Y-m-d', strtotime('-12 months'));
-    $today     = date('Y-m-d');
-    $periodDays = 365;
+    // Fixed trailing-12-month window regardless of date params (inclusive).
+    $from12m = date('Y-m-d', strtotime('-12 months'));
+    $today   = date('Y-m-d');
 
-    // Per-unit: days on lease (clamped to 12m window) + total revenue in same window
-    // WHY: GREATEST/LEAST clamps overlapping lease periods to the 12m window
+    // Fleet = non-deleted, non-decommissioned units (same as Reports → Fleet).
     $units = db_select(
-        "SELECT
-            eu.id,
-            eu.unit_number,
-            et.category,
-            COALESCE(SUM(
-                GREATEST(0,
-                    DATEDIFF(
-                        LEAST(COALESCE(l.actual_return_date, l.end_date, ?), ?),
-                        GREATEST(l.start_date, ?)
-                    ) + 1
-                )
-            ), 0) AS days_on_lease,
-            COALESCE(SUM(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END), 0) AS total_revenue
+        "SELECT eu.id, eu.unit_number, et.category
          FROM equipment_units eu
          JOIN equipment_templates et ON et.id = eu.template_id AND et.deleted_at IS NULL
-         LEFT JOIN leases l
-            ON l.equipment_unit_id = eu.id
-           AND l.deleted_at IS NULL
-           AND l.status IN ('active', 'completed')
-           AND l.start_date <= ?
-           AND (l.actual_return_date IS NULL OR l.actual_return_date >= ?)
-         LEFT JOIN invoices i
-            ON i.lease_id = l.id
-           AND i.deleted_at IS NULL
+         WHERE eu.deleted_at IS NULL
+           AND eu.status <> 'decommissioned'
+         ORDER BY et.category, eu.unit_number"
+    );
+
+    $util = FleetUtilization::forWindow($from12m, $today, array_map(fn($u) => (int) $u['id'], $units), $today);
+
+    // Revenue per unit in the same window — aggregated on its own so it can
+    // never be multiplied by a lease/invoice join. CAD-canonical, billable only.
+    $revRows = db_select(
+        "SELECT l.equipment_unit_id AS unit_id,
+                COALESCE(SUM(" . ReportBuilder::cad('i.total_amount', 'i') . "), 0) AS total_revenue
+         FROM invoices i
+         JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
+         WHERE i.deleted_at IS NULL
            AND i.status NOT IN ('void', 'draft', 'written_off')
            AND i.invoice_date BETWEEN ? AND ?
-         WHERE eu.deleted_at IS NULL
-         GROUP BY eu.id, eu.unit_number, et.category
-         ORDER BY et.category, eu.unit_number",
-        [$today, $today, $from12m, $today, $from12m, $from12m, $today]
+         GROUP BY l.equipment_unit_id",
+        [$from12m, $today]
     );
+    $revMap = [];
+    foreach ($revRows as $r) {
+        $revMap[(int) $r['unit_id']] = (string) $r['total_revenue'];
+    }
 
     // Group into series by category for ApexCharts scatter
     $seriesMap = [];
-    $totalUtil = 0.0;
     $totalRpd  = 0.0;
     $count     = 0;
+    $highUtil  = 0;
+    $lowUtil   = 0;
 
     foreach ($units as $u) {
-        $daysOnLease  = (int)$u['days_on_lease'];
-        $revenue      = (float)$u['total_revenue'];
-        $utilPct      = round($daysOnLease / $periodDays * 100, 1);
-        $revPerDay    = $daysOnLease > 0 ? round($revenue / $daysOnLease, 2) : 0.0;
+        $uid         = (int) $u['id'];
+        $unitUtil    = $util['units'][$uid] ?? ['days_on_rent' => 0, 'utilization_pct' => '0.0'];
+        $daysOnLease = (int) $unitUtil['days_on_rent'];
+        $revenue     = $revMap[$uid] ?? '0';
+        $utilPct     = (float) $unitUtil['utilization_pct'];
+        // Display ratio for a scatter axis (not a stored money value).
+        $revPerDay   = $daysOnLease > 0 ? (float) bcround(bcdiv($revenue, (string) $daysOnLease, 6), 2) : 0.0;
 
         $cat = $u['category'] ?: 'Uncategorized';
-        if (!isset($seriesMap[$cat])) {
-            $seriesMap[$cat] = [];
-        }
         $seriesMap[$cat][] = [
             'x'           => $utilPct,
             'y'           => $revPerDay,
             'unit_number' => $u['unit_number'],
         ];
 
-        $totalUtil += $utilPct;
-        $totalRpd  += $revPerDay;
+        $totalRpd += $revPerDay;
         $count++;
+        if ($utilPct >= 70) $highUtil++;
+        if ($utilPct < 30)  $lowUtil++;
     }
 
     // Convert to ApexCharts series format
@@ -364,26 +378,21 @@ function view_utilization_matrix(): array
         $series[] = ['name' => $cat, 'data' => $points];
     }
 
-    $avgUtil = $count > 0 ? round($totalUtil / $count, 1) : 0.0;
-    $avgRpd  = $count > 0 ? round($totalRpd  / $count, 2) : 0.0;
-
-    // Count high (>70%) and low (<30%) utilization units
-    $highUtil = 0;
-    $lowUtil  = 0;
-    foreach ($units as $u) {
-        $pct = (int)$u['days_on_lease'] / $periodDays * 100;
-        if ($pct >= 70) $highUtil++;
-        if ($pct < 30)  $lowUtil++;
-    }
+    $avgRpd = $count > 0 ? round($totalRpd / $count, 2) : 0.0;
 
     return [
         'chart_data' => ['series' => $series],
         'kpis' => [
-            'avg_utilization'   => $avgUtil,
+            // Fleet-level: occupied unit-days / available unit-days (<= 100 by construction).
+            'avg_utilization'     => (float) $util['utilization_pct'],
             'avg_revenue_per_day' => number_format($avgRpd, 2, '.', ''),
-            'high_util_count'   => $highUtil,
-            'low_util_count'    => $lowUtil,
-            'total_units'       => $count,
+            'high_util_count'     => $highUtil,
+            'low_util_count'      => $lowUtil,
+            'total_units'         => $count,
+            'occupied_unit_days'  => (int) $util['occupied_unit_days'],
+            'available_unit_days' => (int) $util['available_unit_days'],
+            'window_from'         => $util['window_from'],
+            'window_to'           => $util['window_to'],
         ],
     ];
 }
@@ -461,40 +470,76 @@ function view_concentration_risk(): array
 
 // ════════════════════════════════════════════════════════════════════════════
 // VIEW 4 — Seasonal Revenue Pattern
-// Radar: avg monthly revenue per month-of-year (all-time Jan–Dec)
+// Radar: average MONTHLY revenue per calendar month (Jan–Dec), across years
 // ════════════════════════════════════════════════════════════════════════════
 
 /**
  * All-time data — date params not used here.
+ *
+ * For each calendar month: total billable revenue (CAD) earned in that month
+ * across every year observed, divided by the number of times that calendar
+ * month occurs in the observed span. A month inside the span with no revenue
+ * counts as $0 — that IS the seasonality signal.
+ *
+ * WHY (was wrong): the panel is labelled "Avg Monthly Revenue" but used
+ * AVG(invoice total), i.e. average INVOICE SIZE per calendar month — a busy
+ * month with many small invoices read as a slow month.
+ *
+ * Observed span = first month with billable revenue → last month with billable
+ * revenue, excluding the current calendar month while it is still in progress
+ * (a half-finished September would drag September's average down).
+ *
  * @return array { chart_data: { categories, series }, kpis }
  */
 function view_seasonal_pattern(): array
 {
     $rows = db_select(
         "SELECT
-            MONTH(i.invoice_date)                  AS month_num,
-            DATE_FORMAT(i.invoice_date, '%b')      AS month_label,
-            AVG(CASE WHEN i.currency='USD' THEN i.total_amount*COALESCE(i.exchange_rate_to_cad,1) ELSE i.total_amount END)                    AS avg_revenue,
-            COUNT(*)                               AS invoice_count
+            YEAR(i.invoice_date)  AS yr,
+            MONTH(i.invoice_date) AS month_num,
+            COALESCE(SUM(" . ReportBuilder::cad('i.total_amount', 'i') . "), 0) AS revenue
          FROM invoices i
          WHERE i.deleted_at IS NULL
            AND i.status NOT IN ('void', 'draft', 'written_off')
-         GROUP BY MONTH(i.invoice_date), month_label
-         ORDER BY month_num ASC",
-        []
+           AND i.invoice_date < ?
+         GROUP BY YEAR(i.invoice_date), MONTH(i.invoice_date)
+         ORDER BY yr ASC, month_num ASC",
+        [date('Y-m-01')]  // exclude the in-progress current month (business date)
     );
 
-    // Build 12-month array — fill missing months with 0
-    // WHY: radar chart needs all 12 spokes even if no data for a month
     $monthLabels = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    $byMonth     = [];
-    foreach ($rows as $r) {
-        $byMonth[(int)$r['month_num']] = (float)$r['avg_revenue'];
+
+    // Revenue totals per calendar month (bcmath) + occurrences of that month
+    // in the observed span.
+    $totals      = array_fill(1, 12, '0');
+    $occurrences = array_fill(1, 12, 0);
+
+    if ($rows) {
+        $first = sprintf('%04d-%02d', (int) $rows[0]['yr'], (int) $rows[0]['month_num']);
+        $last  = sprintf('%04d-%02d', (int) end($rows)['yr'], (int) end($rows)['month_num']);
+        foreach ($rows as $r) {
+            $m = (int) $r['month_num'];
+            // Scale 6: USD×rate products carry sub-cent digits; round only at the end.
+            $totals[$m] = bcadd($totals[$m], (string) $r['revenue'], 6);
+        }
+        // Walk the span month by month so empty months inside it count as zero.
+        $cursor = new DateTimeImmutable($first . '-01');
+        $stop   = new DateTimeImmutable($last . '-01');
+        while ($cursor <= $stop) {
+            $occurrences[(int) $cursor->format('n')]++;
+            $cursor = $cursor->modify('+1 month');
+        }
     }
 
-    $avgData = [];
+    $avgData  = [];
+    $spanSum  = '0';
+    $spanMths = 0;
     for ($m = 1; $m <= 12; $m++) {
-        $avgData[] = round($byMonth[$m] ?? 0.0, 2);
+        // bcdiv truncates — divide at scale 6 then round half-up to cents.
+        $avg       = $occurrences[$m] > 0 ? bcround(bcdiv($totals[$m], (string) $occurrences[$m], 6), 2) : '0.00';
+        $avgData[] = (float) $avg;   // chart series
+        $spanSum   = bcadd($spanSum, $totals[$m], 6);
+        $spanMths += $occurrences[$m];
     }
 
     // KPIs: best and worst months.
@@ -524,7 +569,9 @@ function view_seasonal_pattern(): array
             'best_month'        => $monthLabels[$bestIdx] ?? '',
             'worst_month'       => $monthLabels[$worstIdx] ?? '',
             'seasonal_variance' => $variance,
-            'avg_all_time'      => number_format(array_sum($avgData) / 12, 2, '.', ''),
+            // Average revenue per month across the whole observed span.
+            'avg_all_time'      => $spanMths > 0 ? bcround(bcdiv($spanSum, (string) $spanMths, 6), 2) : '0.00',
+            'months_observed'   => $spanMths,
         ],
     ];
 }

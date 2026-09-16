@@ -443,7 +443,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         </dd>
                         <!-- S-ACCT-GPS: per-customer presentation policy (ASPE 3400). -->
                         <dt class="text-secondary text-sm">GPS Revenue Presentation</dt>
-                        <dd style="margin:0;" x-data="gpsPresentationToggle(<?= (int) $customer['id'] ?>, <?= json_encode((string) ($customer['gps_revenue_presentation'] ?? 'net')) ?>)">
+                        <?php // json_encode() emits double quotes, which closed the double-quoted x-data
+                              // attribute early ("Unexpected token '}'" + editing/current/draft/saving
+                              // "is not defined" on every load) — escape it for the attribute context. ?>
+                        <dd style="margin:0;" x-data="gpsPresentationToggle(<?= (int) $customer['id'] ?>, <?= e(json_encode((string) ($customer['gps_revenue_presentation'] ?? 'net'))) ?>)">
                             <span x-show="!editing" x-cloak>
                                 <span :class="current === 'gross' ? 'badge badge-warning' : 'badge badge-success'"
                                       style="padding:2px 10px;text-transform:uppercase;font-size:0.6875rem;"

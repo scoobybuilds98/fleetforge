@@ -8,6 +8,13 @@
 -- Normal balance: debit for assets/expenses, credit for liab/equity/revenue.
 -- ============================================================
 
+-- WHY SET NAMES: seeds are applied with the mysql CLI (`mysql db < file.sql`),
+-- whose connection charset defaults to latin1 on a stock install. Without this
+-- line every non-ASCII character in this file (em dash, arrows, <=) is read as
+-- latin1 bytes and stored DOUBLE-ENCODED (an em dash lands as the 3-char
+-- mojibake "a-circumflex, euro, right-quote"). utf8mb4 matches includes/db.php.
+SET NAMES utf8mb4;
+
 -- 1000 Current Assets [HEADER]
 INSERT INTO acc_accounts (code, name, account_type, account_subtype, parent_id, is_header, normal_balance, is_system, is_bank_account, coa_group, sort_order) VALUES
 ('1000', 'Current Assets', 'asset', 'current_asset', NULL, 1, 'debit', 0, 0, 'Current Assets', 100);

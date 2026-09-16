@@ -493,10 +493,14 @@ class DriftChecker
         if ($acct === null) {
             return null;
         }
+        // Posted + reversed: a reversed JE stays on the books, offset by its posted
+        // reversal (QBO holds both too). Counting only 'posted' negated every
+        // reversed entry and reported phantom drift.
         $sums = db_row(
             "SELECT COALESCE(SUM(jel.debit),0) AS d, COALESCE(SUM(jel.credit),0) AS c
                FROM acc_journal_entry_lines jel
-               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id AND je.status = 'posted'
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+                AND je.status IN (" . \FleetForge\Accounting\AccountingService::LEDGER_STATUSES_SQL . ")
               WHERE jel.account_id = ?",
             [$ffAccountId]
         );

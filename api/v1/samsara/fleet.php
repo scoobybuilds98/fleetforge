@@ -54,6 +54,15 @@ require_permission('equipment', 'view');
 // list view. Filtering for active leases only — historical leases
 // don't matter for live tracking. Also pull the linked customer
 // name so the list view doesn't need a second round-trip.
+//
+// ONE ROW PER UNIT: a plain join on "active lease for this unit" returned
+// the unit once per active lease (TR-7002 had two), which duplicated x-for
+// keys in the List/Map views and double-counted stats.total. The subquery
+// picks a single lease deterministically: one that has already started
+// (start_date <= today, company-local day from PHP — the MySQL session is
+// UTC) wins over a future-dated one, then the latest start_date, then the
+// highest id.
+$todayLocal = date('Y-m-d');
 $rows = db_select(
     "SELECT
         u.id, u.unit_number, u.status, u.yard_location, u.year,
@@ -72,15 +81,22 @@ $rows = db_select(
        FROM equipment_units u
        JOIN equipment_templates t ON t.id = u.template_id
        LEFT JOIN leases l
-         ON l.equipment_unit_id = u.id
-        AND l.status = 'active'
-        AND l.deleted_at IS NULL
+         ON l.id = (
+                SELECT l2.id
+                  FROM leases l2
+                 WHERE l2.equipment_unit_id = u.id
+                   AND l2.status = 'active'
+                   AND l2.deleted_at IS NULL
+                 ORDER BY (l2.start_date <= ?) DESC, l2.start_date DESC, l2.id DESC
+                 LIMIT 1
+            )
        LEFT JOIN customers c
          ON c.id = l.customer_id
         AND c.deleted_at IS NULL
       WHERE u.deleted_at IS NULL
         AND u.status <> 'decommissioned'
-      ORDER BY u.unit_number"
+      ORDER BY u.unit_number",
+    [$todayLocal]
 );
 
 // ── Partition + accumulate alerts in a single pass ──────────

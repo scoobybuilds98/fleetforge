@@ -62,24 +62,23 @@ class MorningBriefingRenderer
              LIMIT 5"
         );
 
-        // Compliance expiring within 7 days.
+        // Compliance expiring within 7 days — CVI + Registration only. MVI and
+        // Insurance were removed from every compliance UI
+        // (S-UNIT-COMPLIANCE-HIDE-MVI-INS); briefing on them contradicted the
+        // Compliance page and the sidebar badge.
         $complianceUnits = db_select(
             "SELECT id, unit_number,
                     LEAST(
                         IFNULL(cvi_expiry, '9999-12-31'),
-                        IFNULL(registration_expiry, '9999-12-31'),
-                        IFNULL(mvi_expiry, '9999-12-31'),
-                        IFNULL(insurance_expiry, '9999-12-31')
+                        IFNULL(registration_expiry, '9999-12-31')
                     ) AS earliest
              FROM equipment_units
              WHERE deleted_at IS NULL AND status NOT IN ('inactive','decommissioned')
                AND ((cvi_expiry IS NOT NULL AND cvi_expiry <= ?)
-                 OR (registration_expiry IS NOT NULL AND registration_expiry <= ?)
-                 OR (mvi_expiry IS NOT NULL AND mvi_expiry <= ?)
-                 OR (insurance_expiry IS NOT NULL AND insurance_expiry <= ?))
+                 OR (registration_expiry IS NOT NULL AND registration_expiry <= ?))
              ORDER BY earliest ASC
              LIMIT 10",
-            [$in7d, $in7d, $in7d, $in7d]
+            [$in7d, $in7d]
         );
 
         // Open damage claims.

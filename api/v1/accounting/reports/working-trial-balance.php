@@ -85,6 +85,7 @@ $accounts = db_select(
 );
 
 // Pull period-only activity broken by AJE flag in one pass.
+// reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
 $activity = db_select(
     "SELECT jel.account_id,
             COALESCE(SUM(CASE WHEN je.entry_type IN ({$ajeIn}) THEN jel.debit  ELSE 0 END), 0) AS aje_debit,
@@ -93,7 +94,7 @@ $activity = db_select(
             COALESCE(SUM(CASE WHEN je.entry_type NOT IN ({$ajeIn}) THEN jel.credit ELSE 0 END), 0) AS unadj_credit
        FROM acc_journal_entry_lines jel
        JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-      WHERE je.status = 'posted'
+      WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
         AND je.period_id = ?
       GROUP BY jel.account_id",
     [$periodId]
@@ -104,12 +105,13 @@ foreach ($activity as $a) {
 }
 
 // AJE-line drilldown (most recent 5 per account in this period).
+// reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
 $ajeLines = db_select(
     "SELECT jel.account_id, je.id AS je_id, je.entry_number, je.description,
             jel.debit, jel.credit, je.entry_date
        FROM acc_journal_entry_lines jel
        JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-      WHERE je.status = 'posted'
+      WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
         AND je.period_id = ?
         AND je.entry_type IN ({$ajeIn})
       ORDER BY je.entry_date DESC, je.id DESC",

@@ -798,6 +798,50 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── Chassis Out Modal ─────────────────────────────────────────
+         Offers the open (pending/active) leases on the reserved unit(s) so
+         mark_out.php receives a lease_id — previously it was never sent, so
+         the "Lease #" link in the Units table could never be populated. -->
+    <div class="modal-overlay" x-show="markOutModal.open" x-cloak
+         style="background:rgba(0,0,0,0.5);"
+         @keydown.escape.window="markOutModal.open = false">
+        <div class="card" style="width:520px;max-width:calc(100vw - 32px);padding:24px;">
+            <h3 class="h5" style="margin-bottom:8px;">Mark Out (Chassis Out)</h3>
+            <p class="text-secondary text-sm" style="margin-bottom:16px;">
+                Records Reservation #<?= e($resId) ?> for
+                <strong x-text="res.company_name"></strong> as physically leaving the yard.
+            </p>
+            <div class="form-group">
+                <label class="form-label" for="markout-lease-show">Link to lease</label>
+                <select id="markout-lease-show" class="form-select"
+                        x-model="markOutModal.leaseId"
+                        :disabled="markOutModal.loadingLeases || markOutModal.submitting">
+                    <option value="">— No lease: release the unit to Available —</option>
+                    <template x-for="l in markOutModal.leases" :key="l.id">
+                        <option :value="String(l.id)" x-text="l.label"></option>
+                    </template>
+                </select>
+                <p class="text-xs text-secondary" style="margin-top:6px;" x-show="markOutModal.loadingLeases">Looking up open leases on the reserved unit(s)…</p>
+                <p class="text-xs text-secondary" style="margin-top:6px;" x-show="!markOutModal.loadingLeases && markOutModal.leases.length === 0">
+                    No pending or active lease on the reserved unit(s). The unit will be released to Available.
+                </p>
+                <p class="text-xs text-secondary" style="margin-top:6px;" x-show="!markOutModal.loadingLeases && markOutModal.leases.length > 0">
+                    A linked lease keeps the unit with that lease (Reserved until activated, On Lease once active).
+                </p>
+                <p class="form-error" x-show="markOutModal.error" x-text="markOutModal.error"></p>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+                <button class="btn btn-ghost btn-sm" @click="markOutModal.open = false">Back</button>
+                <button class="btn btn-primary btn-sm"
+                        :disabled="markOutModal.submitting || markOutModal.loadingLeases"
+                        @click="submitMarkOut()">
+                    <span x-show="!markOutModal.submitting">Mark Out</span>
+                    <span x-show="markOutModal.submitting">Saving…</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
 </div><!-- /x-data -->
 
 <!-- ============================================================
@@ -826,6 +870,17 @@ function FF_ReservationShow(resId) {
             error:      '',
             submitting: false,
         },
+
+        // Chassis Out modal — leases = [{id, customer_id, label}] open leases on the reserved unit(s).
+        markOutModal: {
+            open:          false,
+            leases:        [],
+            leaseId:       '',
+            loadingLeases: false,
+            error:         '',
+            submitting:    false,
+        },
+        _markOutLookup: 0,   // bumps per open; stale lease lookups are dropped
 
         // ── Init ─────────────────────────────────────────────────
         async init() {
@@ -909,7 +964,7 @@ function FF_ReservationShow(resId) {
                 this.editErrors.pickup_date = 'Pickup date is required.';
                 ok = false;
             } else {
-                const today = new Date().toISOString().split('T')[0];
+                const today = FF_localDate();
                 if (this.editForm.pickup_date < today) {
                     this.editErrors.pickup_date = 'Pickup date cannot be in the past.';
                     ok = false;
@@ -989,19 +1044,68 @@ function FF_ReservationShow(resId) {
         },
 
         // ── Action: Mark Out ──────────────────────────────────────
+        // Opens the Chassis Out modal and looks up the open leases on the
+        // reservation's unit(s) so a lease_id can be sent to mark_out.php.
         async markOut() {
-            if (!(await FF_Confirm.ask('Mark this reservation as Chassis Out?\n\nThis records the unit as physically leaving the yard.'))) return;
+            this.markOutModal = { open: true, leases: [], leaseId: '',
+                                  loadingLeases: true, error: '', submitting: false };
+            // Token set BEFORE the first await: a lookup that resolves after the modal
+            // was closed and reopened must not overwrite the newer candidate list.
+            const lookup = ++this._markOutLookup;
+            const unitIds = [...new Set((this.res.units || []).map(u => u.equipment_unit_id).filter(Boolean))];
+            const found = [];
+            try {
+                const pages = await Promise.all(unitIds.map(uid =>
+                    FF_Api.get('<?= base_url('api/v1/leases/index.php') ?>?unit_id=' + uid + '&statuses=pending,active&per_page=20')
+                        .catch(() => null)
+                ));
+                for (const pg of pages) {
+                    for (const l of ((pg && pg.data && pg.data.items) || [])) {
+                        if (found.some(x => x.id === l.id)) continue;
+                        found.push({
+                            id: l.id,
+                            customer_id: l.customer_id,
+                            label: `${l.contract_number} · ${l.customer_display_name || '—'} · ${l.unit_display_number || ''} · ${l.status} from ${l.start_date}`,
+                        });
+                    }
+                }
+            } catch (e) { /* lookup is best-effort; mark-out without a lease still works */ }
+            if (lookup !== this._markOutLookup) return;
+            this.markOutModal.leases = found;
+            this.markOutModal.loadingLeases = false;
+            // Pre-select only an unambiguous match: the single open lease for this
+            // reservation's customer (or the only candidate when no customer is set).
+            const cust = this.res.customer_id;
+            const mine = cust ? found.filter(l => String(l.customer_id) === String(cust)) : found;
+            if (mine.length === 1) {
+                const pick = String(mine[0].id);
+                // Set after the x-for options render, or the <select> keeps showing the blank option.
+                this.$nextTick(() => { this.markOutModal.leaseId = pick; });
+            }
+        },
+
+        async submitMarkOut() {
+            if (this.markOutModal.submitting) return;
+            this.markOutModal.submitting = true;
+            this.markOutModal.error = '';
             this.actionBusy  = true;
             this.actionError = '';
             try {
-                const res = await FF_Api.post('<?= base_url('api/v1/reservations/mark_out.php') ?>', { id: resId });
-                if (!res.success) throw new Error(res.error?.message || 'Failed');
+                const payload = { id: resId };
+                if (this.markOutModal.leaseId) payload.lease_id = parseInt(this.markOutModal.leaseId, 10);
+                const res = await FF_Api.post('<?= base_url('api/v1/reservations/mark_out.php') ?>', payload);
+                // FF_Api.post resolves on 4xx — gate on success.
+                if (!res.success) throw new Error(res.error?.fields?.lease_id || res.error?.message || 'Failed');
+                this.markOutModal.open = false;
                 await this.loadReservation();
-                this.actionSuccess = 'Reservation marked out — Chassis Out.';
+                this.actionSuccess = payload.lease_id
+                    ? 'Reservation marked out — Chassis Out, linked to the lease.'
+                    : 'Reservation marked out — Chassis Out.';
                 setTimeout(() => this.actionSuccess = '', 4000);
             } catch (e) {
-                this.actionError = e.message;
+                this.markOutModal.error = e.message;
             } finally {
+                this.markOutModal.submitting = false;
                 this.actionBusy = false;
             }
         },

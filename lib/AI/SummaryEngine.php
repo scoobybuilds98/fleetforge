@@ -609,7 +609,7 @@ Structure your response with these sections:
 Unit number, type/category, year, current status (available/on lease/maintenance), yard location. Current lease customer if on lease.
 
 **Compliance Status**
-CVI, Registration, and MVI expiry dates. For each: how many days until expiry? Flag anything expiring within 60 days as urgent. Recommend specific action (e.g. "Schedule CVI inspection — expires in 22 days").
+CVI and Registration expiry dates (the only compliance documents the fleet tracks). For each: how many days until expiry? Flag anything expiring within 60 days as urgent. Recommend specific action (e.g. "Schedule CVI inspection — expires in 22 days").
 
 **Maintenance & Condition**
 Recent maintenance work orders, costs, recurring issues. Is maintenance spend high for the unit age? Any open work orders?

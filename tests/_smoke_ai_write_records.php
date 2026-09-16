@@ -368,9 +368,14 @@ try {
             $uc = (float) db_row("SELECT total_maintenance_cost FROM equipment_units WHERE id=?", [$wu['id']])['total_maintenance_cost'];
             abs($uc - ((float)$wu['total_maintenance_cost'] + 300.0))<0.001 ? $pass("work order: unit total_maintenance_cost +\$300 (Trap 6)") : $fail("work order: unit cost now {$uc}");
             if ($wv) {
-                $vs = (float) db_row("SELECT total_spent FROM vendors WHERE id=?", [$wv['id']])['total_spent'];
-                abs($vs - ((float)$wv['total_spent'] + 300.0))<0.001 ? $pass("work order: vendor total_spent +\$300 (Trap 6)") : $fail("work order: vendor spent now {$vs}");
+                // Bug #7: total_spent is RECOMPUTED from VendorSpend (approved bills +
+                // unbilled completed WOs), not "+= total_cost" — compare to the rule.
+                $vs       = (string) db_row("SELECT total_spent FROM vendors WHERE id=?", [$wv['id']])['total_spent'];
+                $expected = \FleetForge\Accounting\VendorSpend::compute((int) $wv['id']);
+                bccomp($vs, $expected, 2) === 0 ? $pass("work order: vendor total_spent recomputed = {$expected} (VendorSpend, Trap 6)") : $fail("work order: vendor spent {$vs} ≠ canonical {$expected}");
             }
+            // Bug #10: completion stamps the company-local day, not the UTC CURDATE().
+            ($wo['completed_date'] === date('Y-m-d')) ? $pass("work order: completed_date is the local business day") : $fail("work order: completed_date {$wo['completed_date']} ≠ " . date('Y-m-d'));
         } catch (\Throwable $e) {
             $fail("work order: hermetic apply threw — " . $e->getMessage());
         } finally {

@@ -264,8 +264,31 @@ class AccountingService
     }
 
     /**
+     * Table + number column each nextSequenceNumber() entity is stored in —
+     * used by the drift guard to find the highest number already issued.
+     * None of these tables soft-delete (drafts are hard-deleted, voids keep
+     * their row), so MAX over ALL rows is the collision-safe floor.
+     */
+    private const SEQUENCE_TABLES = [
+        'bill'          => ['acc_bills',             'bill_number'],
+        'ap_payment'    => ['acc_ap_payments',       'payment_number'],
+        'deposit'       => ['acc_customer_deposits', 'deposit_number'],
+        'vendor_credit' => ['acc_vendor_credits',    'credit_number'],
+    ];
+
+    /**
      * Generic atomic sequence number generator.
      * WHY: Same pattern as invoice numbering (Trap 9) — prevents gaps.
+     *
+     * Bug #9 drift guard: the settings counter is only a hint. Seeded rows,
+     * DB restores, and manual/QBO-imported rows never advance it, so it produced
+     * BILL-2026-00005 while BILL-2026-00059 already existed (non-monotonic) — and
+     * for a year whose counter row was missing it restarted at 00001 and 500'd on
+     * the UNIQUE key. The next number is now max(counter, highest issued + 1),
+     * mirroring nextJeNumber(). The numeric tail is compared as an integer (not a
+     * string MAX) so mixed-width legacy numbers (e.g. DEP-2023-003) and numbers
+     * past 99999 still sort correctly. Serialized by the FOR UPDATE on the
+     * counter row (callers must be inside db_transaction()).
      *
      * @param string $entity  Entity key (e.g. 'bill', 'ap_payment')
      * @param string $prefix  Output prefix (e.g. 'BILL', 'APAY')
@@ -278,6 +301,21 @@ class AccountingService
 
         $row = \db_row("SELECT `value` FROM settings WHERE `key` = ? FOR UPDATE", [$key]);
         $next = $row ? (int) $row['value'] : 1;
+
+        if (isset(self::SEQUENCE_TABLES[$entity])) {
+            [$table, $column] = self::SEQUENCE_TABLES[$entity];
+            $maxRow = \db_row(
+                "SELECT MAX(CAST(SUBSTRING_INDEX({$column}, '-', -1) AS UNSIGNED)) AS m
+                   FROM {$table}
+                  WHERE {$column} LIKE ?",
+                ["{$prefix}-{$year}-%"]
+            );
+            $maxNum = (int) ($maxRow['m'] ?? 0);
+            if ($next <= $maxNum) {
+                $next = $maxNum + 1;
+            }
+        }
+
         $number = sprintf("%s-%s-%05d", $prefix, $year, $next);
 
         if ($row) {
@@ -292,11 +330,65 @@ class AccountingService
         return $number;
     }
 
+    /**
+     * Find an existing live bill from the SAME vendor that already carries this
+     * supplier invoice number (acc_bills.vendor_bill_number).
+     *
+     * WHY (bug #9): nothing stopped the same supplier invoice being keyed in
+     * twice, which double-posts the expense + AP liability when both bills are
+     * approved. Scope is per vendor — two different suppliers can legitimately
+     * both issue "INV-1001". Void bills are excluded (re-entering a voided
+     * invoice is the correct fix-up path); acc_bills has no soft delete (draft
+     * deletes are hard deletes). The column collation is case-insensitive
+     * (utf8mb4_unicode_ci), so "inv-1001" matches "INV-1001".
+     *
+     * @param int         $vendorId          vendors.id the bill belongs to
+     * @param string|null $vendorBillNumber  supplier's invoice # (null/blank = no check)
+     * @param int|null    $excludeBillId     the bill being edited (update path)
+     * @return array{id:int, bill_number:string, status:string}|null  the clashing bill
+     */
+    public static function findDuplicateVendorBill(int $vendorId, ?string $vendorBillNumber, ?int $excludeBillId = null): ?array
+    {
+        $vendorBillNumber = $vendorBillNumber !== null ? trim($vendorBillNumber) : '';
+        if ($vendorBillNumber === '') {
+            return null;
+        }
+
+        $row = \db_row(
+            "SELECT id, bill_number, status
+               FROM acc_bills
+              WHERE vendor_id = ?
+                AND vendor_bill_number = ?
+                AND status <> 'void'
+                AND id <> ?
+              ORDER BY id
+              LIMIT 1",
+            [$vendorId, $vendorBillNumber, $excludeBillId ?? 0]
+        );
+
+        return $row ? ['id' => (int) $row['id'], 'bill_number' => (string) $row['bill_number'], 'status' => (string) $row['status']] : null;
+    }
+
     // ============================================================
     // ACCOUNT BALANCE CALCULATION
     // WHY: All balances computed from posted JE lines — no denormalized counters.
     // This is the single source of truth for account balances.
     // ============================================================
+
+    /**
+     * JE statuses whose lines are ON THE BOOKS, as an SQL IN-list body.
+     * Use as: "je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")".
+     *
+     * WHY 'reversed' is included: JournalEntryService::reverse() posts a NEW
+     * swapped-line entry (status 'posted') and flips the ORIGINAL to status
+     * 'reversed' — the original is not un-posted, it is offset. Reading only
+     * status = 'posted' dropped the original but kept its reversal, so every
+     * reversed entry counted as its own NEGATIVE instead of netting to zero
+     * (a voided invoice left AR and revenue understated by the invoice total;
+     * an auto-reversed month-end accrual vanished from the month it accrued).
+     * 'reversed' is only ever set by reverse(), which requires 'posted' first.
+     */
+    public const LEDGER_STATUSES_SQL = "'posted','reversed'";
 
     /**
      * Calculate the balance of an account as of a given date.
@@ -324,7 +416,7 @@ class AccountingService
              FROM acc_journal_entry_lines jel
              JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
              WHERE jel.account_id = ?
-               AND je.status = 'posted'
+               AND je.status IN (" . self::LEDGER_STATUSES_SQL . ")
                {$dateFilter}",
             $params
         );
@@ -356,7 +448,8 @@ class AccountingService
      */
     public static function allAccountBalances(?string $asOfDate = null, ?int $periodId = null): array
     {
-        $where = "je.status = 'posted'";
+        // Reversed originals stay on the books — see LEDGER_STATUSES_SQL.
+        $where = "je.status IN (" . self::LEDGER_STATUSES_SQL . ")";
         $params = [];
 
         if ($asOfDate) {

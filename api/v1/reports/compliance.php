@@ -43,7 +43,8 @@ $today      = date('Y-m-d');
 $windowEnd  = date('Y-m-d', strtotime("+{$windowDays} days"));
 
 // ── Cache check ──────────────────────────────────────────────────────────────
-$cacheParams = ['view' => $view, 'window_days' => $windowDays, 'today' => $today];
+// 'calc' orphans cached payloads from before the compliant/not-tracked split + flat status keys.
+$cacheParams = ['view' => $view, 'window_days' => $windowDays, 'today' => $today, 'calc' => 'comp-v3'];
 $cacheType   = 'compliance_' . $view;
 
 if ($format === 'json') {
@@ -72,7 +73,25 @@ $kpiRow = db_row(
                           (cvi_expiry BETWEEN ? AND DATE_ADD(?, INTERVAL 90 DAY))
                        OR (registration_expiry BETWEEN ? AND DATE_ADD(?, INTERVAL 90 DAY))
                        OR (insurance_expiry    BETWEEN ? AND DATE_ADD(?, INTERVAL 90 DAY))
-                      ) THEN 1 ELSE 0 END) AS expiring_90_count
+                      ) THEN 1 ELSE 0 END) AS expiring_90_count,
+        -- Compliant: ALL THREE documents dated and every one more than 90 days out.
+        -- WHY explicit: the old ok_count was total − expiring − expired, so a unit
+        -- with NO compliance dates at all counted as compliant (49 of 49 in the
+        -- demo fleet, none of which has a single date recorded).
+        SUM(CASE WHEN cvi_expiry          > DATE_ADD(?, INTERVAL 90 DAY)
+                  AND registration_expiry > DATE_ADD(?, INTERVAL 90 DAY)
+                  AND insurance_expiry    > DATE_ADD(?, INTERVAL 90 DAY)
+                 THEN 1 ELSE 0 END) AS compliant_count,
+        -- Not tracked: nothing expired or expiring, but at least one document has no
+        -- date — compliance is UNKNOWN, not proven.
+        SUM(CASE WHEN (cvi_expiry IS NULL OR registration_expiry IS NULL OR insurance_expiry IS NULL)
+                  AND NOT (COALESCE(cvi_expiry,          '9999-12-31') <= DATE_ADD(?, INTERVAL 90 DAY)
+                        OR COALESCE(registration_expiry, '9999-12-31') <= DATE_ADD(?, INTERVAL 90 DAY)
+                        OR COALESCE(insurance_expiry,    '9999-12-31') <= DATE_ADD(?, INTERVAL 90 DAY))
+                 THEN 1 ELSE 0 END) AS not_tracked_count,
+        -- Units with no compliance date of any kind (subset of not_tracked).
+        SUM(CASE WHEN cvi_expiry IS NULL AND registration_expiry IS NULL AND insurance_expiry IS NULL
+                 THEN 1 ELSE 0 END) AS no_dates_count
      FROM equipment_units
      WHERE deleted_at IS NULL AND status != 'decommissioned'",
     [
@@ -82,6 +101,10 @@ $kpiRow = db_row(
         $today, $today, $today, $today, $today, $today,
         // expiring_90
         $today, $today, $today, $today, $today, $today,
+        // compliant
+        $today, $today, $today,
+        // not_tracked
+        $today, $today, $today,
     ]
 );
 
@@ -91,7 +114,11 @@ $kpis = [
     'expired_count'    => (int) $kpiRow['expired_count'],
     'expiring_30'      => (int) $kpiRow['expiring_30_count'],
     'expiring_90'      => (int) $kpiRow['expiring_90_count'],
-    'ok_count'         => max(0, $totalUnits - (int) $kpiRow['expiring_90_count'] - (int) $kpiRow['expired_count']),
+    // Compliant = all three documents dated and > 90 days from expiry. Units with
+    // missing dates are reported separately as not_tracked (unknown), never as OK.
+    'ok_count'         => (int) $kpiRow['compliant_count'],
+    'not_tracked_count'=> (int) $kpiRow['not_tracked_count'],
+    'no_dates_count'   => (int) $kpiRow['no_dates_count'],
     'window_days'      => $windowDays,
     'as_of_date'       => $today,
 ];
@@ -224,6 +251,13 @@ switch ($view) {
             'ok'        => [(int) $statusRows['cvi_ok'],          (int) $statusRows['reg_ok'],          (int) $statusRows['ins_ok']],
             'missing'   => [(int) $statusRows['cvi_missing'],     (int) $statusRows['reg_missing'],     (int) $statusRows['ins_missing']],
         ];
+        // Flat per-document keys (cvi_expired, reg_missing, …) — what the Reports
+        // page chart AND its table actually read. Without them every cell read 0:
+        // the "No Date" column showed 0 for a fleet with no dates at all and the
+        // stacked chart rendered blank with an "Infinity" axis.
+        foreach (($statusRows ?: []) as $k => $v) {
+            $chartData[$k] = (int) $v;
+        }
 
         if ($format === 'csv') {
             ReportBuilder::outputCsv(

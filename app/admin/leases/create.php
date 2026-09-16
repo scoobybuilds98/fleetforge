@@ -1308,8 +1308,10 @@ function FF_CreateLease() {
         ratesCreateUrl:  '<?= base_url('rates/create') ?>',
 
         init() {
-            // Default start date to today
-            this.form.start_date = new Date().toISOString().slice(0, 10);
+            // Default start date to today — the company-local business day.
+            // toISOString() is the UTC day, which after 5pm Pacific pre-filled
+            // TOMORROW and silently back-/forward-dated the lease start.
+            this.form.start_date = FF_localDate();
 
             // ADV-BILL-1: zero out advance periods if cycle leaves monthly.
             this.$watch('form.billing_cycle', (v) => {

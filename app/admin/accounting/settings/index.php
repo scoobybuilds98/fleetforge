@@ -166,10 +166,20 @@ require_once FF_ROOT . '/includes/header.php';
             <template x-for="mapping in glMappings" :key="mapping.key">
                 <div class="form-group">
                     <label class="form-label" x-text="mapping.label"></label>
+                    <!-- WHY :selected — x-model assigns the select's value when the
+                         component boots, BEFORE the x-for below has rendered any
+                         <option>. The browser can't select a value with no matching
+                         option, falls back to "Not Mapped", and x-model never
+                         re-applies it once the options arrive — so every saved
+                         mapping displayed as unmapped. Binding :selected per option
+                         re-evaluates as options render. String() both sides: the
+                         setting is stored as "4", the account id is 4. -->
                     <select class="form-select" x-model="gl_mapping[mapping.key]">
                         <option value="">-- Not Mapped --</option>
-                        <template x-for="acct in glAccountsByType(mapping.types)" :key="acct.id">
-                            <option :value="acct.id" x-text="acct.code + ' — ' + acct.name"></option>
+                        <template x-for="acct in mapping.accounts" :key="acct.id">
+                            <option :value="acct.id"
+                                    :selected="String(acct.id) === String(gl_mapping[mapping.key] ?? '')"
+                                    x-text="acct.code + ' — ' + acct.name"></option>
                         </template>
                     </select>
                     <p class="text-secondary text-sm" style="margin:2px 0 0;" x-text="mapping.hint"></p>
@@ -224,8 +234,11 @@ require_once FF_ROOT . '/includes/header.php';
                                             x-model="revenue_mapping[lt]"
                                             style="max-width:400px;">
                                         <option value="">-- Not Mapped --</option>
+                                        <!-- :selected — same boot-order fix as the GL Mapping selects above. -->
                                         <template x-for="acct in revenueAccounts" :key="acct.id">
-                                            <option :value="acct.id" x-text="acct.code + ' — ' + acct.name"></option>
+                                            <option :value="acct.id"
+                                                    :selected="String(acct.id) === String(revenue_mapping[lt] ?? '')"
+                                                    x-text="acct.code + ' — ' + acct.name"></option>
                                         </template>
                                     </select>
                                 </td>
@@ -633,6 +646,11 @@ function FF_AcctSettings() {
         init() {
             // WHY: Component is fully initialized from server-rendered data —
             // no API call needed on load. Just restore tab state from the URL hash.
+            // WHY: resolve each GL mapping's eligible accounts once, here, instead
+            // of calling glAccountsByType() inside the x-for (a function call in
+            // x-for re-runs the filter on every reactive tick).
+            this.glMappings.forEach(m => { m.accounts = this.glAccountsByType(m.types); });
+
             const _tabs = ['general','gl_mapping','revenue_mapping','depreciation','tax_filing'];
             const _initTab = FF_TabHash.init(_tabs, 'general');
             this.activeTab = _initTab;

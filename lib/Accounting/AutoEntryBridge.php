@@ -1507,9 +1507,14 @@ class AutoEntryBridge
         if (!self::isEnabled()) return null;
 
         // Idempotency guard — already linked?
+        // Only a LIVE recovery JE counts (bug #8): if the previously linked
+        // invoice was voided, its retagged JE is reversed (reversed_by_id set,
+        // and the reversal row carries the same source) — the claim may then be
+        // re-pointed to the replacement invoice, whose JE must still be linked.
         $existing = \db_row(
             "SELECT * FROM acc_journal_entries
               WHERE source_type = 'damage_recovery' AND source_id = ?
+                AND is_reversal = 0 AND reversed_by_id IS NULL
               LIMIT 1",
             [$claimId]
         );
@@ -1526,7 +1531,7 @@ class AutoEntryBridge
 
         $invoice = \db_row(
             "SELECT id, invoice_number, customer_id, company_name_snapshot,
-                    total_amount, customer_name_snapshot
+                    total_amount, customer_name_snapshot, status
                FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [$invoiceId]
         );
@@ -1585,6 +1590,20 @@ class AutoEntryBridge
         // Fallback path: no invoice JE exists (defensive — shouldn't
         // happen in normal flow). Create a minimal reference JE so the
         // subledger has a drill-down target.
+        //
+        // Bug #8 guard: a DRAFT invoice has no JE because it isn't revenue yet;
+        // posting DR AR / CR revenue here would book revenue for a draft AND
+        // double-post when the invoice is later sent (onInvoiceSent only
+        // de-dupes source_type='invoice'). A VOID invoice was never billed.
+        // Refuse both — damage_claims/update.php already requires a sent invoice.
+        if (in_array((string) ($invoice['status'] ?? ''), ['draft', 'void'], true)) {
+            \error_log(
+                "[S-ACCT-DMG] claim #{$claim['claim_number']} → invoice {$invoice['invoice_number']} "
+                . "is {$invoice['status']} — no recovery JE posted (draft/void is not revenue)."
+            );
+            return null;
+        }
+
         $recoveryAmount = (string) ($claim['customer_liable_amount'] ?? '0.00');
         if (bccomp($recoveryAmount, '0', 2) <= 0) {
             $recoveryAmount = (string) ($invoice['total_amount'] ?? '0.00');

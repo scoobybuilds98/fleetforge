@@ -65,7 +65,8 @@ $isAdmin    = can('settings', 'view');
     <div class="page-header-actions">
         <?= help_button('ai') ?>
         <?php if ($isAdmin): ?>
-        <a href="<?= base_url('settings') ?>?tab=integrations" class="btn btn-secondary btn-sm" style="font-size:0.8125rem;">
+        <?php // WHY tab=intelligence: the ai.* settings (enable, API key, model, limits) moved to the Intelligence tab in S-INTEL-TAB; tab=integrations landed on SMTP/GPS/S3 with no AI fields. ?>
+        <a href="<?= base_url('settings') ?>?tab=intelligence" class="btn btn-secondary btn-sm" style="font-size:0.8125rem;">
             AI Settings
         </a>
         <?php endif; ?>
@@ -82,7 +83,7 @@ $isAdmin    = can('settings', 'view');
             To use the AI Assistant, you need to enable AI features and configure your Anthropic API key in Settings.
         </p>
         <?php if ($isAdmin): ?>
-        <a href="<?= base_url('settings') ?>?tab=integrations" class="btn btn-primary">
+        <a href="<?= base_url('settings') ?>?tab=intelligence" class="btn btn-primary">
             Configure AI Settings
         </a>
         <?php else: ?>
@@ -1137,8 +1138,31 @@ function FF_AiChat() {
                 return '\u0000CODE' + (codeBlocks.length - 1) + '\u0000';
             });
 
+            // Inline formatting (bold, italic, code, links). Defined up-front so
+            // step 3 can apply it to table cells: tables are stashed BEFORE the
+            // global inline pass (step 8), so without this a cell like
+            // "**T-100**" rendered with literal asterisks. Input is ALWAYS the
+            // step-1-escaped text, so the only tags that can appear are the
+            // ones these replacements emit.
+            const inline = (s) => s
+                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
+                .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+                // WHY: AI/document output is untrusted (prompt-injection). The
+                // step-1 escape only handles & < > — not " — so an unescaped URL
+                // like [x](" onmouseover="alert(1)) would break out of href=""
+                // into a live event handler, and javascript:/data: URIs would run
+                // on click. Allow only safe schemes and attribute-encode quotes;
+                // anything else degrades to the (already-escaped) link text.
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
+                    if (!/^\s*(https?:\/\/|mailto:|\/|#)/i.test(url)) return label;
+                    const href = url.trim().replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                    return '<a href="' + href + '" target="_blank" rel="noopener">' + label + '</a>';
+                });
+
             // 3. Tables — detect contiguous pipe-rows including separator.
             //    Stash them so later regexes (paragraphs, lists) don't touch the markup.
+            //    Cells get inline() here because the stash hides them from step 8.
             const tables = [];
             html = html.replace(
                 /(^\|[^\n]+\|\n\|[\s\-:|]+\|\n(?:\|[^\n]+\|(?:\n|$))+)/gm,
@@ -1146,13 +1170,15 @@ function FF_AiChat() {
                     const lines = block.trim().split('\n');
                     const headerCells = lines[0].slice(1, -1).split('|').map(c => c.trim());
                     const bodyLines = lines.slice(2); // skip header + separator
-                    const thead = '<thead><tr>' + headerCells.map(c => '<th>' + c + '</th>').join('') + '</tr></thead>';
+                    const thead = '<thead><tr>' + headerCells.map(c => '<th>' + inline(c) + '</th>').join('') + '</tr></thead>';
                     const tbody = '<tbody>' + bodyLines.map(line => {
                         const cells = line.slice(1, -1).split('|').map(c => c.trim());
-                        return '<tr>' + cells.map(c => '<td>' + c + '</td>').join('') + '</tr>';
+                        return '<tr>' + cells.map(c => '<td>' + inline(c) + '</td>').join('') + '</tr>';
                     }).join('') + '</tbody>';
                     tables.push('<table>' + thead + tbody + '</table>');
-                    return '\u0000TABLE' + (tables.length - 1) + '\u0000';
+                    // Keep the newline the regex consumed so a following
+                    // "\n\nText" still splits into its own paragraph (step 9).
+                    return '\u0000TABLE' + (tables.length - 1) + '\u0000' + (block.endsWith('\n') ? '\n' : '');
                 }
             );
 
@@ -1181,25 +1207,14 @@ function FF_AiChat() {
                 return '<ol>' + items.map(i => '<li>' + i + '</li>').join('') + '</ol>\n';
             });
 
-            // 8. Inline formatting (bold, italic, code, links)
-            html = html
-                .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-                .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
-                .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-                // WHY: AI/document output is untrusted (prompt-injection). The
-                // step-1 escape only handles & < > — not " — so an unescaped URL
-                // like [x](" onmouseover="alert(1)) would break out of href=""
-                // into a live event handler, and javascript:/data: URIs would run
-                // on click. Allow only safe schemes and attribute-encode quotes;
-                // anything else degrades to the (already-escaped) link text.
-                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, label, url) => {
-                    if (!/^\s*(https?:\/\/|mailto:|\/|#)/i.test(url)) return label;
-                    const href = url.trim().replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-                    return '<a href="' + href + '" target="_blank" rel="noopener">' + label + '</a>';
-                });
+            // 8. Inline formatting (bold, italic, code, links) — see inline() above.
+            html = inline(html);
 
-            // 9. Paragraphs — split on blank lines, wrap chunks that aren't already block-level
-            const blockTagRe = /^<(h[1-6]|ul|ol|table|pre|blockquote|hr|\u0000)/i;
+            // 9. Paragraphs — split on blank lines, wrap chunks that aren't already block-level.
+            //    A stashed table/code token starts with \u0000 (no "<"), so it must be
+            //    matched on its own — the old /^<(...|\u0000)/ required a "<" first and
+            //    wrapped every table in <p>…</p> (invalid nesting, stray <br>).
+            const blockTagRe = /^(<(h[1-6]|ul|ol|table|pre|blockquote|hr)|\u0000)/i;
             html = html.split(/\n{2,}/).map(chunk => {
                 const trimmed = chunk.trim();
                 if (!trimmed) return '';

@@ -138,7 +138,7 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function trialBalancePage() {
     return {
-        asOfDate: new Date().toISOString().slice(0, 10),
+        asOfDate: FF_localDate(),
         data: null,
         loading: false,
 

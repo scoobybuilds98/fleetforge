@@ -689,7 +689,10 @@ HTML;
         $section = static function (string $label, array $rows, string $total) {
             $o = '<tr class="group"><td colspan="2">' . htmlspecialchars($label) . '</td></tr>';
             foreach ($rows as $row) {
-                $o .= '<tr><td>' . htmlspecialchars($row['code'] . ' — ' . $row['name']) . '</td>';
+                // Computed equity lines (net income YTD / unclosed prior-year
+                // earnings) carry no account code.
+                $rowLabel = ($row['code'] ?? '') !== '' ? $row['code'] . ' — ' . $row['name'] : $row['name'];
+                $o .= '<tr><td>' . htmlspecialchars($rowLabel) . '</td>';
                 $o .= '<td class="amt">' . self::money($row['amount']) . '</td></tr>';
             }
             $o .= '<tr class="total"><td>Total ' . htmlspecialchars($label) . '</td>';
@@ -702,8 +705,8 @@ HTML;
         $h .= $section('Current Liabilities', $r['current_liabilities'], $r['current_liabilities_total']);
         $h .= $section('Long-Term Liabilities', $r['long_term_liabilities'], $r['long_term_liabilities_total']);
         $h .= '<tr class="total"><td>Total Liabilities</td><td class="amt">' . self::money($r['total_liabilities']) . '</td></tr>';
+        // Net income is a row inside the equity section (ReportingService::buildBSBlock).
         $h .= $section('Equity', $r['equity'], $r['total_equity']);
-        $h .= '<tr><td>Net Income (YTD, injected)</td><td class="amt">' . self::money($r['net_income_injected']) . '</td></tr>';
         $h .= '<tr class="total"><td>Total Liabilities + Equity</td><td class="amt">' . self::money($r['total_liabilities_and_equity']) . '</td></tr>';
         if (!$r['is_balanced']) {
             $h .= '<tr><td colspan="2" style="color:#990000;">⚠ Balance check: drift ' . self::money($r['drift']) . '</td></tr>';
@@ -761,35 +764,40 @@ HTML;
         return $h;
     }
 
+    /**
+     * Year-end AR aging schedule (HTML for the PDF package).
+     *
+     * Delegates to \FleetForge\Reports\ArAging::asOf() — the same calculation as
+     * Accounting → AR Aging and Reports → AR Aging — instead of its own query, which
+     * (a) selected customers.name, a column that does not exist (company_name), so
+     * the year-end package fatalled on this schedule; (b) summed USD and CAD
+     * balances as one currency; and (c) used TODAY's balance_due for a prior-year
+     * as-of date. Balances are CAD at each invoice's frozen exchange_rate_to_cad and
+     * rolled back to the as-of date.
+     *
+     * @param string $asOf       Y-m-d fiscal year-end
+     * @param int    $fiscalYear
+     * @return string HTML document
+     */
     private static function renderArAgingHtml(string $asOf, int $fiscalYear): string
     {
-        $rows = \db_select(
-            "SELECT c.name AS customer_name, i.invoice_number, i.invoice_date, i.due_date, i.balance_due,
-                    DATEDIFF(?, i.due_date) AS days_overdue
-               FROM invoices i
-               JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
-              WHERE i.status NOT IN ('paid','void','written_off')
-                AND i.deleted_at IS NULL
-                AND i.balance_due > 0
-                AND i.invoice_date <= ?
-              ORDER BY i.due_date ASC",
-            [$asOf, $asOf]
-        );
+        $aging = \FleetForge\Reports\ArAging::asOf($asOf);
         $h = '<table class="rpt"><thead><tr>';
-        $h .= '<th>Customer</th><th>Invoice #</th><th>Due Date</th><th class="amt">Balance</th><th class="amt">Days Overdue</th>';
+        $h .= '<th>Customer</th><th>Invoice #</th><th>Due Date</th><th class="amt">Balance (CAD)</th><th class="amt">Days Overdue</th>';
         $h .= '</tr></thead><tbody>';
-        $total = '0.00';
-        foreach ($rows as $r) {
-            $h .= '<tr><td>' . htmlspecialchars($r['customer_name']) . '</td>';
-            $h .= '<td>' . htmlspecialchars($r['invoice_number']) . '</td>';
-            $h .= '<td>' . htmlspecialchars($r['due_date']) . '</td>';
-            $h .= '<td class="amt">' . self::money((string) $r['balance_due']) . '</td>';
-            $h .= '<td class="amt">' . (int) $r['days_overdue'] . '</td></tr>';
-            $total = bcadd($total, (string) $r['balance_due'], 2);
+        foreach ($aging['invoices'] as $r) {
+            $native = $r['currency'] !== 'CAD'
+                ? ' <span style="color:#666">(' . htmlspecialchars($r['currency']) . ' ' . self::money((string) $r['balance_due_native']) . ')</span>'
+                : '';
+            $h .= '<tr><td>' . htmlspecialchars((string) $r['company_name']) . '</td>';
+            $h .= '<td>' . htmlspecialchars((string) $r['invoice_number']) . '</td>';
+            $h .= '<td>' . htmlspecialchars((string) $r['due_date']) . '</td>';
+            $h .= '<td class="amt">' . self::money((string) $r['balance_due']) . $native . '</td>';
+            $h .= '<td class="amt">' . (int) $r['days_past_due'] . '</td></tr>';
         }
-        $h .= '<tr class="total"><td colspan="3">Total Outstanding AR</td><td class="amt">' . self::money($total) . '</td><td></td></tr>';
+        $h .= '<tr class="total"><td colspan="3">Total Outstanding AR (CAD)</td><td class="amt">' . self::money((string) $aging['totals']['total']) . '</td><td></td></tr>';
         $h .= '</tbody></table>';
-        return self::wrapHtml("AR Aging — FY {$fiscalYear}", "As of {$asOf}", $h);
+        return self::wrapHtml("AR Aging — FY {$fiscalYear}", "As of {$asOf} · CAD", $h);
     }
 
     private static function renderApAgingHtml(string $asOf, int $fiscalYear): string

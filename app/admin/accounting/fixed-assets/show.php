@@ -395,7 +395,7 @@ function componentsPanel(parentId) {
         modal: { open: false, saving: false, error: null },
         form: {
             name: '', asset_class: 'fleet_equipment',
-            acquisition_cost: '', acquisition_date: new Date().toISOString().slice(0,10),
+            acquisition_cost: '', acquisition_date: FF_localDate(),
             useful_life_years: '5', depreciation_method: 'straight_line', salvage_value: '0',
             asset_account_id: '', accum_depr_account_id: '', depr_expense_account_id: '',
             notes: '',

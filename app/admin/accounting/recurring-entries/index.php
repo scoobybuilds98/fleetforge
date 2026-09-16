@@ -7,6 +7,10 @@
  * (table is small + we want first-paint state); Alpine handles
  * Pause/Unpause toggles inline.
  *
+ * Overdue templates (next_post_date passed, still active) get an "Overdue · N
+ * missed" badge, and a banner says whether the nightly job is switched off —
+ * previously an unposted month just sat there with a past date and no signal.
+ *
  * @session S037-REC
  */
 
@@ -41,6 +45,19 @@ $rows = db_select(
     $params
 );
 
+// Overdue detection uses the posting engine itself, so "N missed" is exactly
+// what the cron / "Catch up now" on the detail page would post.
+$today     = \FleetForge\Accounting\AccountingService::businessToday();
+$cronOn    = cron_enabled('accounting_recurring_entries');
+$overdueTotal = 0;
+foreach ($rows as &$r) {
+    $r['missed'] = ((int) $r['is_active'] === 1)
+        ? count(\FleetForge\Accounting\RecurringEntryService::dueOccurrences($r, $today, 1000))
+        : 0;
+    if ($r['missed'] > 0) $overdueTotal++;
+}
+unset($r);
+
 $pageTitle = 'Recurring Entries';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -72,6 +89,18 @@ require_once FF_ROOT . '/includes/header.php';
         <a href="?filter=paused" class="btn btn-xs <?= $filter === 'paused' ? 'btn-primary'   : 'btn-secondary' ?>">Paused</a>
     </div>
 </div>
+
+<?php if ($overdueTotal > 0): ?>
+    <div class="alert alert-warning" role="status" style="margin-bottom:14px;font-size:0.8125rem;">
+        <strong><?= $overdueTotal ?> template<?= $overdueTotal === 1 ? ' is' : 's are' ?> overdue.</strong>
+        <?php if (!$cronOn): ?>
+            The nightly <strong>Recurring journal entries</strong> job is switched <strong>off</strong> (Settings → Scheduled Jobs), so nothing posts automatically.
+        <?php else: ?>
+            The nightly job posts missed occurrences on its next run.
+        <?php endif; ?>
+        Open a template and use <strong>Catch up now</strong> to post the missed months immediately.
+    </div>
+<?php endif; ?>
 
 <?php if (empty($rows)): ?>
     <div class="card" style="padding:48px;text-align:center;">
@@ -114,7 +143,12 @@ require_once FF_ROOT . '/includes/header.php';
                         </td>
                         <td style="padding:8px 12px;text-transform:capitalize;"><?= e($r['frequency']) ?></td>
                         <td class="font-mono" style="padding:8px 12px;text-align:right;"><?= (int) $r['day_of_month'] ?></td>
-                        <td class="font-mono" style="padding:8px 12px;"><?= e($r['next_post_date'] ?? '—') ?></td>
+                        <td class="font-mono" style="padding:8px 12px;white-space:nowrap;">
+                            <?= e($r['next_post_date'] ?? '—') ?>
+                            <?php if ($r['missed'] > 0): ?>
+                                <span class="badge badge-warning" style="margin-left:4px;font-size:0.65rem;" title="Unposted occurrences due on or before today">Overdue · <?= (int) $r['missed'] ?> missed</span>
+                            <?php endif; ?>
+                        </td>
                         <td class="font-mono" style="padding:8px 12px;"><?= $r['last_posted_date'] ? e($r['last_posted_date']) : '<span style="color:var(--text-secondary);">never</span>' ?></td>
                         <td style="padding:8px 12px;text-align:center;">
                             <?= ((int) $r['auto_post']) === 1

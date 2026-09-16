@@ -8,6 +8,11 @@ declare(strict_types=1);
  * accountant has full authority, no separate approval workflow).
  * On approval, posts JE: DR expense accounts + DR GST Receivable (ITC) / CR 2010 AP.
  * Runs auto-categorization rules engine if enabled.
+ * Rejects (422) a supplier invoice # (vendor_bill_number) that is already on a
+ * live (non-void) bill from the SAME vendor — bug #9; different vendors may
+ * share a number. bill_number is issued by AccountingService::nextBillNumber(),
+ * which is drift-guarded against the highest number already issued.
+ * With auto_approve, vendors.total_spent is recomputed via VendorSpend (bug #7).
  *
  * @method  POST
  * @body    vendor_id, bill_date, due_date, vendor_bill_number?, work_order_id?,
@@ -42,6 +47,11 @@ $billDate        = clean_date($input['bill_date'] ?? null);
 $dueDate         = clean_date($input['due_date'] ?? null);
 $vendorBillNum   = clean_string($input['vendor_bill_number'] ?? null);
 
+// VALID-2: accumulator pattern — collect every error, return all at once.
+// Initialised BEFORE the first check: it used to be reset further down, which
+// silently discarded the vendor_bill_number length error below.
+$fields = [];
+
 // S-QBO-BILL-GOTCHAS-PAYDOWN D-QBO-BILL-GOTCHAS-2: enforce 21-char limit at
 // INPUT time so the operator catches the issue before approve.php fires the
 // QBO push and the preflight gate 7 (failed_preflight_field_too_long)
@@ -59,9 +69,6 @@ $equipmentUnitId = clean_int($input['equipment_unit_id'] ?? null);
 $notes           = clean_string($input['notes'] ?? null, 2000);
 $currency        = clean_string($input['currency'] ?? null) ?? 'CAD';
 $autoApprove     = !empty($input['auto_approve']) && $input['auto_approve'] !== '0';
-
-// VALID-2: accumulator pattern — collect every error, return all at once
-$fields = [];
 
 if (!$vendorId)  $fields['vendor_id']  = 'Please select a vendor.';
 if (!$billDate)  $fields['bill_date']  = 'Bill date is required.';
@@ -84,6 +91,15 @@ $vendor = db_row(
 );
 if (!$vendor) {
     json_validation_error(['vendor_id' => 'Vendor not found.'], 'Vendor not found.');
+}
+
+// Bug #9: the same supplier invoice must not be entered twice for one vendor
+// (it would double-post the expense + AP liability on approval). Pre-checked
+// here for a fast, clear 422; re-checked under the vendor row lock inside the
+// transaction below so two simultaneous saves can't both slip through.
+if ($dup = AccountingService::findDuplicateVendorBill($vendorId, $vendorBillNum)) {
+    $dupMsg = "Supplier invoice # {$vendorBillNum} is already entered for {$vendor['name']} on bill {$dup['bill_number']} ({$dup['status']}). Open that bill instead of entering it twice.";
+    json_validation_error(['vendor_bill_number' => $dupMsg], $dupMsg);
 }
 
 // Validate optional work order link
@@ -219,6 +235,14 @@ $result = db_transaction(function () use (
     $taxGst, $taxPst, $taxHst, $taxTotal, $totalAmount, $validatedLines,
     $vendor
 ) {
+    // Serialize bills for this vendor, then re-run the duplicate supplier
+    // invoice check under the lock (race-safe twin of the pre-check above).
+    db_row("SELECT id FROM vendors WHERE id = ? FOR UPDATE", [$vendorId]);
+    if ($dup = AccountingService::findDuplicateVendorBill($vendorId, $vendorBillNum)) {
+        $dupMsg = "Supplier invoice # {$vendorBillNum} is already entered for {$vendor['name']} on bill {$dup['bill_number']} ({$dup['status']}). Open that bill instead of entering it twice.";
+        json_validation_error(['vendor_bill_number' => $dupMsg], $dupMsg);
+    }
+
     $year = substr($billDate, 0, 4);
     $billNumber = AccountingService::nextBillNumber($year);
 
@@ -271,11 +295,9 @@ $result = db_transaction(function () use (
             'journal_entry_id' => $jeId,
         ], 'id = ?', [$billId]);
 
-        // Update vendor.total_spent in same transaction (Trap 6)
-        db_execute(
-            "UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?",
-            [$totalAmount, $vendorId]
-        );
+        // Trap 6 / bug #7: recompute vendor.total_spent in the same transaction
+        // (the bill replaces a linked work order's cost; never "+= total").
+        \FleetForge\Accounting\VendorSpend::recompute((int) $vendorId);
     }
 
     db_insert('audit_log', [

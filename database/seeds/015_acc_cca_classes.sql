@@ -10,6 +10,13 @@
 -- (all 9 standard classes here are declining balance).
 -- ---------------------------------------------------------------------------
 
+-- WHY SET NAMES: seeds are applied with the mysql CLI (`mysql db < file.sql`),
+-- whose connection charset defaults to latin1 on a stock install. Without this
+-- line every non-ASCII character in this file (em dash, arrows, <=) is read as
+-- latin1 bytes and stored DOUBLE-ENCODED (an em dash lands as the 3-char
+-- mojibake "a-circumflex, euro, right-quote"). utf8mb4 matches includes/db.php.
+SET NAMES utf8mb4;
+
 INSERT IGNORE INTO `acc_cca_classes`
     (`class_number`, `description`, `rate`, `method`, `half_year_rule`, `aiip_eligible`, `recapture_applies`, `terminal_loss_applies`, `one_asset_per_class`, `notes`)
 VALUES

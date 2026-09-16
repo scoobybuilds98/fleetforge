@@ -112,9 +112,14 @@ require_once FF_ROOT . '/includes/header.php';
                         </template>
                     </tr>
                 </thead>
-                <tbody>
-                    <template x-for="(grp, gi) in sections" :key="gi">
-                        <template>
+                    <!-- WHY one <tbody> per section: an x-for iteration must render
+                         exactly ONE root element. This used a bare nested <template>
+                         as the root, which Alpine clones as an inert element — so no
+                         section header, account row or section total ever rendered;
+                         only the grand-total rows below showed. A table may hold any
+                         number of <tbody> elements, so each section gets its own. -->
+                <template x-for="(grp, gi) in sections" :key="gi">
+                    <tbody>
                             <tr style="background:var(--bg-elev);">
                                 <td colspan="4" style="padding:8px 10px;font-weight:600;" x-text="grp.label"></td>
                             </tr>
@@ -136,8 +141,9 @@ require_once FF_ROOT . '/includes/header.php';
                                 <template x-if="hasCompare()"><td></td></template>
                                 <template x-if="hasCompare()"><td></td></template>
                             </tr>
-                        </template>
-                    </template>
+                    </tbody>
+                </template>
+                <tbody>
                     <tr style="border-top:2px solid var(--border-default);">
                         <td style="padding:8px 10px;font-weight:700;">Gross Profit</td>
                         <td class="font-mono" style="padding:8px 10px;text-align:right;font-weight:700;" x-text="fmt(report.gross_profit)"></td>
@@ -150,7 +156,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <template x-if="hasCompare()"><td></td></template>
                         <template x-if="hasCompare()"><td></td></template>
                     </tr>
-                    <tr style="border-top:2px solid var(--border-default);background:#e8f0fe;">
+                    <!-- grand-total rows: --bg-selected is the brand tint defined in BOTH theme blocks (the old hardcoded light blue left white-on-pale text unreadable in dark mode) -->
+                    <tr style="border-top:2px solid var(--border-default);background:var(--bg-selected);">
                         <td style="padding:8px 10px;font-weight:700;">Net Income</td>
                         <td class="font-mono" style="padding:8px 10px;text-align:right;font-weight:700;" x-text="fmt(report.net_income)"></td>
                         <template x-if="hasCompare()"><td></td></template>
@@ -165,7 +172,7 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function plReport() {
     const apiBase = '<?= e(base_url('api/v1/accounting')) ?>';
-    const todayIso = new Date().toISOString().slice(0,10);
+    const todayIso = FF_localDate();
     const yearStart = todayIso.slice(0,4) + '-01-01';
     return {
         form: { from: yearStart, to: todayIso, comparison: 'none', budget_id: '' },

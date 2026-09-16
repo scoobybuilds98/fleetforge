@@ -11,6 +11,12 @@ declare(strict_types=1);
  * D19 optimistic lock: updated_at submitted with every save.
  * Delete: soft-delete via api/v1/vendors/delete.php (blocked if active WOs exist).
  *
+ * Total Spent = vendors.total_spent, maintained by FleetForge\Accounting\VendorSpend
+ * (approved AP bills + completed work orders no approved bill covers — bug #7).
+ * Tiles deep-link to the work-order list with vendor_id / status params that the
+ * list honours (bug #25); 'active' is the open+in_progress+waiting_parts roll-up.
+ * The work-type filter offers exactly the maintenance_work_orders.work_type ENUM.
+ *
  * D30: asset_url() / base_url().
  * D32: Only CSS classes confirmed in app.css.
  *
@@ -204,11 +210,11 @@ require_once FF_ROOT . '/includes/header.php';
        title="View all work orders for this vendor">
         <div class="stat-label">Total Spent</div>
         <div class="stat-value font-mono"><?= format_currency($vendor['total_spent']) ?></div>
-        <div class="stat-delta">all work orders</div>
+        <div class="stat-delta">approved bills + unbilled work orders</div>
     </a>
 
     <a class="stat-card"
-       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>&status=open"
+       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>&status=active"
        style="cursor:pointer;text-decoration:none"
        title="View open / in-progress / waiting-parts work orders">
         <div class="stat-label">Active Work Orders</div>
@@ -478,10 +484,16 @@ require_once FF_ROOT . '/includes/header.php';
         <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
                 x-model="filters.work_type" @change="applyFilters()">
             <option value="">All Types</option>
+            <?php /* Bug #25: must mirror the maintenance_work_orders.work_type ENUM —
+                     'preventive'/'emergency' never existed (emergency is a PRIORITY),
+                     so picking them silently returned every work order. */ ?>
+            <option value="scheduled_service">Scheduled Service</option>
             <option value="repair">Repair</option>
-            <option value="preventive">Preventive</option>
             <option value="inspection">Inspection</option>
-            <option value="emergency">Emergency</option>
+            <option value="tire">Tire</option>
+            <option value="electrical">Electrical</option>
+            <option value="body_damage">Body Damage</option>
+            <option value="breakdown">Breakdown</option>
             <option value="other">Other</option>
         </select>
         <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"

@@ -14,7 +14,10 @@ declare(strict_types=1);
  * @auth        Session required (require_auth_api)
  * @returns     {
  *                active_revenue:      string   (sum of active lease monthly_rate, bcmath string)
- *                fleet_utilization:   float    (on_lease / total_active * 100, 1 decimal)
+ *                fleet_utilization:   float    (on_lease / total_active * 100, 1 decimal) —
+ *                                     a RIGHT-NOW status snapshot, shown as "On Lease Now".
+ *                                     Period utilization (occupied ÷ available unit-days)
+ *                                     lives in lib/Reports/FleetUtilization.php.
  *                on_lease_count:      int
  *                total_active_units:  int
  *                overdue_invoices:    { count: int, total: string }
@@ -116,23 +119,23 @@ $overdueCount = (int) $overdueRow['inv_count'];
 $overdueTotal = bcround((string) $overdueRow['inv_total'], 2);
 
 // ── KPI 4: Compliance Alerts ──────────────────────────────────
-// Units with ANY of the 4 expiry dates within the next 30 days (not null),
-// not deleted, not decommissioned.
-// WHY 4 separate conditions: spec lists CVI, registration, MVI, insurance
-// as the tracked compliance documents on equipment_units.
+// Units with a CVI or Registration expiry within the next 30 days (or already
+// expired), not deleted, not inactive/decommissioned.
+// WHY only 2 documents: MVI and Insurance were removed from every compliance
+// UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS), so counting them made this tile, the
+// sidebar badge and the Compliance page disagree. Same predicate as the
+// sidebar badge and api/v1/compliance/index.php?window=30.
 $alertThreshold  = date('Y-m-d', strtotime('+30 days'));
 $complianceRow   = db_row(
     "SELECT COUNT(DISTINCT id) AS cnt
        FROM equipment_units
       WHERE deleted_at IS NULL
-        AND status != 'decommissioned'
+        AND status NOT IN ('inactive','decommissioned')
         AND (
                (cvi_expiry          IS NOT NULL AND cvi_expiry          <= ?)
             OR (registration_expiry IS NOT NULL AND registration_expiry <= ?)
-            OR (mvi_expiry          IS NOT NULL AND mvi_expiry          <= ?)
-            OR (insurance_expiry    IS NOT NULL AND insurance_expiry    <= ?)
         )",
-    [$alertThreshold, $alertThreshold, $alertThreshold, $alertThreshold]
+    [$alertThreshold, $alertThreshold]
 );
 $complianceAlerts = (int) $complianceRow['cnt'];
 

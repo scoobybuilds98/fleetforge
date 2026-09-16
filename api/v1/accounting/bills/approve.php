@@ -6,7 +6,8 @@ declare(strict_types=1);
  *
  * Approve a draft AP bill — transitions draft → approved and posts JE.
  * JE: DR expense accounts + DR GST Receivable (ITC) / CR 2010 AP.
- * Updates vendor.total_spent in same transaction (Trap 6).
+ * Recomputes vendor.total_spent in same transaction (Trap 6) via VendorSpend —
+ * the bill REPLACES any linked work order's cost instead of adding to it (bug #7).
  *
  * @method  POST
  * @body    id (required)
@@ -134,11 +135,11 @@ $result = db_transaction(function () use ($id) {
         'journal_entry_id' => $je['id'],
     ], 'id = ?', [$id]);
 
-    // Trap 6: update vendor.total_spent in same transaction
-    db_execute(
-        "UPDATE vendors SET total_spent = total_spent + ? WHERE id = ?",
-        [(string) $bill['total_amount'], (int) $bill['vendor_id']]
-    );
+    // Trap 6 / bug #7: recompute vendor.total_spent in the same transaction.
+    // A blind "+= total_amount" double-counted spend whose work order had
+    // already been added at completion; VendorSpend counts the approved bill
+    // and drops the covered work order (acc_bills.work_order_id).
+    \FleetForge\Accounting\VendorSpend::recompute((int) $bill['vendor_id']);
 
     db_insert('audit_log', [
         'user_id'     => current_user_id(),

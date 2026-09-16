@@ -138,7 +138,7 @@ declare(strict_types=1);
                           style="font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px;"></textarea>
 
                 <p class="form-hint">
-                    Basic HTML is supported. Use <code>{customer_name}</code>,
+                    Plain text keeps its line breaks; basic HTML is also supported. Use <code>{customer_name}</code>,
                     <code>{invoice_number}</code>, etc. for variables.
                 </p>
 

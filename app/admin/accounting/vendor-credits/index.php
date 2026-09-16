@@ -229,7 +229,7 @@ function vendorCreditsPage() {
         showCreate: false, creating: false,
         showApply: false, applying: false,
         vendorBills: [],
-        createForm: { vendor_id: '', amount: '', credit_date: new Date().toISOString().slice(0,10), reason: '', expense_account_id: '', notes: '' },
+        createForm: { vendor_id: '', amount: '', credit_date: FF_localDate(), reason: '', expense_account_id: '', notes: '' },
         applyForm: {},
 
         // VALID-2 per-form error state

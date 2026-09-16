@@ -170,70 +170,79 @@ require_once FF_ROOT . '/includes/header.php';
                         <th style="width:60px;"></th>
                     </tr>
                 </thead>
-                <tbody>
-                    <template x-for="(typeGroup, typeName) in groupedAccounts()" :key="typeName">
-                        <template>
+                <!-- WHY one <tbody> per item: an x-for iteration must render
+                     exactly ONE root element. This used to iterate groups with a
+                     bare nested <template> as the root (header row + two inner
+                     x-fors). Alpine clones that first child — an inert <template>
+                     — so nothing rendered: the banner said "N accounts" over an
+                     empty table. A table may hold any number of <tbody> elements,
+                     so each item (group header, or account + its optional AJE
+                     drill-down) gets its own, and the drill-down now sits directly
+                     under the account it belongs to. -->
+                <template x-for="item in wtbItems" :key="item.key">
+                    <tbody>
+                        <template x-if="item.kind === 'group'">
                             <tr style="background:var(--bg-subtle);">
-                                <td colspan="11" style="font-weight:600;padding:8px 12px;" x-text="prettyType(typeName)"></td>
+                                <td colspan="11" style="font-weight:600;padding:8px 12px;" x-text="item.label"></td>
                             </tr>
-                            <template x-for="row in typeGroup" :key="row.account_id">
-                                <tr>
-                                    <td class="font-mono" x-text="row.code"></td>
-                                    <td x-text="row.name"></td>
-                                    <td x-html="leadLink(row)"></td>
-                                    <td class="font-mono text-right" x-text="'$' + money(row.py_balance)"></td>
-                                    <td class="font-mono text-right" x-text="'$' + money(row.unadj_cy)"></td>
-                                    <td class="font-mono text-right"
-                                        :style="row.ajes && bcAbs(row.ajes) > 0 ? 'font-style:italic;cursor:pointer;color:var(--color-primary);' : ''"
-                                        @click="row.aje_entries && row.aje_entries.length ? toggleAje(row.account_id) : null"
-                                        x-text="'$' + money(row.ajes)"></td>
-                                    <td class="font-mono text-right"
-                                        :style="row.balance_flag === 'red' ? 'background:var(--color-danger-light);font-weight:600;' : ''"
-                                        x-text="'$' + money(row.adj_cy)"></td>
-                                    <td class="font-mono text-right"
-                                        :style="row.variance_flag === 'yellow' ? 'background:var(--color-warning-light);' : ''"
-                                        x-text="'$' + money(row.var_amt)"></td>
-                                    <td class="font-mono text-right"
-                                        :style="row.variance_flag === 'yellow' ? 'background:var(--color-warning-light);' : ''"
-                                        x-text="row.var_pct !== null ? Number(row.var_pct).toFixed(2) + '%' : '—'"></td>
-                                    <td class="text-secondary text-sm" x-text="row.ref || ''"></td>
-                                    <td>
-                                        <button class="btn btn-ghost btn-xs" title="Add annotation"
-                                                @click="openAnnotationModal(row.account_id)">+</button>
-                                    </td>
-                                </tr>
-                            </template>
-                            <!-- AJE drill-down row, expandable -->
-                            <template x-for="row in typeGroup.filter(r => expandedAje[r.account_id] && r.aje_entries.length)" :key="'aje-'+row.account_id">
-                                <tr>
-                                    <td colspan="11" style="background:var(--bg-subtle);padding:10px 16px;">
-                                        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;">
-                                            AJE entries on <span x-text="row.code + ' — ' + row.name"></span>
-                                            (showing first <span x-text="row.aje_entries.length"></span>):
-                                        </div>
-                                        <table class="table" style="font-size:0.75rem;margin-bottom:0;">
-                                            <thead><tr>
-                                                <th>JE #</th><th>Date</th><th>Description</th>
-                                                <th class="text-right">Debit</th><th class="text-right">Credit</th>
-                                            </tr></thead>
-                                            <tbody>
-                                                <template x-for="je in row.aje_entries" :key="je.je_id">
-                                                    <tr>
-                                                        <td class="font-mono" x-text="je.entry_number"></td>
-                                                        <td x-text="je.entry_date"></td>
-                                                        <td x-text="je.description"></td>
-                                                        <td class="font-mono text-right" x-text="parseFloat(je.debit) > 0 ? '$' + money(je.debit) : ''"></td>
-                                                        <td class="font-mono text-right" x-text="parseFloat(je.credit) > 0 ? '$' + money(je.credit) : ''"></td>
-                                                    </tr>
-                                                </template>
-                                            </tbody>
-                                        </table>
-                                    </td>
-                                </tr>
-                            </template>
                         </template>
-                    </template>
-                </tbody>
+                        <template x-if="item.kind === 'account'">
+                            <tr>
+                                <td class="font-mono" x-text="item.row.code"></td>
+                                <td x-text="item.row.name"></td>
+                                <td x-html="leadLink(item.row)"></td>
+                                <td class="font-mono text-right" x-text="'$' + money(item.row.py_balance)"></td>
+                                <td class="font-mono text-right" x-text="'$' + money(item.row.unadj_cy)"></td>
+                                <td class="font-mono text-right"
+                                    :style="item.row.ajes && bcAbs(item.row.ajes) > 0 ? 'font-style:italic;cursor:pointer;color:var(--color-primary);' : ''"
+                                    @click="item.row.aje_entries && item.row.aje_entries.length ? toggleAje(item.row.account_id) : null"
+                                    x-text="'$' + money(item.row.ajes)"></td>
+                                <td class="font-mono text-right"
+                                    :style="item.row.balance_flag === 'red' ? 'background:var(--color-danger-light);font-weight:600;' : ''"
+                                    x-text="'$' + money(item.row.adj_cy)"></td>
+                                <td class="font-mono text-right"
+                                    :style="item.row.variance_flag === 'yellow' ? 'background:var(--color-warning-light);' : ''"
+                                    x-text="'$' + money(item.row.var_amt)"></td>
+                                <td class="font-mono text-right"
+                                    :style="item.row.variance_flag === 'yellow' ? 'background:var(--color-warning-light);' : ''"
+                                    x-text="item.row.var_pct !== null ? Number(item.row.var_pct).toFixed(2) + '%' : '—'"></td>
+                                <td class="text-secondary text-sm" x-text="item.row.ref || ''"></td>
+                                <td>
+                                    <button class="btn btn-ghost btn-xs" title="Add annotation"
+                                            @click="openAnnotationModal(item.row.account_id)">+</button>
+                                </td>
+                            </tr>
+                        </template>
+                        <!-- AJE drill-down row, expandable (read expandedAje directly so Alpine tracks it) -->
+                        <template x-if="item.kind === 'account' && expandedAje[item.row.account_id] && item.row.aje_entries.length">
+                            <tr>
+                                <td colspan="11" style="background:var(--bg-subtle);padding:10px 16px;">
+                                    <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:6px;">
+                                        AJE entries on <span x-text="item.row.code + ' — ' + item.row.name"></span>
+                                        (showing first <span x-text="item.row.aje_entries.length"></span>):
+                                    </div>
+                                    <table class="table" style="font-size:0.75rem;margin-bottom:0;">
+                                        <thead><tr>
+                                            <th>JE #</th><th>Date</th><th>Description</th>
+                                            <th class="text-right">Debit</th><th class="text-right">Credit</th>
+                                        </tr></thead>
+                                        <tbody>
+                                            <template x-for="je in item.row.aje_entries" :key="je.je_id">
+                                                <tr>
+                                                    <td class="font-mono" x-text="je.entry_number"></td>
+                                                    <td x-text="je.entry_date"></td>
+                                                    <td x-text="je.description"></td>
+                                                    <td class="font-mono text-right" x-text="parseFloat(je.debit) > 0 ? '$' + money(je.debit) : ''"></td>
+                                                    <td class="font-mono text-right" x-text="parseFloat(je.credit) > 0 ? '$' + money(je.credit) : ''"></td>
+                                                </tr>
+                                            </template>
+                                        </tbody>
+                                    </table>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </template>
                 <tfoot>
                     <tr style="font-weight:600;border-top:2px solid var(--border-default);">
                         <td colspan="3">Totals</td>
@@ -373,18 +382,25 @@ function workingTrialBalance() {
             window.open(url, '_blank');
         },
 
-        groupedAccounts() {
+        // Flat render list for the WTB table: a header item per account type
+        // (canonical order), then one item per account. A getter, not a method
+        // call inside x-for, so it is computed once per reactive change.
+        get wtbItems() {
             const order = ['asset','liability','equity','revenue','cost_of_revenue','operating_expense','other_income','other_expense'];
             const groups = {};
-            if (!this.data) return groups;
+            if (!this.data) return [];
             for (const r of this.data.accounts) {
                 if (!groups[r.account_type]) groups[r.account_type] = [];
                 groups[r.account_type].push(r);
             }
-            // Return in canonical type order.
-            const ordered = {};
-            for (const k of order) if (groups[k]) ordered[k] = groups[k];
-            return ordered;
+            // Canonical types first, then any unexpected type so no row is dropped.
+            const types = order.filter(k => groups[k]).concat(Object.keys(groups).filter(k => !order.includes(k)));
+            const items = [];
+            for (const t of types) {
+                items.push({ kind: 'group', key: 'g-' + t, label: this.prettyType(t) });
+                for (const row of groups[t]) items.push({ kind: 'account', key: 'a-' + row.account_id, row });
+            }
+            return items;
         },
 
         prettyType(t) {

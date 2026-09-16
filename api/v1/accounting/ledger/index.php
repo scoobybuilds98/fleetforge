@@ -46,7 +46,8 @@ $perPage = min(100, max(10, clean_int($_GET['per_page'] ?? 50) ?? 50));
 $offset  = ($page - 1) * $perPage;
 
 // ── Build WHERE ──────────────────────────────────────────────
-$where  = "je.status = 'posted' AND jel.account_id = ?";
+// reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
+$where  = "je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ") AND jel.account_id = ?";
 $params = [$accountId];
 
 if ($dateFrom) {
@@ -61,11 +62,12 @@ if ($dateTo) {
 // ── Opening balance (all posted entries BEFORE date_from) ────
 $openingBalance = '0.00';
 if ($dateFrom) {
+    // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
     $obRow = db_row(
         "SELECT COALESCE(SUM(jel.debit), 0) AS td, COALESCE(SUM(jel.credit), 0) AS tc
          FROM acc_journal_entry_lines jel
          JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-         WHERE je.status = 'posted' AND jel.account_id = ? AND je.entry_date < ?",
+         WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ") AND jel.account_id = ? AND je.entry_date < ?",
         [$accountId, $dateFrom]
     );
     if ($obRow) {

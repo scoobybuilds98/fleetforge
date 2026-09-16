@@ -653,15 +653,16 @@ function FF_Equipment() {
             }
         },
 
-        // Compliance: flag if any expiry date is within 30 days or in the past
+        // Compliance: flag if a CVI or Registration expiry is within 30 days or past.
+        // MVI + Insurance are no longer tracked (hidden from every compliance UI —
+        // S-UNIT-COMPLIANCE-HIDE-MVI-INS), matching the sidebar badge and the
+        // Compliance page. Compare YYYY-MM-DD strings against the company-local
+        // day: new Date('YYYY-MM-DD') is UTC midnight, which shifts the edge day.
         hasComplianceIssue(unit) {
-            const warn = 30 * 24 * 60 * 60 * 1000; // 30 days in ms
-            const soon = Date.now() + warn;
-            const fields = ['cvi_expiry','registration_expiry','mvi_expiry','insurance_expiry'];
-            return fields.some(f => {
-                if (!unit[f]) return false;
-                return new Date(unit[f]).getTime() <= soon;
-            });
+            const soonDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+            const soon = window.FF_localDate ? window.FF_localDate(soonDate) : soonDate.toISOString().slice(0, 10);
+            const fields = ['cvi_expiry','registration_expiry'];
+            return fields.some(f => !!unit[f] && String(unit[f]).slice(0, 10) <= soon);
         },
     };
 }

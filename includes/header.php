@@ -159,6 +159,23 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
         window.FF_TIMEZONE    = <?= json_encode($_timezone) ?>;
         window.FF_BASE_PATH   = <?= json_encode(FF_BASE_PATH) ?>;
         window.FF_ASSET_VERSION = <?= json_encode(FF_ASSET_VERSION) ?>;
+        // Business-day date helper. `new Date().toISOString().slice(0, 10)` is the
+        // UTC day, which in Pacific time rolls to TOMORROW after 5pm — so default
+        // form dates (lease start, return date, payment date…) were off by one every
+        // evening. Format in the COMPANY timezone instead; en-CA yields YYYY-MM-DD.
+        // Accepts an optional Date / timestamp; falls back to browser-local parts.
+        window.FF_localDate = function (d) {
+            var dt = d instanceof Date ? d : (d === undefined || d === null ? new Date() : new Date(d));
+            try {
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: window.FF_TIMEZONE || undefined,
+                    year: 'numeric', month: '2-digit', day: '2-digit'
+                }).format(dt);
+            } catch (e) {
+                var p = function (n) { return (n < 10 ? '0' : '') + n; };
+                return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate());
+            }
+        };
         // PERM-1 — current display settings, read by topbar quick controls
         window.FF_DISPLAY = {
             font_size: <?= (int) $_displayFontSize ?>,
@@ -184,9 +201,14 @@ $_ffNewEvent = isset($createModalEvent) ? trim((string) $createModalEvent) : '';
 //    x-data is processed by Alpine.js (loaded in footer.php)
 // ============================================================
 ?>
+<?php
+// Escape dismisses the sidebar ONLY where it is an overlay (<1024px). On desktop
+// it is an in-flow panel, and a window-level Escape listener fires for every
+// Escape press — closing a dropdown or modal used to collapse the sidebar too.
+?>
 <div class="app-layout"
      x-data="{ sidebarOpen: window.innerWidth >= 1024 }"
-     @keydown.escape.window="sidebarOpen = false"
+     @keydown.escape.window="if (window.innerWidth < 1024) sidebarOpen = false"
      x-cloak>
 
     <?php require_once __DIR__ . '/sidebar.php'; ?>

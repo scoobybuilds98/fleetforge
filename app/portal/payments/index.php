@@ -66,8 +66,10 @@ $payments = db_select(
     [$cid]
 );
 
-// Payment instructions for non-QBO customers
-$paymentInstructions = settings_get('company.payment_instructions', '');
+// Payment instructions for non-QBO customers.
+// Bug #23: same resolution as app/portal/invoices/view.php + the invoice PDF —
+// invoice.payment_instructions first, company.payment_instructions fallback.
+$paymentInstructions = (string) (settings_get('invoice.payment_instructions', '') ?: settings_get('company.payment_instructions', ''));
 $bankName            = settings_get('company.bank_name', '');
 $bankAccount         = settings_get('company.bank_account', '');
 $checkPayable        = settings_get('company.check_payable_to', '');

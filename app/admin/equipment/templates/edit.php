@@ -45,7 +45,11 @@ require_once FF_ROOT . '/includes/header.php';
 
 <!-- ============================================================
      Breadcrumb + Page header
+     The component root opens HERE (not at the form) because the breadcrumb
+     and header bind to `loading` / `form.name`; outside the scope those
+     expressions threw "loading is not defined" on every page load.
      ============================================================ -->
+<div x-data="FF_EditTemplate(<?= $templateId ?>)">
 <nav class="breadcrumb">
     <a href="<?= base_url('equipment') ?>">Equipment</a>
     <span class="breadcrumb-sep">/</span>
@@ -68,7 +72,6 @@ require_once FF_ROOT . '/includes/header.php';
 <!-- ============================================================
      EDIT TEMPLATE FORM (Alpine)
      ============================================================ -->
-<div x-data="FF_EditTemplate(<?= $templateId ?>)">
 
     <!-- Stale-data reload banner (distinct from form-level banner) -->
     <div class="alert alert-warning" x-show="staleError" style="margin-bottom:16px;" x-transition>
@@ -346,6 +349,15 @@ require_once FF_ROOT . '/includes/header.php';
         </form>
     </template>
 
+<?php
+// The shared overlay must sit INSIDE the x-data scope: its <template x-if>
+// blocks read this component's submitting/showSuccessOverlay (it was previously
+// included outside the component and threw "submitting is not defined").
+$overlayTitle    = 'Equipment Type Saved!';
+$overlaySubtitle = 'Redirecting to equipment types list…';
+require_once FF_ROOT . '/includes/success_overlay.php';
+?>
+
 </div><!-- /x-data -->
 
 <!-- ============================================================
@@ -583,11 +595,5 @@ function FF_EditTemplate(templateId) {
     };
 }
 </script>
-
-<?php
-$overlayTitle    = 'Equipment Type Saved!';
-$overlaySubtitle = 'Redirecting to equipment types list…';
-require_once FF_ROOT . '/includes/success_overlay.php';
-?>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

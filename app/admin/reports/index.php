@@ -14,6 +14,15 @@ declare(strict_types=1);
  * Required by: sidebar navigation
  * Requires: includes/auth.php, includes/header.php, app.css, app.js, ApexCharts
  *
+ * Chart rendering rules (see render() / initChart()):
+ *   - A chart is only drawn once its container has width. Rendering into an
+ *     x-show-hidden container (empty state, sub-tab mid-switch) left a
+ *     zero-width chart whose deferred redraw later overwrote the next chart in
+ *     the same element — the "first chart blank after an empty range" bug.
+ *   - Horizontal bar charts go through hbar(): ApexCharts swaps the axes, so the
+ *     value formatter belongs on the x-axis and the y-axis shows category names
+ *     verbatim (the shared money y-formatter used to print "$Northgate …").
+ *
  * Spec ref:  §7.10 Reports, PROGRESS.md S021
  * Decisions: D7 (base_url), D17 (PSR-4), D32 (only confirmed CSS classes)
  */
@@ -154,10 +163,10 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
         <!-- AR Aging -->
         <div x-show="tabs.financial.view==='ar_aging'&&!tabs.financial.viewLoading&&!isEmptyView('financial')" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
-            <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Accounts Receivable Aging</div><div class="rpt-chart-sub">Outstanding balances grouped by overdue period</div></div></div><div id="chart-aging" style="height:240px;"></div></div>
+            <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Accounts Receivable Aging</div><div class="rpt-chart-sub" x-text="'Balances as of '+(tabs.financial.viewData.ar_aging?.totals?.as_of_date||'the range end')+' (range end, capped at today), grouped by overdue period. CAD — USD invoices converted at their frozen rate.'"></div></div></div><div id="chart-aging" style="height:240px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
-                <table class="table rpt-table"><thead><tr><th>Invoice #</th><th>Customer</th><th>Invoice Date</th><th>Due Date</th><th class="text-right">Total</th><th class="text-right">Balance Due</th><th class="text-right">Days Overdue</th><th>Bucket</th></tr></thead>
-                <tbody><template x-for="r in capped('financial')" :key="r.id"><tr><td class="font-mono" x-text="r.invoice_number"></td><td x-text="r.company_name"></td><td x-text="r.invoice_date"></td><td x-text="r.due_date"></td><td class="text-right font-mono" x-text="money(r.total_amount)"></td><td class="text-right font-mono" x-text="money(r.balance_due)"></td><td class="text-right" x-text="Math.max(0,parseInt(r.days_overdue||0))"></td><td><span class="badge" :class="agingBadge(r.aging_bucket)" x-text="(r.aging_bucket||'').replace('_','–')"></span></td></tr></template></tbody>
+                <table class="table rpt-table"><thead><tr><th>Invoice #</th><th>Customer</th><th>Invoice Date</th><th>Due Date</th><th class="text-right">Total (CAD)</th><th class="text-right">Balance Due (CAD)</th><th class="text-right">Days Overdue</th><th>Bucket</th></tr></thead>
+                <tbody><template x-for="r in capped('financial')" :key="r.id"><tr><td class="font-mono"><span x-text="r.invoice_number"></span><span x-show="r.currency==='USD'" class="badge badge-neutral" style="margin-left:6px;">USD</span></td><td x-text="r.company_name"></td><td x-text="r.invoice_date"></td><td x-text="r.due_date"></td><td class="text-right font-mono" x-text="money(r.total_amount)"></td><td class="text-right font-mono" :title="r.currency==='USD' ? ('US$'+r.balance_due_native+' @ '+r.exchange_rate_to_cad) : ''" x-text="money(r.balance_due)"></td><td class="text-right" x-text="Math.max(0,parseInt(r.days_overdue||0))"></td><td><span class="badge" :class="agingBadge(r.aging_bucket)" x-text="(r.aging_bucket||'').replace('_','–')"></span></td></tr></template></tbody>
                 </table>
             </div><div class="rpt-table-ft" x-show="isOverCap('financial')"><span x-text="capLabel('financial')"></span><button class="btn btn-sm btn-secondary" @click="toggleExpand('financial')" x-text="isExpanded('financial')?'Show less ▲':'Show all ▼'"></button></div></div>
         </div>
@@ -189,7 +198,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     <div x-show="mainTab==='fleet'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
         <div x-show="tabs.fleet.kpis" class="stat-grid mb-4">
-                <div class="stat-card stat-card--blue"><div class="stat-label">Avg Utilization</div><div class="stat-value font-mono" x-text="pct(tabs.fleet.kpis?.avg_utilization)"></div><div class="stat-delta" x-text="(tabs.fleet.kpis?.period_days??'')+'-day period'"></div></div>
+                <div class="stat-card stat-card--blue"><div class="stat-label">Fleet Utilization</div><div class="stat-value font-mono" x-text="pct(tabs.fleet.kpis?.avg_utilization)"></div><div class="stat-delta" x-text="tabs.fleet.kpis?.util_window_from ? (tabs.fleet.kpis.period_days+' days measured, to '+tabs.fleet.kpis.util_window_to) : 'No elapsed days in range'"></div></div>
                 <div class="stat-card stat-card--green"><div class="stat-label">Total Units</div><div class="stat-value" x-text="tabs.fleet.kpis?.total_units"></div><div class="stat-delta" x-text="(tabs.fleet.kpis?.active_units??'')+' active'"></div></div>
                 <div class="stat-card stat-card--amber"><div class="stat-label">Idle Units</div><div class="stat-value" x-text="tabs.fleet.kpis?.idle_units"></div><div class="stat-delta">0 days leased in period</div></div>
                 <div class="stat-card stat-card--green"><div class="stat-label">Fleet Revenue</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_revenue)"></div></div>
@@ -223,9 +232,9 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 
         <!-- Utilization — DISTRIBUTION HISTOGRAM (not per-unit bars) -->
         <div x-show="tabs.fleet.view==='utilization'&&!tabs.fleet.viewLoading&&!isEmptyView('fleet')" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
-            <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Fleet Utilization Distribution</div><div class="rpt-chart-sub">Number of units in each utilization bracket — shows fleet health at a glance</div></div></div><div id="chart-fleet-util" style="height:320px;"></div></div>
+            <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Fleet Utilization Distribution</div><div class="rpt-chart-sub">Units per utilization bracket — on-rent days (overlapping leases merged) ÷ days available, range capped at today</div></div></div><div id="chart-fleet-util" style="height:320px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
-                <table class="table rpt-table"><thead><tr><th>Unit #</th><th>Type</th><th>Yard</th><th>Status</th><th class="text-right">Days Leased</th><th class="text-right">Period Days</th><th class="text-right">Utilization</th><th class="text-right">Revenue</th><th class="text-right">Maint. Cost</th><th class="text-right">ROI</th></tr></thead>
+                <table class="table rpt-table"><thead><tr><th>Unit #</th><th>Type</th><th>Yard</th><th>Status</th><th class="text-right">Days Leased</th><th class="text-right">Available Days</th><th class="text-right">Utilization</th><th class="text-right">Revenue</th><th class="text-right">Maint. Cost</th><th class="text-right">ROI</th></tr></thead>
                 <tbody><template x-for="r in capped('fleet')" :key="r.unit_id"><tr><td class="font-mono" x-text="r.unit_number"></td><td x-text="r.equipment_type"></td><td x-text="r.yard_location||'—'"></td><td><span class="badge" :class="unitStatusBadge(r.status)" x-text="(r.status||'').replace(/_/g,' ')"></span></td><td class="text-right" x-text="r.days_on_lease"></td><td class="text-right" x-text="r.period_days"></td><td class="text-right font-mono" :class="utilColor(r.utilization_pct)" x-text="pct(r.utilization_pct)"></td><td class="text-right font-mono" x-text="money(r.revenue)"></td><td class="text-right font-mono" x-text="money(r.maintenance_cost)"></td><td class="text-right font-mono" x-text="money(r.roi)"></td></tr></template></tbody>
                 </table>
             </div><div class="rpt-table-ft" x-show="isOverCap('fleet')"><span x-text="capLabel('fleet')"></span><button class="btn btn-sm btn-secondary" @click="toggleExpand('fleet')" x-text="isExpanded('fleet')?'Show less ▲':'Show all ▼'"></button></div></div>
@@ -259,7 +268,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Maintenance Cost by Work Type</div><div class="rpt-chart-sub">Breakdown of labour, parts, and total cost by work order type</div></div></div><div id="chart-maint-type" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Work Type</th><th class="text-right">Work Orders</th><th class="text-right">Units</th><th class="text-right">Labour</th><th class="text-right">Parts</th><th class="text-right">Total Cost</th><th class="text-right">Avg Cost</th></tr></thead>
-                <tbody><template x-for="r in capped('fleet')" :key="r.work_type"><tr><td x-text="(r.work_type||'').replace(/_/g,' ')"></td><td class="text-right" x-text="r.work_order_count"></td><td class="text-right" x-text="r.unit_count"></td><td class="text-right font-mono" x-text="money(r.labor_cost)"></td><td class="text-right font-mono" x-text="money(r.parts_cost)"></td><td class="text-right font-mono" x-text="money(r.total_cost)"></td><td class="text-right font-mono" x-text="money(r.avg_cost)"></td></tr></template></tbody>
+                <tbody><template x-for="r in capped('fleet')" :key="r.work_type"><tr><td x-text="(r.work_type||'').replace(/_/g,' ')"></td><td class="text-right" x-text="r.work_order_count"></td><td class="text-right" x-text="r.units_affected"></td><td class="text-right font-mono" x-text="money(r.labor_cost)"></td><td class="text-right font-mono" x-text="money(r.parts_cost)"></td><td class="text-right font-mono" x-text="money(r.total_cost)"></td><td class="text-right font-mono" x-text="money(r.avg_cost)"></td></tr></template></tbody>
                 </table>
             </div></div>
         </div>
@@ -269,7 +278,7 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             <div class="rpt-chart-card"><div class="rpt-chart-hdr"><div><div class="rpt-chart-title">Fleet Performance by Yard</div><div class="rpt-chart-sub">Revenue vs. maintenance cost per yard location</div></div></div><div id="chart-fleet-yard" style="height:280px;"></div></div>
             <div class="card"><div class="card-body" style="overflow-x:auto;">
                 <table class="table rpt-table"><thead><tr><th>Yard</th><th class="text-right">Units</th><th class="text-right">Idle</th><th class="text-right">Avg Utilization</th><th class="text-right">Revenue</th><th class="text-right">Maintenance</th><th class="text-right">ROI</th></tr></thead>
-                <tbody><template x-for="r in capped('fleet')" :key="r.yard"><tr><td x-text="r.yard||'Unassigned'"></td><td class="text-right" x-text="r.unit_count"></td><td class="text-right" x-text="r.idle_count"></td><td class="text-right font-mono" :class="utilColor(r.avg_utilization)" x-text="pct(r.avg_utilization)"></td><td class="text-right font-mono" x-text="money(r.revenue)"></td><td class="text-right font-mono" x-text="money(r.maintenance_cost)"></td><td class="text-right font-mono" x-text="money(r.roi)"></td></tr></template></tbody>
+                <tbody><template x-for="r in capped('fleet')" :key="r.yard_location"><tr><td x-text="r.yard_location||'Unassigned'"></td><td class="text-right" x-text="r.unit_count"></td><td class="text-right" x-text="r.idle_count"></td><td class="text-right font-mono" :class="utilColor(r.avg_utilization)" x-text="pct(r.avg_utilization)"></td><td class="text-right font-mono" x-text="money(r.revenue)"></td><td class="text-right font-mono" x-text="money(r.maintenance)"></td><td class="text-right font-mono" x-text="money(r.roi)"></td></tr></template></tbody>
                 </table>
             </div></div>
         </div>
@@ -376,16 +385,18 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
                 <template x-for="d in [30,60,90,180,365]" :key="d">
                     <button class="btn btn-sm" :class="compWindow===d?'btn-primary':'btn-secondary'" @click="setCompWindow(d)" x-text="d+'d'"></button>
                 </template>
+                <span class="rpt-date-range" x-show="tabs.compliance.kpis?.as_of_date" x-text="'As of '+(tabs.compliance.kpis?.as_of_date||'')"></span>
             </div>
         </div>
 
         <div x-show="tabs.compliance.kpis" class="stat-grid mb-4">
-                <div class="stat-card stat-card--slate"><div class="stat-label">Total Units Tracked</div><div class="stat-value" x-text="tabs.compliance.kpis?.total_units"></div></div>
+                <div class="stat-card stat-card--slate"><div class="stat-label">Total Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.total_units"></div></div>
                 <div class="stat-card stat-card--red"><div class="stat-label">Expired Documents</div><div class="stat-value" x-text="tabs.compliance.kpis?.expired_count"></div><div class="stat-delta">Past expiry date</div></div>
                 <div class="stat-card stat-card--amber"><div class="stat-label">Expiring ≤30 Days</div><div class="stat-value" x-text="tabs.compliance.kpis?.expiring_30"></div></div>
                 <div class="stat-card stat-card--blue"><div class="stat-label">Expiring ≤90 Days</div><div class="stat-value" x-text="tabs.compliance.kpis?.expiring_90"></div></div>
-                <div class="stat-card stat-card--green"><div class="stat-label">Compliant Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.ok_count"></div><div class="stat-delta">>90 days remaining</div></div>
-                <div class="stat-card stat-card--slate"><div class="stat-label">As Of</div><div class="stat-value" style="font-size:16px;" x-text="tabs.compliance.kpis?.as_of_date"></div></div>
+                <!-- Compliant requires all three dates on file; a unit with a missing date is UNKNOWN, not compliant -->
+                <div class="stat-card stat-card--green"><div class="stat-label">Compliant Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.ok_count"></div><div class="stat-delta">All 3 dates on file, &gt;90 days left</div></div>
+                <div class="stat-card stat-card--slate"><div class="stat-label">Not Tracked</div><div class="stat-value" x-text="tabs.compliance.kpis?.not_tracked_count"></div><div class="stat-delta" x-text="(tabs.compliance.kpis?.no_dates_count??0)+' with no dates at all'"></div></div>
         </div>
         <div x-show="tabs.compliance.loading&&!tabs.compliance.kpis" class="stat-grid mb-4"><template x-for="i in 6"><div class="stat-card"><div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div><div class="skeleton-bar" style="width:80%;height:24px;"></div></div></template></div>
 
@@ -556,6 +567,9 @@ function FF_Reports() {
         compWindow: 90,
         rowCap: 25,
         expandedTables: {},
+        // tab_view key → chart element ids it draws into (see render()).
+        _viewChartEls: {},
+        _renderKey: null,
 
         presetOptions: [
             {value:'this_month',label:'This Month'},{value:'last_month',label:'Last Month'},
@@ -840,8 +854,13 @@ function FF_Reports() {
         initChart(tab, view, data) {
             if (!data) return;
             const key = tab + '_' + view;
+            // An empty view shows the empty-state card and hides its chart
+            // container: drop any chart it still holds and draw nothing. Not
+            // marking it rendered lets the next non-empty load draw it fresh.
+            if (!(data.table || []).length) { this.destroyViewCharts(key); return; }
             if (this.tabs[tab].chartsRendered[key]) return;
             this.tabs[tab].chartsRendered[key] = true;
+            this._renderKey = key;
 
             const cd = data.chart_data;
             if (!cd || !Object.keys(cd).length) return;
@@ -850,8 +869,10 @@ function FF_Reports() {
             const isDark   = document.documentElement.getAttribute('data-theme') === 'dark';
             const txtCol   = isDark ? '#9c9c96' : '#6b6b66';
             const gridCol  = isDark ? '#2e2e2e' : '#e5e5e2';
-            const moneyFmt = (v) => '$' + (v||0).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0});
-            const pctFmt   = (v) => (v||0).toFixed(1) + '%';
+            // Number() coercion: axis ticks can arrive as numeric strings, and
+            // (string).toLocaleString() would print them unformatted.
+            const moneyFmt = (v) => '$' + (Number(v)||0).toLocaleString('en-CA', {minimumFractionDigits:0, maximumFractionDigits:0});
+            const pctFmt   = (v) => (Number(v)||0).toFixed(1) + '%';
 
             // S-LUX-2: shared base from the global Atelier chart theme
             // (FF_CHART_THEME) — Geist font (was 'inherit'), token palette,
@@ -867,6 +888,18 @@ function FF_Reports() {
 
             const R = (id, opts) => this.render(id, opts);
 
+            // Horizontal bars: ApexCharts SWAPS the axes, so the y-axis labels are
+            // the category names and the x-axis labels are the values. The shared
+            // base puts moneyFmt on the y-axis (correct for vertical charts), which
+            // printed "$Northgate Logistics" / "$dry_van" here and NaN for counts.
+            const hbar = (opts, valueFmt) => ({
+                ...opts,
+                xaxis:  {...(opts.xaxis||base.xaxis), labels:{...((opts.xaxis||base.xaxis).labels||{}), formatter:valueFmt}},
+                yaxis:  {...base.yaxis, labels:{...base.yaxis.labels, formatter:(v) => v}},
+                tooltip:{...base.tooltip, ...(opts.tooltip||{}), y:{formatter:valueFmt}},
+                plotOptions:{...(opts.plotOptions||{}), bar:{...((opts.plotOptions||{}).bar||{}), horizontal:true}},
+            });
+
             switch (key) {
 
                 // ── FINANCIAL ──────────────────────────────────────
@@ -879,23 +912,23 @@ function FF_Reports() {
                     break;
 
                 case 'financial_customer':
-                    R('chart-rev-customer', {...base, chart:{...base.chart,type:'bar',height:360}, series:[
+                    R('chart-rev-customer', hbar({...base, chart:{...base.chart,type:'bar',height:360}, series:[
                         {name:'Revenue',     data:cd.gross_revenue||[]},
                         {name:'Outstanding', data:cd.outstanding||[]}
-                    ], xaxis:{...base.xaxis, categories:cd.categories||[]}, plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'65%'}}, colors:['#3b82f6','#f59e0b']});
+                    ], xaxis:{...base.xaxis, categories:cd.categories||[]}, plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'65%'}}, colors:['#3b82f6','#f59e0b']}, moneyFmt));
                     break;
 
                 case 'financial_equipment_type':
-                    R('chart-rev-type', {...base, chart:{...base.chart,type:'bar',height:280}, series:[
+                    R('chart-rev-type', hbar({...base, chart:{...base.chart,type:'bar',height:280}, series:[
                         {name:'Gross Revenue', data:cd.gross_revenue||[]}
-                    ], xaxis:{...base.xaxis, categories:cd.categories||[]}, plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'55%'}}, colors:['#8b5cf6']});
+                    ], xaxis:{...base.xaxis, categories:cd.categories||[]}, plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'55%'}}, colors:['#8b5cf6']}, moneyFmt));
                     break;
 
                 case 'financial_ar_aging':
-                    R('chart-aging', {...base, chart:{...base.chart,type:'bar',height:240}, series:[
-                        {name:'Outstanding', data:cd.amounts||[]}
+                    R('chart-aging', hbar({...base, chart:{...base.chart,type:'bar',height:240}, series:[
+                        {name:'Outstanding (CAD)', data:cd.amounts||[]}
                     ], xaxis:{...base.xaxis, categories:cd.categories||[]}, plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'55%',distributed:true}},
-                    colors:['#10b981','#f59e0b','#f97316','#ef4444','#dc2626']});
+                    colors:['#10b981','#f59e0b','#f97316','#ef4444','#dc2626']}, moneyFmt));
                     break;
 
                 case 'financial_collection': {
@@ -929,7 +962,9 @@ function FF_Reports() {
                     const binLabels = ['0–10%','10–20%','20–30%','30–40%','40–50%','50–60%','60–70%','70–80%','80–90%','90–100%'];
                     // Red → yellow → green gradient
                     const utilGradient = ['#ef4444','#f97316','#f59e0b','#eab308','#a3e635','#22c55e','#10b981','#14b8a6','#06b6d4','#3b82f6'];
-                    const avgUtil = rows.length ? rows.reduce((s,r) => s + parseFloat(r.utilization_pct||0), 0) / rows.length : 0;
+                    // Fleet-level figure from the API (occupied ÷ available unit-days) —
+                    // a plain mean of per-unit % would disagree with the KPI tile.
+                    const avgUtil = parseFloat(data.kpis?.avg_utilization || 0);
 
                     R('chart-fleet-util', {...base, chart:{...base.chart,type:'bar',height:320},
                         series:[{name:'Units', data:bins}],
@@ -953,20 +988,18 @@ function FF_Reports() {
                     const top10 = rows.slice(0, Math.min(10, rows.length));
                     const bottom10 = rows.length > 10 ? rows.slice(-Math.min(10, rows.length - 10)).reverse() : [];
 
-                    R('chart-fleet-roi-top', {...base, chart:{...base.chart,type:'bar',height:280},
+                    R('chart-fleet-roi-top', hbar({...base, chart:{...base.chart,type:'bar',height:280},
                         series:[{name:'ROI', data:top10.map(r=>parseFloat(r.roi||0))}],
                         xaxis:{...base.xaxis, categories:top10.map(r=>r.unit_number)},
-                        colors:['#10b981'], plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'60%'}},
-                        tooltip:{y:{formatter:moneyFmt}}
-                    });
+                        colors:['#10b981'], plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'60%'}}
+                    }, moneyFmt));
 
                     if (bottom10.length) {
-                        R('chart-fleet-roi-bottom', {...base, chart:{...base.chart,type:'bar',height:280},
+                        R('chart-fleet-roi-bottom', hbar({...base, chart:{...base.chart,type:'bar',height:280},
                             series:[{name:'ROI', data:bottom10.map(r=>parseFloat(r.roi||0))}],
                             xaxis:{...base.xaxis, categories:bottom10.map(r=>r.unit_number)},
-                            colors:['#ef4444'], plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'60%'}},
-                            tooltip:{y:{formatter:moneyFmt}}
-                        });
+                            colors:['#ef4444'], plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'60%'}}
+                        }, moneyFmt));
                     }
                     break;
                 }
@@ -996,10 +1029,10 @@ function FF_Reports() {
 
                 // ── CUSTOMER ──────────────────────────────────────
                 case 'customer_ltv':
-                    R('chart-cust-ltv', {...base, chart:{...base.chart,type:'bar',height:340},
+                    R('chart-cust-ltv', hbar({...base, chart:{...base.chart,type:'bar',height:340},
                         series:[{name:'Lifetime Revenue',data:cd.lifetime_revenue||[]},{name:'Period Revenue',data:cd.period_revenue||[]}],
                         xaxis:{...base.xaxis, categories:cd.categories||[]},
-                        plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'60%'}}, colors:['#3b82f6','#10b981']});
+                        plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'60%'}}, colors:['#3b82f6','#10b981']}, moneyFmt));
                     break;
 
                 case 'customer_payment_behavior': {
@@ -1044,11 +1077,10 @@ function FF_Reports() {
                     break;
 
                 case 'customer_frequency':
-                    R('chart-cust-freq', {...base, chart:{...base.chart,type:'bar',height:300},
+                    R('chart-cust-freq', hbar({...base, chart:{...base.chart,type:'bar',height:300},
                         series:[{name:'Leases', data:cd.lease_count||[]}],
                         xaxis:{...base.xaxis, categories:cd.categories||[]},
-                        yaxis:{...base.yaxis, labels:{...base.yaxis.labels, formatter:v=>Math.round(v)}},
-                        plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'55%'}}, colors:['#8b5cf6']});
+                        plotOptions:{bar:{horizontal:true,borderRadius:3,barHeight:'55%'}}, colors:['#8b5cf6']}, v=>Math.round(Number(v)||0)));
                     break;
 
                 case 'customer_credit_notes':
@@ -1086,13 +1118,46 @@ function FF_Reports() {
             }
         },
 
+        // Draw a chart into #elId, replacing whatever that element held.
+        // WHY deferred: ApexCharts measures its container at render(). Drawing
+        // into a display:none container (x-show hidden) produced a zero-width
+        // chart whose late resize-redraw then overwrote the NEXT chart drawn
+        // into the same element with its own stale data. So if the container
+        // has no width yet, wait (ResizeObserver) until it does; a newer render
+        // for the same element cancels the pending one.
         render(elId, options) {
             const el = document.getElementById(elId);
             if (!el) return;
-            if (el._apexChart) { el._apexChart.destroy(); el._apexChart = null; }
-            const chart = new ApexCharts(el, options);
-            chart.render();
-            el._apexChart = chart;
+            if (this._renderKey) {
+                this._viewChartEls[this._renderKey] = this._viewChartEls[this._renderKey] || [];
+                if (!this._viewChartEls[this._renderKey].includes(elId)) this._viewChartEls[this._renderKey].push(elId);
+            }
+            this.destroyChartEl(el);
+            const draw = () => {
+                // Defensive: drop any orphaned canvas a destroyed chart left behind.
+                el.replaceChildren();
+                const chart = new ApexCharts(el, options);
+                chart.render();
+                el._apexChart = chart;
+            };
+            if (el.offsetWidth > 0 || typeof ResizeObserver !== 'function') { draw(); return; }
+            const ro = new ResizeObserver(() => {
+                if (el.offsetWidth > 0) { ro.disconnect(); el._apexPendingRO = null; draw(); }
+            });
+            el._apexPendingRO = ro;
+            ro.observe(el);
+        },
+
+        // Cancel a pending draw and destroy the live chart on one element.
+        destroyChartEl(el) {
+            if (!el) return;
+            if (el._apexPendingRO) { el._apexPendingRO.disconnect(); el._apexPendingRO = null; }
+            if (el._apexChart) { try { el._apexChart.destroy(); } catch (e) {} el._apexChart = null; }
+        },
+
+        // Destroy every chart a view (tab_view key) has drawn.
+        destroyViewCharts(key) {
+            (this._viewChartEls[key] || []).forEach(id => this.destroyChartEl(document.getElementById(id)));
         },
 
         // ── Helpers ──

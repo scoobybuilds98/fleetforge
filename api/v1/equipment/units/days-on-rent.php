@@ -30,11 +30,12 @@ declare(strict_types=1);
  *
  *  - END-DATE LADDER: actual_return_date → end_date → today. This is
  *    the billing engine's canonical precedence (InvoiceGenerator.php
- *    :296-315, _close_reconciliation.php:47-65). Three older surfaces
- *    disagree and are NOT copied: api/v1/reports/fleet.php:91-108 omits
- *    end_date, app/admin/equipment/payoff.php:278-302 omits
- *    actual_return_date. The ladder is load-bearing — completed leases
- *    with a NULL actual_return_date exist, and under fleet.php's ladder
+ *    :296-315, _close_reconciliation.php:47-65). Older surfaces disagreed
+ *    and are NOT copied: app/admin/equipment/payoff.php:278-302 omits
+ *    actual_return_date, and api/v1/reports/fleet.php used to omit
+ *    end_date (it now uses lib/Reports/FleetUtilization.php, which
+ *    implements this same ladder). The ladder is load-bearing — completed
+ *    leases with a NULL actual_return_date exist, and without end_date
  *    they would read as still-on-rent through the window end.
  *
  *  - DAYS ARE INCLUSIVE OF BOTH ENDPOINTS. A lease 2026-03-01 →
@@ -85,13 +86,15 @@ declare(strict_types=1);
  *                    overlaps}],
  *          pagination: {page, per_page, total, total_pages} }
  *
- * @depends api/bootstrap.php, lib/Billing/HolisticLeaseEngine.php
+ * @depends api/bootstrap.php, lib/Billing/HolisticLeaseEngine.php,
+ *          lib/Reports/FleetUtilization.php (shared interval merge)
  * @session S-DAYS-ON-RENT
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
 
 use FleetForge\Billing\HolisticLeaseEngine;
+use FleetForge\Reports\FleetUtilization;
 
 require_method('GET');
 require_auth_api();
@@ -222,15 +225,16 @@ $rows = db_select(
 );
 
 /* ── Merge overlapping / adjacent spells ─────────────────────────────
-   Y-m-d strings compare lexicographically == chronologically, so the
-   ordering needs no DateTime objects.
+   Merging is delegated to FleetUtilization::mergeSpells() — the SAME
+   routine behind Reports → Fleet, Analytics and the Dashboard trend, so
+   this panel and the fleet-wide figures cannot drift apart.
 
    Adjacency (+1 day) rather than strict overlap: back-to-back leases
    (Jan 1-31, Feb 1-28) are one continuous 59-day occupancy spell, and
    presenting them as two spells in `periods` would be misleading. Both
    rules yield the same day TOTAL — the difference is only in how
    `periods` reads. */
-$merged        = [];
+$spells        = [];
 $rawDaySum     = 0;
 $contributing  = 0;
 $leaseRows     = [];
@@ -265,21 +269,10 @@ foreach ($rows as $r) {
         'overlaps'           => false,   // filled in below
     ];
 
-    $n = count($merged);
-    if ($n === 0) {
-        $merged[] = [$s, $e];
-        continue;
-    }
-
-    $gapFree = (new DateTimeImmutable($merged[$n - 1][1]))->modify('+1 day')->format('Y-m-d');
-    if ($s <= $gapFree) {
-        if ($e > $merged[$n - 1][1]) {
-            $merged[$n - 1][1] = $e;   // extend the open spell
-        }
-    } else {
-        $merged[] = [$s, $e];          // disjoint spell
-    }
+    $spells[] = [$s, $e];
 }
+
+$merged = FleetUtilization::mergeSpells($spells);
 
 $periods    = [];
 $daysOnRent = 0;

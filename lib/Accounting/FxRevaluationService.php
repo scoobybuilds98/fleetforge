@@ -191,6 +191,10 @@ class FxRevaluationService
             // USD balance: sum of foreign_amount, signed by debit/credit
             // and the account's normal-balance side. acc_journal_entry_lines.foreign_amount
             // is stored as the USD value of each debit or credit line.
+            // Ledger scope matches accountBalance() below (posted + reversed —
+            // AccountingService::LEDGER_STATUSES_SQL); a posted-only USD side
+            // against a posted+reversed CAD side would invent an FX delta for
+            // every reversed USD entry.
             $usdRow = \db_row(
                 "SELECT
                     COALESCE(SUM(CASE WHEN jel.debit  > 0 THEN COALESCE(jel.foreign_amount, jel.debit)  ELSE 0 END), 0) AS dr,
@@ -198,7 +202,7 @@ class FxRevaluationService
                    FROM acc_journal_entry_lines jel
                    JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                   WHERE jel.account_id = ?
-                    AND je.status = 'posted'
+                    AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                     AND je.entry_date <= ?",
                 [$accountId, $periodEnd]
             );

@@ -358,13 +358,17 @@ class BudgetService
             $budgeted = self::prorateLineToRange($l, $from, $to);
 
             // Actual from posted JE lines for this account in the same range.
+            // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
+            // Year-end closing entries are excluded, as in the P&L: they zero every
+            // P&L account on Dec 31, which made a closed year's actuals read $0.
             $actualRow = \db_row(
                 "SELECT COALESCE(SUM(jel.debit), 0) AS dr,
                         COALESCE(SUM(jel.credit), 0) AS cr
                    FROM acc_journal_entry_lines jel
                    JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                   WHERE jel.account_id = ?
-                    AND je.status = 'posted'
+                    AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                    AND COALESCE(je.source_type, '') <> 'year_end'
                     AND je.entry_date BETWEEN ? AND ?",
                 [$accountId, $from, $to]
             );

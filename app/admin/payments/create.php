@@ -10,6 +10,8 @@ declare(strict_types=1);
  *
  * Invoice picker pre-filters to status IN ('sent','partially_paid','overdue').
  * D18: Currency selector auto-matches the invoice currency on selection.
+ * Overpayments are allowed (the API issues the excess as an 'overpayment' credit
+ * note): the form shows the invoice/credit split and confirms before posting.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.8 Payments
@@ -104,14 +106,26 @@ require_once FF_ROOT . '/includes/header.php';
                         'searchParam' => 'q',
                         'resultKey'   => 'items',
                         'perPage'     => 15,
-                        // WHY no status filter: invoices/index.php only accepts
-                        //      a single status value. Client-side filter below.
-                        'placeholder' => 'Search invoices by invoice #…',
-                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number + ' — ' + (r.company_name_snapshot || ''), sublabel: [r.currency + ' ' + (r.balance_due || '0.00') + ' due', r.due_date ? ('due ' + r.due_date) : '', r.status].filter(Boolean).join(' · '), raw: r })",
+                        // WHY the statuses scope: only sent / partially_paid / overdue
+                        //      invoices can take a payment (the API 422s everything
+                        //      else). This picker used to carry a note saying the API
+                        //      only accepted a single status and that a "client-side
+                        //      filter below" would narrow it — that filter never
+                        //      existed, so drafts, voids and paid invoices were all
+                        //      offered and the user only found out on submit.
+                        //      invoices/index.php has accepted `statuses=a,b,c` since
+                        //      the Outstanding tab; scope server-side, oldest due first.
+                        'extraParams' => 'statuses=sent,partially_paid,overdue&sort=due_date&dir=ASC',
+                        'placeholder' => 'Search invoices by invoice # or customer…',
+                        // Customer is omitted (not rendered as a dangling "— ") when the
+                        // invoice carries no company_name_snapshot.
+                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number + (r.company_name_snapshot ? ' — ' + r.company_name_snapshot : ''), sublabel: [r.currency + ' ' + (r.balance_due || '0.00') + ' due', r.due_date ? ('due ' + r.due_date) : '', r.status].filter(Boolean).join(' · '), raw: r })",
                     ];
                     if ($preselectedInvoice) {
                         $pickerConfig['initialId']    = (int) $preselectedInvoice['id'];
-                        $pickerConfig['initialLabel'] = $preselectedInvoice['invoice_number'] . ' — ' . $preselectedInvoice['company_name_snapshot'];
+                        // Same label shape as mapResult above (no dangling " — " without a snapshot).
+                        $pickerConfig['initialLabel'] = $preselectedInvoice['invoice_number']
+                            . (($preselectedInvoice['company_name_snapshot'] ?? '') !== '' ? ' — ' . $preselectedInvoice['company_name_snapshot'] : '');
                     }
                     $pickerOnPicked  = 'form.invoice_id = $event.detail.id; onInvoicePickerSelected($event.detail.raw)';
                     $pickerOnCleared = "form.invoice_id = ''; selectedInvoice = {}";
@@ -140,10 +154,31 @@ require_once FF_ROOT . '/includes/header.php';
                                required>
                         <!-- Quick-fill buttons -->
                         <div style="margin-top:6px; display:flex; gap:8px;" x-show="selectedInvoice.balance">
+                            <!-- WHY x-text: the amount is Alpine state, not PHP. This used to
+                                 echo a literal PHP short-echo open/close tag pair around the JS
+                                 expression into the HTML; the browser parses that as a bogus
+                                 comment and drops it, so the button read "Pay full balance ()".
+                                 The whole label is one x-text because .btn is inline-flex with a
+                                 gap — a nested <span> would render as a separately spaced item. -->
                             <button type="button" class="btn btn-secondary btn-xs"
-                                    @click="fillBalance()">
-                                Pay full balance (<?= '<?=' ?>  selectedInvoice.currency + ' ' + formatCurrency(selectedInvoice.balance) <?= '?>' ?>)
+                                    @click="fillBalance()"
+                                    x-text="'Pay full balance (' + selectedInvoice.currency + ' ' + formatCurrency(selectedInvoice.balance) + ')'">
+                                Pay full balance
                             </button>
+                        </div>
+                        <!-- Overpayment notice. The server (api/v1/payments/create.php,
+                             S-FIX-2 Bug #2) allocates exactly the balance to the invoice and
+                             issues the excess as an 'overpayment' credit note on the
+                             customer's account, so the form WARNS instead of blocking.
+                             Arguments are passed explicitly so Alpine tracks form.amount and
+                             the selected balance directly (getter dep-tracking trap). -->
+                        <div class="alert alert-warning" role="status"
+                             style="margin-top:8px; font-size:0.85rem; padding:8px 12px;"
+                             x-show="overpaymentCents(form.amount, selectedInvoice.balance) > 0" x-cloak>
+                            <strong>Overpayment of
+                                <span class="font-mono" x-text="selectedInvoice.currency + ' ' + centsToMoney(overpaymentCents(form.amount, selectedInvoice.balance))"></span></strong>
+                            will be issued as account credit.
+                            <span x-text="'Only ' + selectedInvoice.currency + ' ' + formatCurrency(selectedInvoice.balance) + ' is applied to ' + (selectedInvoice.number || 'the invoice') + '; the rest becomes a credit note the customer can use on a future invoice.'"></span>
                         </div>
                         <!-- VALID-2: FF_Validate slot -->
                         <div class="field-error" data-error-for="amount"></div>
@@ -285,6 +320,18 @@ require_once FF_ROOT . '/includes/header.php';
                         <div style="font-size:0.8rem; color:var(--text-muted);">You are recording</div>
                         <div class="font-mono" style="font-size:1.5rem; font-weight:700; color:var(--color-success);"
                              x-text="(form.currency || 'CAD') + ' ' + formatCurrency(form.amount)"></div>
+                        <!-- Split preview — mirrors the server's allocation: balance to the
+                             invoice, remainder to an overpayment credit note. -->
+                        <!-- x-show on the wrapper: Alpine strips the inline `display` when it
+                             re-shows an element, which would drop display:grid. -->
+                        <div x-show="overpaymentCents(form.amount, selectedInvoice.balance) > 0" x-cloak>
+                        <div style="margin-top:8px; font-size:0.8rem; color:var(--text-secondary); display:grid; grid-template-columns:1fr auto; gap:2px 8px;">
+                            <span>Applied to invoice</span>
+                            <span class="font-mono" x-text="formatCurrency(selectedInvoice.balance)"></span>
+                            <span>Account credit</span>
+                            <span class="font-mono" x-text="centsToMoney(overpaymentCents(form.amount, selectedInvoice.balance))"></span>
+                        </div>
+                        </div>
                     </div>
 
                     <!-- VALID-2: form-level error banner injected by FF_Validate.banner() -->
@@ -343,7 +390,10 @@ function FF_CreatePayment() {
                 }, 'CAD')
             ) : "'CAD'" ?>,
             payment_method:  '',
-            payment_date:    new Date().toISOString().slice(0, 10),
+            // FF_localDate (includes/header.php): the company-timezone day. The old
+            // toISOString() default was the UTC day — after 5pm Pacific it pre-filled
+            // TOMORROW, past the date input's own max (server-rendered local today).
+            payment_date:    FF_localDate(),
             reference_number: '',
             bank_name:       '',
             check_number:    '',
@@ -368,6 +418,7 @@ function FF_CreatePayment() {
             ]) : '{}';
         ?>,
         submitting:         false,
+        _confirming:        false,   // overpayment confirm dialog open (see submitPayment)
         showSuccessOverlay: false,
 
         init() { // S-FORM-DRAFT-ROLLOUT
@@ -450,14 +501,14 @@ function FF_CreatePayment() {
                 } else if (a === 0) {
                     FF_Validate.field(form, 'amount', 'Payment amount must be greater than zero.');
                     ok = false;
-                } else if (this.selectedInvoice.balance
-                           && a > parseFloat(this.selectedInvoice.balance)) {
-                    const bal = '$' + parseFloat(this.selectedInvoice.balance)
-                        .toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                    FF_Validate.field(form, 'amount',
-                        `Payment amount exceeds invoice balance of ${bal}.`);
-                    ok = false;
                 }
+                // WHY no "exceeds invoice balance" rejection: api/v1/payments/create.php
+                // (S-FIX-2 Bug #2) accepts overpayments — it allocates exactly
+                // balance_due to the invoice and books the excess as an 'overpayment'
+                // credit note (3-line JE: DR cash / CR AR / CR 2060 customer credits).
+                // Blocking here contradicted the server and forced staff to record a
+                // real cheque at the wrong amount. The inline notice above warns
+                // instead, and submitPayment() confirms before posting.
             }
 
             // Currency mismatch — spec message
@@ -483,9 +534,38 @@ function FF_CreatePayment() {
         },
 
         async submitPayment() {
+            // Re-entrancy guards set BEFORE the first await (the overpayment confirm
+            // below suspends; a second click must not open a second dialog/post).
+            // WHY a separate _confirming flag: `submitting` also drives the
+            // full-screen "Saving…" overlay (includes/success_overlay.php, z-index
+            // 9998), which would sit on top of the confirm modal and swallow its clicks.
+            if (this.submitting || this._confirming) return;
             if (!this.validate()) return;
-            this.submitting = true;
             const form = document.querySelector('form');
+
+            // Overpayment: the server will mint a credit note for the excess — a
+            // typo'd amount (10800 for 1080.00) would silently park real money as
+            // account credit, so make the split explicit before posting.
+            const overCents = this.overpaymentCents(this.form.amount, this.selectedInvoice.balance);
+            if (overCents > 0) {
+                this._confirming = true;
+                const cur = this.selectedInvoice.currency || this.form.currency || 'CAD';
+                let ok = false;
+                try {
+                    ok = await FF_Confirm.ask({
+                        title:        'Record an overpayment?',
+                        message:      `This payment is ${cur} ${this.centsToMoney(overCents)} more than the invoice balance. `
+                                    + `${cur} ${this.formatCurrency(this.selectedInvoice.balance)} will be applied to ${this.selectedInvoice.number || 'the invoice'} `
+                                    + `and ${cur} ${this.centsToMoney(overCents)} will be issued as account credit (a credit note for this customer).`,
+                        confirmLabel: 'Record payment',
+                        dangerMode:   false,
+                    });
+                } finally {
+                    this._confirming = false;
+                }
+                if (!ok) return;
+            }
+            this.submitting = true;
 
             const payload = {
                 invoice_id:      parseInt(this.form.invoice_id, 10),
@@ -537,6 +617,33 @@ function FF_CreatePayment() {
             const n = parseFloat(val);
             if (isNaN(n)) return '—';
             return '$' + n.toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+
+        /**
+         * Amount above the invoice balance, in integer cents (0 when not an overpayment).
+         * Display-only mirror of the server split in api/v1/payments/create.php — the
+         * server's bcmath result is authoritative. Integer cents avoid float drift
+         * (e.g. 1080.10 - 1080.00 !== 0.10 in IEEE doubles).
+         *
+         * @param {string|number} amount   entered payment amount
+         * @param {string|number} balance  selected invoice balance_due
+         * @returns {number} cents over the balance, never negative
+         */
+        overpaymentCents(amount, balance) {
+            if (balance === undefined || balance === null || balance === '') return 0;
+            const a = parseFloat(amount), b = parseFloat(balance);
+            if (isNaN(a) || isNaN(b)) return 0;
+            return Math.max(0, Math.round(a * 100) - Math.round(b * 100));
+        },
+
+        /**
+         * Format integer cents as "$1,234.56".
+         *
+         * @param {number} cents
+         * @returns {string}
+         */
+        centsToMoney(cents) {
+            return this.formatCurrency((cents || 0) / 100);
         },
     };
 }

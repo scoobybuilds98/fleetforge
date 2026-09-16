@@ -683,12 +683,22 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         json_error('NOT_FOUND', 'Equipment unit not found.', 404);
     }
 
-    // Validate mileage order — end must be >= start
-    if ($mileageAtEnd !== null && $lease['mileage_at_start'] !== null) {
+    // Validate mileage order — only meaningful for a TRUE legacy lease, where
+    // mileage_at_end is an absolute end READING compared to mileage_at_start.
+    // S-CLOSE-MILEAGE-SEMANTICS: on every lease with a starting odometer the
+    // dialog's "Actual Mileage (for billing)" is the DISTANCE driven, so comparing
+    // it to the starting reading rejected any lease that did not start at 0
+    // (45,000 km start + 2,280 km driven → "End mileage cannot be less than start").
+    // A distance is already clean_int'd non-negative-or-null; a closing odometer
+    // below the start is still rejected by S-ODO-VALIDATION above.
+    if ($mileageAtEnd !== null && !ff_close_mileage_at_end_is_distance($lease)) {
         if ($mileageAtEnd < (int) $lease['mileage_at_start']) {
             json_error('MILEAGE_DATA_ERROR',
                 'End mileage cannot be less than start mileage.', 422);
         }
+    }
+    if ($mileageAtEnd !== null && $mileageAtEnd < 0) {
+        json_error('MILEAGE_DATA_ERROR', 'Actual mileage cannot be negative.', 422);
     }
 
     $user      = current_user();
@@ -710,10 +720,10 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     ];
     if ($mileageAtEnd !== null) {
         $leaseUpdate['mileage_at_end'] = $mileageAtEnd;
-        // Calculate actual mileage for reconciliation
-        if ($lease['mileage_at_start'] !== null) {
-            $leaseUpdate['actual_mileage'] = $mileageAtEnd - (int) $lease['mileage_at_start'];
-        }
+        // Actual mileage = lifetime distance driven. S-CLOSE-MILEAGE-SEMANTICS:
+        // mileage_at_end is already that distance on an odometer lease; only a
+        // legacy reading needs the start subtracted.
+        $leaseUpdate['actual_mileage'] = ff_close_lifetime_distance($lease, $mileageAtEnd);
     }
 
     // ── S-LEASE-MILEAGE: persist closing odometer + total distance ───
@@ -913,13 +923,33 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // (true-up owns reconciliation — see $usesEstimateMileage above).
     $extraLines     = [];
     $hasMileageLine = false;
+    // S-CLOSE-MILEAGE-SEMANTICS: set when the overage line below is built, so the
+    // partial_end engine run is told not to ALSO emit its per-period mileage_usage
+    // line for the same distance (see 'suppress_usage_mileage' there).
+    $closeOverageLineBuilt = false;
     if (!$usesEstimateMileage
         && $mileageAtEnd !== null && $lease['mileage_at_start'] !== null
         && bccomp((string)$lease['mileage_rate'], '0', 4) > 0)
     {
-        $actualMileage    = (string)($mileageAtEnd - (int)$lease['mileage_at_start']);
+        // Lifetime distance in the lease unit (the dialog sends a distance on an
+        // odometer lease; a legacy lease sends an end reading), minus the included
+        // allowance, minus distance ALREADY billed as mileage on this lease's live
+        // invoices. The prior-billed term makes a reopen → reclose bill only the
+        // correction and stops a lease with per-period odometer billing from being
+        // re-billed its whole lifetime distance at close. Clamped at 0 below.
+        $actualMileage    = (string) ff_close_lifetime_distance($lease, $mileageAtEnd);
         $includedMileage  = (string)($lease['estimated_mileage'] ?? '0');
-        $overageMileage   = bcsub($actualMileage, $includedMileage, 4);
+        // Same pure extent the S-CLOSE-OVERSHOOT pass computes further down —
+        // needed here so prior-billed excludes invoices that pass will void.
+        $mileageExtent    = lease_billable_extent(
+            $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date'],
+            $billingDaysRemoved
+        );
+        $overageMileage   = bcsub(
+            bcsub($actualMileage, $includedMileage, 4),
+            ff_close_prior_billed_distance($id, $mileageExtent),
+            4
+        );
 
         if (bccomp($overageMileage, '0', 4) > 0) {
             $mileageCharge = bcround(bcmul($overageMileage, (string)$lease['mileage_rate'], 6), 2);
@@ -940,7 +970,8 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'is_credit'   => 0,
                     'taxable'     => 1,
                 ];
-                $hasMileageLine = true;
+                $hasMileageLine        = true;
+                $closeOverageLineBuilt = true;
             }
         }
     }
@@ -1390,6 +1421,16 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                     'odometer_source'             => $odoSource,
                     'odometer_fetched_at'         => $odoFetchedAt,
                     'cumulative_actual_km'        => $cumulativeActualKmOverride,
+                    // S-CLOSE-MILEAGE-SEMANTICS: the close overage line in
+                    // $extraLines already bills this lease's unbilled distance.
+                    // Without this the engine ALSO emitted a mileage_usage line
+                    // for the same closing-odometer distance — a same-invoice
+                    // double bill (prod drafts INV-2026-00795 / INV-2026-02131).
+                    // The odometer snapshot is still written; only the line is
+                    // suppressed. Every other close shape (fold / append /
+                    // advance carrier / adjustment) never runs that emit, so the
+                    // overage line is the one mileage biller on all paths.
+                    'suppress_usage_mileage'      => $closeOverageLineBuilt,
                     // S-LEASE-HOURLY-BILLING: bill the closing period's engine hours.
                     'engine_hours_at_period_start' => $hoursPeriodStart,
                     'engine_hours_at_period_end'   => $hoursAtClose,

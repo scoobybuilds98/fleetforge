@@ -457,7 +457,7 @@ function FF_TaxPeriods() {
         filedOpen: false,
         filedBusy: false,
         filedTarget: null,
-        filedForm: { filed_date: new Date().toISOString().slice(0, 10) },
+        filedForm: { filed_date: FF_localDate() },
         filedFormError: '',
         filedErrors: { filed_date: '' },
 
@@ -465,7 +465,7 @@ function FF_TaxPeriods() {
         remitBusy: false,
         remitTarget: null,
         remitForm: {
-            remittance_date: new Date().toISOString().slice(0, 10),
+            remittance_date: FF_localDate(),
             amount: '',
             payment_method: '',
             bank_account_id: '',
@@ -661,7 +661,7 @@ function FF_TaxPeriods() {
         // ── Mark filed ─────────────────────────────────────────
         openMarkFiled(p) {
             this.filedTarget = p;
-            this.filedForm = { filed_date: new Date().toISOString().slice(0, 10) };
+            this.filedForm = { filed_date: FF_localDate() };
             this._clearErrors(this.filedErrors, 'filedFormError');
             this.filedOpen  = true;
         },
@@ -690,7 +690,7 @@ function FF_TaxPeriods() {
             this.remitTarget = p;
             // Pre-fill amount with the period's net_tax_owing as a convenience.
             this.remitForm = {
-                remittance_date: new Date().toISOString().slice(0, 10),
+                remittance_date: FF_localDate(),
                 amount: parseFloat(p.net_tax_owing || 0).toFixed(2),
                 payment_method: '',
                 bank_account_id: '',
@@ -961,7 +961,7 @@ function posResolver() {
         form: {
             customer_id: '',
             transaction_type: 'short_lease',
-            transaction_date: new Date().toISOString().slice(0,10),
+            transaction_date: FF_localDate(),
             delivery_province: '',
         },
         busy: false, error: null, result: null,

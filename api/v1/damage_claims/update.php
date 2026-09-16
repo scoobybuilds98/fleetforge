@@ -21,6 +21,27 @@ declare(strict_types=1);
  *   resolved      → [terminal]
  *   written_off   → [terminal]
  *
+ * Recovery invoice rules (bug #8 — claims moved to 'invoiced' with no invoice
+ * link silently skipped the GL step, and the UI had no way to set the link):
+ *   - invoice_id must exist, not be void, and belong to the claim's customer.
+ *   - Moving to 'invoiced' (or changing/clearing the link while invoiced)
+ *     requires a customer + a linked invoice. A DRAFT is accepted: it is not
+ *     revenue yet, so nothing posts now — FinancialActions::sendInvoice() calls
+ *     AutoEntryBridge::onDamageRecoveryBilled() for every invoiced claim linked
+ *     to the invoice when it is sent. (Requiring a sent invoice would have made
+ *     'invoiced' unreachable on a deployment that bills from drafts.)
+ *   - Once the recovery is linked in the GL (a live source_type='damage_recovery'
+ *     JE for this claim), the invoice link cannot be re-pointed or removed.
+ *   - AutoEntryBridge::onDamageRecoveryBilled fires on the transition to
+ *     'invoiced' AND when the link is set/changed on an already-invoiced claim
+ *     (so legacy invoiced-without-invoice claims can be repaired). It is
+ *     idempotent (one damage_recovery JE per claim) — never double-posts.
+ *   GL effect: the invoice's existing send JE (DR 1030 AR / CR revenue / CR tax)
+ *   is re-tagged source_type 'invoice' → 'damage_recovery', source_id = claim id.
+ *   No new money moves. Only when a sent invoice has NO JE (accounting was off
+ *   at send) does the bridge post DR AR / CR Damage Recovery Revenue for the
+ *   customer-liable amount (falling back to the invoice total).
+ *
  * D19: optimistic lock — caller must supply updated_at matching DB value.
  * D16: monetary amounts via bcmath.
  *
@@ -32,7 +53,7 @@ declare(strict_types=1);
  *               customer_liable_amount?, insurance_claim_amount?,
  *               work_order_id?, invoice_id?
  * @auth    Session required; require_permission('maintenance','edit')
- * @returns 200 { id, claim_number, status, updated_at }
+ * @returns 200 { id, claim_number, status, updated_at, gl_journal_entry? }
  *
  * Decisions: D5 (soft delete), D16 (bcmath), D19 (optimistic lock), §6 (state machine)
  * Session: S012
@@ -212,9 +233,13 @@ if (array_key_exists('work_order_id', $body)) {
 if (array_key_exists('invoice_id', $body)) {
     $invId = clean_int($body['invoice_id'] ?? null);
     if ($invId) {
-        $invCheck = db_row("SELECT id FROM invoices WHERE id = ? AND deleted_at IS NULL", [$invId]);
+        $invCheck = db_row("SELECT id, invoice_number, status FROM invoices WHERE id = ? AND deleted_at IS NULL", [$invId]);
         if (!$invCheck) {
             $fields['invoice_id'] = 'Invoice not found.';
+        } elseif ($invCheck['status'] === 'void') {
+            // A void invoice's JE is already reversed — linking it would record a
+            // recovery that was never billed.
+            $fields['invoice_id'] = "Invoice {$invCheck['invoice_number']} is void. Pick the live recovery invoice.";
         } else {
             $updates['invoice_id'] = $invId;
         }
@@ -237,8 +262,62 @@ if (array_key_exists('vendor_id', $body)) {
     }
 }
 
+// -----------------------------------------------------------------------
+// 3b. Recovery-invoice rules (bug #8) — evaluated on the POST-update state
+// -----------------------------------------------------------------------
+$effectiveStatus     = $updates['status'] ?? $claim['status'];
+$effectiveCustomerId = array_key_exists('customer_id', $updates) ? $updates['customer_id'] : $claim['customer_id'];
+$effectiveInvoiceId  = array_key_exists('invoice_id', $updates) ? $updates['invoice_id'] : $claim['invoice_id'];
+$transitionInvoiced  = $newStatus === 'invoiced' && $claim['status'] !== 'invoiced';
+$invoiceLinkChanged  = array_key_exists('invoice_id', $updates)
+    && (int) ($updates['invoice_id'] ?? 0) !== (int) ($claim['invoice_id'] ?? 0);
+$customerChanged     = array_key_exists('customer_id', $updates)
+    && (int) ($updates['customer_id'] ?? 0) !== (int) ($claim['customer_id'] ?? 0);
+
+// Lock the link once the recovery is classified in the GL. A voided invoice's
+// JE is reversed (reversed_by_id set), which releases the lock.
+if ($invoiceLinkChanged && !isset($fields['invoice_id'])) {
+    $liveRecoveryJe = db_row(
+        "SELECT id, entry_number FROM acc_journal_entries
+          WHERE source_type = 'damage_recovery' AND source_id = ?
+            AND is_reversal = 0 AND reversed_by_id IS NULL
+          LIMIT 1",
+        [$claimId]
+    );
+    if ($liveRecoveryJe) {
+        $fields['invoice_id'] = "This claim's recovery is already posted to the general ledger (journal entry "
+            . "{$liveRecoveryJe['entry_number']}) against its current invoice, so the invoice link can't be changed. "
+            . "Void that invoice first if it was wrong.";
+    }
+}
+
+// The invoice must belong to the claim's customer (AutoEntryBridge enforces the
+// same rule and would otherwise silently refuse to link).
+if ($effectiveInvoiceId && ($invoiceLinkChanged || $customerChanged || $transitionInvoiced) && !isset($fields['invoice_id'])) {
+    $inv = db_row("SELECT invoice_number, customer_id, status FROM invoices WHERE id = ?", [$effectiveInvoiceId]);
+    if ($inv && (int) ($inv['customer_id'] ?? 0) !== (int) ($effectiveCustomerId ?? 0)) {
+        $fields['invoice_id'] = $effectiveCustomerId
+            ? "Invoice {$inv['invoice_number']} belongs to a different customer than this claim."
+            : "Link this claim to a customer before attaching invoice {$inv['invoice_number']}.";
+    }
+}
+
+// Being 'invoiced' means a recovery invoice is on file — that link is what posts
+// the recovery to the GL (now if the invoice is sent, otherwise when it is sent).
+if (($transitionInvoiced || ($invoiceLinkChanged && $effectiveStatus === 'invoiced')) && !isset($fields['invoice_id'])) {
+    if (!$effectiveCustomerId) {
+        $fields['invoice_id'] = 'Link this claim to a customer before marking it invoiced — the recovery invoice must belong to that customer.';
+    } elseif (!$effectiveInvoiceId) {
+        $fields['invoice_id'] = $transitionInvoiced
+            ? 'Select the recovery invoice before marking this claim invoiced — that link is what posts the damage recovery to the general ledger.'
+            : 'An invoiced claim must keep its recovery invoice.';
+    }
+}
+
 if ($fields) {
-    json_validation_error($fields);
+    // Surface the invoice rule (the most common blocker) as the banner message
+    // so single-message UIs like the status panel show the actual reason.
+    json_validation_error($fields, $fields['invoice_id'] ?? 'Please correct the highlighted fields.');
 }
 
 if (empty($updates)) {
@@ -301,26 +380,28 @@ db_transaction(function () use ($claimId, $claim, $updates, $newStatus, &$result
 // the actual transition (newStatus differs from prior status).
 // Per spec §23.11 + K-22 catch: 'invoiced' is the damage_claims status
 // equivalent of "billed_to_customer" (not present in the ENUM).
-if ($newStatus !== null && $newStatus !== $claim['status']) {
-    if ($newStatus === 'invoiced') {
-        try {
-            // Reload to get the current invoice_id (caller may have just set it).
-            $linked = db_row(
-                "SELECT invoice_id FROM damage_claims WHERE id = ?",
-                [$claimId]
-            );
-            $invId = isset($linked['invoice_id']) ? (int) $linked['invoice_id'] : 0;
-            if ($invId > 0) {
-                \FleetForge\Accounting\AutoEntryBridge::onDamageRecoveryBilled(
-                    $claimId, $invId, current_user_id()
-                );
-            } else {
-                error_log("[S-ACCT-DMG] Claim {$claim['claim_number']} → invoiced but invoice_id is NULL. Bridge call skipped.");
-            }
-        } catch (\Throwable $e) {
-            error_log('[S-ACCT-DMG onDamageRecoveryBilled] ' . $e->getMessage());
+// Bug #8: also fire when the invoice link is set/changed on an already-invoiced
+// claim (the validation above guarantees a customer-matched, non-void invoice).
+// A draft invoice returns null here by design (not revenue yet); the send path
+// links it when the invoice is sent.
+if ($effectiveStatus === 'invoiced' && $effectiveInvoiceId && ($transitionInvoiced || $invoiceLinkChanged)) {
+    try {
+        $glJe = \FleetForge\Accounting\AutoEntryBridge::onDamageRecoveryBilled(
+            $claimId, (int) $effectiveInvoiceId, current_user_id()
+        );
+        $resultRow['gl_journal_entry'] = $glJe
+            ? ['id' => (int) $glJe['id'], 'entry_number' => $glJe['entry_number'], 'source_type' => $glJe['source_type']]
+            : null;
+        if (!$glJe) {
+            error_log("[S-ACCT-DMG] Claim {$claim['claim_number']} → invoiced with invoice #{$effectiveInvoiceId} but no recovery JE was linked yet (draft invoice — links on send — or accounting disabled).");
         }
-    } elseif ($newStatus === 'written_off') {
+    } catch (\Throwable $e) {
+        error_log('[S-ACCT-DMG onDamageRecoveryBilled] ' . $e->getMessage());
+    }
+}
+
+if ($newStatus !== null && $newStatus !== $claim['status']) {
+    if ($newStatus === 'written_off') {
         try {
             \FleetForge\Accounting\AutoEntryBridge::onDamageWrittenOff(
                 $claimId, current_user_id()

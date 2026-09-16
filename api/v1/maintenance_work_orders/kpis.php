@@ -25,10 +25,13 @@ require_permission('maintenance', 'view');
 $total     = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE deleted_at IS NULL");
 $open      = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE status = 'open' AND deleted_at IS NULL");
 $active    = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE status IN ('in_progress','waiting_parts') AND deleted_at IS NULL");
+// Bug #10: month start in the company-local calendar — NOW() is the UTC
+// session clock, which flips to next month ~5pm Pacific on the last day.
 $completed = db_count(
     "SELECT COUNT(*) FROM maintenance_work_orders
      WHERE status = 'completed' AND deleted_at IS NULL
-       AND completed_date >= DATE_FORMAT(NOW(), '%Y-%m-01')"
+       AND completed_date >= ?",
+    [date('Y-m-01')]
 );
 
 json_success([

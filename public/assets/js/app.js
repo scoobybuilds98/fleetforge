@@ -4742,6 +4742,26 @@ window.FF_GuidanceModal = function () {
 //   - Validates required fields client-side before POSTing
 //   - Surfaces success/failure via FF_Toast
 // ============================================================
+
+/**
+ * FF_emailBodyToHtml — render a Compose/Bulk message body for preview.
+ *
+ * The textarea holds EITHER a template's HTML or a free-typed plain-text
+ * message. A plain-text body (no real tag like <p>/<br>/</div>) is escaped
+ * and its line breaks become <br>; otherwise every "\n" collapses to a space
+ * and the preview shows one run-on paragraph. MUST stay in lock-step with
+ * EmailService::isPlainTextBody()/bodyToHtml() (lib/Email/EmailService.php),
+ * which applies the identical rule to the email that is actually sent.
+ *
+ * @param {string} body Raw textarea value
+ * @returns {string} HTML for x-html
+ */
+window.FF_emailBodyToHtml = function (body) {
+    const s = String(body ?? '');
+    if (/<\/?[a-z][a-z0-9]*(?:\s[^<>]*)?\/?>/i.test(s)) return s;
+    return ffEsc(s.replace(/\r\n?/g, '\n').trim()).replace(/\n/g, '<br>');
+};
+
 window.FF_EmailCompose = function () {
     return {
         // ── visibility ──
@@ -4783,7 +4803,8 @@ window.FF_EmailCompose = function () {
                 + this.ffEsc(company)
                 + '</div>'
                 + '<div style="padding:16px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#1c1c1a;background:#fff;line-height:1.6;">'
-                + (this.bodyHtml || '<em style="color:#999;">No body yet…</em>')
+                // Plain-text bodies keep their line breaks (same rule the server applies on send).
+                + (this.bodyHtml ? window.FF_emailBodyToHtml(this.bodyHtml) : '<em style="color:#999;">No body yet…</em>')
                 + '</div>';
         },
 
@@ -5176,6 +5197,20 @@ window.openEmailCompose = function (opts) {
         return _inst;
     }
     Patched.prototype = Original.prototype;
+    // ApexCharts 3.45 bug: its parent-resize handler schedules ctx.update()
+    // 150 ms later, and destroy() never clears that timer. Hiding a chart
+    // (x-show) and destroying it inside that window made the dead chart
+    // re-create its SVG in the element afterwards — a stale zero-width chart
+    // that pushed the NEXT chart drawn there out of view (Reports: blank first
+    // chart after an empty date range). Clear the pending timer on destroy.
+    if (typeof Original.prototype.destroy === 'function' && !Original.prototype.__ff_destroy_patched__) {
+        const _origDestroy = Original.prototype.destroy;
+        Original.prototype.destroy = function () {
+            try { if (this.w && this.w.globals) window.clearTimeout(this.w.globals.resizeTimer); } catch (_e3) {}
+            return _origDestroy.apply(this, arguments);
+        };
+        Original.prototype.__ff_destroy_patched__ = true;
+    }
     // Copy static members (exec, initOnLoad, etc.)
     Object.keys(Original).forEach((k) => { Patched[k] = Original[k]; });
     Patched.__ff_responsive_patched__ = true;

@@ -387,6 +387,9 @@ class LeaseNiReclassService
      */
     private static function glBalanceForLeaseAccount(int $leaseId, int $accountId): string
     {
+        // Posted + reversed (AccountingService::LEDGER_STATUSES_SQL): a reversed
+        // lease JE stays on the books offset by its posted reversal; posted-only
+        // would count the reversal alone and misstate the NI balance.
         $row = \db_row(
             "SELECT COALESCE(SUM(jel.debit) - SUM(jel.credit), '0.00') AS bal
                FROM acc_journal_entry_lines jel
@@ -395,7 +398,7 @@ class LeaseNiReclassService
                 AND je.source_type IN ('lease_inception','lease_period',
                                        'lease_ni_reclass','lease_termination',
                                        'lease_residual_impairment')
-                AND je.status     = 'posted'
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND jel.account_id = ?",
             [$leaseId, $accountId]
         );

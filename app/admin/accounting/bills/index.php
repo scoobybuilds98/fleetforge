@@ -7,6 +7,12 @@
  * Tabs: All | Draft | Approved | Partially Paid | Paid | Overdue | Void.
  * KPI tiles: Total Outstanding AP, Due This Week, Overdue.
  * Create/edit modal with line items, auto-categorization, tax fields.
+ * The modal can link the bill to one of the vendor's work orders
+ * (acc_bills.work_order_id) — VendorSpend uses that link so an approved bill
+ * replaces the work order's cost in the vendor's Total Spent instead of
+ * double-counting it (bug #7). A duplicate supplier invoice # for the same
+ * vendor is rejected server-side and painted under the Vendor Invoice # field
+ * (bug #9).
  *
  * @depends config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  * @session S032
@@ -207,11 +213,25 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" x-show="saveErrors.due_date" x-cloak x-text="saveErrors.due_date"></div>
                     </div>
                 </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px;">
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Vendor Invoice #</label>
-                        <input type="text" x-model="form.vendor_bill_number" class="form-input" maxlength="21" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;" placeholder="Vendor's invoice # (max 21 chars — QBO limit)">
-                        <div class="text-xs text-secondary" style="margin-top:2px;" x-show="form.vendor_bill_number"><span x-text="(form.vendor_bill_number || '').length"></span>/21 chars</div>
+                        <input type="text" x-model="form.vendor_bill_number" @input="saveErrors.vendor_bill_number = ''" :class="saveErrors.vendor_bill_number ? 'is-invalid' : ''" class="form-input" maxlength="21" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;" placeholder="Vendor's invoice # (max 21 chars — QBO limit)">
+                        <div class="text-xs text-secondary" style="margin-top:2px;" x-show="form.vendor_bill_number && !saveErrors.vendor_bill_number"><span x-text="(form.vendor_bill_number || '').length"></span>/21 chars</div>
+                        <!-- Bug #9: server rejects a supplier invoice # already on a live bill of this vendor. -->
+                        <div class="field-error" x-show="saveErrors.vendor_bill_number" x-cloak x-text="saveErrors.vendor_bill_number"></div>
+                    </div>
+                    <div>
+                        <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Work Order <span style="font-weight:400;">(optional)</span></label>
+                        <!-- Bug #7: linking the work order lets Total Spent count this bill
+                             INSTEAD of the work order's cost (no double count). -->
+                        <select x-model="form.work_order_id" @change="saveErrors.work_order_id = ''" :disabled="!form.vendor_id || vendorWoLoading" :class="saveErrors.work_order_id ? 'is-invalid' : ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                            <option value="" x-text="!form.vendor_id ? 'Select a vendor first' : (vendorWoLoading ? 'Loading work orders…' : (vendorWorkOrders.length ? 'No work order' : 'No work orders for this vendor'))"></option>
+                            <template x-for="wo in vendorWorkOrders" :key="wo.id">
+                                <option :value="wo.id" x-text="wo.label"></option>
+                            </template>
+                        </select>
+                        <div class="field-error" x-show="saveErrors.work_order_id" x-cloak x-text="saveErrors.work_order_id"></div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Notes</label>
@@ -433,7 +453,9 @@ function billsPage() {
 
         // VALID-2 per-form error state
         saveFormError: '',
-        saveErrors: { vendor_id: '', bill_date: '', due_date: '', vendor_bill_number: '', notes: '', lines: '' },
+        saveErrors: { vendor_id: '', bill_date: '', due_date: '', vendor_bill_number: '', work_order_id: '', notes: '', lines: '' },
+        // Work orders of the selected vendor for the optional bill↔WO link (bug #7).
+        vendorWorkOrders: [], vendorWoLoading: false,
         lineErrors: [],
         payFormError: '',
         payErrors: { amount: '', payment_date: '', payment_method: '', bank_account_id: '', check_number: '' },
@@ -665,10 +687,11 @@ function billsPage() {
 
         openCreate() {
             this.form = {
-                id: null, vendor_id: '', bill_date: new Date().toISOString().slice(0,10),
-                due_date: '', vendor_bill_number: '', notes: '',
+                id: null, vendor_id: '', bill_date: FF_localDate(),
+                due_date: '', vendor_bill_number: '', work_order_id: '', notes: '',
                 lines: [this.newLine()],
             };
+            this.vendorWorkOrders = [];
             this.lineErrors = [this._emptyLineErr()];
             this._clearSaveErrors();
             this.showModal = true;
@@ -716,7 +739,34 @@ function billsPage() {
             } catch (e) { console.error(e); }
         },
 
-        onVendorChange() { /* Could auto-set due date from vendor terms */ },
+        // Load the chosen vendor's (non-cancelled) work orders for the optional
+        // link. Labels are precomputed here — never call a function inside x-for.
+        async onVendorChange() {
+            const vid = String(this.form.vendor_id || '');
+            this.form.work_order_id = '';
+            this.vendorWorkOrders = [];
+            this.vendorWoLoading = false;
+            if (!vid) return;
+            this.vendorWoLoading = true;
+            try {
+                const p = new URLSearchParams({ vendor_id: vid, per_page: 100, sort: 'requested_date', dir: 'DESC' });
+                const r = await fetch(FF_Api.url('/api/v1/maintenance_work_orders/index.php?' + p));
+                const j = await r.json();
+                // Ignore a stale response if the vendor was changed mid-flight.
+                if (String(this.form.vendor_id || '') !== vid) return;
+                if (j.success) {
+                    const items = (j.data && j.data.items) || [];
+                    this.vendorWorkOrders = items
+                        .filter(w => w.status !== 'cancelled')
+                        .map(w => ({
+                            id: String(w.id),
+                            label: w.work_order_number + ' — ' + (w.title || '') + ' (' + String(w.status).replace(/_/g, ' ')
+                                 + (Number(w.total_cost) > 0 ? ', $' + Number(w.total_cost).toFixed(2) : '') + ')',
+                        }));
+                }
+            } catch (e) { /* optional link — the bill can still be saved without it */ }
+            finally { if (String(this.form.vendor_id || '') === vid) this.vendorWoLoading = false; }
+        },
 
         async saveBill(autoApprove) {
             if (!this.validateBill()) return;
@@ -727,6 +777,7 @@ function billsPage() {
                 fd.append('bill_date', this.form.bill_date);
                 fd.append('due_date', this.form.due_date);
                 fd.append('vendor_bill_number', this.form.vendor_bill_number || '');
+                fd.append('work_order_id', this.form.work_order_id || '');
                 fd.append('notes', this.form.notes || '');
                 fd.append('auto_approve', autoApprove ? '1' : '0');
                 fd.append('lines', JSON.stringify(this.form.lines));
@@ -780,7 +831,7 @@ function billsPage() {
             this.payForm = {
                 vendor_id: bill.vendor_id, bill_id: bill.id, bill_number: bill.bill_number,
                 balance_due: bill.balance_due, amount: bill.balance_due,
-                payment_date: new Date().toISOString().slice(0,10), payment_method: 'check',
+                payment_date: FF_localDate(), payment_method: 'check',
                 bank_account_id: '<?= (int)($bankAccounts[0]['id'] ?? 1) ?>',
                 check_number: '', reference_number: '',
             };

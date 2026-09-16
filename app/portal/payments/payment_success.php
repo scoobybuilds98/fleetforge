@@ -62,7 +62,8 @@ require_once dirname(__DIR__) . '/includes/header.php';
     </div>
 <?php else: ?>
 
-<div x-data="paymentSuccessPoller(<?= json_encode($token) ?>, <?= json_encode($initRow['status']) ?>)" class="card" style="padding:32px;text-align:center;">
+<?php /* e(): json_encode's double quotes would otherwise close the x-data attribute. */ ?>
+<div x-data="paymentSuccessPoller(<?= e(json_encode($token)) ?>, <?= e(json_encode($initRow['status'])) ?>)" class="card" style="padding:32px;text-align:center;">
 
     <!-- Pending (waiting for webhook) -->
     <template x-if="status === 'pending' && !timedOut">

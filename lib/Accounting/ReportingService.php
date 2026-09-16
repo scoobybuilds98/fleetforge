@@ -11,6 +11,17 @@ declare(strict_types=1);
  * implementation is the source of truth for "what does this account
  * have on it as of date X".
  *
+ * Sign convention (every statement): an amount is signed by the SECTION's
+ * natural side, not by the account's own normal_balance — assets are
+ * debit − credit, liabilities/equity/revenue/other income credit − debit,
+ * costs/expenses debit − credit. A contra account (Accumulated Depreciation,
+ * Allowance for Doubtful Accounts, Owner Drawings, a sales-discount revenue
+ * account) therefore shows NEGATIVE and reduces its section total.
+ *
+ * Ledger scope: posted AND reversed entries (AccountingService::
+ * LEDGER_STATUSES_SQL) — a reversed original stays on the books, offset by
+ * its posted reversal.
+ *
  * Spec ref: FLEETFORGE_ACCOUNTING_SPEC.md §10 (Financial Statements)
  *           and §21 (Phase B reporting + budgeting build).
  * Session:  S036
@@ -20,6 +31,12 @@ namespace FleetForge\Accounting;
 
 class ReportingService
 {
+    /** P&L account types whose natural (positive) side is CREDIT. */
+    private const CREDIT_NATURAL_PL_TYPES = ['revenue', 'other_income'];
+
+    /** Every account type that closes to retained earnings. */
+    private const PL_TYPES = ['revenue', 'other_income', 'cost_of_revenue', 'operating_expense', 'other_expense'];
+
     // ============================================================
     // PROFIT & LOSS
     // ============================================================
@@ -56,8 +73,12 @@ class ReportingService
         // Merge comparison amounts onto each base row + compute variance
         if ($compare) {
             foreach (['revenue', 'direct_costs', 'operating_expenses', 'other'] as $group) {
+                // accountSection() returns a LIST, so index the compare block by
+                // account_id first — looking up $compare[$group][$accountId]
+                // directly read whatever row sat at that list position.
+                $cmpByAccount = array_column($compare[$group], null, 'account_id');
                 foreach ($base[$group] as &$row) {
-                    $cmp = $compare[$group][$row['account_id']] ?? null;
+                    $cmp = $cmpByAccount[$row['account_id']] ?? null;
                     $row['compare_amount'] = $cmp ? $cmp['amount'] : '0.00';
                     $row['var_amt']        = bcsub($row['amount'], $row['compare_amount'], 2);
                     $row['var_pct']        = self::variancePct($row['amount'], $row['compare_amount']);
@@ -98,14 +119,15 @@ class ReportingService
         $otherTotal        = self::sumSection($other, true); // signed: other_income adds, other_expense subtracts
         $netIncomeBeforeTax = bcadd($operatingIncome, $otherTotal, 2);
 
-        // Tax provision: sum acc_tax_remittances in the period (DR side of remittance JE)
-        $taxRow = \db_row(
-            "SELECT COALESCE(SUM(amount), 0) AS total
-               FROM acc_tax_remittances
-              WHERE remittance_date BETWEEN ? AND ?",
-            [$from, $to]
-        );
-        $taxProvision = (string) ($taxRow['total'] ?? '0.00');
+        // Tax provision: none is derived here. This used to subtract
+        // acc_tax_remittances, but those rows are GST/HST + PST remittances
+        // (acc_tax_filing_periods.tax_type is gst_hst / pst_*), booked
+        // DR tax payable / CR cash — settling a liability, not an expense.
+        // Subtracting them understated net income by every remittance and
+        // unbalanced the balance sheet by the same amount. Corporate income tax
+        // is booked by JE to an expense account, so it is already in the
+        // sections above. Key kept (always 0.00) for the PDF/API shape.
+        $taxProvision = '0.00';
         $netIncome    = bcsub($netIncomeBeforeTax, $taxProvision, 2);
 
         return [
@@ -136,6 +158,7 @@ class ReportingService
     {
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $params = array_merge($types, [$from, $to]);
+        $ledger = AccountingService::LEDGER_STATUSES_SQL;
 
         // C5: the je status/date predicates MUST live in WHERE (with INNER
         // JOINs), not in a LEFT JOIN ... ON. With a LEFT JOIN, a non-matching
@@ -144,6 +167,15 @@ class ReportingService
         // draft + other-period activity into every period total. INNER JOIN +
         // WHERE drops those lines entirely. Accounts with no posted-in-period
         // activity simply produce no row (they were skipped as zero anyway).
+        //
+        // No is_active filter: an account deactivated mid-year still carries
+        // the activity it booked, and dropping it would understate the period.
+        //
+        // Year-end closing entries (source_type 'year_end', and their reversal,
+        // which inherits the source_type) are excluded: they zero every P&L
+        // account into retained earnings on Dec 31, so including them made the
+        // P&L of any CLOSED year read $0 — including the year-end package's own
+        // P&L. The balance sheet reads the ledger WITH them (see ledgerEarnings()).
         $rows = \db_select(
             "SELECT a.id AS account_id, a.code, a.name, a.account_type, a.normal_balance,
                     COALESCE(SUM(jel.debit), 0) AS total_debit,
@@ -152,9 +184,9 @@ class ReportingService
                JOIN acc_journal_entry_lines jel ON jel.account_id = a.id
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
               WHERE a.account_type IN ({$placeholders})
-                AND a.is_active = 1
                 AND a.is_header = 0
-                AND je.status = 'posted'
+                AND je.status IN ({$ledger})
+                AND COALESCE(je.source_type, '') <> 'year_end'
                 AND je.entry_date BETWEEN ? AND ?
               GROUP BY a.id, a.code, a.name, a.account_type, a.normal_balance
               ORDER BY a.sort_order ASC, a.code ASC",
@@ -166,9 +198,12 @@ class ReportingService
             $debit  = (string) ($r['total_debit']  ?? '0.00');
             $credit = (string) ($r['total_credit'] ?? '0.00');
 
-            // Revenue / income / liability / equity: credit-normal → amount = credit - debit
-            // Cost / expense / asset: debit-normal → amount = debit - credit
-            $amount = $r['normal_balance'] === 'credit'
+            // Signed by the section's natural side (account TYPE), not the
+            // account's normal_balance: revenue / other income = credit − debit,
+            // costs / expenses = debit − credit. A contra account (e.g. a
+            // debit-normal sales-discount account typed 'revenue') then comes
+            // out negative and reduces its section, instead of inflating it.
+            $amount = in_array($r['account_type'], self::CREDIT_NATURAL_PL_TYPES, true)
                 ? bcsub($credit, $debit, 2)
                 : bcsub($debit, $credit, 2);
 
@@ -181,7 +216,8 @@ class ReportingService
                    FROM acc_journal_entry_lines jel
                    JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                   WHERE jel.account_id = ?
-                    AND je.status = 'posted'
+                    AND je.status IN ({$ledger})
+                    AND COALESCE(je.source_type, '') <> 'year_end'
                     AND je.entry_date BETWEEN ? AND ?
                   ORDER BY je.entry_date DESC, jel.id DESC
                   LIMIT 50",
@@ -371,13 +407,35 @@ class ReportingService
         return $base;
     }
 
+    /**
+     * One balance-sheet snapshot as of a date — used for both the base and the
+     * comparison column.
+     *
+     * Equity = equity-account balances
+     *        + current fiscal-year earnings   (P&L accounts, Jan 1 → as-of)
+     *        + prior-year earnings not closed (P&L accounts, all time → Dec 31 prior)
+     *
+     * Both earnings figures are read straight from the ledger INCLUDING
+     * year-end closing entries, which is what makes the equation hold by
+     * construction: every posted JE balances, so assets − liabilities −
+     * equity accounts ≡ cumulative P&L-account net. After a year-end close the
+     * closing JE has already zeroed that year's P&L accounts into Retained
+     * Earnings, so the prior-years term is 0 and nothing is counted twice.
+     * Before this, only YTD income was injected: with 2022–2025 never closed,
+     * every earlier year's profit was missing from equity.
+     *
+     * @param string $asOf YYYY-MM-DD
+     * @return array
+     */
     private static function buildBSBlock(string $asOf): array
     {
-        // Inject net income from start of fiscal year (Jan 1 of $asOf's year)
+        // Fiscal year = calendar year (decision A4; YearEndService closes Jan–Dec).
         $year       = (int) substr($asOf, 0, 4);
         $fyStart    = sprintf('%04d-01-01', $year);
-        $pl         = self::profitAndLoss($fyStart, $asOf);
-        $netIncomeYtd = $pl['net_income'];
+        $priorEnd   = sprintf('%04d-12-31', $year - 1);
+
+        $netIncomeYtd          = self::ledgerEarnings($fyStart, $asOf);
+        $priorUnclosedEarnings = self::ledgerEarnings(null, $priorEnd);
 
         $assets = self::balanceSheetSection($asOf, ['asset']);
         $liabs  = self::balanceSheetSection($asOf, ['liability']);
@@ -389,9 +447,33 @@ class ReportingService
 
         $totalAssets         = self::sumBSSection($assets);
         $totalLiabilities    = self::sumBSSection($liabs);
-        // Equity rows + Net Income YTD injection
-        $totalEquityRows     = self::sumBSSection($equity);
-        $totalEquity         = bcadd($totalEquityRows, $netIncomeYtd, 2);
+
+        // Earnings are shown as their own equity lines (not silently folded
+        // into the total) so the section rows add up to Total Equity. Synthetic
+        // rows carry a string account_id (unique x-for key) and an empty code.
+        if (bccomp($priorUnclosedEarnings, '0', 2) !== 0) {
+            $equity['retained_earnings_unclosed'] = [
+                'account_id'     => 'retained_earnings_unclosed',
+                'code'           => '',
+                'name'           => 'Retained Earnings — prior years not yet closed',
+                'account_type'   => 'equity',
+                'normal_balance' => 'credit',
+                'coa_group'      => 'Equity',
+                'amount'         => $priorUnclosedEarnings,
+                'is_computed'    => true,
+            ];
+        }
+        $equity['net_income_ytd'] = [
+            'account_id'     => 'net_income_ytd',
+            'code'           => '',
+            'name'           => "Net Income — {$year} year to date",
+            'account_type'   => 'equity',
+            'normal_balance' => 'credit',
+            'coa_group'      => 'Equity',
+            'amount'         => $netIncomeYtd,
+            'is_computed'    => true,
+        ];
+        $totalEquity         = self::sumBSSection($equity);
 
         $currentAssetsTotal      = self::sumBSSection($currentAssets);
         $longTermAssetsTotal     = self::sumBSSection($longTermAssets);
@@ -416,6 +498,7 @@ class ReportingService
             'total_liabilities'     => $totalLiabilities,
             'equity'                => $equity,
             'net_income_injected'   => $netIncomeYtd,
+            'prior_unclosed_earnings' => $priorUnclosedEarnings,
             'total_equity'          => $totalEquity,
             'total_liabilities_and_equity' => $liabPlusEquity,
             'is_balanced'           => $isBalanced,
@@ -424,17 +507,63 @@ class ReportingService
     }
 
     /**
-     * Pull active accounts of the given types with their balance as of the date.
-     * Each row { account_id, code, name, account_type, normal_balance, coa_group, amount }.
+     * Net earnings (credit − debit across every P&L-type account) booked in a
+     * date window, read from the ledger INCLUDING year-end closing entries.
+     *
+     * @param string|null $from YYYY-MM-DD inclusive, or null for "since inception"
+     * @param string      $to   YYYY-MM-DD inclusive
+     * @return string bcmath amount; positive = profit
+     */
+    private static function ledgerEarnings(?string $from, string $to): string
+    {
+        $typeIn = implode(',', array_fill(0, count(self::PL_TYPES), '?'));
+        $params = self::PL_TYPES;
+        $fromSql = '';
+        if ($from !== null) {
+            $fromSql  = 'AND je.entry_date >= ?';
+            $params[] = $from;
+        }
+        $params[] = $to;
+
+        $row = \db_row(
+            "SELECT COALESCE(SUM(jel.credit), 0) - COALESCE(SUM(jel.debit), 0) AS net
+               FROM acc_journal_entry_lines jel
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+               JOIN acc_accounts a ON a.id = jel.account_id
+              WHERE a.account_type IN ({$typeIn})
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                {$fromSql}
+                AND je.entry_date <= ?",
+            $params
+        );
+        return bcadd((string) ($row['net'] ?? '0'), '0', 2);
+    }
+
+    /**
+     * Pull accounts of the given balance-sheet types with their balance as of
+     * the date, signed by the section's natural side (asset → debit − credit;
+     * liability/equity → credit − debit). Contra accounts come out negative:
+     * 1220 Accumulated Depreciation reduces Total Assets and 3030 Owner Drawings
+     * reduces Total Equity. (Previously the account's own normal-balance sign
+     * was used, so accumulated depreciation was ADDED to assets — a $X
+     * depreciation run drifted the sheet by 2×$X.)
+     *
+     * Inactive accounts are included when they still carry a balance —
+     * leaving them out would unbalance the sheet.
+     *
+     * Each row { account_id, code, name, account_type, normal_balance, coa_group, account_subtype, amount }.
+     *
+     * @param string   $asOf  YYYY-MM-DD
+     * @param string[] $types account_type values (asset | liability | equity)
+     * @return array<int, array>
      */
     private static function balanceSheetSection(string $asOf, array $types): array
     {
         $placeholders = implode(',', array_fill(0, count($types), '?'));
         $accts = \db_select(
-            "SELECT id, code, name, account_type, normal_balance, coa_group, sort_order
+            "SELECT id, code, name, account_type, account_subtype, normal_balance, coa_group, sort_order
                FROM acc_accounts
               WHERE account_type IN ({$placeholders})
-                AND is_active = 1
                 AND is_header = 0
               ORDER BY sort_order ASC, code ASC",
             $types
@@ -442,21 +571,34 @@ class ReportingService
 
         $out = [];
         foreach ($accts as $a) {
-            $amount = AccountingService::accountBalance((int) $a['id'], $asOf);
+            // accountBalance() is positive on the ACCOUNT's normal side; flip it
+            // when that differs from the section's natural side (a contra account).
+            $amount  = AccountingService::accountBalance((int) $a['id'], $asOf);
+            $natural = $a['account_type'] === 'asset' ? 'debit' : 'credit';
+            if ($a['normal_balance'] !== $natural) {
+                $amount = bcmul($amount, '-1', 2);
+            }
             if (bccomp($amount, '0', 2) === 0) continue;
             $out[(int) $a['id']] = [
-                'account_id'     => (int) $a['id'],
-                'code'           => $a['code'],
-                'name'           => $a['name'],
-                'account_type'   => $a['account_type'],
-                'normal_balance' => $a['normal_balance'],
-                'coa_group'      => $a['coa_group'],
-                'amount'         => $amount,
+                'account_id'      => (int) $a['id'],
+                'code'            => $a['code'],
+                'name'            => $a['name'],
+                'account_type'    => $a['account_type'],
+                'account_subtype' => $a['account_subtype'],
+                'normal_balance'  => $a['normal_balance'],
+                'coa_group'       => $a['coa_group'],
+                'amount'          => $amount,
             ];
         }
         return $out;
     }
 
+    /**
+     * Sum the (already section-signed) amounts of a balance-sheet section.
+     *
+     * @param array $section rows from balanceSheetSection() (plus synthetic equity rows)
+     * @return string bcmath total
+     */
     private static function sumBSSection(array $section): string
     {
         $total = '0.00';
@@ -476,11 +618,17 @@ class ReportingService
         foreach ($assets as $key => $row) {
             $code = (string) $row['code'];
             $group = strtolower((string) ($row['coa_group'] ?? ''));
+            // Subtype + name hints catch accounts seeded without a coa_group
+            // (e.g. 1600 Net Investment in Lease — Long-Term).
+            $subtype = strtolower((string) ($row['account_subtype'] ?? ''));
+            $name    = strtolower((string) ($row['name'] ?? ''));
             $isLongTerm = (
                 str_starts_with($code, '12') || str_starts_with($code, '13') ||
                 str_starts_with($code, '14') || str_starts_with($code, '15') ||
                 str_contains($group, 'fixed') ||
-                str_contains($group, 'long')
+                str_contains($group, 'long') ||
+                $subtype === 'fixed_asset' || str_contains($subtype, 'long') ||
+                str_contains($name, 'long-term')
             );
             if ($isLongTerm) $longTerm[$key] = $row;
             else             $current[$key]  = $row;
@@ -499,9 +647,11 @@ class ReportingService
         foreach ($liabs as $key => $row) {
             $code = (string) $row['code'];
             $group = strtolower((string) ($row['coa_group'] ?? ''));
+            $subtype = strtolower((string) ($row['account_subtype'] ?? ''));
             $isLongTerm = (
                 str_starts_with($code, '25') || str_starts_with($code, '26') ||
-                str_contains($group, 'long')
+                str_contains($group, 'long') ||
+                str_contains($subtype, 'long')
             );
             if ($isLongTerm) $longTerm[$key] = $row;
             else             $current[$key]  = $row;
@@ -601,31 +751,42 @@ class ReportingService
     }
 
     /**
-     * Sum JE lines for the given source_type within date range.
-     * Direction:
-     *   'debit'  → return debit side (typical for expense)
-     *   'credit' → return credit side
-     *   'net'    → return (debit - credit)
+     * Non-cash P&L effect of every entry with the given source_type in a date
+     * range: SUM(debit − credit) over the P&L-type lines only (positive = an
+     * expense/loss to add back to net income; negative = an income/gain).
+     *
+     * WHY P&L lines only: every JE balances, so summing debit − credit over ALL
+     * of its lines is always 0 — the old 'net' mode reported $0 for asset
+     * disposals and FX revaluation no matter what posted. The old 'debit' mode
+     * summed both sides' debits, so a reversed depreciation run (original
+     * debits the expense, its reversal debits accumulated depreciation) was
+     * added back twice instead of netting to zero.
+     *
+     * @param string $sourceType acc_journal_entries.source_type
+     * @param string $from       YYYY-MM-DD inclusive
+     * @param string $to         YYYY-MM-DD inclusive
+     * @param string $dir        'debit' | 'net' (identical now; kept for call-site
+     *                           readability) — anything else returns 0.00
+     * @return string bcmath amount
      */
     private static function sumJELinesBySourceType(string $sourceType, string $from, string $to, string $dir): string
     {
+        if (!in_array($dir, ['debit', 'net'], true)) {
+            return '0.00';
+        }
+        $typeIn = implode(',', array_fill(0, count(self::PL_TYPES), '?'));
         $row = \db_row(
-            "SELECT COALESCE(SUM(jel.debit), 0) AS dr, COALESCE(SUM(jel.credit), 0) AS cr
+            "SELECT COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0) AS net
                FROM acc_journal_entry_lines jel
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+               JOIN acc_accounts a ON a.id = jel.account_id
               WHERE je.source_type = ?
-                AND je.status = 'posted'
+                AND a.account_type IN ({$typeIn})
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?",
-            [$sourceType, $from, $to]
+            array_merge([$sourceType], self::PL_TYPES, [$from, $to])
         );
-        $dr = (string) ($row['dr'] ?? '0.00');
-        $cr = (string) ($row['cr'] ?? '0.00');
-        return match ($dir) {
-            'debit'  => $dr,
-            'credit' => $cr,
-            'net'    => bcsub($dr, $cr, 2),
-            default  => '0.00',
-        };
+        return bcadd((string) ($row['net'] ?? '0'), '0', 2);
     }
 
     /**
@@ -689,7 +850,7 @@ class ReportingService
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                JOIN acc_accounts a ON a.id = jel.account_id
               WHERE a.code LIKE '25%%'
-                AND je.status = 'posted'
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?",
             [$from, $to]
         );
@@ -705,7 +866,7 @@ class ReportingService
                JOIN acc_accounts a ON a.id = jel.account_id
               WHERE a.account_type = 'equity'
                 AND LOWER(a.name) LIKE '%dividend%'
-                AND je.status = 'posted'
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?",
             [$from, $to]
         );

@@ -175,6 +175,8 @@ require_once FF_ROOT . '/includes/header.php';
 <?php
 $overlayTitle    = 'User Created!';
 $overlaySubtitle = 'Redirecting to user profile…';
+// This component's in-flight flag is `saving`, not the overlay's default `submitting`.
+$overlaySubmittingVar = 'saving';
 require_once FF_ROOT . '/includes/success_overlay.php';
 ?>
 

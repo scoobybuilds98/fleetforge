@@ -693,8 +693,11 @@ function FF_Invoices() {
         },
 
         isOverdue(inv) {
-            if (['paid', 'void', 'written_off'].includes(inv.status)) return false;
-            return inv.due_date && new Date(inv.due_date + 'T00:00:00') < new Date();
+            // Drafts are unsent — nothing is owed yet, so never flag them overdue.
+            if (['draft', 'paid', 'void', 'written_off'].includes(inv.status)) return false;
+            // Past due = due date BEFORE today (company-local day, YYYY-MM-DD string
+            // compare). The old `midnight < now` test flagged invoices due TODAY.
+            return !!inv.due_date && inv.due_date < FF_localDate();
         },
 
         formatDate(d) {

@@ -171,8 +171,8 @@ function ledgerPage() {
     return {
         filters: {
             account_id: '',
-            date_from: new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10),
-            date_to: new Date().toISOString().slice(0, 10),
+            date_from: FF_localDate().slice(0, 4) + '-01-01',
+            date_to: FF_localDate(),
         },
         data: null,
         loading: false,

@@ -7,6 +7,12 @@
  * and aging bucket (current, 1-30, 31-60, 61-90, 90+ days past due).
  * Includes AR/GL reconciliation check alert.
  *
+ * Amounts are CAD (canonical; USD invoices converted at their own frozen
+ * rate) and balances are AS OF the selected date — the API
+ * (lib/Reports/ArAging.php) excludes invoices issued later and ignores
+ * payments/credits applied after it. USD invoice rows also show the native
+ * USD balance so the conversion is visible.
+ *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php,
  *           api/v1/accounting/reports/ar-aging.php, api/v1/accounting/ar/reconcile_check.php
  * @session  S030
@@ -49,6 +55,17 @@ require_once FF_ROOT . '/includes/header.php';
             </button>
         </div>
     </div>
+
+    <!-- Basis note: says what the numbers are, so a USD balance is never read at face value -->
+    <template x-if="data">
+        <div style="margin:-8px 0 16px;font-size:0.75rem;color:var(--text-secondary);">
+            All amounts in CAD — USD invoices converted at each invoice's frozen exchange rate.
+            Balances as of <span class="font-mono" x-text="data.as_of_date"></span>: invoices issued after that date are excluded, and payments or credits applied after it are not deducted.
+            <template x-if="Number(data.native_totals?.USD || 0) > 0">
+                <span>Includes <span class="font-mono" x-text="'US$' + Number(data.native_totals.USD).toLocaleString('en-CA', {minimumFractionDigits:2})"></span> of USD receivables.</span>
+            </template>
+        </div>
+    </template>
 
     <!-- Reconciliation Alert -->
     <template x-if="recon && !recon.is_reconciled">
@@ -170,6 +187,8 @@ require_once FF_ROOT . '/includes/header.php';
                                     <span x-text="row.invoice_number" style="font-weight:500;color:var(--text-primary);"></span>
                                     <span style="margin-left:8px;" x-text="'Due: ' + row.due_date"></span>
                                     <span style="margin-left:8px;color:var(--text-tertiary);" x-text="row.days_overdue > 0 ? row.days_overdue + 'd overdue' : 'current'"></span>
+                                    <span x-show="row.currency === 'USD'" style="margin-left:8px;color:var(--text-tertiary);"
+                                          x-text="'US$' + Number(row.balance_due_native).toLocaleString('en-CA', {minimumFractionDigits:2}) + ' @ ' + row.exchange_rate_to_cad"></span>
                                 </td>
                             </template>
                             <template x-if="row._type === 'invoice'">
@@ -212,7 +231,7 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="data && data.customers.length === 0 && !loading">
         <div class="card" style="padding:48px;text-align:center;">
             <div style="font-size:1rem;font-weight:600;color:var(--text-primary);margin-bottom:4px;">No Outstanding AR</div>
-            <div style="font-size:0.8125rem;color:var(--text-secondary);">All invoices are paid or there are no open invoices.</div>
+            <div style="font-size:0.8125rem;color:var(--text-secondary);" x-text="'No invoice issued on or before ' + data.as_of_date + ' had a balance outstanding at that date.'"></div>
         </div>
     </template>
 </div>
@@ -220,7 +239,8 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function arAgingPage() {
     return {
-        asOfDate: new Date().toISOString().slice(0, 10),
+        // Local business date — toISOString() is the UTC day (tomorrow after ~5pm Pacific).
+        asOfDate: (window.FF_localDate ? window.FF_localDate() : new Date().toLocaleDateString('en-CA')),
         data: null,
         recon: null,
         loading: false,

@@ -205,6 +205,12 @@ final class CustomerReminders
         );
         $docsDefault = (array) ($m['docs'] ?? []);
         $docs = self::jsonSetting(self::typeSetting($key, 'docs'), $docsDefault);
+        // A saved docs map may still carry slugs retired from the config (mvi,
+        // insurance) — keep only the documents the registry currently defines so
+        // the settings page never renders a toggle that no sender honours.
+        if ($docsDefault) {
+            $docs = array_intersect_key($docs + $docsDefault, $docsDefault);
+        }
 
         return [
             'key'           => $key,

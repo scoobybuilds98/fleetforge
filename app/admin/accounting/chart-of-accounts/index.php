@@ -118,8 +118,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="liability">Liability</option>
                 <option value="equity">Equity</option>
                 <option value="revenue">Revenue</option>
-                <option value="expense">Expense</option>
-                <option value="cogs">COGS</option>
+                <option value="cost_of_revenue">Cost of Revenue</option>
+                <option value="operating_expense">Operating Expense</option>
                 <option value="other_income">Other Income</option>
                 <option value="other_expense">Other Expense</option>
             </select>
@@ -477,7 +477,6 @@ function FF_ChartOfAccounts() {
         flatAccounts:  [],          // sorted flat list for flat view
         parentOptions: [],          // header accounts for parent dropdown
         expanded:      {},
-        filteredCount: 0,
         loading:       true,
         loadError:     null,
         viewMode:      'tree',      // 'tree' or 'flat'
@@ -573,6 +572,11 @@ function FF_ChartOfAccounts() {
                             walk(acct.children, depth + 1);
                         }
                     } else {
+                        // WHY: honour the Active/Inactive status filter in the
+                        // browse (non-search) tree too; a header stays visible
+                        // while any descendant passes, so its children remain
+                        // reachable.
+                        if (!this._treeHasMatch(acct, a => this._matchesActive(a))) continue;
                         result.push(enriched);
                         if (acct.children && this.expanded[acct.id]) {
                             walk(acct.children, depth + 1);
@@ -582,19 +586,25 @@ function FF_ChartOfAccounts() {
             };
 
             walk(this.treeAccounts, 0);
-            this.filteredCount = result.length;
             return result;
         },
 
         // -- Computed: filtered flat accounts for flat view ----------
         get flatFiltered() {
-            const filtered = this.flatAccounts.filter(a => this._matchesFilter(a));
-            // WHY: Update filteredCount only when flat view is active so the
-            // counter in the toolbar reflects whichever view is showing.
-            if (this.viewMode === 'flat') {
-                this.filteredCount = filtered.length;
-            }
-            return filtered;
+            return this.flatAccounts.filter(a => this._matchesFilter(a));
+        },
+
+        // -- Computed: row count for whichever view is showing -------
+        // WHY: this used to be a plain `filteredCount: 0` field that the two
+        // getters above assigned as a side effect. Those getters are only ever
+        // evaluated INSIDE the tables, and both tables sit behind
+        // `x-if="filteredCount > 0"` — so the count never left 0, the tables
+        // never rendered, and the page always said "No accounts found".
+        // Deriving it here makes the empty state reflect the data.
+        get filteredCount() {
+            return this.viewMode === 'flat'
+                ? this.flatFiltered.length
+                : this.visibleTreeAccounts.length;
         },
 
         // -- Init ---------------------------------------------------
@@ -608,10 +618,16 @@ function FF_ChartOfAccounts() {
             this.loadError = null;
 
             try {
-                const params = new URLSearchParams(this.filters);
-                const r = await FF_Api.get('<?= base_url('api/v1/accounting/accounts') ?>?' + params);
+                // WHY: load the WHOLE chart once as a flat list and filter
+                // client-side (_matchesFilter). Without flat=1 the API returns
+                // only the 21 root accounts with children pre-nested, and
+                // buildTree() below rebuilt nodes with `children: []`, dropping
+                // every child account. Sending the filters server-side also meant
+                // the "Inactive"/"All" status options could never show inactive
+                // accounts, since the list was never reloaded on change.
+                const r = await FF_Api.get('<?= base_url('api/v1/accounting/accounts') ?>?flat=1');
                 if (r.success) {
-                    const raw = r.data.accounts || r.data || [];
+                    const raw = r.data?.accounts || [];
                     this.accounts = raw;
                     this.treeAccounts = this.buildTree(raw);
                     this._buildFlatList(raw);
@@ -672,12 +688,15 @@ function FF_ChartOfAccounts() {
         },
 
         // -- Filter helpers -----------------------------------------
+        _matchesActive(acct) {
+            if (this.filters.active === '') return true;
+            // Number(): is_active may arrive as 1/0 or "1"/"0" — `!!"0"` is true.
+            return (Number(acct.is_active) === 1) === (this.filters.active === '1');
+        },
+
         _matchesFilter(acct) {
             if (this.filters.type && acct.account_type !== this.filters.type) return false;
-            if (this.filters.active !== '') {
-                const wantActive = this.filters.active === '1';
-                if (!!acct.is_active !== wantActive) return false;
-            }
+            if (!this._matchesActive(acct)) return false;
             if (this.filters.search) {
                 const q = this.filters.search.toLowerCase();
                 return (acct.code || '').toLowerCase().includes(q) ||

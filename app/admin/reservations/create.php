@@ -734,7 +734,7 @@ function FF_ReservationCreate() {
                 this.errors.pickup_date = 'Pickup date is required.';
                 ok = false;
             } else {
-                const today = new Date().toISOString().split('T')[0];
+                const today = FF_localDate();
                 if (this.form.pickup_date < today) {
                     this.errors.pickup_date = 'Pickup date cannot be in the past.';
                     ok = false;

@@ -306,7 +306,7 @@ function createInspection() {
             equipment_unit_id:     <?= $preUnitId  ? (int)$preUnitId  : 'null' ?>,
             inspection_type:       '<?= e($preType) ?>',
             lease_id:              <?= $preLeaseId ? (int)$preLeaseId : 'null' ?>,
-            inspection_date:       new Date().toISOString().slice(0, 10),
+            inspection_date:       FF_localDate(),
             inspected_by:          '',
             inspected_by_user_id:  null,
             mileage_at_inspection: null,

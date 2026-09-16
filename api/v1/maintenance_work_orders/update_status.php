@@ -14,11 +14,12 @@ declare(strict_types=1);
  *   cancelled    → [TERMINAL]
  *
  * On completion:
- *   - completed_date set to today.
+ *   - completed_date set to today (company-local business day, not the UTC day).
  *   - completed_by set to current user.
  *   - resolution_notes saved if provided.
- *   - If vendor_id is set: UPDATE vendors SET total_spent = total_spent + total_cost
- *     in the SAME transaction (Trap 6 — denormalized counter).
+ *   - If vendor_id is set: vendors.total_spent is RECOMPUTED via
+ *     FleetForge\Accounting\VendorSpend in the SAME transaction (bills-first rule —
+ *     a work order already covered by an approved bill is not counted twice).
  *
  * No dedicated work_order_status_log table exists in schema.
  * All status history is written to audit_log (action='status_change').

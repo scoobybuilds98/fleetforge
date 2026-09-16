@@ -137,7 +137,10 @@ $rows = db_select(
         i.invoice_type,
         i.customer_id,
         i.lease_id,
-        i.company_name_snapshot,
+        -- Snapshot first (the name as invoiced); fall back to the live customer
+        -- name when a lease was created without a snapshot so the list never
+        -- renders a bare dash for a real customer.
+        COALESCE(NULLIF(i.company_name_snapshot, ''), c.company_name) AS company_name_snapshot,
         i.contract_number_snapshot,
         i.unit_number_invoice_snapshot,
         i.status,
@@ -168,6 +171,7 @@ $rows = db_select(
         {$qboSelect}
      FROM invoices i
      LEFT JOIN leases l ON l.id = i.lease_id
+     LEFT JOIN customers c ON c.id = i.customer_id
      {$qboJoin}
      WHERE {$whereSQL}
      ORDER BY i.{$sort} {$dir}, i.id {$dir}

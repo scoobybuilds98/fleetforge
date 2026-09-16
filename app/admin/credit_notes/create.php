@@ -163,7 +163,9 @@ require_once FF_ROOT . '/includes/header.php';
                         'resultKey'   => 'items',
                         'perPage'     => 10,
                         'placeholder' => 'Search invoices by invoice #…',
-                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number, sublabel: [r.company_name, '\$' + (r.total_amount || '0.00'), r.status].filter(Boolean).join(' · '), raw: r })",
+                        // company_name_snapshot, not company_name: invoices/index.php has no
+                        // company_name column, so the customer silently dropped out of the sublabel.
+                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number, sublabel: [r.company_name_snapshot, '\$' + (r.total_amount || '0.00'), r.status].filter(Boolean).join(' · '), raw: r })",
                     ];
                     $pickerOnPicked  = 'form.source_invoice_id = $event.detail.id';
                     $pickerOnCleared = "form.source_invoice_id = ''";

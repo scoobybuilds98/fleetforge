@@ -13,7 +13,9 @@ declare(strict_types=1);
  *   3. Total issued this calendar month
  *   4. Fully used this calendar month (applied to invoices)
  *
- * Filters: customer search, status, currency, source
+ * Filters: customer (?customer_id= drill-through from the customer profile's
+ * Account Credit tile — shown as a clearable banner, and scopes the KPI tiles
+ * too), status, currency, source
  * Table columns: CN#, Customer, Source, Amount, Remaining, Currency, Status, Expires, Created
  *
  * D32: All CSS classes verified in public/assets/css/app.css before use.
@@ -32,6 +34,27 @@ require_auth();
 require_permission('invoices', 'view');
 
 // -----------------------------------------------------------------------
+// Customer scope (?customer_id=) — the customer profile's "Account Credit" tile
+// links here with the customer's id. The page used to ignore it and list every
+// customer's notes. The API has always accepted customer_id; the page now reads
+// it, filters the table AND the KPI tiles, and shows a clearable banner.
+// -----------------------------------------------------------------------
+$filterCustomerId   = clean_int($_GET['customer_id'] ?? null) ?: null;
+$filterCustomerName = null;
+if ($filterCustomerId) {
+    // No deleted_at filter: a soft-deleted customer's credit notes are still real
+    // liabilities, and the banner should still name them.
+    $_fc = db_row("SELECT company_name FROM customers WHERE id = ?", [$filterCustomerId]);
+    $filterCustomerName = $_fc ? (string) $_fc['company_name'] : null;
+    unset($_fc);
+}
+
+// Shared KPI scope fragment — mirrors api/v1/credit_notes/kpis.php so the
+// server-rendered first paint and the Alpine refresh agree.
+$kpiScopeSql    = $filterCustomerId ? ' AND customer_id = ?' : '';
+$kpiScopeParams = $filterCustomerId ? [$filterCustomerId] : [];
+
+// -----------------------------------------------------------------------
 // KPI tiles — server-rendered
 // -----------------------------------------------------------------------
 
@@ -39,8 +62,8 @@ require_permission('invoices', 'view');
 $activeBalance = db_row(
     "SELECT COALESCE(SUM(amount_remaining), 0) AS total, COUNT(*) AS cnt
      FROM credit_notes
-     WHERE deleted_at IS NULL AND status IN ('active', 'partially_used')",
-    []
+     WHERE deleted_at IS NULL AND status IN ('active', 'partially_used'){$kpiScopeSql}",
+    $kpiScopeParams
 );
 
 // Total credit notes issued this calendar month (by amount)
@@ -48,8 +71,8 @@ $issuedThisMonth = db_row(
     "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt
      FROM credit_notes
      WHERE deleted_at IS NULL
-       AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')",
-    []
+       AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01'){$kpiScopeSql}",
+    $kpiScopeParams
 );
 
 // Fully used this calendar month
@@ -57,8 +80,8 @@ $fullyUsedThisMonth = db_row(
     "SELECT COUNT(*) AS cnt
      FROM credit_notes
      WHERE deleted_at IS NULL AND status = 'fully_used'
-       AND updated_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')",
-    []
+       AND updated_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01'){$kpiScopeSql}",
+    $kpiScopeParams
 );
 
 // Expired/void this month (informational)
@@ -66,9 +89,15 @@ $expiredThisMonth = db_row(
     "SELECT COUNT(*) AS cnt
      FROM credit_notes
      WHERE deleted_at IS NULL AND status IN ('expired', 'void')
-       AND updated_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')",
-    []
+       AND updated_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01'){$kpiScopeSql}",
+    $kpiScopeParams
 );
+
+// I03 serve-time redaction: this page is reachable with invoices:view alone
+// (dispatchers), and the tiles below are embedded as JSON in the page source.
+// kpis.php already zeroes the dollar totals for roles without financial access;
+// the first paint must not leak them either.
+$canSeeMoney = can_view_financials();
 
 $pageTitle      = 'Credit Notes';
 $helpModuleSlug = 'credit-notes';
@@ -93,7 +122,7 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- KPI tiles -->
-<div x-data="creditNotesKpis()" x-init="loadKpis()">
+<div x-data="creditNotesKpis()" x-init="loadKpis()" @cn-customer-scope-changed.window="customerId = $event.detail.customer_id; loadKpis()">
 <div class="stat-grid" style="margin-bottom:1.5rem;">
     <div class="stat-card stat-card--blue" style="cursor:pointer;"
          @click="activeTile = activeTile === 'active' ? '' : 'active'; drill('status', activeTile === 'active' ? 'active' : '')"
@@ -142,6 +171,20 @@ require_once FF_ROOT . '/includes/header.php';
      tiles' drill() resolves the component via Alpine.$data(). -->
 <div id="credit-notes-table" x-data="creditNotesList()">
 
+    <!-- ── CUSTOMER SCOPE BANNER (drill-through context) ─────────────
+         Same pattern as the equipment list's drilldown banner. Rendered from
+         Alpine state so clearing it updates in place (no reload). -->
+    <template x-if="filters.customer_id">
+        <div class="card card-body" style="margin-bottom:1rem;background:var(--color-info-light);color:var(--color-info-text);display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:0.625rem 1rem;">
+            <span>Showing credit notes for
+                <a class="link" style="font-weight:600;" :href="'<?= base_url('customers/show') ?>?id=' + filters.customer_id" x-text="customerName || ('Customer #' + filters.customer_id)"></a>
+                only</span>
+            <button type="button" class="btn btn-ghost btn-sm" @click="clearCustomer()" aria-label="Clear customer filter">
+                &times; Clear filter
+            </button>
+        </div>
+    </template>
+
     <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
     <div class="table-toolbar">
 
@@ -174,11 +217,17 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="damage_resolution">Damage Resolution</option>
                 <option value="goodwill">Goodwill</option>
                 <option value="payment_returned">Payment Returned</option>
+                <!-- System-minted sources (credit_notes.source ENUM) — overpayment is
+                     what Record Payment issues for the excess of an overpayment. -->
+                <option value="overpayment">Overpayment</option>
+                <option value="hours_overpayment">Hours Overpayment</option>
+                <option value="precharge_refund">Pre-charge Refund</option>
+                <option value="base_rental_reconciliation_overflow">Rental Reconciliation Credit</option>
                 <option value="other">Other</option>
             </select>
 
             <button class="btn btn-secondary btn-sm"
-                    @click="filters = { status: '', currency: '', source: '' }; goPage(1)">Reset</button>
+                    @click="resetFilters()">Reset</button>
         </div>
 
         <div class="table-toolbar-right">
@@ -297,9 +346,9 @@ require_once FF_ROOT . '/includes/header.php';
 function creditNotesKpis() {
     return {
         kpis: {
-            active_balance:  <?= json_encode($activeBalance['total'] ?? '0.00') ?>,
+            active_balance:  <?= json_encode($canSeeMoney ? ($activeBalance['total'] ?? '0.00') : '0.00') ?>,
             active_cnt:      <?= json_encode((int)($activeBalance['cnt'] ?? 0)) ?>,
-            issued_total:    <?= json_encode($issuedThisMonth['total'] ?? '0.00') ?>,
+            issued_total:    <?= json_encode($canSeeMoney ? ($issuedThisMonth['total'] ?? '0.00') : '0.00') ?>,
             issued_cnt:      <?= json_encode((int)($issuedThisMonth['cnt'] ?? 0)) ?>,
             fully_used_cnt:  <?= json_encode((int)($fullyUsedThisMonth['cnt'] ?? 0)) ?>,
             expired_cnt:     <?= json_encode((int)($expiredThisMonth['cnt'] ?? 0)) ?>,
@@ -314,8 +363,13 @@ function creditNotesKpis() {
             d.page = 1;
             d.fetchRows();
         },
+        // Customer scope for the tiles. Seeded from PHP (NOT read from the table
+        // component: this component's x-init runs before the table below has
+        // initialised) and updated by the table's cn-customer-scope-changed event.
+        customerId: <?= json_encode($filterCustomerId ? (string) $filterCustomerId : '') ?>,
         async loadKpis() {
-            const r = await FF_Api.get('<?= base_url('api/v1/credit_notes/kpis') ?>');
+            const qs = this.customerId ? ('?customer_id=' + encodeURIComponent(this.customerId)) : '';
+            const r = await FF_Api.get('<?= base_url('api/v1/credit_notes/kpis') ?>' + qs);
             if (r.success) Object.assign(this.kpis, r.data);
         },
     };
@@ -335,10 +389,41 @@ function creditNotesList() {
             status: '',
             currency: '',
             source: '',
+            // ?customer_id= from the URL (customer profile → Account Credit tile).
+            customer_id: <?= json_encode($filterCustomerId ? (string) $filterCustomerId : '') ?>,
         },
+        customerName: <?= json_encode($filterCustomerName) ?>,
 
         init() {
             this.fetchRows();
+        },
+
+        /**
+         * Drop the customer scope: update the URL (so reload/back don't re-apply
+         * it), refetch the table, and tell the KPI tiles to re-scope.
+         */
+        clearCustomer() {
+            this.filters.customer_id = '';
+            this.customerName = null;
+            try {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('customer_id');
+                window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+            } catch (e) { /* URL API unavailable — filter is still cleared in-page */ }
+            window.dispatchEvent(new CustomEvent('cn-customer-scope-changed', { detail: { customer_id: '' } }));
+            this.goPage(1);
+        },
+
+        /** Reset every filter, including the customer scope. */
+        resetFilters() {
+            this.filters.status = '';
+            this.filters.currency = '';
+            this.filters.source = '';
+            if (this.filters.customer_id) {
+                this.clearCustomer();   // also refetches
+            } else {
+                this.goPage(1);
+            }
         },
 
         fetchRows() {
@@ -352,6 +437,7 @@ function creditNotesList() {
             if (this.filters.status)   params.set('status', this.filters.status);
             if (this.filters.currency) params.set('currency', this.filters.currency);
             if (this.filters.source)   params.set('source', this.filters.source);
+            if (this.filters.customer_id) params.set('customer_id', this.filters.customer_id);
 
             // Envelope contract: json_paginated() emits
             //   { success, data: { items, pagination: { total, total_pages, ... } } }
@@ -428,6 +514,10 @@ function creditNotesList() {
                 damage_resolution:   'Damage Resolution',
                 goodwill:            'Goodwill',
                 payment_returned:    'Payment Returned',
+                overpayment:         'Overpayment',
+                hours_overpayment:   'Hours Overpayment',
+                precharge_refund:    'Pre-charge Refund',
+                base_rental_reconciliation_overflow: 'Rental Reconciliation Credit',
                 other:               'Other',
             };
             return map[source] || source;

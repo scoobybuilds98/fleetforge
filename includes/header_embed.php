@@ -161,6 +161,23 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
         window.FF_BASE_PATH     = <?= json_encode(FF_BASE_PATH) ?>;
         window.FF_ASSET_VERSION = <?= json_encode(FF_ASSET_VERSION) ?>;
         window.FF_EMBED         = true;
+        // Business-day date helper. `new Date().toISOString().slice(0, 10)` is the
+        // UTC day, which in Pacific time rolls to TOMORROW after 5pm — so default
+        // form dates (lease start, return date, payment date…) were off by one every
+        // evening. Format in the COMPANY timezone instead; en-CA yields YYYY-MM-DD.
+        // Accepts an optional Date / timestamp; falls back to browser-local parts.
+        window.FF_localDate = function (d) {
+            var dt = d instanceof Date ? d : (d === undefined || d === null ? new Date() : new Date(d));
+            try {
+                return new Intl.DateTimeFormat('en-CA', {
+                    timeZone: window.FF_TIMEZONE || undefined,
+                    year: 'numeric', month: '2-digit', day: '2-digit'
+                }).format(dt);
+            } catch (e) {
+                var p = function (n) { return (n < 10 ? '0' : '') + n; };
+                return dt.getFullYear() + '-' + p(dt.getMonth() + 1) + '-' + p(dt.getDate());
+            }
+        };
     </script>
 </head>
 <body data-density="<?= e($_user['display_density'] ?? 'comfortable') ?>">

@@ -4,12 +4,14 @@ declare(strict_types=1);
  * api/v1/reports/fleet.php
  *
  * Fleet Reports API — utilization, ROI, idle units, maintenance breakdown, yard summary.
- * Utilization is computed by overlapping each lease's date range with the report period
- * (clamped to [date_from, date_to]).  Revenue and maintenance cost are similarly scoped
- * to invoices/work-orders that fall within the period.
+ * Utilization comes from FleetForge\Reports\FleetUtilization (the ONE shared
+ * implementation also used by Analytics and the Dashboard trend): occupied unit-days
+ * (overlapping leases MERGED, end-date ladder actual_return → end_date → today) over
+ * available unit-days, with the window end capped at today.  Revenue and maintenance
+ * cost are scoped to invoices/work-orders that fall within [date_from, date_to].
  *
  * Required by: app/admin/reports/index.php (Fleet tab)
- * Requires: api/bootstrap.php, lib/Reports/ReportBuilder.php (autoloaded)
+ * Requires: api/bootstrap.php, lib/Reports/ReportBuilder.php, lib/Reports/FleetUtilization.php (autoloaded)
  *
  * GET params:
  *   preset      : date preset slug (default 'this_month')
@@ -26,6 +28,7 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 
+use FleetForge\Reports\FleetUtilization;
 use FleetForge\Reports\ReportBuilder;
 
 require_method('GET');
@@ -51,7 +54,9 @@ if (!in_array($view, $allowedViews, true))        $view   = 'utilization';
 if (!in_array($format, ['json', 'csv'], true))    $format = 'json';
 
 // ── Cache check ──────────────────────────────────────────────────────────────
-$cacheParams = ['date_from' => $dateFrom, 'date_to' => $dateTo, 'view' => $view, 'yard' => $yardFilter, 'cat' => $categoryFilter];
+// 'calc' versions the utilization maths: bumping it orphans cached payloads that
+// were computed with the old summed-overlap formula (15-minute cache).
+$cacheParams = ['date_from' => $dateFrom, 'date_to' => $dateTo, 'view' => $view, 'yard' => $yardFilter, 'cat' => $categoryFilter, 'calc' => 'fleet-util-v2', 'today' => date('Y-m-d')];
 $cacheType   = 'fleet_' . $view;
 
 if ($format === 'json') {
@@ -88,26 +93,11 @@ $units = db_select(
 
 // ── Parallel queries for the per-unit metrics ────────────────────────────────
 
-// 1. Days on lease within the period.
-// GREATEST(0,...) prevents negative overlap when lease falls partly outside range.
-// COALESCE(actual_return_date, ?) treats open active leases as still out until period end.
-$daysRows = db_select(
-    "SELECT
-        l.equipment_unit_id,
-        SUM(GREATEST(0,
-            DATEDIFF(
-                LEAST(COALESCE(l.actual_return_date, ?), ?),
-                GREATEST(l.start_date, ?)
-            ) + 1
-        )) AS days_on_lease
-     FROM leases l
-     WHERE l.deleted_at IS NULL
-       AND l.status IN ('active','completed')
-       AND l.start_date <= ?
-       AND COALESCE(l.actual_return_date, CURDATE()) >= ?
-     GROUP BY l.equipment_unit_id",
-    [$dateTo, $dateTo, $dateFrom, $dateTo, $dateFrom]
-);
+// 1. Occupancy within the period — shared helper (merged spells, capped at today).
+// WHY not the old inline SUM(DATEDIFF): it summed overlapping leases (a unit
+// showed 1200% for This Month), omitted end_date from the ladder, and counted
+// unelapsed future days of the preset in both numerator and denominator.
+$util = FleetUtilization::forWindow($dateFrom, $dateTo, array_map(fn($u) => (int) $u['id'], $units));
 
 // 2. Revenue per unit — invoices billed against leases for this unit, within the period.
 $revRows = db_select(
@@ -140,20 +130,21 @@ $maintRows = db_select(
 );
 
 // ── Build lookup maps (unit_id as key) ───────────────────────────────────────
-$daysMap  = array_column($daysRows,  'days_on_lease',     'equipment_unit_id');
 $revMap   = [];
 foreach ($revRows  as $r) { $revMap[$r['equipment_unit_id']]  = $r; }
 $maintMap = [];
 foreach ($maintRows as $r) { $maintMap[$r['equipment_unit_id']] = $r; }
 
-// Total calendar days in the period (D14: inclusive)
-$totalPeriodDays = ReportBuilder::periodDays($dateFrom, $dateTo);
+// Elapsed calendar days in the period (D14: inclusive), capped at today — the
+// utilization denominator never includes days that have not happened yet.
+$totalPeriodDays = (int) $util['window_days'];
 
 // ── Merge into one per-unit result set ───────────────────────────────────────
 $rows = [];
 foreach ($units as $unit) {
     $id          = $unit['id'];
-    $daysLeased  = (int)   ($daysMap[$id] ?? 0);
+    $unitUtil    = $util['units'][(int) $id] ?? ['days_on_rent' => 0, 'available_days' => 0, 'utilization_pct' => '0.0', 'raw_lease_day_sum' => 0];
+    $daysLeased  = (int) $unitUtil['days_on_rent'];
     $rev         = bcround((string) ($revMap[$id]['revenue']          ?? 0), 2);
     $maint       = bcround((string) ($maintMap[$id]['maintenance_cost'] ?? 0), 2);
     $labor       = bcround((string) ($maintMap[$id]['labor_cost']      ?? 0), 2);
@@ -162,17 +153,21 @@ foreach ($units as $unit) {
     $invCount    = (int) ($revMap[$id]['invoice_count']  ?? 0);
     $leaseCount  = (int) ($revMap[$id]['lease_count']    ?? 0);
 
-    // Utilization %: days on lease / total period days × 100 (D16 bcmath)
-    $utilPct = $totalPeriodDays > 0
-        ? ReportBuilder::pct((string) $daysLeased, (string) $totalPeriodDays, 1)
-        : '0.0';
+    // Utilization %: merged days on rent / this unit's available days (bcmath,
+    // computed by FleetUtilization — a unit placed in service mid-period is not
+    // penalised for the days before it existed).
+    $utilPct = (string) $unitUtil['utilization_pct'];
 
     // ROI: revenue generated minus maintenance cost for this unit in the period
     $roi = bcsub($rev, $maint, 2);
 
     $rows[] = array_merge($unit, [
-        'total_period_days'  => $totalPeriodDays,
+        'total_period_days'  => (int) $unitUtil['available_days'],
+        // Alias read by the Reports page table ("Period Days" column).
+        'period_days'        => (int) $unitUtil['available_days'],
         'days_on_lease'      => $daysLeased,
+        // Unmerged per-lease day total; > days_on_lease only when leases overlap.
+        'raw_lease_day_sum'  => (int) $unitUtil['raw_lease_day_sum'],
         'utilization_pct'    => $utilPct,
         'revenue'            => $rev,
         'invoice_count'      => $invCount,
@@ -187,15 +182,15 @@ foreach ($units as $unit) {
 }
 
 // ── Shared KPIs (fleet-wide totals) ─────────────────────────────────────────
-$allUtilPcts   = array_map(fn($r) => (float) $r['utilization_pct'], $rows);
 $totalUnits    = count($rows);
 $idleUnits     = count(array_filter($rows, fn($r) => $r['is_idle']));
 $totalRevenue  = bcround((string) array_sum(array_map(fn($r) => (float) $r['revenue'],          $rows)), 2);
 $totalMaint    = bcround((string) array_sum(array_map(fn($r) => (float) $r['maintenance_cost'],  $rows)), 2);
 $totalRoi      = bcsub($totalRevenue, $totalMaint, 2);
-$avgUtil       = $totalUnits > 0
-    ? bcround((string) (array_sum($allUtilPcts) / $totalUnits), 1)
-    : '0.0';
+// Fleet utilization = total occupied unit-days / total available unit-days.
+// (Not a mean of per-unit percentages: a unit in service for 3 days must not
+// weigh as much as one available all period.)
+$avgUtil       = (string) $util['utilization_pct'];
 
 $kpis = [
     'total_units'      => $totalUnits,
@@ -206,6 +201,12 @@ $kpis = [
     'total_maint_cost' => $totalMaint,
     'total_roi'        => $totalRoi,
     'period_days'      => $totalPeriodDays,
+    'occupied_unit_days'  => (int) $util['occupied_unit_days'],
+    'available_unit_days' => (int) $util['available_unit_days'],
+    // Utilization window actually measured (end capped at today); null when the
+    // selected range lies wholly in the future.
+    'util_window_from' => $util['window_from'],
+    'util_window_to'   => $util['window_to'],
 ];
 
 // ── View-specific chart/table shaping ────────────────────────────────────────
@@ -330,6 +331,10 @@ switch ($view) {
         $chartData = [
             'labels'     => array_column($maintTypeRows, 'work_type'),
             'total_cost' => array_map(fn($r) => (float) $r['total_cost'], $maintTypeRows),
+            // The page stacks labour + parts; without these two series the
+            // "Maintenance Cost by Work Type" chart rendered empty.
+            'labor_cost' => array_map(fn($r) => (float) $r['labor_cost'], $maintTypeRows),
+            'parts_cost' => array_map(fn($r) => (float) $r['parts_cost'], $maintTypeRows),
             'counts'     => array_map(fn($r) => (int)   $r['work_order_count'], $maintTypeRows),
         ];
 
@@ -363,20 +368,22 @@ switch ($view) {
                     'revenue'        => '0',
                     'maintenance'    => '0',
                     'days_on_lease'  => 0,
+                    'available_days' => 0,
                 ];
             }
             $yardMap[$yard]['unit_count']++;
             if ($r['is_idle']) $yardMap[$yard]['idle_count']++;
             $yardMap[$yard]['revenue']       = bcadd($yardMap[$yard]['revenue'],      $r['revenue'],           2);
             $yardMap[$yard]['maintenance']   = bcadd($yardMap[$yard]['maintenance'],  $r['maintenance_cost'],  2);
-            $yardMap[$yard]['days_on_lease'] += $r['days_on_lease'];
+            $yardMap[$yard]['days_on_lease']  += $r['days_on_lease'];
+            $yardMap[$yard]['available_days'] += $r['total_period_days'];
         }
 
-        // Compute avg utilization per yard (total lease-days / possible days)
+        // Yard utilization = merged on-rent unit-days / available unit-days
+        // (per-unit availability already accounts for in-service dates).
         $yardRows = [];
         foreach ($yardMap as $y) {
-            $possibleDays = $y['unit_count'] * $totalPeriodDays;
-            $y['avg_utilization'] = ReportBuilder::pct((string) $y['days_on_lease'], (string) $possibleDays, 1);
+            $y['avg_utilization'] = ReportBuilder::pct((string) $y['days_on_lease'], (string) $y['available_days'], 1);
             $y['roi']             = bcsub($y['revenue'], $y['maintenance'], 2);
             $yardRows[]           = $y;
         }

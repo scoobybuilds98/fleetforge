@@ -10,7 +10,15 @@ declare(strict_types=1);
  *
  * Required: equipment_unit_id, description, severity.
  * Optional: customer_id, lease_id, damage_location, estimated_repair_cost,
- *           customer_liable_amount, insurance_claim_amount, notes.
+ *           customer_liable_amount, insurance_claim_amount, notes, inspection_id.
+ *
+ * Prefill query params: equipment_unit_id (equipment/show) or its alias unit_id,
+ * lease_id (leases/show), customer_id (customers/show), inspection_id.
+ * Bug #8b: inspections/show links here with ?inspection_id=&unit_id=&lease_id=,
+ * but the form only read equipment_unit_id, so the unit arrived blank and the
+ * inspection was dropped. unit_id is now accepted, the inspection is linked
+ * (and supplies the unit/lease when those params are absent), and the customer
+ * is prefilled from the lease when not given explicitly.
  *
  * D30: asset_url() / base_url().
  * D32: Only CSS classes confirmed in app.css.
@@ -28,9 +36,27 @@ require_auth();
 require_permission('maintenance', 'create');
 
 // Pre-populate from query string (e.g., linked from equipment/show or lease/show)
-$preUnitId     = clean_int($_GET['equipment_unit_id'] ?? null);
-$preLeaseId    = clean_int($_GET['lease_id'] ?? null);
-$preCustomerId = clean_int($_GET['customer_id'] ?? null);
+$preUnitId       = clean_int($_GET['equipment_unit_id'] ?? null) ?? clean_int($_GET['unit_id'] ?? null);
+$preLeaseId      = clean_int($_GET['lease_id'] ?? null);
+$preCustomerId   = clean_int($_GET['customer_id'] ?? null);
+$preInspectionId = clean_int($_GET['inspection_id'] ?? null);
+
+// Bug #8b: resolve the source inspection. It is authoritative for the unit (the
+// API rejects a unit mismatch) and supplies the lease when none was passed.
+$preInspection = null;
+if ($preInspectionId) {
+    $preInspection = db_row(
+        "SELECT id, inspection_number, inspection_type, inspection_date, equipment_unit_id, lease_id
+         FROM inspections WHERE id = ?",
+        [$preInspectionId]
+    );
+    if ($preInspection) {
+        $preUnitId  = (int) $preInspection['equipment_unit_id'];
+        $preLeaseId = $preLeaseId ?: ($preInspection['lease_id'] ? (int) $preInspection['lease_id'] : null);
+    } else {
+        $preInspectionId = null;
+    }
+}
 
 // Pre-load lease label so the picker shows the correct selected state on pre-populated load.
 $preLeaseLabel = null;
@@ -50,6 +76,14 @@ if ($preLeaseId) {
         // form doesn't submit a garbage FK.
         $preLeaseId = null;
     }
+}
+
+// Default the customer to the lease's customer (the party normally liable for
+// the damage) when the caller didn't name one — also required later to link the
+// recovery invoice.
+if (!$preCustomerId && $preLeaseId) {
+    $leaseCustomer = db_row("SELECT customer_id FROM leases WHERE id = ?", [$preLeaseId]);
+    $preCustomerId = !empty($leaseCustomer['customer_id']) ? (int) $leaseCustomer['customer_id'] : null;
 }
 
 // S-DROPDOWN-RETROFIT-2: Equipment Unit uses FF_RecordPicker (api/v1/equipment/units/index.php).
@@ -114,6 +148,18 @@ require_once FF_ROOT . '/includes/header.php';
 
             <!-- Error banner -->
             <div class="form-error-banner" data-form-error></div>
+
+            <?php if ($preInspection): ?>
+            <!-- Bug #8b: claim raised from an inspection — shown so staff can see the link it will carry. -->
+            <div class="alert alert-info" style="margin-bottom:16px;">
+                Linked to inspection
+                <a href="<?= base_url('inspections/show') ?>?id=<?= (int) $preInspection['id'] ?>" class="link">
+                    <?= e($preInspection['inspection_number'] ?: ('#' . $preInspection['id'])) ?></a>
+                (<?= e(ucwords(str_replace('_', ' ', (string) $preInspection['inspection_type']))) ?>,
+                <?= e(format_date($preInspection['inspection_date'])) ?>).
+                <div class="field-error" data-error-for="inspection_id"></div>
+            </div>
+            <?php endif; ?>
 
             <!-- Section: Who / What -->
             <div class="form-row form-row-2" style="margin-bottom:0;">
@@ -353,6 +399,7 @@ function damageClaimCreate() {
             customer_id:           <?= $preCustomerId ? $preCustomerId : "''" ?>,
             customer_name:         '',
             lease_id:              <?= $preLeaseId    ? $preLeaseId    : "''" ?>,
+            inspection_id:         <?= $preInspectionId ? (int) $preInspectionId : "''" ?>,
             vendor_id:             '',
             severity:              '',
             damage_location:       '',
@@ -371,7 +418,7 @@ function damageClaimCreate() {
                     el: this.$root, // S-FORM-DRAFT-ROLLOUT
                     model: this.form, // S-FORM-DRAFT-ROLLOUT
                     version: '1', // S-FORM-DRAFT-ROLLOUT
-                    exclude: ['equipment_unit_id', 'customer_id', 'lease_id', 'vendor_id'], // S-FORM-DRAFT-ROLLOUT
+                    exclude: ['equipment_unit_id', 'customer_id', 'lease_id', 'vendor_id', 'inspection_id'], // S-FORM-DRAFT-ROLLOUT
                 }); // S-FORM-DRAFT-ROLLOUT
             } // S-FORM-DRAFT-ROLLOUT
         }, // S-FORM-DRAFT-ROLLOUT
@@ -424,6 +471,7 @@ function damageClaimCreate() {
                 customer_id:            this.form.customer_id        ? parseInt(this.form.customer_id)       : null,
                 customer_name:          this.form.customer_name.trim() || null,
                 lease_id:               this.form.lease_id           ? parseInt(this.form.lease_id)          : null,
+                inspection_id:          this.form.inspection_id      ? parseInt(this.form.inspection_id)     : null,
                 vendor_id:              this.form.vendor_id          ? parseInt(this.form.vendor_id)         : null,
                 severity:               this.form.severity,
                 damage_location:        this.form.damage_location  || null,

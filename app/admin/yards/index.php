@@ -64,8 +64,10 @@ require_once FF_ROOT . '/includes/header.php';
 <div class="page-header">
     <h1 class="page-header-title">Yards</h1>
     <?php if ($canEdit): ?>
+    <?php // This button sits OUTSIDE FF_YardsManager's scope, so it must not call
+          // openCreate() directly (that threw "openCreate is not defined") — it
+          // dispatches the window event the component listens for instead. ?>
     <button class="btn btn-primary btn-sm"
-            @click="openCreate()"
             x-data=""
             x-on:click="$dispatch('open-create-yard')">
         + New Yard

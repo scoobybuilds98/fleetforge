@@ -114,16 +114,29 @@ class EmailService
         $fromEmail = (string) (settings_get('email.from_email') ?: env('SMTP_FROM_EMAIL', 'noreply@fleetforge.test'));
         $fromName  = (string) (settings_get('email.from_name')  ?: settings_get('company.name', 'FleetForge'));
 
+        // Auto-generate plain-text body if not provided.
+        // WHY before the HTML conversion below: a plain-text message typed
+        // into the Compose textarea IS already the ideal text/plain part —
+        // running it through stripHtml() would html_entity_decode() any
+        // literal "&amp;" the operator typed and collapse nothing useful.
+        if (trim($bodyText) === '') {
+            $bodyText = self::isPlainTextBody($bodyHtml)
+                ? trim(str_replace(["\r\n", "\r"], "\n", $bodyHtml))
+                : self::stripHtml($bodyHtml);
+        }
+
+        // Plain-text bodies (no HTML tags — the usual "Custom message" typed
+        // into Compose / Bulk Email) must keep their line breaks. Dropped
+        // raw into the HTML shell every "\n" collapses to a space, so the
+        // customer received one run-on paragraph. Escape, then nl2br.
+        // Template bodies are HTML and pass through untouched.
+        $bodyHtml = self::bodyToHtml($bodyHtml);
+
         // Wrap raw body in the company shell (logo + footer)
         // WHY: separating the shell from the template body lets the
         // user-edited message stay focused on its own content while
         // still inheriting the global brand chrome.
         $wrappedHtml = self::renderEmailHtml($bodyHtml);
-
-        // Auto-generate plain-text body if not provided
-        if (trim($bodyText) === '') {
-            $bodyText = self::stripHtml($bodyHtml);
-        }
 
         // ── Persist log row BEFORE sending (audit-first strategy) ─
         // WHY: if the SMTP layer crashes mid-send we still have a
@@ -853,6 +866,43 @@ class EmailService
         $html .= '</body></html>';
 
         return $html;
+    }
+
+    /**
+     * isPlainTextBody() — true when a message body contains no HTML tags.
+     *
+     * The Compose + Bulk Email textareas accept EITHER a template's HTML or
+     * a free-typed plain-text message. Only a real tag (<p>, <br>, </div>,
+     * <a href=...>) marks the body as HTML; a bare "<" as in "qty < 5" or
+     * "<3" does not. Mirrored client-side by FF_emailBodyToHtml() in
+     * public/assets/js/app.js so the preview matches what is sent.
+     *
+     * @param string $body Raw body as submitted
+     * @return bool True when the body should be treated as plain text
+     */
+    public static function isPlainTextBody(string $body): bool
+    {
+        return preg_match('/<\/?[a-z][a-z0-9]*(?:\s[^<>]*)?\/?>/i', $body) !== 1;
+    }
+
+    /**
+     * bodyToHtml() — normalise a message body for the HTML part.
+     *
+     * HTML bodies are returned unchanged. Plain-text bodies are
+     * HTML-escaped (so a typed "<" or "&" renders literally and cannot
+     * inject markup) and every line break becomes <br>, preserving the
+     * paragraphs the operator typed.
+     *
+     * @param string $body Raw body as submitted
+     * @return string HTML-safe body for renderEmailHtml()
+     */
+    public static function bodyToHtml(string $body): string
+    {
+        if (!self::isPlainTextBody($body)) {
+            return $body;
+        }
+        $text = str_replace(["\r\n", "\r"], "\n", trim($body));
+        return nl2br(htmlspecialchars($text, ENT_QUOTES, 'UTF-8'), false);
     }
 
     // =========================================================

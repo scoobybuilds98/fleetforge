@@ -260,25 +260,23 @@ function gather_brief_metrics(): array
          WHERE deleted_at IS NULL AND status NOT IN ('resolved','written_off')"
     );
 
-    // Compliance expiring 7d / 30d
+    // Compliance expiring 7d / 30d — CVI + Registration only (MVI/Insurance were
+    // removed from every compliance UI, S-UNIT-COMPLIANCE-HIDE-MVI-INS; the brief
+    // must agree with the Compliance page and sidebar badge).
     $exp7 = (int)(db_row(
         "SELECT COUNT(DISTINCT id) AS n FROM equipment_units
          WHERE deleted_at IS NULL AND status NOT IN ('inactive','decommissioned')
            AND ((cvi_expiry IS NOT NULL AND cvi_expiry <= ?)
-             OR (registration_expiry IS NOT NULL AND registration_expiry <= ?)
-             OR (mvi_expiry IS NOT NULL AND mvi_expiry <= ?)
-             OR (insurance_expiry IS NOT NULL AND insurance_expiry <= ?))",
-        [$in7d, $in7d, $in7d, $in7d]
+             OR (registration_expiry IS NOT NULL AND registration_expiry <= ?))",
+        [$in7d, $in7d]
     )['n'] ?? 0);
 
     $exp30 = (int)(db_row(
         "SELECT COUNT(DISTINCT id) AS n FROM equipment_units
          WHERE deleted_at IS NULL AND status NOT IN ('inactive','decommissioned')
            AND ((cvi_expiry IS NOT NULL AND cvi_expiry <= ?)
-             OR (registration_expiry IS NOT NULL AND registration_expiry <= ?)
-             OR (mvi_expiry IS NOT NULL AND mvi_expiry <= ?)
-             OR (insurance_expiry IS NOT NULL AND insurance_expiry <= ?))",
-        [$in30d, $in30d, $in30d, $in30d]
+             OR (registration_expiry IS NOT NULL AND registration_expiry <= ?))",
+        [$in30d, $in30d]
     )['n'] ?? 0);
 
     // AR

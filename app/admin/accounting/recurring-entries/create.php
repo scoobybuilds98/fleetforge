@@ -193,7 +193,7 @@ function recurringCreate() {
             description: '',
             frequency: 'monthly',
             day_of_month: 1,
-            start_date: new Date().toISOString().slice(0, 10),
+            start_date: FF_localDate(),
             end_date: '',
             auto_post: false,
             lines: [

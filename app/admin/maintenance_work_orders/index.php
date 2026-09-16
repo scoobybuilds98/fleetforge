@@ -8,8 +8,17 @@ declare(strict_types=1);
  * Server-renders 4 KPI tiles, then Alpine.js loads the filterable table.
  *
  * KPI tiles: Total WOs, Open, In Progress / Waiting Parts, Completed This Month.
- * Filters: status, work_type, priority, date_from, date_to, q (search).
+ * Filters: status, work_type, priority, date_from, date_to, q (search),
+ *          vendor_id, equipment_unit_id.
  * Default sort: requested_date DESC.
+ *
+ * Deep links (bug #25): the vendor pages' tiles link here with ?vendor_id= and
+ * ?status= — those URL params used to be ignored (the list showed every work
+ * order). The page now seeds its filters from status / work_type / priority /
+ * q / vendor_id / equipment_unit_id, shows a removable chip for the vendor or
+ * unit scope (which has no dropdown), and keeps the URL in sync so reload/back
+ * preserves the view. status accepts the API roll-ups 'active' (open + in
+ * progress + waiting parts) and 'in_work' (in progress + waiting parts).
  *
  * URL target for navigation entry 'url => /maintenance'.
  *
@@ -29,10 +38,51 @@ require_permission('maintenance', 'view');
 $kpiTotal      = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE deleted_at IS NULL");
 $kpiOpen       = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE status = 'open' AND deleted_at IS NULL");
 $kpiActive     = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE status IN ('in_progress','waiting_parts') AND deleted_at IS NULL");
+// ── Deep-link filters from the URL (bug #25) ─────────────────────────────────
+// Validated against the same allowlists the API uses so a bad param degrades to
+// "no filter" instead of an empty list.
+$validStatusFilters   = ['open', 'in_progress', 'waiting_parts', 'completed', 'cancelled', 'active', 'in_work'];
+$validWorkTypeFilters = ['scheduled_service', 'repair', 'inspection', 'tire', 'electrical', 'body_damage', 'breakdown', 'other'];
+$validPriorityFilters = ['low', 'medium', 'high', 'emergency'];
+
+$initStatus   = clean_string($_GET['status'] ?? null);
+$initStatus   = in_array($initStatus, $validStatusFilters, true) ? $initStatus : '';
+$initWorkType = clean_string($_GET['work_type'] ?? null);
+$initWorkType = in_array($initWorkType, $validWorkTypeFilters, true) ? $initWorkType : '';
+$initPriority = clean_string($_GET['priority'] ?? null);
+$initPriority = in_array($initPriority, $validPriorityFilters, true) ? $initPriority : '';
+$initQ        = clean_string($_GET['q'] ?? null) ?? '';
+
+// Vendor / unit scopes have no dropdown — resolve a label for the filter chip.
+$initVendorId   = clean_int($_GET['vendor_id'] ?? null);
+$initVendorName = $initVendorId
+    ? db_row("SELECT name FROM vendors WHERE id = ?", [$initVendorId])['name'] ?? null
+    : null;
+if ($initVendorName === null) {
+    $initVendorId = null;
+}
+$initUnitId     = clean_int($_GET['equipment_unit_id'] ?? null);
+$initUnitNumber = $initUnitId
+    ? db_row("SELECT unit_number FROM equipment_units WHERE id = ?", [$initUnitId])['unit_number'] ?? null
+    : null;
+if ($initUnitNumber === null) {
+    $initUnitId = null;
+}
+
+// Light up the matching KPI tile when arriving via a status deep link.
+$initTile = match ($initStatus) {
+    'open'      => 'open',
+    'in_work'   => 'active',
+    'completed' => 'completed',
+    default     => '',
+};
+
+// Bug #10: company-local month start (NOW() is the UTC session clock).
 $kpiCompleted  = db_count(
     "SELECT COUNT(*) FROM maintenance_work_orders
      WHERE status = 'completed' AND deleted_at IS NULL
-       AND completed_date >= DATE_FORMAT(NOW(), '%Y-%m-01')"
+       AND completed_date >= ?",
+    [date('Y-m-01')]
 );
 
 $pageTitle = 'Work Orders';
@@ -75,7 +125,7 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <div class="stat-card stat-card--teal" style="cursor:pointer;"
-         @click="activeTile = activeTile === 'active' ? '' : 'active'; setFilter('status', activeTile === 'active' ? 'in_progress' : '')"
+         @click="activeTile = activeTile === 'active' ? '' : 'active'; setFilter('status', activeTile === 'active' ? 'in_work' : '')"
          :class="{ 'ring-active': activeTile === 'active' }">
         <span class="stat-icon stat-icon--teal"><svg><use href="#icon-bolt"/></svg></span>
         <div class="stat-label">Active</div>
@@ -120,6 +170,8 @@ require_once FF_ROOT . '/includes/header.php';
                     x-model="filters.status" @change="goPage(1)"
                     aria-label="Filter by status">
                 <option value="">All Statuses</option>
+                <option value="active">Active (open / in progress / waiting)</option>
+                <option value="in_work">In progress / waiting parts</option>
                 <option value="open">Open</option>
                 <option value="in_progress">In Progress</option>
                 <option value="waiting_parts">Waiting Parts</option>
@@ -150,6 +202,22 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
             </select>
+
+            <!-- Scope chips for deep-linked filters that have no dropdown (bug #25). -->
+            <template x-if="filters.vendor_id">
+                <span class="badge badge-info" style="display:inline-flex;align-items:center;gap:6px;">
+                    <span x-text="'Vendor: ' + vendorLabel"></span>
+                    <button type="button" style="background:none;border:0;padding:0 2px;color:inherit;cursor:pointer;font-size:1rem;line-height:1;"
+                            @click="clearScope('vendor_id')" aria-label="Remove vendor filter">×</button>
+                </span>
+            </template>
+            <template x-if="filters.equipment_unit_id">
+                <span class="badge badge-info" style="display:inline-flex;align-items:center;gap:6px;">
+                    <span x-text="'Unit: ' + unitLabel"></span>
+                    <button type="button" style="background:none;border:0;padding:0 2px;color:inherit;cursor:pointer;font-size:1rem;line-height:1;"
+                            @click="clearScope('equipment_unit_id')" aria-label="Remove unit filter">×</button>
+                </span>
+            </template>
 
             <button class="btn btn-secondary btn-sm" @click="resetFilters()">Reset</button>
         </div>
@@ -325,7 +393,7 @@ require_once FF_ROOT . '/includes/header.php';
 <script>
 function woKpis() {
     return {
-        activeTile: '',
+        activeTile: <?= json_encode($initTile) ?>,
         kpis: {
             total:                <?= json_encode($kpiTotal) ?>,
             open:                 <?= json_encode($kpiOpen) ?>,
@@ -363,12 +431,17 @@ function woList() {
         selectedIds: [],
         selectAll:   false,
         bulkWorking: false,
+        // Seeded from the URL so vendor/equipment deep links land pre-filtered (bug #25).
         filters: {
-            status:    '',
-            work_type: '',
-            priority:  '',
-            q:         '',
+            status:            <?= json_encode($initStatus) ?>,
+            work_type:         <?= json_encode($initWorkType) ?>,
+            priority:          <?= json_encode($initPriority) ?>,
+            q:                 <?= json_encode($initQ) ?>,
+            vendor_id:         <?= json_encode($initVendorId ? (string) $initVendorId : '') ?>,
+            equipment_unit_id: <?= json_encode($initUnitId ? (string) $initUnitId : '') ?>,
         },
+        vendorLabel: <?= json_encode((string) ($initVendorName ?? '')) ?>,
+        unitLabel:   <?= json_encode((string) ($initUnitNumber ?? '')) ?>,
 
         init() {
             this.$watch('page', () => this.clearSelection());
@@ -387,6 +460,9 @@ function woList() {
             if (this.filters.work_type) p.set('work_type', this.filters.work_type);
             if (this.filters.priority)  p.set('priority', this.filters.priority);
             if (this.filters.q)         p.set('q', this.filters.q);
+            if (this.filters.vendor_id)         p.set('vendor_id', this.filters.vendor_id);
+            if (this.filters.equipment_unit_id) p.set('equipment_unit_id', this.filters.equipment_unit_id);
+            this._syncUrl();
 
             FF_Api.get('<?= base_url('api/v1/maintenance_work_orders/index.php') ?>?' + p.toString())
                 .then(d => {
@@ -400,6 +476,26 @@ function woList() {
         },
 
         goPage(n) { this.page = n; this.fetch(); },
+
+        // Mirror the active filters into the address bar (no reload) so a
+        // refresh / back-navigation keeps the same filtered view.
+        _syncUrl() {
+            try {
+                const u = new URLSearchParams();
+                for (const k of ['status', 'work_type', 'priority', 'q', 'vendor_id', 'equipment_unit_id']) {
+                    if (this.filters[k]) u.set(k, this.filters[k]);
+                }
+                const qs = u.toString();
+                history.replaceState(null, '', window.location.pathname + (qs ? '?' + qs : ''));
+            } catch (e) { /* cosmetic only */ }
+        },
+
+        // Drop a chip-only scope (vendor / unit) and refetch.
+        clearScope(key) {
+            this.filters[key] = '';
+            this.page = 1;
+            this.fetch();
+        },
 
         toggleSelect(id) {
             const idx = this.selectedIds.indexOf(id);
@@ -443,7 +539,7 @@ function woList() {
         sortIcon(col) { return this.sort === col ? (this.dir === 'ASC' ? ' ↑' : ' ↓') : ''; },
 
         resetFilters() {
-            this.filters = { status: '', work_type: '', priority: '', q: '' };
+            this.filters = { status: '', work_type: '', priority: '', q: '', vendor_id: '', equipment_unit_id: '' };
             this.page = 1;
             this.fetch();
         },

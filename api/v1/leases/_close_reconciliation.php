@@ -16,6 +16,10 @@
  *   adv_partial_refund_containing() containing period: draft -> void+regenerate-shortened | sent -> prorated credit
  *   adv_create_credit_note()       gap-free credit_note + auto-JE
  *   reconcile_overshoot_invoices() clamp every non-advance rental invoice billed past the extent
+ *   ff_close_manual_mileage_bridge_line() manual lease: bill the operator-entered distance
+ *   ff_close_mileage_at_end_is_distance() is the close payload's mileage_at_end a distance or a legacy reading
+ *   ff_close_lifetime_distance()   normalise mileage_at_end to lifetime distance (lease unit)
+ *   ff_close_prior_billed_distance() distance already billed as mileage on live invoices
  */
 
 /**
@@ -599,4 +603,100 @@ function ff_close_manual_mileage_bridge_line(
         'is_credit'   => 0,
         'taxable'     => 1,
     ];
+}
+
+/**
+ * S-CLOSE-MILEAGE-SEMANTICS — is the close payload's `mileage_at_end` a DISTANCE
+ * (km/miles driven) or an absolute end READING?
+ *
+ * The Close dialog's "Actual Mileage (for billing)" field is auto-filled with the
+ * distance driven (closing odometer − starting odometer) and the estimate true-up +
+ * manual bridge already consume it as a distance. But api/v1/leases/create.php
+ * (SAMSARA-3) auto-derives the legacy integer `mileage_at_start` from
+ * `odometer_start_km` on every lease with a starting odometer, which used to route
+ * those leases through the pre-odometer "end reading − start reading" math:
+ * a lease that started at 45,000 km and was driven 2,280 km was rejected with
+ * "End mileage cannot be less than start mileage" (2,280 < 45,000), and a lease
+ * that started at 0 only closed because reading − 0 happens to equal the distance.
+ *
+ * Only a TRUE legacy lease — `mileage_at_start` captured but no decimal starting
+ * odometer (pre-SAMSARA-3 data, or an API caller that sent mileage_at_start alone) —
+ * still treats mileage_at_end as an end reading.
+ *
+ * @param  array $lease  close.php lease row (needs mileage_at_start, odometer_start_km)
+ * @return bool          true = mileage_at_end is a distance; false = legacy end reading
+ */
+function ff_close_mileage_at_end_is_distance(array $lease): bool
+{
+    $hasLegacyStart = ($lease['mileage_at_start'] ?? null) !== null;
+    $hasOdometer    = ($lease['odometer_start_km'] ?? null) !== null;
+    return !($hasLegacyStart && !$hasOdometer);
+}
+
+/**
+ * S-CLOSE-MILEAGE-SEMANTICS — normalise the operator's close-time mileage entry to
+ * the DISTANCE driven over the life of the lease, in the lease's mileage unit.
+ *
+ * @param  array    $lease         close.php lease row
+ * @param  int|null $mileageAtEnd  payload mileage_at_end (distance or legacy reading)
+ * @return int|null                lifetime distance (lease unit), or null when not entered
+ */
+function ff_close_lifetime_distance(array $lease, ?int $mileageAtEnd): ?int
+{
+    if ($mileageAtEnd === null) {
+        return null;
+    }
+    if (ff_close_mileage_at_end_is_distance($lease)) {
+        return $mileageAtEnd;
+    }
+    return $mileageAtEnd - (int) $lease['mileage_at_start'];
+}
+
+/**
+ * S-CLOSE-MILEAGE-SEMANTICS — distance (lease unit) already billed as mileage on
+ * this lease's live invoices that the close will NOT void or rewrite.
+ *
+ * Why it exists: manual odometer leases are commonly billed month by month with a
+ * reading on each invoice (InvoiceGenerator's per-period `mileage_usage` line —
+ * 224 such lines on prod for 31 leases). The close dialog then pre-fills the
+ * LIFETIME distance, so an overage line built from it alone re-bills every month
+ * that was already invoiced. Subtracting what is already billed makes the close
+ * line bill only the unbilled tail, and makes a reopen → reclose with a corrected
+ * reading bill only the correction.
+ *
+ * Which lines count (quantities are stored in the lease unit by both builders, so
+ * the sum is directly comparable to ff_close_lifetime_distance()):
+ *   - live (non-void, non-deleted) invoices only — voiding is how an operator
+ *     re-bills in full;
+ *   - billing_period_end on/before the billable extent — invoices past the
+ *     extent are voided / credited / reissued WITHOUT their mileage by the
+ *     overshoot + closing-month full_month passes that run later in close.php,
+ *     so counting them would under-bill;
+ *   - EXCEPT a close-owned 'mileage' line sitting on the rental DRAFT that ends on
+ *     the extent: that draft is the fold target, and the fold (S-CLOSE-RECLOSE-
+ *     IDEMPOTENT, F43) deletes and replaces its 'mileage' line — counting it too
+ *     would net the replacement down to the delta and under-bill.
+ *
+ * @param  int    $leaseId
+ * @param  string $extentEnd  lease_billable_extent() for this close, 'Y-m-d'
+ * @return string             distance already billed (bcmath string, 4 dp; '0.0000' when none)
+ */
+function ff_close_prior_billed_distance(int $leaseId, string $extentEnd): string
+{
+    $row = db_row(
+        "SELECT COALESCE(SUM(CASE WHEN li.is_credit = 1 THEN -li.quantity ELSE li.quantity END), 0) AS billed
+           FROM invoice_line_items li
+           JOIN invoices i ON i.id = li.invoice_id
+          WHERE i.lease_id = ? AND i.deleted_at IS NULL AND i.status <> 'void'
+            AND li.item_type IN ('mileage_usage', 'mileage')
+            AND i.billing_period_end IS NOT NULL
+            AND i.billing_period_end <= ?
+            AND NOT (li.item_type = 'mileage'
+                     AND i.status = 'draft'
+                     AND i.billing_period_end = ?
+                     AND i.billing_type IN ('partial_start', 'partial_end', 'single_period', 'full_month'))",
+        [$leaseId, $extentEnd, $extentEnd]
+    );
+    $billed = bcadd((string) ($row['billed'] ?? '0'), '0', 4);
+    return bccomp($billed, '0', 4) > 0 ? $billed : '0.0000';
 }

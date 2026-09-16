@@ -41,7 +41,9 @@ $status    = isset($_GET['status'])    ? (string) $_GET['status']    : 'unresolv
 $category  = isset($_GET['category'])  ? (string) $_GET['category']  : '';
 $entity    = isset($_GET['entity'])    ? (string) $_GET['entity']    : '';
 $source    = isset($_GET['source'])    ? (string) $_GET['source']    : '';
-$range     = isset($_GET['range'])     ? (string) $_GET['range']     : '30'; // 7 | 30 | 90 | all
+// Default 'all' (was '30'): the Unresolved summary card is not date-bounded, so
+// a date-bounded default list disagreed with it (open events >30d old vanished).
+$range     = isset($_GET['range'])     ? (string) $_GET['range']     : 'all'; // 7 | 30 | 90 | all
 $page      = max(1, (int) ($_GET['page'] ?? 1));
 $perPage   = min(100, max(10, (int) ($_GET['per_page'] ?? 25)));
 

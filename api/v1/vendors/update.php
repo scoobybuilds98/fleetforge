@@ -11,7 +11,7 @@ declare(strict_types=1);
  *   - name uniqueness excludes the current vendor.
  *   - rating must be 1–5 or null.
  *   - specializations replaces the entire array (not merged).
- *   - total_spent is NOT editable — managed by work order module.
+ *   - total_spent is NOT editable — derived by FleetForge\Accounting\VendorSpend.
  *   - Audit log: action='update', old_values/new_values captured.
  *
  * @method  POST

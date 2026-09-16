@@ -10,17 +10,23 @@ declare(strict_types=1);
  * this file re-checks server-side so direct require / route access
  * cannot bypass it.
  *
- * Layout: five vertically stacked .card blocks, each a self-contained
- * <form> that POSTs to api/v1/settings/brand.php as multipart/form-data
- * with only its own fields. The shared API treats every field as
- * optional and only updates rows that arrive in the request.
+ * Layout: one .card block (Brand Identity) holding self-contained <form>s
+ * that POST to api/v1/settings/brand.php as multipart/form-data with only
+ * their own fields. The shared API treats every field as optional and only
+ * updates rows that arrive in the request.
  *
  * Cards:
  *   1. Brand Identity   — color picker + 6 swatches + live preview + logo + favicon
- *   2. New User Defaults — theme / density / font size
- *   3. Regional         — date / time / currency / timezone / distance unit
- *   4. PDF & Invoices   — footer text + logo toggle + accent override
- *   5. UI Behaviour     — sidebar default + rows per page + session timeout
+ *
+ * Bug #23 — REMOVED cards: "New User Defaults" (defaults.theme/density/
+ * font_size), "Regional" (regional.*), "PDF & Invoices" (pdf.*) and
+ * "UI Behaviour" (ui.sidebar_collapsed_default, defaults.rows_per_page,
+ * ui.session_timeout_minutes). A repo-wide grep found NO reader for any of
+ * those 14 keys — the only code touching them was this page (to pre-fill)
+ * and brand.php (to write) — so every "Save" silently did nothing (e.g. the
+ * session timeout never changed the session lifetime). The settings rows and
+ * brand.php's write handlers are left in place; re-add a card only together
+ * with the code that honours it.
  *
  * Decisions: D9 (StorageClient), D32 (CSS classes), Trap 7 (no path leak)
  * Session:   S-DESIGN-SETTINGS-FOOTER-LOGIN
@@ -41,24 +47,6 @@ if (!is_super_admin()) {
 $brand_primary_color = (string) (settings_get('brand.primary_color') ?? '#2596be');
 $brand_logo_path     = (string) (settings_get('brand.logo_path')     ?? '');
 $brand_favicon_path  = (string) (settings_get('brand.favicon_path')  ?? '');
-
-$defaults_theme         = (string) (settings_get('defaults.theme')         ?? 'dark');
-$defaults_density       = (string) (settings_get('defaults.density')       ?? 'comfortable');
-$defaults_font_size     = (int)    (settings_get('defaults.font_size')     ?? 100);
-$defaults_rows_per_page = (int)    (settings_get('defaults.rows_per_page') ?? 25);
-
-$regional_date_format     = (string) (settings_get('regional.date_format')     ?? 'M/D/YYYY');
-$regional_time_format     = (string) (settings_get('regional.time_format')     ?? '12h');
-$regional_currency_symbol = (string) (settings_get('regional.currency_symbol') ?? '$');
-$regional_timezone        = (string) (settings_get('regional.timezone')        ?? 'America/Vancouver');
-$regional_distance_unit   = (string) (settings_get('regional.distance_unit')   ?? 'km');
-
-$pdf_invoice_footer_text = (string) (settings_get('pdf.invoice_footer_text') ?? 'Thank you for your business.');
-$pdf_show_logo           = (int)    (settings_get('pdf.show_logo')           ?? 1);
-$pdf_accent_color        = (string) (settings_get('pdf.accent_color')        ?? '');
-
-$ui_sidebar_collapsed_default = (int) (settings_get('ui.sidebar_collapsed_default') ?? 0);
-$ui_session_timeout_minutes   = (int) (settings_get('ui.session_timeout_minutes')   ?? 480);
 
 // Logo / favicon preview URLs — empty string if nothing uploaded yet.
 // StorageClient::url() returns a signed local URL OR an S3 presigned
@@ -406,294 +394,9 @@ $brandApi = base_url('api/v1/settings/brand');
     </div>
 </div>
 
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- CARD 2 — New User Defaults                                  -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<form @submit.prevent="saveCard('defaults', $event)" data-card="defaults">
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-header" style="font-weight:600;">New User Defaults</div>
-    <div class="card-body">
-
-        <div class="ff-form-grid">
-
-            <div>
-                <label class="form-label">Default Theme</label>
-                <div class="ff-segment" role="radiogroup" aria-label="Default theme">
-                    <label>
-                        <input type="radio" name="defaults_theme" value="dark" <?= $defaults_theme === 'dark' ? 'checked' : '' ?>>
-                        <span>Dark</span>
-                    </label>
-                    <label>
-                        <input type="radio" name="defaults_theme" value="light" <?= $defaults_theme === 'light' ? 'checked' : '' ?>>
-                        <span>Light</span>
-                    </label>
-                </div>
-                <p class="ff-helper">Applied when a new user is invited. Existing users keep their own preferences.</p>
-            </div>
-
-            <div>
-                <label class="form-label">Default Density</label>
-                <div class="ff-segment" role="radiogroup" aria-label="Default density">
-                    <label>
-                        <input type="radio" name="defaults_density" value="compact"      <?= $defaults_density === 'compact'      ? 'checked' : '' ?>>
-                        <span>Compact</span>
-                    </label>
-                    <label>
-                        <input type="radio" name="defaults_density" value="comfortable"  <?= $defaults_density === 'comfortable'  ? 'checked' : '' ?>>
-                        <span>Comfortable</span>
-                    </label>
-                    <label>
-                        <input type="radio" name="defaults_density" value="spacious"     <?= $defaults_density === 'spacious'     ? 'checked' : '' ?>>
-                        <span>Spacious</span>
-                    </label>
-                </div>
-                <p class="ff-helper">Applied when a new user is invited. Existing users keep their own preferences.</p>
-            </div>
-
-            <div>
-                <label class="form-label" for="defaults_font_size">Default Font Size — <span id="font-size-readout"><?= e((string) $defaults_font_size) ?></span>%</label>
-                <input type="range"
-                       id="defaults_font_size"
-                       name="defaults_font_size"
-                       min="85" max="115" step="5"
-                       value="<?= e((string) $defaults_font_size) ?>"
-                       style="width:100%;"
-                       oninput="document.getElementById('font-size-readout').textContent = this.value;">
-                <p class="ff-helper">Applied when a new user is invited. Existing users keep their own preferences.</p>
-            </div>
-
-        </div>
-
-        <div class="ff-card-actions">
-            <button type="submit" class="btn btn-primary btn-sm" :disabled="saving['defaults']">
-                <span x-show="!saving['defaults']">Save Defaults</span>
-                <span x-show="saving['defaults']" x-cloak>Saving&hellip;</span>
-            </button>
-            <span class="ff-save-msg"
-                  :style="msgStyle('defaults')"
-                  x-text="msg['defaults'] || ''"
-                  x-show="msg['defaults']"></span>
-        </div>
-
-    </div>
-</div>
-</form>
-
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- CARD 3 — Regional                                           -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<form @submit.prevent="saveCard('regional', $event)" data-card="regional">
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-header" style="font-weight:600;">Regional</div>
-    <div class="card-body">
-
-        <div class="ff-form-grid">
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" for="regional_date_format">Date Format</label>
-                <select name="regional_date_format" id="regional_date_format" class="form-control">
-                    <?php foreach (['M/D/YYYY' => 'M/D/YYYY (e.g. 5/17/2026)', 'D/M/YYYY' => 'D/M/YYYY (e.g. 17/5/2026)', 'YYYY-MM-DD' => 'YYYY-MM-DD (e.g. 2026-05-17)'] as $v => $l): ?>
-                        <option value="<?= e($v) ?>" <?= $regional_date_format === $v ? 'selected' : '' ?>><?= e($l) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" for="regional_time_format">Time Format</label>
-                <select name="regional_time_format" id="regional_time_format" class="form-control">
-                    <option value="12h" <?= $regional_time_format === '12h' ? 'selected' : '' ?>>12-hour (e.g. 3:45 PM)</option>
-                    <option value="24h" <?= $regional_time_format === '24h' ? 'selected' : '' ?>>24-hour (e.g. 15:45)</option>
-                </select>
-            </div>
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" for="regional_currency_symbol">Currency Symbol</label>
-                <input type="text"
-                       name="regional_currency_symbol"
-                       id="regional_currency_symbol"
-                       class="form-control"
-                       maxlength="8"
-                       value="<?= e($regional_currency_symbol) ?>">
-                <p class="ff-helper">Prefix shown before monetary values. Examples: $, CAD $, USD $, €.</p>
-            </div>
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" for="regional_timezone">Timezone</label>
-                <select name="regional_timezone" id="regional_timezone" class="form-control">
-                    <?php foreach ([
-                        'America/Vancouver'   => 'Vancouver (PT)',
-                        'America/Edmonton'    => 'Edmonton (MT)',
-                        'America/Regina'      => 'Regina (CST, no DST)',
-                        'America/Winnipeg'    => 'Winnipeg (CT)',
-                        'America/Toronto'     => 'Toronto (ET)',
-                        'America/Halifax'     => 'Halifax (AT)',
-                        'America/St_Johns'    => 'St. John\'s (NT)',
-                        'America/Los_Angeles' => 'Los Angeles (PT)',
-                        'America/Denver'      => 'Denver (MT)',
-                        'America/Phoenix'     => 'Phoenix (MST, no DST)',
-                        'America/Chicago'     => 'Chicago (CT)',
-                        'America/New_York'    => 'New York (ET)',
-                        'America/Anchorage'   => 'Anchorage (AKT)',
-                        'Pacific/Honolulu'    => 'Honolulu (HST)',
-                        'UTC'                 => 'UTC',
-                    ] as $tz => $label): ?>
-                        <option value="<?= e($tz) ?>" <?= $regional_timezone === $tz ? 'selected' : '' ?>><?= e($label) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div>
-                <label class="form-label">Distance Unit Default</label>
-                <div class="ff-segment" role="radiogroup" aria-label="Distance unit default">
-                    <label>
-                        <input type="radio" name="regional_distance_unit" value="km"    <?= $regional_distance_unit === 'km'    ? 'checked' : '' ?>>
-                        <span>km</span>
-                    </label>
-                    <label>
-                        <input type="radio" name="regional_distance_unit" value="miles" <?= $regional_distance_unit === 'miles' ? 'checked' : '' ?>>
-                        <span>miles</span>
-                    </label>
-                </div>
-                <p class="ff-helper">Default mileage unit suggested on new leases.</p>
-            </div>
-
-        </div>
-
-        <div class="ff-card-actions">
-            <button type="submit" class="btn btn-primary btn-sm" :disabled="saving['regional']">
-                <span x-show="!saving['regional']">Save Regional</span>
-                <span x-show="saving['regional']" x-cloak>Saving&hellip;</span>
-            </button>
-            <span class="ff-save-msg"
-                  :style="msgStyle('regional')"
-                  x-text="msg['regional'] || ''"
-                  x-show="msg['regional']"></span>
-        </div>
-
-    </div>
-</div>
-</form>
-
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- CARD 4 — PDF & Invoices                                     -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<form @submit.prevent="saveCard('pdf', $event)" data-card="pdf">
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-header" style="font-weight:600;">PDF &amp; Invoices</div>
-    <div class="card-body">
-
-        <div class="form-group">
-            <label class="form-label" for="pdf_invoice_footer_text">Invoice Footer Text</label>
-            <textarea name="pdf_invoice_footer_text"
-                      id="pdf_invoice_footer_text"
-                      class="form-control"
-                      maxlength="200"
-                      rows="2"
-                      oninput="document.getElementById('pdf-footer-readout').textContent = this.value.length;"><?= e($pdf_invoice_footer_text) ?></textarea>
-            <p class="ff-helper"><span id="pdf-footer-readout"><?= e((string) mb_strlen($pdf_invoice_footer_text)) ?></span> / 200 characters.</p>
-        </div>
-
-        <div class="form-group" style="margin-top:16px;">
-            <label class="form-label" style="display:flex;align-items:center;gap:10px;">
-                <input type="checkbox" name="pdf_show_logo" value="1" <?= $pdf_show_logo === 1 ? 'checked' : '' ?>>
-                Show Logo on PDFs
-            </label>
-            <p class="ff-helper">When off, generated PDFs render the company name in text only.</p>
-        </div>
-
-        <div class="form-group" style="margin-top:16px;">
-            <label class="form-label" for="pdf_accent_color">PDF Accent Color</label>
-            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-                <input type="color"
-                       name="pdf_accent_color"
-                       id="pdf_accent_color"
-                       class="ff-color-picker"
-                       value="<?= e($pdf_accent_color !== '' ? $pdf_accent_color : $brand_primary_color) ?>">
-                <input type="text"
-                       class="form-control"
-                       style="max-width:160px;"
-                       placeholder="Leave blank to inherit"
-                       value="<?= e($pdf_accent_color) ?>"
-                       oninput="document.getElementById('pdf_accent_color').value = this.value.match(/^#[0-9a-fA-F]{6}$/) ? this.value : document.getElementById('pdf_accent_color').value;"
-                       onchange="document.querySelector('[name=pdf_accent_color]').value = this.value;">
-            </div>
-            <p class="ff-helper">Leave blank to inherit Brand Primary Color. Otherwise a 6-digit hex.</p>
-        </div>
-
-        <div class="ff-card-actions">
-            <button type="submit" class="btn btn-primary btn-sm" :disabled="saving['pdf']">
-                <span x-show="!saving['pdf']">Save PDF Settings</span>
-                <span x-show="saving['pdf']" x-cloak>Saving&hellip;</span>
-            </button>
-            <span class="ff-save-msg"
-                  :style="msgStyle('pdf')"
-                  x-text="msg['pdf'] || ''"
-                  x-show="msg['pdf']"></span>
-        </div>
-
-    </div>
-</div>
-</form>
-
-<!-- ════════════════════════════════════════════════════════════ -->
-<!-- CARD 5 — UI Behaviour                                       -->
-<!-- ════════════════════════════════════════════════════════════ -->
-<form @submit.prevent="saveCard('ui', $event)" data-card="ui">
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-header" style="font-weight:600;">UI Behaviour</div>
-    <div class="card-body">
-
-        <div class="ff-form-grid">
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" style="display:flex;align-items:center;gap:10px;">
-                    <input type="checkbox" name="ui_sidebar_collapsed_default" value="1" <?= $ui_sidebar_collapsed_default === 1 ? 'checked' : '' ?>>
-                    Sidebar Collapsed by Default
-                </label>
-                <p class="ff-helper">First-visit sidebar state; per-user toggles still apply.</p>
-            </div>
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" for="defaults_rows_per_page">Default Rows Per Page</label>
-                <select name="defaults_rows_per_page" id="defaults_rows_per_page" class="form-control">
-                    <?php foreach ([10, 25, 50, 100] as $n): ?>
-                        <option value="<?= $n ?>" <?= $defaults_rows_per_page === $n ? 'selected' : '' ?>><?= $n ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-            <div class="form-group" style="margin:0;">
-                <label class="form-label" for="ui_session_timeout_minutes">Session Timeout</label>
-                <select name="ui_session_timeout_minutes" id="ui_session_timeout_minutes" class="form-control">
-                    <?php foreach ([
-                        15  => '15 minutes',
-                        30  => '30 minutes',
-                        60  => '1 hour',
-                        120 => '2 hours',
-                        240 => '4 hours',
-                        480 => '8 hours',
-                    ] as $v => $l): ?>
-                        <option value="<?= $v ?>" <?= $ui_session_timeout_minutes === $v ? 'selected' : '' ?>><?= e($l) ?></option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-
-        </div>
-
-        <div class="ff-card-actions">
-            <button type="submit" class="btn btn-primary btn-sm" :disabled="saving['ui']">
-                <span x-show="!saving['ui']">Save UI Behaviour</span>
-                <span x-show="saving['ui']" x-cloak>Saving&hellip;</span>
-            </button>
-            <span class="ff-save-msg"
-                  :style="msgStyle('ui')"
-                  x-text="msg['ui'] || ''"
-                  x-show="msg['ui']"></span>
-        </div>
-
-    </div>
-</div>
-</form>
+<!-- Bug #23: the "New User Defaults", "Regional", "PDF & Invoices" and
+     "UI Behaviour" cards were removed — none of their settings had a reader,
+     so saving them changed nothing. See the file docblock. -->
 
 </div><!-- /#ff-design-tab -->
 

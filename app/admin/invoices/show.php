@@ -485,8 +485,12 @@ $methodLabels = [
     'e_transfer' => 'e-Transfer', 'account_credit' => 'Acct Credit', 'other' => 'Other',
 ];
 
-$isOverdue = ($invoice['status'] !== 'paid' && $invoice['status'] !== 'void'
-    && $invoice['status'] !== 'written_off' && !empty($invoice['due_date'])
+// A DRAFT is never overdue: it has not been sent, so nothing is owed yet and its
+// due_date is only provisional. Without the draft exclusion the header showed
+// "DRAFT" and "OVERDUE" side by side on an unsent invoice (and the print badge
+// read "Overdue"). date('Y-m-d') is the company-local day (APP_TIMEZONE).
+$isOverdue = (!in_array($invoice['status'], ['draft', 'paid', 'void', 'written_off'], true)
+    && !empty($invoice['due_date'])
     && $invoice['due_date'] < date('Y-m-d'));
 
 $isDraft      = ($invoice['status'] === 'draft');

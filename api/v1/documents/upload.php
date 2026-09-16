@@ -8,9 +8,16 @@ declare(strict_types=1);
  * Stores the file via StorageClient and inserts a row into the documents table.
  *
  * Backward-compat syncing:
- *   - equipment_unit + (cvi|registration|insurance) → also updates
- *     equipment_units.{type}_document so the compliance list page continues
- *     to show 📄 icons without any changes.
+ *   - equipment_unit + (cvi|registration) → also updates
+ *     equipment_units.{type}_document (and {type}_expiry when an expiration
+ *     date is supplied) so the compliance list page shows 📄 icons.
+ *   - 'insurance' is no longer an accepted equipment_unit document type:
+ *     insurance was removed from every compliance UI
+ *     (S-UNIT-COMPLIANCE-HIDE-MVI-INS), but the Documents library could still
+ *     upload one and silently write equipment_units.insurance_expiry / _document
+ *     — a date nobody could see or edit. Upload such a file as 'other'.
+ *     (Existing insurance documents still list/download; delete.php still
+ *     clears the legacy column for them.)
  *   - lease + (contract|inspection_in|inspection_out) → also updates the
  *     corresponding leases.contract_file / inspection_in_file / inspection_out_file.
  *
@@ -66,7 +73,7 @@ require_permission($permModule, 'edit');
 
 // ── 3. Validate document_type (allowlist per entity type) ─────────────────────
 $docTypesByEntity = [
-    'equipment_unit' => ['cvi', 'registration', 'insurance', 'other'],
+    'equipment_unit' => ['cvi', 'registration', 'other'],   // no 'insurance' — see header
     'lease'          => ['contract', 'inspection_in', 'inspection_out', 'amendment', 'other'],
     'customer'       => ['tax_exemption', 'credit_agreement', 'credit_application', 'other'],
     'inspection'     => ['report', 'other'],
@@ -193,15 +200,15 @@ $docId = db_insert('documents', [
 //      the 📄 icons on the compliance grid reflect the latest upload without
 //      requiring a compliance module refactor.
 if ($entityType === 'equipment_unit'
-    && in_array($docType, ['cvi', 'registration', 'insurance'], true)) {
-    $col = $docType . '_document'; // cvi_document | registration_document | insurance_document
+    && in_array($docType, ['cvi', 'registration'], true)) {
+    $col = $docType . '_document'; // cvi_document | registration_document
     db_execute("UPDATE equipment_units SET {$col} = ? WHERE id = ?", [$storagePath, $entityId]);
 
     // WHY: if the user supplied an expiry date with the upload, sync it to the compliance
     // column so the compliance grid reflects the new document's expiry immediately —
     // without requiring a separate inline-edit step on the compliance page.
     if ($expiry) {
-        $expiryCol = $docType . '_expiry'; // cvi_expiry | registration_expiry | insurance_expiry
+        $expiryCol = $docType . '_expiry'; // cvi_expiry | registration_expiry
         db_execute("UPDATE equipment_units SET {$expiryCol} = ? WHERE id = ?", [$expiry, $entityId]);
     }
 }

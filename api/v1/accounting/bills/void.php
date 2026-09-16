@@ -6,7 +6,7 @@ declare(strict_types=1);
  *
  * Void an AP bill — transitions draft/approved → void.
  * If the bill had a posted JE, reverses it.
- * Restores vendor.total_spent if bill was approved.
+ * Recomputes vendor.total_spent (VendorSpend) if the bill was approved.
  * Cannot void partially_paid or paid bills.
  *
  * @method  POST
@@ -60,12 +60,6 @@ $result = db_transaction(function () use ($id, $voidReason) {
     // If approved (has JE), reverse it
     if ($bill['journal_entry_id']) {
         JournalEntryService::reverse((int) $bill['journal_entry_id'], date('Y-m-d'), current_user_id());
-
-        // Restore vendor.total_spent (Trap 6 — same transaction)
-        db_execute(
-            "UPDATE vendors SET total_spent = GREATEST(0, total_spent - ?) WHERE id = ?",
-            [(string) $bill['total_amount'], (int) $bill['vendor_id']]
-        );
     }
 
     db_update('acc_bills', [
@@ -75,6 +69,14 @@ $result = db_transaction(function () use ($id, $voidReason) {
         'voided_at'   => date('Y-m-d H:i:s'),
         'balance_due' => '0.00',
     ], 'id = ?', [$id]);
+
+    // Trap 6 / bug #7: recompute vendor.total_spent AFTER the status flips to
+    // void (same transaction). The old "GREATEST(0, total_spent - amount)" clamp
+    // could drift, and a voided bill must hand its linked work order's cost back
+    // to the vendor's spend rather than just subtracting.
+    if ($oldStatus !== 'draft') {
+        \FleetForge\Accounting\VendorSpend::recompute((int) $bill['vendor_id']);
+    }
 
     db_insert('audit_log', [
         'user_id'     => current_user_id(),
