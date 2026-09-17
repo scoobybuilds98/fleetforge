@@ -211,20 +211,28 @@ foreach (db_select(
     [$unitId, ff_today()]
 ) as $r) { $mntByMonth[$r['ym']] = (string) $r['cost']; }
 
-// Damage by month
-$dmgByMonth = [];
-foreach (db_select(
-    "SELECT DATE_FORMAT(created_at,'%Y-%m') AS ym,
-            COALESCE(SUM(COALESCE(actual_repair_cost,estimated_repair_cost,0)),0) AS cost
-       FROM damage_claims WHERE equipment_unit_id = ? AND deleted_at IS NULL
-        AND created_at >= (CURDATE() - INTERVAL 24 MONTH)
-      GROUP BY ym", [$unitId]
-) as $r) { $dmgByMonth[$r['ym']] = (string) $r['cost']; }
-
 // Dense 24-month window (newest first for the table)
-$monthlyPnl = [];
 $cursor = new DateTimeImmutable('first day of this month');
 $mStart = $cursor->modify('-23 months');
+
+// Damage by month
+// S-LOCAL-DAY-TS: damage_claims.created_at is a UTC DATETIME, so bucketing it
+// with DATE_FORMAT() in SQL put a claim filed on a local evening at month-end
+// into the NEXT month. Select the (few) rows from local 00:00 on the first
+// dense month ($mStart) and bucket each by its LOCAL month in PHP.
+$dmgByMonth = [];
+foreach (db_select(
+    "SELECT created_at,
+            COALESCE(actual_repair_cost,estimated_repair_cost,0) AS cost
+       FROM damage_claims WHERE equipment_unit_id = ? AND deleted_at IS NULL
+        AND created_at >= ?",
+    [$unitId, ff_local_month_start_utc($mStart->format('Y-m-d'))]
+) as $r) {
+    $ym = ff_utc_to_local((string) $r['created_at'], 'Y-m');
+    $dmgByMonth[$ym] = bcadd($dmgByMonth[$ym] ?? '0.00', (string) $r['cost'], 2);
+}
+
+$monthlyPnl = [];
 for ($m = $cursor; $m >= $mStart; $m = $m->modify('-1 month')) {
     $ym  = $m->format('Y-m');
     $rev = $revByMonth[$ym]  ?? '0.00';

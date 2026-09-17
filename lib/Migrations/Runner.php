@@ -347,7 +347,9 @@ class Runner
             }
             $checksum  = $this->checksum($f);
             $mtime     = filemtime($path) ?: time();
-            $appliedAt = date('Y-m-d H:i:s', $mtime);
+            // S-LOCAL-DAY-TS: UTC, like the DEFAULT CURRENT_TIMESTAMP the normal
+            // apply path gets — date() rendered the mtime in PHP-local time.
+            $appliedAt = gmdate('Y-m-d H:i:s', $mtime);
             $this->recordApplied($f, $checksum, 0, $appliedBy, $appliedAt);
             $results[] = [
                 'filename'   => $f,

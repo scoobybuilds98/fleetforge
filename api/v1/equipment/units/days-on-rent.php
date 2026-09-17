@@ -58,7 +58,8 @@ declare(strict_types=1);
  *    `cancelled` never happened. (payoff.php uses status != 'cancelled',
  *    which silently counts pending — not copied.)
  *
- *  - "Since added" anchors on DATE(equipment_units.created_at), which is
+ *  - "Since added" anchors on the LOCAL day of equipment_units.created_at
+ *    (UTC DATETIME, converted via ff_utc_to_local()), which is
  *    NOT NULL on every unit. `acquired_date` would be the truer "since
  *    we bought it" anchor but is NULL fleet-wide until backfilled.
  *
@@ -145,7 +146,10 @@ if (!in_array($preset, ['since_added', 'last_year', 'this_year', 'custom'], true
     $preset = 'since_added';
 }
 
-$anchorDate   = substr((string) $unit['created_at'], 0, 10);
+// S-LOCAL-DAY-TS: equipment_units.created_at is a UTC DATETIME — its first 10
+// chars are the UTC day, a day AHEAD for a unit added on a local evening.
+// Anchor on the business-local calendar day it was added.
+$anchorDate   = ff_utc_to_local((string) $unit['created_at']);
 $anchorSource = 'created_at';
 
 $thisYear = (int) date('Y');

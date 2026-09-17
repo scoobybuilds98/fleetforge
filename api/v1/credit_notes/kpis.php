@@ -42,24 +42,30 @@ $issuedThisMonth = db_row(
     "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt
      FROM credit_notes
      WHERE deleted_at IS NULL
-       AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01'){$scopeSql}",
-    $scopeParams
+       AND created_at >= ?{$scopeSql}",
+    // created_at is UTC: CURDATE()'s month rolled over at 5pm Pacific on the last day.
+    // Local month start as a UTC instant; bound BEFORE the scope params (textual order).
+    array_merge([ff_local_month_start_utc()], $scopeParams)
 );
 
 $fullyUsedThisMonth = db_row(
     "SELECT COUNT(*) AS cnt
      FROM credit_notes
      WHERE deleted_at IS NULL AND status = 'fully_used'
-       AND updated_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01'){$scopeSql}",
-    $scopeParams
+       AND updated_at >= ?{$scopeSql}",
+    // updated_at is UTC: CURDATE()'s month rolled over at 5pm Pacific on the last day.
+    // Local month start as a UTC instant; bound BEFORE the scope params (textual order).
+    array_merge([ff_local_month_start_utc()], $scopeParams)
 );
 
 $expiredThisMonth = db_row(
     "SELECT COUNT(*) AS cnt
      FROM credit_notes
      WHERE deleted_at IS NULL AND status IN ('expired', 'void')
-       AND updated_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01'){$scopeSql}",
-    $scopeParams
+       AND updated_at >= ?{$scopeSql}",
+    // updated_at is UTC: CURDATE()'s month rolled over at 5pm Pacific on the last day.
+    // Local month start as a UTC instant; bound BEFORE the scope params (textual order).
+    array_merge([ff_local_month_start_utc()], $scopeParams)
 );
 
 // I03: dollar totals hidden from roles without payments:view; counts stay.

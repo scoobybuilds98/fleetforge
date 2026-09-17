@@ -191,7 +191,9 @@ while (($data = fgetcsv($fh, 0, ',', '"', '')) !== false) {
                 'account_type'   => $accountType,
                 'normal_balance' => $normalBalance,
                 'parent_id'      => $parentId,
-                'updated_at'     => date('Y-m-d H:i:s'),
+                // S-LOCAL-DAY-TS: explicit UTC (like ON UPDATE CURRENT_TIMESTAMP),
+                // kept explicit so an idempotent re-import still bumps it.
+                'updated_at'     => ff_now_utc(),
             ], 'id = ?', [(int) $existing['id']]);
 
             $rows[] = ['row' => $rowNum, 'account_number' => $accountNumber, 'action' => 'updated', 'detail' => "Updated #{$existing['id']}."];

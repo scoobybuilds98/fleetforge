@@ -87,13 +87,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Generate token — plain version goes into the email link only
                     $plainToken = bin2hex(random_bytes(32));  // 64 hex chars
                     $tokenHash  = hash('sha256', $plainToken);
-                    $expiresAt  = date('Y-m-d H:i:s', time() + 3600); // 1 hour
 
+                    // S-LOCAL-DAY-TS: expiry is computed in SQL (UTC, same clock as
+                    // created_at and reset_password.php's `expires_at > NOW()`).
+                    // It used to bind PHP-local date(time()+3600) — Pacific wall
+                    // time, 7-8h behind the UTC session — so every link was
+                    // already expired the moment it was created.
                     db_execute(
                         "INSERT INTO password_reset_tokens
                              (user_id, token_hash, expires_at, created_at)
-                         VALUES (?, ?, ?, NOW())",
-                        [$user['id'], $tokenHash, $expiresAt]
+                         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR), NOW())",
+                        [$user['id'], $tokenHash]
                     );
 
                     $resetLink = base_url('auth/reset_password') . '?token=' . urlencode($plainToken);

@@ -123,7 +123,10 @@ class AnomalyDetector
     public static function acknowledgeAlert(int $alertId, int $userId): void
     {
         db_update('ai_anomaly_alerts', [
-            'acknowledged_at' => date('Y-m-d H:i:s'),
+            // UTC (S-LOCAL-DAY-TS): read against NOW() by the ack-cooldown check
+            // and written as NOW() by pruneStaleAlerts(); PHP-local date() was
+            // 7–8h early, shortening the cooldown.
+            'acknowledged_at' => ff_now_utc(),
             'acknowledged_by' => $userId,
         ], 'id = ?', [$alertId]);
     }

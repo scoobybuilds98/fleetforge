@@ -664,7 +664,9 @@ class DriftChecker
                 }
                 // Open — refresh.
                 db_update('acc_qbo_drift_events', [
-                    'detected_at'  => date('Y-m-d H:i:s'),
+                    // S-LOCAL-DAY-TS: detected_at is UTC (inserts use the
+                    // column DEFAULT; drift_list filters `>= NOW() - INTERVAL`).
+                    'detected_at'  => ff_now_utc(),
                     'ff_value'     => $d['ff_value'] ?? null,
                     'qbo_value'    => $d['qbo_value'] ?? null,
                     'drift_amount' => $d['drift_amount'] ?? null,

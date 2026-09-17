@@ -118,7 +118,8 @@ class CreditApplicationReversal
                 db_update('credit_notes', [
                     'amount_remaining' => $newRemaining,
                     'status'           => $newCnStatus,
-                    'updated_at'       => date('Y-m-d H:i:s'),
+                    // UTC like ON UPDATE (PDO +00:00); explicit because the cap can leave the row unchanged.
+                    'updated_at'       => ff_now_utc(),
                 ], 'id = ?', [$creditNoteId]);
             } else {
                 $creditUntouchedVoided = true;
@@ -151,7 +152,8 @@ class CreditApplicationReversal
                 'credits_applied' => $newCreditsApplied,
                 'balance_due'     => $newBalanceDue,
                 'status'          => $newInvoiceStatus,
-                'updated_at'      => date('Y-m-d H:i:s'),
+                // UTC like ON UPDATE; explicit because the 0.00 clamp can leave the row unchanged.
+                'updated_at'      => ff_now_utc(),
             ];
             // Clear paid_date when the invoice is no longer fully paid.
             if ($newInvoiceStatus !== 'paid') {

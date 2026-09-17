@@ -332,8 +332,11 @@ try {
 
     // For C11+ we need to manually craft pending rows since the real
     // generate() would call Intuit (which we can't from smoke).
-    $now      = date('Y-m-d H:i:s');
-    $expires  = date('Y-m-d H:i:s', time() + 1800);
+    // gmdate: acc_qbo_payment_initiations timestamps are UTC (S-LOCAL-DAY-TS) —
+    // a Pacific-wall-time fixture reads as already expired, and C11 then fell
+    // through to a LIVE sandbox call.
+    $now      = gmdate('Y-m-d H:i:s');
+    $expires  = gmdate('Y-m-d H:i:s', time() + 1800);
 
     // ── C11: idempotency — existing pending+unexpired returns same URL ─
     // Pre-insert a pending row; second generate() call should NOT generate
@@ -367,7 +370,7 @@ try {
     // Set the row's expires_at to past + verify generate() marks it expired
     // BEFORE attempting to generate a new URL (which would fail offline due
     // to no real Intuit endpoint).
-    db_execute("UPDATE acc_qbo_payment_initiations SET expires_at = ? WHERE initiation_token = ?", [date('Y-m-d H:i:s', time() - 60), $existingToken]);
+    db_execute("UPDATE acc_qbo_payment_initiations SET expires_at = ? WHERE initiation_token = ?", [gmdate('Y-m-d H:i:s', time() - 60), $existingToken]);
     // We don't expect generate() to succeed here (no real Intuit); just
     // verify it marks the expired row as expired BEFORE failing.
     $r12 = PaymentInitiator::generate($fx['invoice_id'], $fx['portal_user_id']);
@@ -432,14 +435,14 @@ try {
         'ff_invoice_id' => $fx['invoice_id'], 'ff_portal_user_id' => $fx['portal_user_id'],
         'qbo_invoice_id' => $fx['qbo_invoice_id'], 'qbo_hosted_url' => 'url-older',
         'initiation_token' => $tokenOlder, 'amount' => '500.00', 'currency' => 'CAD',
-        'realm_id' => '9341457119548719', 'generated_at' => date('Y-m-d H:i:s', time() - 120),
+        'realm_id' => '9341457119548719', 'generated_at' => gmdate('Y-m-d H:i:s', time() - 120),
         'expires_at' => $expires, 'status' => 'pending',
     ]);
     db_insert('acc_qbo_payment_initiations', [
         'ff_invoice_id' => $fx['invoice_id'], 'ff_portal_user_id' => $fx['portal_user_id'],
         'qbo_invoice_id' => $fx['qbo_invoice_id'], 'qbo_hosted_url' => 'url-newer',
         'initiation_token' => $tokenNewer, 'amount' => '500.00', 'currency' => 'CAD',
-        'realm_id' => '9341457119548719', 'generated_at' => date('Y-m-d H:i:s', time() - 10),
+        'realm_id' => '9341457119548719', 'generated_at' => gmdate('Y-m-d H:i:s', time() - 10),
         'expires_at' => $expires, 'status' => 'pending',
     ]);
     $matchedLatest = PaymentInitiator::matchByQboInvoice($fx['qbo_invoice_id'], 'qbo-pay-c15');
@@ -717,8 +720,8 @@ try {
         'amount'            => '500.00',
         'currency'          => 'CAD',
         'realm_id'          => '9341457119548719',
-        'generated_at'      => date('Y-m-d H:i:s'),
-        'expires_at'        => date('Y-m-d H:i:s', time() + 1800),
+        'generated_at'      => gmdate('Y-m-d H:i:s'),
+        'expires_at'        => gmdate('Y-m-d H:i:s', time() + 1800),
         'status'            => 'pending',
     ]);
     // Simulate webhook by calling matchByQboInvoice directly (the
@@ -771,8 +774,8 @@ try {
         'amount'            => '500.00',
         'currency'          => 'CAD',
         'realm_id'          => '9341457119548719',
-        'generated_at'      => date('Y-m-d H:i:s'),
-        'expires_at'        => date('Y-m-d H:i:s', time() + 1800),
+        'generated_at'      => gmdate('Y-m-d H:i:s'),
+        'expires_at'        => gmdate('Y-m-d H:i:s', time() + 1800),
         'status'            => 'pending',
     ]);
     // Step 2: customer return URL lands BEFORE webhook — findByToken

@@ -36,7 +36,9 @@ class MorningBriefingRenderer
      */
     public static function buildPayload(): array
     {
-        $cutoff24h = date('Y-m-d H:i:s', strtotime('-24 hours'));
+        // S-LOCAL-DAY-TS: rolling "overnight" window vs audit_log.created_at (UTC).
+        // date() gave Pacific wall time, i.e. a cutoff 31-32h back, not 24h.
+        $cutoff24h = \ff_now_utc('-24 hours');
         $in7d      = date('Y-m-d', strtotime('+7 days'));
 
         // Company-local business "today". SQL CURDATE() is the UTC day (the
@@ -140,6 +142,9 @@ class MorningBriefingRenderer
             $payload = json_decode((string) $brief['result_data'], true);
             $text    = (string) ($payload['brief'] ?? '');
             $briefFirstPara = trim(explode("\n\n", $text, 2)[0] ?? '');
+            // Payload generated_at is ISO-8601 with offset (S-LOCAL-DAY-TS writers),
+            // so strtotime() yields the true instant; a legacy bare string was
+            // written as PHP-local wall time, which strtotime() also reads right.
             $briefStale = !empty($payload['generated_at'])
                 && strtotime((string) $payload['generated_at']) < strtotime('-20 hours');
         }
@@ -307,10 +312,14 @@ class MorningBriefingRenderer
      */
     public static function buildWeeklyPayload(): array
     {
-        $weekStart = date('Y-m-d 00:00:00', strtotime('-7 days'));
         // Company-local business "today" for the DATE-column filters below
         // (payment_date, due_date). SQL CURDATE() is the UTC day (ff_today).
         $today = ff_today();
+        // S-LOCAL-DAY-TS: calendar week = local midnight 7 days ago, as a UTC
+        // instant for invoices/leases.created_at (UTC). The old PHP-local
+        // 'Y-m-d 00:00:00' landed 7-8h early (5pm/4pm Pacific the day before).
+        $weekStartLocal = \ff_local_date_add($today, -7);
+        $weekStart      = \ff_local_day_start_utc($weekStartLocal);
 
         // Invoices generated in last 7 days
         $invoices7d = db_row(
@@ -374,7 +383,7 @@ class MorningBriefingRenderer
         );
 
         return [
-            'week_start' => date('M j', strtotime($weekStart)),
+            'week_start' => date('M j', strtotime($weekStartLocal)), // local label, not the UTC bound
             'week_end'   => date('M j', strtotime('-1 day')),
             'invoices'   => ['count' => (int) ($invoices7d['n'] ?? 0), 'total' => (string) ($invoices7d['total'] ?? '0.00')],
             'payments'   => ['count' => (int) ($payments7d['n'] ?? 0), 'total' => (string) ($payments7d['total'] ?? '0.00')],

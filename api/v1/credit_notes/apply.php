@@ -220,7 +220,9 @@ db_transaction(function () use (
     db_update('credit_notes', [
         'amount_remaining' => $newCnRemaining,
         'status'           => $newCnStatus,
-        'updated_at'       => date('Y-m-d H:i:s'),
+        // UTC like ON UPDATE CURRENT_TIMESTAMP (PDO session +00:00); kept explicit
+        // because a sub-cent amount rounds to 0.00 and the row may not change.
+        'updated_at'       => ff_now_utc(),
     ], 'id = ?', [$creditNoteId]);
 
     // ------------------------------------------------------------------
@@ -249,7 +251,8 @@ db_transaction(function () use (
         'credits_applied' => $newCreditsApplied,
         'balance_due'     => $newBalanceDue,
         'status'          => $newInvoiceStatus,
-        'updated_at'      => date('Y-m-d H:i:s'),
+        // UTC (was PHP-local): explicit because a sub-cent apply can leave the row unchanged.
+        'updated_at'      => ff_now_utc(),
     ];
     if ($newInvoiceStatus === 'paid') {
         $invUpdates['paid_date'] = date('Y-m-d');

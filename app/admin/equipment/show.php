@@ -348,7 +348,7 @@ $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
         <div class="stat-label">AI Analysis</div>
         <?php if ($_aiCachedUnit): ?>
         <div class="stat-value" style="font-size:0.9rem;font-weight:600;">Available</div>
-        <div class="stat-delta text-secondary"><?= e(date('M j, Y', strtotime($_aiCachedUnit['generated_at']))) ?></div>
+        <div class="stat-delta text-secondary"><?= e(format_datetime($_aiCachedUnit['generated_at'], 'M j, Y')) /* UTC DATETIME → local day (S-LOCAL-DAY-TS) */ ?></div>
         <?php else: ?>
         <div class="stat-value text-secondary" style="font-size:0.875rem;">Not run yet</div>
         <div class="stat-delta" style="color:var(--color-primary);font-weight:500;">Click to generate →</div>

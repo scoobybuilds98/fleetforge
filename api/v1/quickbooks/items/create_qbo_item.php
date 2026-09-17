@@ -111,7 +111,9 @@ try {
         'is_credit_variant'       => $isCredit,
         'presentation_variant'    => $presentation,
         'last_synced_at'          => $now,
-        'last_pull_at'            => $now,
+        // S-LOCAL-DAY-TS: last_pull_at is UTC everywhere else (pull.php NOW());
+        // last_synced_at keeps $now to match its other (PHP-local) writers.
+        'last_pull_at'            => ff_now_utc(),
         'created_by_user_id'      => $userId,
     ]);
 

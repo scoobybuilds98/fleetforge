@@ -90,7 +90,8 @@ db_transaction(function () use ($id, $reason, $cnCheck, &$result) {
         'voided_by'       => current_user_id(),
         'voided_at'       => $voidedAt,
         'internal_notes'  => trim(($cn['internal_notes'] ?? '') . "\n---\nVoid reason: {$reason}"),
-        'updated_at'      => $voidedAt,
+        // updated_at omitted: status always changes to 'void', so the column's
+        // ON UPDATE CURRENT_TIMESTAMP stamps it in UTC (was PHP-local).
     ], 'id = ?', [$id]);
 
     db_insert('audit_log', [

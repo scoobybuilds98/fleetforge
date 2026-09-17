@@ -72,7 +72,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                 } else {
                     $plainToken = bin2hex(random_bytes(32));
                     $tokenHash  = hash('sha256', $plainToken);
-                    $expiry     = date('Y-m-d H:i:s', strtotime('+7 days'));
+                    // S-LOCAL-DAY-TS: UTC — accept_invite.php checks
+                    // `invite_token_expiry > NOW()` on the UTC session clock.
+                    $expiry     = ff_now_utc('+7 days');
 
                     $newUserId = db_insert('users', [
                         'name'               => $invName,
@@ -81,7 +83,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
                         'status'             => 'invited',
                         'invite_token'       => $tokenHash,
                         'invite_token_expiry' => $expiry,
-                        'invite_sent_at'     => date('Y-m-d H:i:s'),
+                        'invite_sent_at'     => ff_now_utc(), // UTC: format_datetime() reads it as UTC
                         'created_by'         => current_user_id(),
                     ]);
 
@@ -181,7 +183,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $canEdit) {
             if ($targetId && $targetId !== current_user_id()) {
                 $target = db_row("SELECT name, email FROM users WHERE id = ? AND deleted_at IS NULL", [$targetId]);
                 if ($target) {
-                    db_update('users', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$targetId]);
+                    // S-LOCAL-DAY-TS: UTC, matching api/v1/users/delete.php's NOW().
+                    db_update('users', ['deleted_at' => ff_now_utc()], 'id = ?', [$targetId]);
 
                     db_insert('audit_log', [
                         'user_id'      => current_user_id(),

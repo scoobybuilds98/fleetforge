@@ -55,16 +55,19 @@ $msgId = db_insert('chat_messages', [
     'sender_display_name'  => $senderName,
     'message'              => $message,
     'type'                 => 'text',
-    'created_at'           => date('Y-m-d H:i:s'),
-    'updated_at'           => date('Y-m-d H:i:s'),
+    // S-LOCAL-DAY-TS: created_at/updated_at omitted — column DEFAULTs write UTC
+    // like staff-side messages; PHP date() was local wall time, so a portal
+    // message sorted 7-8h BEFORE the staff reply it answered.
 ]);
 
 // Update channel's last_message_at + preview
+// S-LOCAL-DAY-TS: NOW() (UTC session), same as every staff-side writer — the
+// channel list orders by last_message_at.
 $preview = mb_substr($message, 0, 100);
-db_update('chat_channels', [
-    'last_message_at'      => date('Y-m-d H:i:s'),
-    'last_message_preview' => $preview,
-], 'id = ?', [$channelId]);
+db_execute(
+    "UPDATE chat_channels SET last_message_at = NOW(), last_message_preview = ? WHERE id = ?",
+    [$preview, $channelId]
+);
 
 // Mark channel as read for this portal user (their own message)
 db_execute(

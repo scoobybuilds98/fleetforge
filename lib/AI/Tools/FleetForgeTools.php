@@ -2469,20 +2469,26 @@ class FleetForgeTools
         $mntByMonth = [];
         foreach ($mntMonthRows as $r) $mntByMonth[$r['ym']] = (string) $r['cost'];
 
-        // damage_claims.created_at is a UTC DATETIME, so UTC CURDATE() is the
-        // matching frame here — intentionally left as-is.
+        // S-LOCAL-DAY-TS: damage_claims.created_at is a UTC DATETIME, and the
+        // dense series below is in LOCAL months — SQL DATE_FORMAT() bucketing
+        // put a claim filed on a local month-end evening into the next month.
+        // Window = local 00:00 on the dense series' first month ('first day of
+        // this month' -13 months); select rows and bucket by local month in PHP.
+        $dmgWindowStart = (new \DateTimeImmutable('first day of this month'))->modify('-13 months');
         $dmgMonthRows = db_select(
-            "SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym,
-                    COALESCE(SUM(COALESCE(actual_repair_cost, estimated_repair_cost, 0)), 0) AS cost
+            "SELECT created_at,
+                    COALESCE(actual_repair_cost, estimated_repair_cost, 0) AS cost
              FROM damage_claims
              WHERE equipment_unit_id = ?
                AND deleted_at IS NULL
-               AND created_at >= (CURDATE() - INTERVAL 13 MONTH)
-             GROUP BY ym",
-            [$eqUnitId]
+               AND created_at >= ?",
+            [$eqUnitId, ff_local_month_start_utc($dmgWindowStart->format('Y-m-d'))]
         );
         $dmgByMonth = [];
-        foreach ($dmgMonthRows as $r) $dmgByMonth[$r['ym']] = (string) $r['cost'];
+        foreach ($dmgMonthRows as $r) {
+            $ym = ff_utc_to_local((string) $r['created_at'], 'Y-m');
+            $dmgByMonth[$ym] = bcadd($dmgByMonth[$ym] ?? '0.00', (string) $r['cost'], 2);
+        }
 
         // Dense 14-month series (oldest → newest) of net revenue.
         $netSeries = [];

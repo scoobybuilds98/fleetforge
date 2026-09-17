@@ -308,10 +308,15 @@ function portalPayBtn(invoiceId) {
                     '<?= e(base_url('api/v1/portal/invoices/initiate_qbo_payment')) ?>',
                     { invoice_id: invoiceId }
                 );
-                if (r.success) {
-                    window.location.href = r.url;
+                // FF_Api.post resolves to the WHOLE envelope: the initiate endpoint's
+                // body is { success, data: { success, url, status, error } } and a 422
+                // resolves as { success:false, error:{ message } } — same handling as
+                // portal/invoices/view.php. Reading r.url navigated to "undefined".
+                if (r && r.success && r.data && r.data.success && r.data.url) {
+                    window.location.href = r.data.url;
                 } else {
-                    this.error = r.error || 'Unable to start payment. Please try again or contact us.';
+                    const em = (r && r.data && r.data.error) || (r && r.error && (r.error.message || r.error));
+                    this.error = (typeof em === 'string' && em) ? em : 'Unable to start payment. Please try again or contact us.';
                     this.loading = false;
                 }
             } catch (e) {

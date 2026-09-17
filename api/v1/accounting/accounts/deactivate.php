@@ -88,7 +88,8 @@ if ((int) $account['is_header'] !== 1) {
 // -----------------------------------------------------------------------
 // 5. Deactivate inside transaction (update + audit log)
 // -----------------------------------------------------------------------
-$now = date('Y-m-d H:i:s');
+// S-LOCAL-DAY-TS: UTC, like ON UPDATE CURRENT_TIMESTAMP on acc_accounts.updated_at.
+$now = ff_now_utc();
 
 db_transaction(function () use ($id, $account, $now) {
     db_update('acc_accounts', [

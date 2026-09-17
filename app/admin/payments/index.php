@@ -57,8 +57,10 @@ $arOverdue = db_row(
 // Payments recorded today
 $today = db_row(
     "SELECT COUNT(*) AS cnt FROM payments
-     WHERE deleted_at IS NULL AND DATE(created_at) = CURDATE()",
-    []
+     WHERE deleted_at IS NULL AND created_at >= ? AND created_at < ?",
+    // created_at is UTC (PDO session +00:00): CURDATE() rolled "today" over at
+    // 5pm Pacific (4pm in winter). Bound to the company-local day in UTC, sargable.
+    [ff_local_day_start_utc(), ff_local_day_start_utc(ff_local_date_add(ff_today(), 1))]
 );
 
 $pageTitle      = 'Payments';

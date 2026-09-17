@@ -79,7 +79,8 @@ db_transaction(function () use ($id) {
                 'old_status'        => 'reserved',
                 'new_status'        => 'available',
                 'reason'            => "Reservation #{$id} deleted — unit released",
-                'changed_at'        => date('Y-m-d H:i:s'),
+                // S-LOCAL-DAY-TS: changed_at omitted — the column DEFAULT (UTC)
+                // applies; PHP date() was local wall time, 7-8h behind.
             ]);
         }
     }

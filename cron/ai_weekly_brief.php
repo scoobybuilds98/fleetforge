@@ -140,7 +140,7 @@ try {
                         'entity_type' => 'user', 'entity_id' => $userId,
                         'notification_type' => 'weekly_digest',
                         'status' => $ok ? 'sent' : 'failed',
-                        'sent_at' => $ok ? date('Y-m-d H:i:s') : null,
+                        'sent_at' => $ok ? ff_now_utc() : null, // UTC like created_at (S-LOCAL-DAY-TS)
                     ]);
                     if ($ok) $anySent = true;
                 } elseif ($channel === 'slack') {
@@ -158,7 +158,7 @@ try {
                         'notification_type' => 'weekly_digest',
                         'status' => $r['ok'] ? 'sent' : (($r['skipped'] ?? false) ? 'skipped' : 'failed'),
                         'error_message' => $r['ok'] ? null : (string) ($r['reason'] ?? ''),
-                        'sent_at' => $r['ok'] ? date('Y-m-d H:i:s') : null,
+                        'sent_at' => $r['ok'] ? ff_now_utc() : null, // UTC (S-LOCAL-DAY-TS)
                     ]);
                     if ($r['ok']) $anySent = true;
                 } elseif ($channel === 'sms') {
@@ -172,7 +172,7 @@ try {
                         'notification_type' => 'weekly_digest',
                         'status' => $r['ok'] ? 'sent' : (($r['skipped'] ?? false) ? 'skipped' : 'failed'),
                         'error_message' => $r['ok'] ? null : (string) ($r['reason'] ?? ''),
-                        'sent_at' => $r['ok'] ? date('Y-m-d H:i:s') : null,
+                        'sent_at' => $r['ok'] ? ff_now_utc() : null, // UTC (S-LOCAL-DAY-TS)
                     ]);
                     if ($r['ok']) $anySent = true;
                 }

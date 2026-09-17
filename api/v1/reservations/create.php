@@ -312,7 +312,8 @@ db_transaction(function () use (
                 'old_status'        => $currentStatus,
                 'new_status'        => 'reserved',
                 'reason'            => "Reservation #{$newId} created as confirmed",
-                'changed_at'        => date('Y-m-d H:i:s'),
+                // S-LOCAL-DAY-TS: changed_at omitted — the column DEFAULT (UTC)
+                // applies; PHP date() was local wall time, 7-8h behind.
             ]);
         }
     }

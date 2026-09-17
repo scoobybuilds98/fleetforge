@@ -44,7 +44,12 @@ require_auth_api();
 $cacheKey    = 'dashboard_kpis';
 $cacheHash   = hash('sha256', $cacheKey);
 $cacheTtlMin = 5;
-$now         = date('Y-m-d H:i:s');
+// S-LOCAL-DAY-TS: report_cache.generated_at/expires_at are UTC — cron/cache_cleanup.php
+// deletes `expires_at < NOW()` on the +00:00 session, and a Pacific wall-time
+// expiry was already 7-8h in the past, so every row was purged on the next
+// cleanup run. $now (the lookup cutoff AND the written generated_at) and
+// $expiresAt below move to UTC together.
+$now         = ff_now_utc();
 
 // Serve-time financial redaction. report_cache uses a ROLE-BLIND key (the full
 // payload is cached once for everyone), so monetary KPIs must be stripped on
@@ -235,7 +240,7 @@ $payload = [
 // Upsert into report_cache. REPLACE INTO atomically removes any stale row
 // matching the unique key (report_type, parameters_hash) then inserts fresh.
 // WHY REPLACE: simpler than INSERT … ON DUPLICATE KEY UPDATE for cache writes.
-$expiresAt = date('Y-m-d H:i:s', strtotime("+{$cacheTtlMin} minutes"));
+$expiresAt = ff_now_utc("+{$cacheTtlMin} minutes"); // UTC, lockstep with $now (S-LOCAL-DAY-TS)
 
 db_execute(
     "REPLACE INTO report_cache

@@ -212,7 +212,8 @@ try {
                         'entity_id'         => $custId,
                         'notification_type' => 'collections_90day',
                         'status'            => 'sent',
-                        'sent_at'           => date('Y-m-d H:i:s'),
+                        // S-LOCAL-DAY-TS: UTC like the DB-defaulted created_at.
+                        'sent_at'           => ff_now_utc(),
                     ]);
                     $notified++;
                 } else {

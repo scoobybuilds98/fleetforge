@@ -418,7 +418,8 @@ class StatusActions
                     'old_status'        => $u['current_status'],
                     'new_status'        => $unitNewStatus,
                     'reason'            => "Reservation #{$id} status changed: {$currentStatus} → {$targetStatus}" . ($cancelReason ? " — {$cancelReason}" : ''),
-                    'changed_at'        => date('Y-m-d H:i:s'),
+                    // S-LOCAL-DAY-TS: changed_at omitted — the column DEFAULT
+                    // (UTC) applies; PHP date() was local wall time.
                 ]);
             }
 

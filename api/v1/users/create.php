@@ -119,8 +119,11 @@ $createUser = function () use (
             'status'               => 'invited',
             'mfa_required'         => $mfaRequired,
             'invite_token'         => $tokenHash,
-            'invite_token_expiry'  => date('Y-m-d H:i:s', strtotime('+7 days')),
-            'invite_sent_at'       => date('Y-m-d H:i:s'),
+            // S-LOCAL-DAY-TS: UTC like invite.php's NOW()-based resend and
+            // accept_invite.php's `invite_token_expiry > NOW()` — PHP-local
+            // date() here was 7-8h behind, shortening the 7-day window.
+            'invite_token_expiry'  => ff_now_utc('+7 days'),
+            'invite_sent_at'       => ff_now_utc(),
             'deleted_at'           => null,
             'created_by'           => current_user_id(),
             // wipe inherited credentials / session state from the old account
@@ -147,8 +150,9 @@ $createUser = function () use (
             'status'               => 'invited',
             'mfa_required'         => $mfaRequired,
             'invite_token'         => $tokenHash,
-            'invite_token_expiry'  => date('Y-m-d H:i:s', strtotime('+7 days')),
-            'invite_sent_at'       => date('Y-m-d H:i:s'),
+            // S-LOCAL-DAY-TS: UTC (see revive branch above).
+            'invite_token_expiry'  => ff_now_utc('+7 days'),
+            'invite_sent_at'       => ff_now_utc(),
             'created_by'           => current_user_id(),
         ]);
     }

@@ -199,7 +199,10 @@ if (empty($updates)) {
     json_validation_error(['_general' => 'No editable fields provided.']);
 }
 
-$updates['updated_at'] = date('Y-m-d H:i:s');
+// S-LOCAL-DAY-TS: UTC, like ON UPDATE CURRENT_TIMESTAMP and every other
+// acc_accounts writer. Kept explicit because the response echoes it back as
+// the client's next concurrency token, so it must equal the stored value.
+$updates['updated_at'] = ff_now_utc();
 
 // -----------------------------------------------------------------------
 // 5. Persist inside transaction (update + audit log)

@@ -65,8 +65,11 @@ try {
     $in7d       = date('Y-m-d', strtotime('+7 days'));
     $in30d      = date('Y-m-d', strtotime('+30 days'));
     $in60d      = date('Y-m-d', strtotime('+60 days'));
-    $cutoff14d  = date('Y-m-d H:i:s', strtotime('-14 days'));
-    $cutoff90d  = date('Y-m-d H:i:s', strtotime('-90 days'));
+    // S-LOCAL-DAY-TS: rolling cutoffs compared with UTC DATETIMEs
+    // (maintenance_work_orders.created_at, equipment_units.updated_at) must be
+    // UTC instants — PHP-local date() shifted both windows 7-8h.
+    $cutoff14d  = ff_now_utc('-14 days');
+    $cutoff90d  = ff_now_utc('-90 days');
 
     // -----------------------------------------------------------------------
     // Pre-compute average odometer per template_id once for the mileage check.

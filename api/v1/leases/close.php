@@ -709,7 +709,8 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         'status'               => 'completed',
         'actual_return_date'   => $actualReturnDate,
         'actual_return_time'   => $actualReturnTime,  // S-LEASE-RENTAL-DAY-TIME; NULL = not captured
-        'closed_at'            => date('Y-m-d H:i:s'),
+        // S-LOCAL-DAY-TS: UTC, like bulk_close.php's `closed_at = NOW()`.
+        'closed_at'            => ff_now_utc(),
         'closed_by_user_id'    => current_user_id(),
         'updated_by'           => current_user_id(),
         // S-LEASE-CLOSE-REMOVE-DAYS: persist the operator's "Remove N days" input

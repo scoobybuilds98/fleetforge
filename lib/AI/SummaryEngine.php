@@ -107,7 +107,9 @@ class SummaryEngine
 
         return [
             'summary'      => $summaryText,
-            'generated_at' => date('Y-m-d H:i:s'),
+            // UTC, same representation as the cached branch's column value above
+            // (S-LOCAL-DAY-TS) — callers get one format whether cached or fresh.
+            'generated_at' => \ff_now_utc(),
             'cached'       => false,
         ];
     }
@@ -172,8 +174,12 @@ class SummaryEngine
     ): void {
         try {
             $ttlHours  = (int) settings_get('ai.summary_ttl_hours', self::DEFAULT_TTL_HOURS);
-            $expiresAt = date('Y-m-d H:i:s', strtotime("+{$ttlHours} hours"));
-            $now       = date('Y-m-d H:i:s');
+            // S-LOCAL-DAY-TS: ai_summaries.generated_at/expires_at are UTC —
+            // getCached() checks `expires_at > NOW()` and cache_cleanup.php purges
+            // `expires_at < NOW()` on the +00:00 session. Pacific wall time made
+            // every summary expire 7-8h early (a 24h TTL served ~16-17h).
+            $expiresAt = \ff_now_utc("+{$ttlHours} hours");
+            $now       = \ff_now_utc();
 
             // WHY: ai_summaries has UNIQUE(entity_type,entity_id,summary_type) — at
             // most one row per tuple. The old "UPDATE is_current=0 then INSERT the

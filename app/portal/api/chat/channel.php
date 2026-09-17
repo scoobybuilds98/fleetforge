@@ -52,7 +52,7 @@ if (!$existing) {
         'channel_id'     => $channelId,
         'portal_user_id' => $portalUserId,
         'role'           => 'member',
-        'joined_at'      => date('Y-m-d H:i:s'),
+        // S-LOCAL-DAY-TS: joined_at omitted — the column DEFAULT writes UTC.
     ]);
 }
 

@@ -23,6 +23,25 @@ namespace FleetForge\AI;
  */
 class TokenTracker
 {
+    /**
+     * UTC bounds [start, end) of the current business-local day.
+     *
+     * WHY (S-LOCAL-DAY-TS): ai_query_log.created_at is a UTC DATETIME, and the
+     * old `DATE(created_at) = CURDATE()` reset the daily budget at UTC midnight
+     * (5pm/4pm Pacific). This is THE single "today" window — canSpend()
+     * (enforcement), getTodayUsage() and TokenBudgetMonitor all use it so the
+     * gate and every displayed "today" figure can never disagree. Sargable.
+     *
+     * @return array{0: string, 1: string} UTC 'Y-m-d H:i:s' [local 00:00 today, local 00:00 tomorrow)
+     */
+    public static function todayWindowUtc(): array
+    {
+        return [
+            ff_local_day_start_utc(),
+            ff_local_day_start_utc(ff_local_date_add(ff_today(), 1)),
+        ];
+    }
+
     // ────────────────────────────────────────────────────────────
     // canSpend()
     //
@@ -43,10 +62,12 @@ class TokenTracker
         if ($limit <= 0) return true; // 0 = unlimited
 
         // Global daily usage (all users combined) vs the shared daily budget.
+        // Business-local day (S-LOCAL-DAY-TS) — same window as getTodayUsage().
         $row = db_row(
             "SELECT COALESCE(SUM(total_tokens), 0) AS used
              FROM ai_query_log
-             WHERE DATE(created_at) = CURDATE()"
+             WHERE created_at >= ? AND created_at < ?",
+            self::todayWindowUtc()
         );
 
         return ((int) ($row['used'] ?? 0)) < $limit;
@@ -107,8 +128,9 @@ class TokenTracker
     {
         $limit = (int) settings_get('ai.daily_token_limit', 500000);
 
-        $where = "WHERE DATE(created_at) = CURDATE()";
-        $params = [];
+        // Business-local day, identical to canSpend()'s window (S-LOCAL-DAY-TS).
+        $where = "WHERE created_at >= ? AND created_at < ?";
+        $params = self::todayWindowUtc();
         if ($userId !== null) {
             $where .= " AND user_id = ?";
             $params[] = $userId;
@@ -142,13 +164,15 @@ class TokenTracker
     // ────────────────────────────────────────────────────────────
     public static function getMonthUsage(): array
     {
+        // Business-local month (S-LOCAL-DAY-TS): YEAR/MONTH(created_at) vs
+        // CURDATE() rolled the month at UTC midnight and was non-sargable.
         $row = db_row(
             "SELECT COALESCE(SUM(total_tokens), 0) AS tokens,
                     COALESCE(SUM(cost_usd), 0) AS cost,
                     COUNT(*) AS requests
              FROM ai_query_log
-             WHERE YEAR(created_at) = YEAR(CURDATE())
-               AND MONTH(created_at) = MONTH(CURDATE())"
+             WHERE created_at >= ? AND created_at < ?",
+            self::monthWindowUtc()
         );
 
         return [
@@ -175,10 +199,28 @@ class TokenTracker
                     COUNT(*) AS requests
              FROM ai_query_log q
              LEFT JOIN users u ON u.id = q.user_id
-             WHERE YEAR(q.created_at) = YEAR(CURDATE())
-               AND MONTH(q.created_at) = MONTH(CURDATE())
+             WHERE q.created_at >= ? AND q.created_at < ?
              GROUP BY q.user_id, u.name
-             ORDER BY tokens DESC"
+             ORDER BY tokens DESC",
+            // Same business-local month as getMonthUsage() (S-LOCAL-DAY-TS).
+            self::monthWindowUtc()
         );
+    }
+
+    /**
+     * UTC bounds [start, end) of the current business-local calendar month.
+     *
+     * WHY (S-LOCAL-DAY-TS): the old YEAR/MONTH(created_at) = YEAR/MONTH(CURDATE())
+     * compared a UTC column to the UTC month, so the last local evening of a
+     * month counted toward the next one. Upper bound kept because the original
+     * predicate also excluded later months.
+     *
+     * @return array{0: string, 1: string} UTC 'Y-m-d H:i:s' [local 1st 00:00, next local 1st 00:00)
+     */
+    private static function monthWindowUtc(): array
+    {
+        $firstOfMonth = substr(ff_today(), 0, 7) . '-01';
+        $nextMonth    = (new \DateTimeImmutable($firstOfMonth))->modify('+1 month')->format('Y-m-d');
+        return [ff_local_month_start_utc($firstOfMonth), ff_local_month_start_utc($nextMonth)];
     }
 }

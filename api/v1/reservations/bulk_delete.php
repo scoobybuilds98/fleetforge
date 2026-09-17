@@ -63,7 +63,9 @@ $actioned  = 0;
 $skipped   = 0;
 $errors    = [];
 
-$now       = date('Y-m-d H:i:s');
+// S-LOCAL-DAY-TS: UTC — feeds reservations.deleted_at, which the single
+// delete.php writes with NOW() (UTC session).
+$now       = ff_now_utc();
 $userId    = current_user_id();
 $userName  = current_user()['name'] ?? 'System';
 $ipAddress = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
@@ -135,7 +137,7 @@ foreach ($ids as $id) {
                         'old_status'        => 'reserved',
                         'new_status'        => 'available',
                         'reason'            => "Reservation #{$id} deleted (bulk) — unit released",
-                        'changed_at'        => $now,
+                        // S-LOCAL-DAY-TS: changed_at omitted — column DEFAULT (UTC).
                     ]);
                 }
             }

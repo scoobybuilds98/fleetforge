@@ -174,7 +174,8 @@ db_transaction(function () use ($id, $leaseId, &$result) {
                 'new_status'        => $target,
                 'reason'            => "Reservation #{$id} marked out" .
                                        ($isLeaseOf ? " — linked to Lease #{$leaseId}" : ''),
-                'changed_at'        => $now,
+                // S-LOCAL-DAY-TS: changed_at omitted — the column DEFAULT (UTC)
+                // applies. $now stays local for reservations.marked_out_at only.
             ]);
         }
 

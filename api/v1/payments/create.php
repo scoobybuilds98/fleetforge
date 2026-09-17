@@ -314,7 +314,8 @@ db_transaction(function () use (
         'amount_paid' => $newAmountPaid,
         'balance_due' => $newBalanceDue,
         'status'      => $newInvoiceStatus,
-        'updated_at'  => date('Y-m-d H:i:s'),
+        // UTC like ON UPDATE (PDO +00:00); explicit because a sub-cent allocation can leave the row unchanged.
+        'updated_at'  => ff_now_utc(),
     ];
     if ($newInvoiceStatus === 'paid') {
         $invoiceUpdates['paid_date'] = date('Y-m-d');

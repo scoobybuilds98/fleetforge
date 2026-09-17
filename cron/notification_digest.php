@@ -363,7 +363,9 @@ function run_morning_digest_emails(): array
                         'notification_type' => 'morning_digest',
                         'status'            => $okCh ? 'sent' : 'failed',
                         'error_message'     => $okCh ? null : 'Mailer::send returned false',
-                        'sent_at'           => $okCh ? date('Y-m-d H:i:s') : null,
+                        // S-LOCAL-DAY-TS: UTC like created_at — briefing_history/brief_content
+                        // bucket COALESCE(sent_at, created_at) into local days.
+                        'sent_at'           => $okCh ? ff_now_utc() : null,
                     ]);
                     if ($okCh) $anySent = true;
                 } elseif ($channel === 'slack') {
@@ -384,7 +386,7 @@ function run_morning_digest_emails(): array
                         'notification_type' => 'morning_digest',
                         'status'            => $statusStr,
                         'error_message'     => $result['ok'] ? null : (string) ($result['reason'] ?? 'slack_failed'),
-                        'sent_at'           => $result['ok'] ? date('Y-m-d H:i:s') : null,
+                        'sent_at'           => $result['ok'] ? ff_now_utc() : null, // UTC (S-LOCAL-DAY-TS)
                     ]);
                     if ($result['ok']) $anySent = true;
                 } elseif ($channel === 'sms') {
@@ -401,7 +403,7 @@ function run_morning_digest_emails(): array
                         'notification_type' => 'morning_digest',
                         'status'            => $statusStr,
                         'error_message'     => $result['ok'] ? null : (string) ($result['reason'] ?? 'sms_failed'),
-                        'sent_at'           => $result['ok'] ? date('Y-m-d H:i:s') : null,
+                        'sent_at'           => $result['ok'] ? ff_now_utc() : null, // UTC (S-LOCAL-DAY-TS)
                     ]);
                     if ($result['ok']) $anySent = true;
                 }
@@ -582,7 +584,8 @@ function run_scheduled_reports(): array
             $next = compute_next_send_at($r);
             db_update('scheduled_reports', [
                 'next_send_at' => $next,
-                'last_sent_at' => date('Y-m-d H:i:s'),
+                // S-LOCAL-DAY-TS: UTC, like next_send_at (compared to NOW() above).
+                'last_sent_at' => ff_now_utc(),
             ], 'id = ?', [(int)$r['id']]);
 
             db_insert('audit_log', [
@@ -593,7 +596,7 @@ function run_scheduled_reports(): array
                 'entity_type'  => 'scheduled_report',
                 'entity_id'    => (int)$r['id'],
                 'entity_label' => (string)$r['name'],
-                'notes'        => "Scheduled report '{$r['name']}' due but executor not implemented (audit #23). next_send_at advanced to {$next}.",
+                'notes'        => "Scheduled report '{$r['name']}' due but executor not implemented (audit #23). next_send_at advanced to {$next} UTC.",
                 'ip_address'   => '127.0.0.1',
             ]);
             $skipped++;
@@ -608,16 +611,23 @@ function run_scheduled_reports(): array
 /**
  * compute_next_send_at() — advance next_send_at by the row's frequency.
  *
+ * Returns a UTC 'Y-m-d H:i:s'. S-LOCAL-DAY-TS: run_scheduled_reports() selects
+ * `next_send_at <= NOW()` on the +00:00 session, so the old Pacific wall-time
+ * value came due 7-8h early. ff_now_utc() still does the '+1 day/week/month'
+ * arithmetic via strtotime() in the PHP (business) zone, so the interval keeps
+ * its local-calendar meaning across DST; only the stored representation is UTC.
+ * (send_time/send_day are not consulted today — unchanged.)
+ *
  * @param array<string,mixed> $row
+ * @return string UTC DATETIME
  */
 function compute_next_send_at(array $row): string
 {
     $freq = (string)($row['frequency'] ?? 'daily');
-    $base = strtotime('+1 day');
     return match ($freq) {
-        'weekly'  => date('Y-m-d H:i:s', strtotime('+1 week')),
-        'monthly' => date('Y-m-d H:i:s', strtotime('+1 month')),
-        default   => date('Y-m-d H:i:s', $base),
+        'weekly'  => ff_now_utc('+1 week'),
+        'monthly' => ff_now_utc('+1 month'),
+        default   => ff_now_utc('+1 day'),
     };
 }
 

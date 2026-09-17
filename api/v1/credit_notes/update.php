@@ -88,7 +88,9 @@ if (empty($updates)) {
     json_error('VALIDATION_ERROR', 'No updatable fields provided. Allowed: reason, internal_notes, expires_at.', 422);
 }
 
-$updates['updated_at'] = date('Y-m-d H:i:s');
+// UTC like the column's ON UPDATE CURRENT_TIMESTAMP (PDO session +00:00). Kept
+// explicit: re-saving identical metadata changes nothing, so ON UPDATE wouldn't fire.
+$updates['updated_at'] = ff_now_utc();
 
 // Capture old values for audit trail
 $oldValues = [

@@ -324,7 +324,9 @@ class FixedAssetService
                 $updates['depreciable_cost'] = bcsub($row['acquisition_cost'], $newSalvage, 2);
             }
 
-            $updates['updated_at'] = date('Y-m-d H:i:s');
+            // S-LOCAL-DAY-TS: UTC, like ON UPDATE CURRENT_TIMESTAMP — the returned
+            // row's updated_at is the client's next optimistic-lock token.
+            $updates['updated_at'] = \ff_now_utc();
             \db_update('acc_fixed_assets', $updates, 'id = ?', [$id]);
 
             self::audit(
@@ -1796,7 +1798,8 @@ class FixedAssetService
             \db_update('acc_fixed_assets', [
                 'acquisition_cost' => $newCost,
                 'depreciable_cost' => $newDeprBase,
-                'updated_at'       => date('Y-m-d H:i:s'),
+                // S-LOCAL-DAY-TS: UTC, like ON UPDATE CURRENT_TIMESTAMP.
+                'updated_at'       => \ff_now_utc(),
             ], 'id = ?', [$assetId]);
 
             $billRef = $billLineId ? " Bill line #{$billLineId}." : '';

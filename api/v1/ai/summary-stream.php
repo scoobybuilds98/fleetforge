@@ -117,7 +117,10 @@ if (!$force) {
     $cachedRow = \FleetForge\AI\SummaryEngine::cachedSummary($entityType, $entityId, $summaryType);
     if ($cachedRow !== null) {
         echo 'data: ' . json_encode(['t' => 'tok', 'c' => (string) $cachedRow['content']]) . "\n\n";
-        echo 'data: ' . json_encode(['t' => 'done', 'cached' => true, 'generated_at' => $cachedRow['generated_at']]) . "\n\n";
+        // ai_summaries.generated_at is a UTC DATETIME and the card prints this value
+        // verbatim ("Generated …") — send it already formatted in company-local time
+        // (S-LOCAL-DAY-TS), the same shape the card's own fallback uses.
+        echo 'data: ' . json_encode(['t' => 'done', 'cached' => true, 'generated_at' => format_datetime($cachedRow['generated_at'], 'M j, g:i A')]) . "\n\n";
         flush();
         exit;
     }

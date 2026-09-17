@@ -93,26 +93,32 @@ try {
     $labels       = [];
     $completedMap = [];
     $failedMap    = [];
+    // S-LOCAL-DAY-TS: labels are company-local days (ff_today()), and
+    // acc_qbo_sync_log.created_at is UTC — so the window starts at LOCAL
+    // midnight 13 days back (not CURDATE() = UTC midnight) and rows are
+    // aggregated by UTC hour in SQL, then bucketed to their local day in PHP
+    // (named MySQL time zones aren't loaded, so no CONVERT_TZ).
+    $today = ff_today();
     for ($i = 13; $i >= 0; $i--) {
-        $d = date('Y-m-d', strtotime("-{$i} days"));
+        $d = ff_local_date_add($today, -$i);
         $labels[]            = $d;
         $completedMap[$d]    = 0;
         $failedMap[$d]       = 0;
     }
     $chartRows = db_select(
-        "SELECT DATE(created_at) AS d,
+        "SELECT DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00') AS h,
                 SUM(response_status >= 200 AND response_status < 300) AS ok,
                 SUM(response_status IS NULL OR response_status < 200 OR response_status >= 300) AS err
            FROM acc_qbo_sync_log
-          WHERE created_at >= CURDATE() - INTERVAL 13 DAY
-          GROUP BY DATE(created_at)",
-        []
+          WHERE created_at >= ?
+          GROUP BY h",
+        [ff_local_day_start_utc(ff_local_date_add($today, -13))]
     );
     foreach ($chartRows as $r) {
-        $d = (string) $r['d'];
+        $d = ff_utc_to_local((string) $r['h']);
         if (isset($completedMap[$d])) {
-            $completedMap[$d] = (int) $r['ok'];
-            $failedMap[$d]    = (int) $r['err'];
+            $completedMap[$d] += (int) $r['ok'];
+            $failedMap[$d]    += (int) $r['err'];
         }
     }
     $chart = [

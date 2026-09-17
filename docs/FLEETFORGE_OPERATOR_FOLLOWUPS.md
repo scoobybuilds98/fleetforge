@@ -12,11 +12,23 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-17 via S-LOCAL-DAY-TS — **F77** added (deploy: admin "forgot password" links were expired on creation; one-time timestamp side effects). Previously 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
+
+### F77 — Deploy S-LOCAL-DAY-TS: admin "Forgot password" links have never worked on prod 🔴 BLOCKING (auth — LIVE NOW)
+
+**Surfaced by:** S-LOCAL-DAY-TS (2026-09-17).
+**Affects:** every staff user who uses **Forgot password** on the login page; plus every evening-time "today / this month" tile and several cache/expiry timestamps.
+**Detail:** `app/auth/forgot_password.php` stored the reset token's `expires_at` as Pacific wall time + 1h, but `reset_password.php` checks `expires_at > NOW()` in UTC — so the token was already ~6h (PDT) / ~7h (PST) expired when the email went out, and every link opened as "invalid or expired". The fix writes `DATE_ADD(NOW(), INTERVAL 1 HOUR)`. Same class, also fixed: staff invite links expired ~7h early; AI summary / morning-brief caches expired 7h early (extra paid Claude calls); dashboard KPI/chart cache rows were deleted by `cache_cleanup` as soon as they were written; QBO pay-online links were treated as expired on creation; "Recorded today", notifications "Today", AI token usage/budget, credit-note and inspection "this month" tiles now start at local midnight instead of 5pm/4pm the previous evening.
+**Operator action:**
+1. Deploy `main` (no migration).
+2. Test once: log out → **Forgot password** with your own admin email → the link should open the "choose a new password" form.
+3. Expect, once, right after deploy: rows written BEFORE the deploy keep their old Pacific-wall-time stamps (no backfill) — e.g. older morning-digest runs in Settings → Intelligence → Recent runs show up to 7–8h early, and existing summary/brief caches expire once early; one AI budget threshold alert may be re-sent that first evening (its dedup key moved from the UTC day to the local day). Nothing to do.
+
+---
 
 ### F74 — Deploy S-CASHFLOW-TIE, then confirm which accounts count as cash 🟡 PARTIAL (report correctness — no data change, no migration)
 

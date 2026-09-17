@@ -164,7 +164,8 @@ class OverflowCreditNotes
                 'voided_by'        => $userId,
                 'voided_at'        => $now,
                 'internal_notes'   => "Auto-voided: {$context} (S-ORPHAN-OVERFLOW-CN — an overflow credit lives and dies with its source invoice).",
-                'updated_at'       => $now,
+                // updated_at omitted: status always changes to 'void', so ON UPDATE
+                // CURRENT_TIMESTAMP stamps UTC (was PHP-local $now).
             ], 'id = ? AND status = ? AND amount_remaining = ?', [(int) $cn['id'], $cn['status'], $cn['amount_remaining']]);
             if ($affected === 0) {
                 throw new \RuntimeException(

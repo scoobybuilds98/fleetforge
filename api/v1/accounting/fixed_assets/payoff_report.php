@@ -245,6 +245,13 @@ foreach ($mnt6Rows as $r) {
     $mnt6ByUnit[(int) $r['eu_id']] = (string) $r['total'];
 }
 
+// S-LOCAL-DAY-TS: damage_claims.created_at is a UTC DATETIME, so the window
+// must open at LOCAL 00:00 on the same calendar day the revenue/maintenance
+// windows above use (company-local today minus 6 months, month-end clamped
+// like MySQL's "- INTERVAL 6 MONTH"), not at UTC midnight of the UTC day.
+$dmg6Today    = new DateTimeImmutable(ff_today());
+$dmg6Month    = $dmg6Today->modify('first day of -6 months');
+$dmg6FromDate = $dmg6Month->format('Y-m-') . sprintf('%02d', min((int) $dmg6Today->format('j'), (int) $dmg6Month->format('t')));
 $dmg6ByUnit = [];
 $dmg6Rows = db_select(
     "SELECT equipment_unit_id AS eu_id,
@@ -252,9 +259,10 @@ $dmg6Rows = db_select(
      FROM damage_claims
      WHERE equipment_unit_id IN ({$placeholders})
        AND deleted_at IS NULL
-       AND created_at >= (CURDATE() - INTERVAL 6 MONTH)
+       AND created_at >= ?
      GROUP BY equipment_unit_id",
-    $unitIdList
+    // The '?' comes AFTER the IN(...) list.
+    array_merge($unitIdList, [ff_local_day_start_utc($dmg6FromDate)])
 );
 foreach ($dmg6Rows as $r) {
     $dmg6ByUnit[(int) $r['eu_id']] = (string) $r['total'];

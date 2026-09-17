@@ -214,7 +214,11 @@ class PaymentInitiator
             [$ffInvoiceId]
         );
         if ($existing !== null) {
-            $now = date('Y-m-d H:i:s');
+            // S-LOCAL-DAY-TS: expires_at/generated_at/completed_at are UTC
+            // DATETIMEs (the admin list checks `expires_at < NOW()` in the
+            // UTC-pinned session) — compare and stamp with UTC, not PHP-local
+            // wall time, which kept expired links "valid" for 7-8h.
+            $now = ff_now_utc();
             if ($existing['expires_at'] > $now) {
                 // Still valid — return same URL (idempotent).
                 return [
@@ -276,7 +280,8 @@ class PaymentInitiator
         }
 
         // ── Persist successful initiation row ───────────────────────────
-        $expiresAt = date('Y-m-d H:i:s', time() + ($ttlMinutes * 60));
+        // S-LOCAL-DAY-TS: UTC, so the `expires_at < NOW()` readers agree.
+        $expiresAt = gmdate('Y-m-d H:i:s', time() + ($ttlMinutes * 60));
 
         $insertedId = db_insert('acc_qbo_payment_initiations', [
             'ff_invoice_id'     => $ffInvoiceId,
@@ -287,7 +292,7 @@ class PaymentInitiator
             'amount'            => (string) $ff['balance_due'],
             'currency'          => (string) $ff['currency'],
             'realm_id'          => $realmId,
-            'generated_at'      => date('Y-m-d H:i:s'),
+            'generated_at'      => ff_now_utc(),
             'expires_at'        => $expiresAt,
             'status'            => 'pending',
         ]);
@@ -329,7 +334,8 @@ class PaymentInitiator
             return null;
         }
 
-        $now = date('Y-m-d H:i:s');
+        // S-LOCAL-DAY-TS: completed_at is a UTC DATETIME.
+        $now = ff_now_utc();
         db_update(
             'acc_qbo_payment_initiations',
             [
@@ -381,7 +387,8 @@ class PaymentInitiator
         }
         db_update(
             'acc_qbo_payment_initiations',
-            ['status' => 'cancelled', 'completed_at' => date('Y-m-d H:i:s')],
+            // S-LOCAL-DAY-TS: completed_at is a UTC DATETIME.
+            ['status' => 'cancelled', 'completed_at' => ff_now_utc()],
             'id = ?',
             [(int) $row['id']]
         );
@@ -409,11 +416,12 @@ class PaymentInitiator
                 'amount'            => (string) $ff['balance_due'],
                 'currency'          => (string) $ff['currency'],
                 'realm_id'          => $realmId,
-                'generated_at'      => date('Y-m-d H:i:s'),
-                'expires_at'        => date('Y-m-d H:i:s', time() + ($ttlMinutes * 60)),
+                // S-LOCAL-DAY-TS: all three are UTC DATETIMEs (see generate()).
+                'generated_at'      => ff_now_utc(),
+                'expires_at'        => gmdate('Y-m-d H:i:s', time() + ($ttlMinutes * 60)),
                 'status'            => 'failed',
                 'error_message'     => substr($error, 0, 65535),
-                'completed_at'      => date('Y-m-d H:i:s'),
+                'completed_at'      => ff_now_utc(),
             ]);
         } catch (\Throwable $e) {
             error_log("[PaymentInitiator] persistFailedRow failed for ff_invoice={$ffInvoiceId}: " . $e->getMessage());

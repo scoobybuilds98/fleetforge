@@ -396,11 +396,15 @@ switch ($view) {
              FROM credit_notes cn
              LEFT JOIN customers c ON c.id = cn.customer_id AND c.deleted_at IS NULL
              WHERE cn.deleted_at IS NULL
-               AND cn.created_at BETWEEN CONCAT(?, ' 00:00:00') AND CONCAT(?, ' 23:59:59')
+               AND cn.created_at >= ? AND cn.created_at < ?
              GROUP BY cn.customer_id
              ORDER BY total_issued DESC
              LIMIT 50",
-            [$dateFrom, $dateTo]
+            // S-LOCAL-DAY-TS: credit_notes.created_at is a UTC DATETIME while
+            // $dateFrom/$dateTo are company-local dates — bound the range at
+            // local 00:00 on $dateFrom through local 00:00 the day after $dateTo
+            // (half-open), not UTC midnight 7-8h early.
+            [ff_local_day_start_utc($dateFrom), ff_local_day_start_utc(ff_local_date_add($dateTo, 1))]
         );
 
         $chartData = [

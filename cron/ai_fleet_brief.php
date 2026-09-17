@@ -137,14 +137,19 @@ try {
     $promptTokens    = (int) ($usage['input_tokens'] ?? 0);
     $completionTokens = (int) ($usage['output_tokens'] ?? 0);
     $totalTokens     = $promptTokens + $completionTokens;
-    $generatedAt     = date('Y-m-d H:i:s');
-    $expiresAt       = date('Y-m-d H:i:s', strtotime('+24 hours'));
+    // S-LOCAL-DAY-TS: report_cache.generated_at/expires_at are UTC (every
+    // reader checks `expires_at > NOW()` on the +00:00 session). date() wrote
+    // Pacific wall time, so the 24h brief looked 7-8h older than it was.
+    $generatedAt     = ff_now_utc();
+    $expiresAt       = ff_now_utc('+24 hours');
 
     $cachePayload = [
         'brief'        => $briefText,
         'word_count'   => str_word_count($briefText),
-        'generated_at' => $generatedAt,
-        'expires_at'   => $expiresAt,
+        // ISO-8601 WITH offset so strtotime()/JS Date() parse the instant
+        // unambiguously (a bare 'Y-m-d H:i:s' would parse as PHP-local).
+        'generated_at' => gmdate('c', strtotime($generatedAt . ' UTC')),
+        'expires_at'   => gmdate('c', strtotime($expiresAt . ' UTC')),
         'metrics'      => $metrics,
         'tokens'       => [
             'prompt'     => $promptTokens,
@@ -190,7 +195,7 @@ try {
     }
 
     log_brief_audit(sprintf(
-        'Fleet brief generated. metrics=%d tokens=%d (in=%d out=%d) words=%d cache_expires=%s',
+        'Fleet brief generated. metrics=%d tokens=%d (in=%d out=%d) words=%d cache_expires=%s UTC',
         count($metrics),
         $totalTokens,
         $promptTokens,

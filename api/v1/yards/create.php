@@ -116,7 +116,8 @@ $yardData = [
 ];
 try {
     if ($reviveId !== null) {
-        db_update('yards', $yardData + ['deleted_at' => null, 'updated_at' => date('Y-m-d H:i:s')], 'id = ?', [$reviveId]);
+        // S-LOCAL-DAY-TS: updated_at in UTC, like ON UPDATE CURRENT_TIMESTAMP.
+        db_update('yards', $yardData + ['deleted_at' => null, 'updated_at' => ff_now_utc()], 'id = ?', [$reviveId]);
         $yardId = $reviveId;
     } else {
         $yardId = db_insert('yards', $yardData);

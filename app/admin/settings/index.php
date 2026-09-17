@@ -2091,10 +2091,10 @@ foreach ($cronJobs as $cronName => $cronMeta) {
         </div>
 
         <?php
-        $aiUsageToday = db_row(
-            "SELECT COALESCE(SUM(total_tokens), 0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd), 0) AS cost
-             FROM ai_query_log WHERE DATE(created_at) = CURDATE()"
-        );
+        // S-LOCAL-DAY-TS: reuse the tracker so this tile shows the SAME business-
+        // local day canSpend() enforces (was UTC CURDATE(), reset at 5pm/4pm
+        // Pacific). Shape has tokens/requests/cost like the old inline query.
+        $aiUsageToday = \FleetForge\AI\TokenTracker::getTodayUsage(null);
         $aiDailyLimit = (int) settings_get('ai.daily_token_limit', 500000);
         $aiModel = settings_get('ai.model', 'claude-sonnet-4-6');
         ?>
@@ -2472,7 +2472,10 @@ foreach ($cronJobs as $cronName => $cronMeta) {
                     <?php foreach ($intelRecipients as $u):
                         $inAllowList   = isset($intelRolesSet[$u['role_slug']]);
                         $snoozeRaw     = $u['briefing_snoozed_until'];
-                        $snoozeActive  = $snoozeRaw !== null && strtotime((string) $snoozeRaw) > time();
+                        // briefing_snoozed_until is a UTC DATETIME (S-LOCAL-DAY-TS): compare to the UTC
+                        // clock as strings — strtotime() would parse it as Pacific and keep the badge on
+                        // for 7–8h after the snooze lifted.
+                        $snoozeActive  = $snoozeRaw !== null && (string) $snoozeRaw > ff_now_utc();
                         $userHour      = $u['briefing_hour'];
                         $sectionsRaw   = $u['briefing_sections'];
                         $sectionsArr   = $sectionsRaw !== null ? (json_decode((string) $sectionsRaw, true) ?: []) : null;
@@ -2513,7 +2516,7 @@ foreach ($cronJobs as $cronName => $cronMeta) {
                         </td>
                         <td>
                             <?php if ($snoozeActive): ?>
-                                <span class="badge badge-warning" style="font-size:0.7rem;">until <?= e((string) $snoozeRaw) ?></span>
+                                <span class="badge badge-warning" style="font-size:0.7rem;">until <?= e(ff_utc_to_local((string) $snoozeRaw, 'Y-m-d H:i')) ?></span>
                                 <button class="btn btn-sm btn-outline" style="margin-left:4px;padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, null)">Clear</button>
                             <?php else: ?>
                                 <button class="btn btn-sm btn-outline" style="padding:2px 6px;font-size:0.7rem;" @click="setSnooze(<?= (int) $u['id'] ?>, '1d')">1d</button>
@@ -2928,7 +2931,7 @@ function FF_RecipientManager() {
             try {
                 const j = await FF_Api.post(FF_Api.url('/api/v1/admin/intelligence/set_snooze.php'), { user_id: userId, snoozed_until: snoozeValue });
                 if (j.success) {
-                    this.optFlash = { message: j.data.cleared ? 'Snooze cleared. Reloading…' : 'Snoozed until ' + j.data.snoozed_until + '. Reloading…', type: 'success' };
+                    this.optFlash = { message: j.data.cleared ? 'Snooze cleared. Reloading…' : 'Snoozed until ' + (j.data.snoozed_until_local || j.data.snoozed_until) + '. Reloading…', type: 'success' };
                     setTimeout(() => window.location.reload(), 800);
                 } else {
                     this.optFlash = { message: (j.error && j.error.message) || 'Snooze failed', type: 'error' };

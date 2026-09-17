@@ -67,7 +67,10 @@ if ($category !== '' && array_key_exists($category, $allowedCategories)) {
 
 switch ($dateRange) {
     case 'today':
-        $where[] = 'n.created_at >= UTC_DATE()';
+        // created_at is UTC; UTC_DATE() made "Today" reset at 5pm Pacific (4pm winter).
+        // Company-local midnight as a UTC instant, pushed in fragment order.
+        $where[]  = 'n.created_at >= ?';
+        $params[] = ff_local_day_start_utc();
         break;
     case 'week':
         $where[] = 'n.created_at >= (UTC_TIMESTAMP() - INTERVAL 7 DAY)';

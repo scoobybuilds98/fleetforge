@@ -102,7 +102,8 @@ try {
         'notification_type' => 'morning_digest_test',
         'status'            => $ok ? 'sent' : 'failed',
         'error_message'     => $ok ? null : 'Mailer::send returned false',
-        'sent_at'           => $ok ? date('Y-m-d H:i:s') : null,
+        // S-LOCAL-DAY-TS: UTC like created_at — briefing readers COALESCE the two.
+        'sent_at'           => $ok ? ff_now_utc() : null,
     ]);
 
     db_insert('audit_log', [
@@ -124,7 +125,7 @@ try {
     json_success([
         'recipient' => $email,
         'subject'   => $subject,
-        'sent_at'   => date('Y-m-d H:i:s'),
+        'sent_at'   => gmdate('c'), // ISO-8601 with offset — unambiguous instant
     ]);
 
 } catch (\Throwable $e) {

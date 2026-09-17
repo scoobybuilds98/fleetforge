@@ -27,7 +27,11 @@ $complete = db_count("SELECT COUNT(*) FROM inspections WHERE status = 'complete'
 $signed   = db_count(
     "SELECT COUNT(*) FROM inspections
      WHERE status = 'signed'
-       AND signed_at >= DATE_FORMAT(NOW(), '%Y-%m-01')"
+       AND signed_at >= ?",
+    // signed_at is a UTC DATETIME: "this month" starts at LOCAL midnight on the
+    // 1st (ff_local_month_start_utc), not the UTC month boundary, which rolled
+    // the tile over at 5pm Pacific on the last day (S-LOCAL-DAY-TS).
+    [ff_local_month_start_utc()]
 );
 
 json_success([

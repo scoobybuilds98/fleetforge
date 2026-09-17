@@ -55,7 +55,9 @@ $start = time();
 
 try {
     $thresholdDays = max(1, (int) settings_get('reservations.stale_after_days', '14'));
-    $cutoff        = date('Y-m-d H:i:s', strtotime("-{$thresholdDays} days"));
+    // S-LOCAL-DAY-TS: UTC instant — compared with reservations.created_at (UTC
+    // DATETIME); PHP-local date() made the window 7-8h longer than configured.
+    $cutoff        = ff_now_utc("-{$thresholdDays} days");
     $now           = date('Y-m-d H:i:s');
     $cancelNote    = "Auto-cancelled by stale-reservation cron on {$now}"
         . " — reservation remained pending for {$thresholdDays}+ days with no confirmation.";

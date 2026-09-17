@@ -556,7 +556,8 @@ final class CustomerReminders
                 'notification_type' => $dedupType,
                 'status'            => $status,
                 'error_message'     => $error,
-                'sent_at'           => $status === 'sent' ? date('Y-m-d H:i:s') : null,
+                // S-LOCAL-DAY-TS: UTC like the DB-defaulted created_at (was Pacific wall time).
+                'sent_at'           => $status === 'sent' ? \ff_now_utc() : null,
             ]);
         } catch (\Throwable $e) {
             error_log('[CustomerReminders] notification_log insert failed: ' . $e->getMessage());

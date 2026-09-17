@@ -10,8 +10,9 @@ declare(strict_types=1);
  * crossing (`ai.budget_alert_thresholds`).
  *
  * Per-threshold dedup is stored in `ai.budget_alert_last_sent` as a
- * JSON map {threshold: 'YYYY-MM-DD'}. The check resets each calendar
- * day (UTC) so threshold N fires at most once per day per crossing.
+ * JSON map {threshold: 'YYYY-MM-DD'}. The check resets each business-local
+ * calendar day (ff_today(); S-LOCAL-DAY-TS — was UTC) so threshold N fires at
+ * most once per day per crossing.
  *
  * Called from two surfaces:
  *   1. cron/ai_budget_check.php — hourly, dedicated cron
@@ -45,10 +46,14 @@ class TokenBudgetMonitor
      */
     public static function check(): array
     {
+        // Business-local day — the SAME window TokenTracker::canSpend() enforces
+        // (S-LOCAL-DAY-TS; was UTC CURDATE(), resetting at 5pm/4pm Pacific).
+        [$dayStartUtc, $dayEndUtc] = TokenTracker::todayWindowUtc();
         $usage = (int) db_count(
             "SELECT COALESCE(SUM(total_tokens), 0)
                FROM ai_query_log
-              WHERE DATE(created_at) = CURDATE()"
+              WHERE created_at >= ? AND created_at < ?",
+            [$dayStartUtc, $dayEndUtc]
         );
         $limit = (int) settings_get('ai.daily_token_limit', 500000);
         $percent = $limit > 0 ? $usage / $limit : 0.0;
@@ -63,11 +68,11 @@ class TokenBudgetMonitor
         $lastSent = json_decode($lastSentJson, true);
         if (!is_array($lastSent)) { $lastSent = []; }
 
-        // gmdate (UTC) so the per-threshold dedup key rolls over on the SAME
-        // boundary as the usage counter (MySQL CURDATE() is UTC). date() in
-        // APP_TIMEZONE lagged UTC in the evening window → duplicate/one-cycle-late
-        // budget alerts. S-AI-AUDIT-HIGH-FIX.
-        $today = gmdate('Y-m-d');
+        // The per-threshold dedup key MUST roll over on the SAME boundary as the
+        // usage counter above (S-AI-AUDIT-HIGH-FIX lesson: a mismatch gives
+        // duplicate/one-cycle-late alerts). Both are now the business-local day
+        // (S-LOCAL-DAY-TS; previously both UTC via gmdate()/CURDATE()).
+        $today = ff_today();
         $alertsSent = [];
         $skipped = [];
 
@@ -178,7 +183,8 @@ class TokenBudgetMonitor
                 'entity_id'         => (int) $r['id'],
                 'notification_type' => 'ai_budget_alert',
                 'status'            => $ok ? 'sent' : 'failed',
-                'sent_at'           => $ok ? date('Y-m-d H:i:s') : null,
+                // UTC like every other DB-defaulted DATETIME (S-LOCAL-DAY-TS).
+                'sent_at'           => $ok ? ff_now_utc() : null,
             ]);
 
             if ($ok) $sent++;
@@ -204,25 +210,54 @@ class TokenBudgetMonitor
      */
     public static function snapshot(): array
     {
-        $today = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE DATE(created_at) = CURDATE()");
-        $mtd   = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')");
-        $w7    = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)");
-        $d30   = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)");
+        // S-LOCAL-DAY-TS: every window is a business-local calendar window
+        // (created_at is UTC). "today" is TokenTracker's enforcement window so the
+        // widget matches the canSpend() gate; last_7d/last_30d keep their calendar
+        // meaning (local midnight N days ago, was CURDATE() - N DAY = UTC midnight).
+        [$dayStartUtc, $dayEndUtc] = TokenTracker::todayWindowUtc();
+        $mtdStartUtc = ff_local_month_start_utc();
+        $w7StartUtc  = ff_local_day_start_utc(ff_local_date_add(ff_today(), -7));
+        $d30StartUtc = ff_local_day_start_utc(ff_local_date_add(ff_today(), -30));
+
+        $today = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= ? AND created_at < ?", [$dayStartUtc, $dayEndUtc]);
+        $mtd   = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= ?", [$mtdStartUtc]);
+        $w7    = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= ?", [$w7StartUtc]);
+        $d30   = db_row("SELECT COALESCE(SUM(total_tokens),0) AS tokens, COUNT(*) AS requests, COALESCE(SUM(cost_usd),0) AS cost FROM ai_query_log WHERE created_at >= ?", [$d30StartUtc]);
 
         $byFeature = db_select(
             "SELECT query_type, SUM(total_tokens) AS tokens, COUNT(*) AS requests
                FROM ai_query_log
-              WHERE DATE(created_at) = CURDATE()
+              WHERE created_at >= ? AND created_at < ?
               GROUP BY query_type
-              ORDER BY tokens DESC"
+              ORDER BY tokens DESC",
+            [$dayStartUtc, $dayEndUtc]
         );
-        $daily = db_select(
-            "SELECT DATE(created_at) AS d, SUM(total_tokens) AS tokens, SUM(cost_usd) AS cost
+
+        // Daily chart: DATE(created_at) would bucket by UTC day, and named MySQL
+        // zones aren't loaded (CONVERT_TZ → NULL), so aggregate per UTC quarter-
+        // hour in SQL and fold each slot into its local day in PHP. Quarter-hours
+        // (not hours) so a :30/:45-offset company.timezone can't split a bucket.
+        $hourly = db_select(
+            "SELECT CONCAT(DATE_FORMAT(created_at, '%Y-%m-%d %H:'),
+                           LPAD(FLOOR(MINUTE(created_at) / 15) * 15, 2, '0'), ':00') AS h,
+                    SUM(total_tokens) AS tokens, SUM(cost_usd) AS cost
                FROM ai_query_log
-              WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-              GROUP BY DATE(created_at)
-              ORDER BY d"
+              WHERE created_at >= ?
+              GROUP BY h
+              ORDER BY h",
+            [$w7StartUtc]
         );
+        $dailyMap = [];
+        foreach ($hourly as $hr) {
+            $d = ff_utc_to_local((string) $hr['h'], 'Y-m-d');
+            $dailyMap[$d] ??= ['d' => $d, 'tokens' => 0, 'cost' => 0.0];
+            $dailyMap[$d]['tokens'] += (int) $hr['tokens'];
+            // Re-round: summing floats in PHP can surface 0.30000000000000004 where
+            // SQL's DECIMAL SUM was exact (cost_usd is DECIMAL(12,6)).
+            $dailyMap[$d]['cost']    = round($dailyMap[$d]['cost'] + (float) $hr['cost'], 6);
+        }
+        ksort($dailyMap); // slots arrive sorted; ksort keeps "ORDER BY d" explicit
+        $daily = array_values($dailyMap);
 
         $limit = (int) settings_get('ai.daily_token_limit', 500000);
         $todayTokens = (int) ($today['tokens'] ?? 0);

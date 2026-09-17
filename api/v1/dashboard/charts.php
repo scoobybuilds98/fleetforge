@@ -67,7 +67,11 @@ if ($requestedChart !== null && !in_array($requestedChart, $allowedCharts, true)
 // Build the list of charts to fetch
 $chartsToFetch = ($requestedChart !== null) ? [$requestedChart] : $allowedCharts;
 
-$now          = date('Y-m-d H:i:s');
+// S-LOCAL-DAY-TS: report_cache timestamps are UTC (cache_cleanup.php purges
+// `expires_at < NOW()` on the +00:00 session — a Pacific wall-time expiry was
+// deleted on the next run). $now is both the `expires_at > ?` cutoff and the
+// written generated_at, so it moves to UTC together with $expiresAt.
+$now          = ff_now_utc();
 $cacheTtlMin  = 15;
 $results      = [];
 
@@ -94,7 +98,7 @@ foreach ($chartsToFetch as $chartKey) {
 
     // ── Build fresh dataset ────────────────────────────────────
     $dataset    = build_chart_dataset($chartKey);
-    $expiresAt  = date('Y-m-d H:i:s', strtotime("+{$cacheTtlMin} minutes"));
+    $expiresAt  = ff_now_utc("+{$cacheTtlMin} minutes"); // UTC, lockstep with $now
 
     db_execute(
         "REPLACE INTO report_cache

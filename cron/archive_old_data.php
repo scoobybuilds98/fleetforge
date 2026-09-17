@@ -72,8 +72,10 @@ try {
     // ── Retention thresholds ─────────────────────────────────────────────────
     $auditRetentionDays  = max(30, (int) settings_get('archive.audit_log_retention_days', '365'));
     $notifRetentionDays  = max(7,  (int) settings_get('archive.notification_log_retention_days', '90'));
-    $auditCutoff         = date('Y-m-d H:i:s', strtotime("-{$auditRetentionDays} days"));
-    $notifCutoff         = date('Y-m-d H:i:s', strtotime("-{$notifRetentionDays} days"));
+    // S-LOCAL-DAY-TS: UTC instants — compared with the UTC created_at of
+    // audit_log / notification_log; PHP-local date() was 7-8h off.
+    $auditCutoff         = ff_now_utc("-{$auditRetentionDays} days");
+    $notifCutoff         = ff_now_utc("-{$notifRetentionDays} days");
 
     // ── Helper: archive one table in chunks ──────────────────────────────────
     // Returns [archived_count, error_count]

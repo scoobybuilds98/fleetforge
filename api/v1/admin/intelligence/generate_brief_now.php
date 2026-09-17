@@ -67,7 +67,9 @@ try {
                 'generated'       => false,
                 'cache_hit'       => true,
                 'cache_id'        => (int) $existing['id'],
-                'cached_at'       => (string) $existing['generated_at'],
+                // generated_at is a UTC DATETIME — emit ISO-8601 with offset so the
+                // client never reads it as local wall time (S-LOCAL-DAY-TS).
+                'cached_at'       => gmdate('c', strtotime((string) $existing['generated_at'] . ' UTC')),
                 'brief_preview'   => mb_substr($brief, 0, 400),
                 'brief_full'      => $brief,
                 'tokens_used'     => 0,
@@ -164,12 +166,17 @@ try {
     // S-INTEL-FIX2: report_cache columns are parameters_hash + generated_at,
     // NOT cache_key + created_at. Schema mismatch made every insert error
     // out, so even successful Claude calls would never be cached.
-    $generatedAt = date('Y-m-d H:i:s');
-    $expiresAt   = date('Y-m-d H:i:s', strtotime('+24 hours'));
+    // S-LOCAL-DAY-TS: columns are UTC — Gate 3 above and the renderer/cleanup
+    // readers compare them to NOW() on the +00:00 session. date() wrote Pacific
+    // wall time, so a fresh brief failed Gate 3's 60-minute window (looked
+    // 7-8h old) and expired 7-8h early.
+    $generatedAt = ff_now_utc();
+    $expiresAt   = ff_now_utc('+24 hours');
     $cachePayload = [
         'brief'        => $briefText,
-        'generated_at' => $generatedAt,
-        'expires_at'   => $expiresAt,
+        // ISO-8601 with offset: strtotime()/JS Date() parse the true instant.
+        'generated_at' => gmdate('c', strtotime($generatedAt . ' UTC')),
+        'expires_at'   => gmdate('c', strtotime($expiresAt . ' UTC')),
         'model'        => $model,
         'metrics'      => $metrics,
         'manual'       => true,

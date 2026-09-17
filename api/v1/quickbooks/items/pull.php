@@ -89,7 +89,8 @@ try {
             'qbo_expense_account_id'   => $it['expense_account_id'] !== '' ? $it['expense_account_id'] : null,
             'qbo_expense_account_name' => $it['expense_account_name'] !== '' ? $it['expense_account_name'] : null,
             'mapping_status'           => 'qbo_only',
-            'last_pull_at'             => date('Y-m-d H:i:s'),
+            // S-LOCAL-DAY-TS: UTC, matching the UPDATE branch's `last_pull_at = NOW()`.
+            'last_pull_at'             => ff_now_utc(),
             'created_by_user_id'       => $userId,
         ]);
         $insertedRows++;

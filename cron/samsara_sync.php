@@ -358,7 +358,9 @@ try {
                     'entity_id'         => (int) $c['id'],
                     'notification_type' => $type,
                     'status'            => 'sent',
-                    'sent_at'           => $now,
+                    // S-LOCAL-DAY-TS: sent_at is UTC like the DB-defaulted created_at. Not
+                    // $now — that local value also feeds the samsara sync timestamps above.
+                    'sent_at'           => ff_now_utc(),
                 ]);
             }
         }

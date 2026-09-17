@@ -117,8 +117,10 @@ db_transaction(function () use ($id, $insp, $currentStatus, $newStatus, $notes, 
     }
 
     // On 'signed': record signed_at timestamp
+    // S-LOCAL-DAY-TS: UTC — show.php renders it via format_datetime() (reads
+    // UTC) and the KPI tiles compare it with NOW()-based month bounds.
     if ($newStatus === 'signed') {
-        $updateData['signed_at'] = date('Y-m-d H:i:s');
+        $updateData['signed_at'] = ff_now_utc();
     }
 
     db_execute(

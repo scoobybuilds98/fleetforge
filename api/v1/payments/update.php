@@ -87,7 +87,10 @@ if (empty($updates)) {
     json_validation_error([], 'No editable fields provided.');
 }
 
-$updates['updated_at'] = date('Y-m-d H:i:s');
+// UTC like the column's ON UPDATE CURRENT_TIMESTAMP (PDO +00:00), so the value echoed
+// below equals what show.php later returns as the lock token. Kept explicit: an
+// identical metadata re-save changes nothing and ON UPDATE would not fire.
+$updates['updated_at'] = ff_now_utc();
 
 db_transaction(function () use ($id, $updates, $payment) {
     db_update('payments', $updates, 'id = ?', [$id]);

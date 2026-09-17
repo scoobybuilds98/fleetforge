@@ -2073,8 +2073,11 @@ if (!empty($invoice['lease_id']) && ($invoice['odometer_source'] ?? null) === 'g
           ORDER BY created_at DESC LIMIT 1",
         [
             (int) $invoice['lease_id'],
-            $invoice['billing_period_start'] . ' 00:00:00',
-            date('Y-m-d H:i:s', strtotime($invoice['billing_period_end'] . ' +2 days')),
+            // S-LOCAL-DAY-TS: audit_log.created_at is UTC, the period dates are
+            // local business days — bound at LOCAL 00:00 on period start through
+            // local 00:00 two days after period end, expressed as UTC instants.
+            ff_local_day_start_utc((string) $invoice['billing_period_start']),
+            ff_local_day_start_utc(ff_local_date_add((string) $invoice['billing_period_end'], 2)),
         ]
     );
     if ($samsaraAudit && !empty($samsaraAudit['new_values'])) {

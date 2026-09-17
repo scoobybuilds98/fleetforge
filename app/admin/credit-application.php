@@ -429,7 +429,10 @@ if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminP
                 $termsUrl,
                 $sigPath,
                 !empty($uploadedDocIds) ? json_encode($uploadedDocIds) : null,
-                $now,
+                // S-LOCAL-DAY-TS: updated_at in UTC (the 'opened' flip above and
+                // ON UPDATE write NOW()); PHP-local $now made it go BACKWARDS 7-8h.
+                // The optimistic guard still compares the re-read $freshApp value.
+                ff_now_utc(),
                 (int)$app['id'],
                 $freshApp['updated_at'],
             ]

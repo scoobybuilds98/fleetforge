@@ -57,8 +57,13 @@ $bandCounts = ['low' => 0, 'medium' => 0, 'high' => 0];
 
 try {
     $today          = date('Y-m-d');
-    $cutoff6months  = date('Y-m-d H:i:s', strtotime('-6 months'));
-    $cutoff12months = date('Y-m-d H:i:s', strtotime('-12 months'));
+    // S-LOCAL-DAY-TS: the damage_claims.created_at cutoffs are UTC instants
+    // (created_at is a UTC DATETIME; PHP-local date() shifted them 7-8h). The
+    // invoices.due_date (business DATE) lower bound gets its own company-local
+    // date — one variable used to serve both columns.
+    $cutoff6months      = ff_now_utc('-6 months');
+    $cutoff12months     = ff_now_utc('-12 months');
+    $cutoff12monthsDate = (new DateTimeImmutable(ff_today()))->modify('-12 months')->format('Y-m-d');
 
     // -----------------------------------------------------------------------
     // Pull every customer + the precomputed risk-input booleans/counts.
@@ -116,8 +121,9 @@ try {
         // Business DATE vs company-local today: SQL CURDATE() is the UTC day
         // (session time_zone '+00:00'), a day ahead after 5pm Pacific (4pm in winter), so the
         // three invoices.due_date comparisons bind ff_today() instead.
-        // Order = textual '?' order: DATEDIFF, due_date <, due_date <, then cutoffs.
-        [ff_today(), ff_today(), ff_today(), $cutoff12months, $cutoff6months, $cutoff12months]
+        // Order = textual '?' order: DATEDIFF, due_date <, due_date <, due_date >=
+        // (local DATE), then the two UTC damage_claims.created_at cutoffs.
+        [ff_today(), ff_today(), ff_today(), $cutoff12monthsDate, $cutoff6months, $cutoff12months]
     );
 
     foreach ($customers as $cust) {

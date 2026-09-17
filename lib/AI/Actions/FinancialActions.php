@@ -534,7 +534,8 @@ class FinancialActions
                     'amount_paid' => $newAmountPaid,
                     'balance_due' => $newBalanceDue,
                     'status'      => $revertedStatus,
-                    'updated_at'  => date('Y-m-d H:i:s'),
+                    // UTC like ON UPDATE (PDO +00:00); explicit because the 0.00 clamps can leave the row unchanged.
+                    'updated_at'  => ff_now_utc(),
                 ];
                 if ($revertedStatus !== 'paid') {
                     $invoiceUpdates['paid_date'] = null;

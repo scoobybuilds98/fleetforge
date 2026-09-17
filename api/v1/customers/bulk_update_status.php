@@ -158,7 +158,8 @@ foreach ($cleanIds as $id) {
                 [
                     'status'     => $targetStatus,
                     'updated_by' => $userId,
-                    'updated_at' => date('Y-m-d H:i:s'),
+                    // S-LOCAL-DAY-TS: UTC, like ON UPDATE CURRENT_TIMESTAMP.
+                    'updated_at' => ff_now_utc(),
                 ],
                 'id = ?',
                 [$id]

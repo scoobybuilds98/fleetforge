@@ -54,7 +54,10 @@ if (!$customerExists) {
 }
 
 $userId = current_user_id();
-$now    = date('Y-m-d H:i:s');
+// S-LOCAL-DAY-TS: UTC — the row's created_at is the column DEFAULT (UTC) and
+// customers/show.php formats the echoed created_at as UTC ('Z'); PHP-local
+// wall time rendered a new note 7-8h early (the previous day each evening).
+$now    = ff_now_utc();
 
 // ── Insert ──────────────────────────────────────────────────────
 $noteId = null;

@@ -588,6 +588,100 @@ function ff_today(): string
 }
 }
 
+// ============================================================
+// Local-day boundaries for UTC DATETIME columns — S-LOCAL-DAY-TS (2026-09-17)
+//
+// WHY: DATETIME columns (created_at, updated_at, expires_at…) hold UTC:
+// includes/db.php pins the session to '+00:00' (DEFAULT CURRENT_TIMESTAMP /
+// NOW() write UTC) and format_datetime() reads them as UTC. A "today" /
+// "this month" / "last N days" figure over such a column must start at LOCAL
+// midnight — 00:00 America/Vancouver is 07:00 UTC (PDT) / 08:00 UTC (PST) —
+// not at UTC midnight (CURDATE()/UTC_DATE()), which is 5pm/4pm the previous
+// evening: tiles reset mid-afternoon and counted last evening as "today".
+// Named MySQL time zones are NOT loaded (CONVERT_TZ(…,'America/Vancouver') is
+// NULL on dev and prod), so the conversion is done here, DST-correct, and the
+// SQL stays sargable:
+//   "created_at >= ? AND created_at < ?"
+//   [ff_local_day_start_utc(), ff_local_day_start_utc(ff_local_date_add(ff_today(), 1))]
+// Day/month BUCKETS: aggregate by UTC hour (or select rows) in SQL and map each
+// value to its local day with ff_utc_to_local() in PHP.
+// WRITES: a PHP-computed timestamp stored into a UTC DATETIME column must be
+// ff_now_utc() (or NOW() in SQL) — never date('Y-m-d H:i:s'), which is local
+// wall time and lands 7–8h early next to DB-defaulted rows.
+// ============================================================
+
+if (!function_exists('ff_local_day_start_utc')) {
+/**
+ * UTC 'Y-m-d H:i:s' instant of 00:00 business-local time on a local date.
+ *
+ * @param string|null $localDate 'Y-m-d' company-local date; null = ff_today()
+ * @return string e.g. '2026-09-16 07:00:00' for 2026-09-16 in PDT
+ */
+function ff_local_day_start_utc(?string $localDate = null): string
+{
+    $local = new DateTimeImmutable(($localDate ?? ff_today()) . ' 00:00:00', ff_business_timezone());
+    return $local->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+}
+}
+
+if (!function_exists('ff_local_month_start_utc')) {
+/**
+ * UTC instant of 00:00 local time on the 1st of the local month containing
+ * $localDate.
+ *
+ * @param string|null $localDate 'Y-m-d' company-local date; null = ff_today()
+ * @return string UTC 'Y-m-d H:i:s'
+ */
+function ff_local_month_start_utc(?string $localDate = null): string
+{
+    return ff_local_day_start_utc(substr($localDate ?? ff_today(), 0, 7) . '-01');
+}
+}
+
+if (!function_exists('ff_local_date_add')) {
+/**
+ * Calendar arithmetic on a local 'Y-m-d' date (dates, not instants — DST-free).
+ *
+ * @param string $localDate 'Y-m-d'
+ * @param int    $days      may be negative
+ * @return string 'Y-m-d'
+ */
+function ff_local_date_add(string $localDate, int $days): string
+{
+    return (new DateTimeImmutable($localDate))->modify(($days >= 0 ? '+' : '') . $days . ' days')->format('Y-m-d');
+}
+}
+
+if (!function_exists('ff_utc_to_local')) {
+/**
+ * Convert a stored UTC DATETIME string to business-local time.
+ *
+ * @param string $utc    'Y-m-d H:i:s' (UTC)
+ * @param string $format output format; default 'Y-m-d' = the local calendar day
+ * @return string
+ */
+function ff_utc_to_local(string $utc, string $format = 'Y-m-d'): string
+{
+    return (new DateTimeImmutable($utc, new DateTimeZone('UTC')))
+        ->setTimezone(ff_business_timezone())
+        ->format($format);
+}
+}
+
+if (!function_exists('ff_now_utc')) {
+/**
+ * Current time (optionally offset) as a UTC DATETIME string — the value to
+ * WRITE from PHP into a UTC DATETIME column or to compare against one.
+ *
+ * @param string $modify optional strtotime-style offset, e.g. '+24 hours', '-7 days'
+ * @return string 'Y-m-d H:i:s' in UTC
+ */
+function ff_now_utc(string $modify = ''): string
+{
+    return $modify === '' ? gmdate('Y-m-d H:i:s') : gmdate('Y-m-d H:i:s', strtotime($modify));
+}
+}
+
 // clean_date() — return a validated Y-m-d date string, or null
 // Rejects invalid calendar dates (e.g. Feb 30).
 if (!function_exists('clean_date')) {

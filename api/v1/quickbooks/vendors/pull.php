@@ -100,7 +100,8 @@ try {
             'qbo_active'         => $v['active'] ? 1 : 0,
             'qbo_v4v_status'     => $v['v4v_status'],
             'mapping_status'     => 'qbo_only',
-            'last_pull_at'       => date('Y-m-d H:i:s'),
+            // S-LOCAL-DAY-TS: UTC, matching the UPDATE branch's `last_pull_at = NOW()`.
+            'last_pull_at'       => ff_now_utc(),
             'created_by_user_id' => $userId,
         ]);
         $insertedRows++;
