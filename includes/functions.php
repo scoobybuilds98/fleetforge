@@ -1607,3 +1607,96 @@ function redact_rows(array $rows, array $keys): array
         $rows
     );
 }
+
+/**
+ * ff_is_money_field() — true if a column/field NAME denotes a monetary value.
+ *
+ * For payloads whose keys are not known in advance — audit_log old/new value
+ * diffs span every entity's columns — so a fixed redact_keys() list can't be
+ * written. Classifies by underscore-delimited name tokens, derived from every
+ * DECIMAL money column on the Activity-card entities (leases, customers,
+ * payments, credit_notes, vendors, work orders, damage claims, units):
+ * daily_rate, precharge_amount, acquisition_cost, total_spent, late_fee_value,
+ * total_invoiced, final_total_charge, currency_markup_pct, tax_rate_gst, …
+ * Whole tokens only, so odometer_start_km, estimated_mileage_km,
+ * km_to_miles_conversion, total_distance_km and total_days stay operational.
+ * Deliberately errs toward hiding: rate_method / rate_card_id / tax_exempt
+ * are classed money, which only ever hides pricing context from roles that
+ * already have rates:NONE.
+ *
+ * @param  string $field  Column / JSON key name (snake_case).
+ * @return bool
+ */
+function ff_is_money_field(string $field): bool
+{
+    static $tokens = [
+        'amount' => true, 'amounts' => true, 'balance' => true, 'cost' => true, 'costs' => true,
+        'price' => true, 'rate' => true, 'revenue' => true, 'spent' => true, 'fee' => true,
+        'fees' => true, 'value' => true, 'charge' => true, 'invoiced' => true, 'paid' => true,
+        'pct' => true, 'subtotal' => true, 'tax' => true, 'discount' => true, 'deposit' => true,
+    ];
+    $field = strtolower($field);
+    // 'credit' alone is too broad (credit_note_number, credit_application_id).
+    if ($field === 'credit_limit') {
+        return true;
+    }
+    foreach (explode('_', $field) as $part) {
+        if (isset($tokens[$part])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * ff_scrub_money_text() — replace monetary figures inside free text with
+ * "[amount hidden]", keeping the operational wording around them.
+ *
+ * Serve-time companion to can_view_financials() for text that interpolates
+ * money: audit_log.notes and text-valued change fields. Rules target how the
+ * app's writers actually put money into text (surveyed across every distinct
+ * audit note shape in the dev corpus), applied in order:
+ *   1. currency-marked prefix: "$65.00", "$-768.57", "-$40.01", "$0.5000/km",
+ *      "$0 mileage", "CAD 1444.90", "C$12", "US$ 5"
+ *   2. currency-code suffix:   "12.50 USD"
+ *   3. money keyword + number: "fee 0", "amount 40.00", "balance: 300"
+ *   4. any bare number with 2+ decimal places: "-= 1040.00", "80.00 → 90.00",
+ *      "Gain/loss=122373.64" — every DECIMAL money column serializes that way,
+ *      which is why unmarked amounts (vendor total_spent notes) are still caught.
+ * Rule 4 skips numbers followed by a distance/time/size unit ("2,280.00 km",
+ * "12.50 hours") and never touches record numbers, dates, IPs or versions
+ * (INV-2026-00753, 2026-06-15, 127.0.0.1, v1.10.2) — no 2-decimal group or a
+ * word/dot immediately before it. Non-money 2-decimal ratios ("monthly/4.33")
+ * are hidden too; over-hiding a ratio beats leaking an amount.
+ *
+ * Limitation (documented, not detectable): an integer amount with no currency
+ * marker and no money keyword ("600") passes through. Audit writers emit money
+ * as DECIMAL strings or format_currency()/number_format() output, so keep new
+ * notes in one of those shapes.
+ *
+ * @param  string $text  Free text that may contain monetary figures.
+ * @return string        The text with each figure replaced by "[amount hidden]".
+ */
+function ff_scrub_money_text(string $text): string
+{
+    // Thousands-grouped or plain digits; grouped form so "1,250, then" doesn't
+    // swallow the trailing comma.
+    $num    = '(?:\d{1,3}(?:,\d{3})+|\d+)';
+    $hidden = '[amount hidden]';
+
+    $rules = [
+        // 1. Currency symbol / code prefix (optional sign either side).
+        '/-?(?:\b(?:CAD|USD|EUR|GBP)\s*\$?|\b(?:C|CA|US)\$|\$|€|£)\s*-?' . $num . '(?:\.\d+)?/u' => $hidden,
+        // 2. Currency code suffix.
+        '/-?' . $num . '(?:\.\d+)?\s*(?:CAD|USD|EUR|GBP)\b/u' => $hidden,
+        // 3. Money keyword followed by a figure (integers included).
+        '/\b(amount|balance|fee|fees|cost|price|refund|paid|charge|deposit)\b(\s*[:=]?\s*)-?' . $num . '(?:\.\d+)?/iu' => '$1$2' . $hidden,
+        // 4. Bare 2+-decimal number not glued to a word/dot/comma, not a version,
+        //    not followed by a measurement unit.
+        '/(?<![\w.,])-?' . $num . '\.\d{2,}(?!\d)(?!\.\d)(?!\s*(?:km|kms|mi|mile|miles|hr|hrs|hour|hours|ft|lb|lbs|kg|kph|mph|ms)\b)/iu' => $hidden,
+    ];
+    foreach ($rules as $pattern => $replacement) {
+        $text = (string) preg_replace($pattern, $replacement, $text);
+    }
+    return $text;
+}
