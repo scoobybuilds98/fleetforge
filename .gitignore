@@ -106,3 +106,6 @@ logs/
 # operator convenience; not tracked. Added 2026-05-12 via S-FORK-CLOSE-RESOLVE
 # after the file had sat untracked at repo root since 2026-05-06.
 FleetForge Prompt Review.md
+
+# Staff-training walkthrough renders (scripts/walkthrough/) — large MP4s, never committed
+training-videos/
