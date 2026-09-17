@@ -33,6 +33,14 @@
  *        current +2 invoices / +$500.00, ar30 +1 / +$200.00.
  *   L  api/v1/invoices/index.php?customer_id=…&aging=current → DUE_TODAY + DUE_IN_5;
  *      &aging=ar30 → DUE_YESTERDAY only.
+ *   P  tile ↔ drill-down parity (S-SQL-LOCAL-DATE-FOLLOWUPS). The list's aging filter used
+ *      status 'sent' (current) / 'sent','overdue' (ar30/60/90) while the tiles count
+ *      'partially_paid' too, so a clicked tile listed fewer invoices than it showed.
+ *      The extended fixture adds PART_TODAY (partially_paid, due D, $200 balance),
+ *      PART_YESTERDAY (partially_paid, due D-1, $50), OVERDUE_2 (overdue, due D-2,
+ *      $25), PART_45 (partially_paid, due D-45, $10), PART_100 (partially_paid,
+ *      due D-100, $5). For EVERY bucket: list ids == expected set, list count ==
+ *      tile count delta, and list balance_due sum == tile total delta.
  *
  * USAGE: php tests/_smoke_local_date_overdue.php
  * EXIT:  0 = all pass, 1 = any failure, 2 = setup error.
@@ -77,7 +85,8 @@ error_reporting(E_ERROR | E_PARSE);
 $root      = $argv[1];
 $endpoint  = $argv[2];                       // e.g. api/v1/invoices/kpis.php
 $query     = $argv[3];                       // query string; {cust} → fixture customer id
-$withFix   = $argv[4] === '1';
+$fixMode   = $argv[4];                       // '0' none | '1' base fixture | '2' base + partially_paid/overdue
+$withFix   = $fixMode !== '0';
 
 ob_start();
 require $root . '/config/app.php';
@@ -102,15 +111,15 @@ if ($withFix) {
         'company_name' => $tag . ' Co', 'contact_name' => 'Local Date Smoke',
         'province' => 'BC', 'currency' => 'CAD', 'outstanding_balance' => '700.00',
     ]);
-    $mk = static function (string $suffix, string $due, string $amt) use ($custId, $tag, $today): int {
+    $mk = static function (string $suffix, string $due, string $amt, string $status = 'sent', string $paid = '0.00') use ($custId, $tag, $today): int {
         return db_insert('invoices', [
             'invoice_number' => $tag . '-' . $suffix, 'customer_id' => $custId, 'lease_id' => null,
             'company_name_snapshot' => $tag . ' Co',
             'billing_period_start' => $today, 'billing_period_end' => $today, 'billing_period_days' => 1,
             'billing_type' => 'single_period', 'invoice_date' => $today, 'due_date' => $due,
-            'sent_date' => $today, 'status' => 'sent', 'currency' => 'CAD',
-            'subtotal' => $amt, 'total_amount' => $amt, 'amount_paid' => '0.00',
-            'credits_applied' => '0.00', 'balance_due' => $amt,
+            'sent_date' => $today, 'status' => $status, 'currency' => 'CAD',
+            'subtotal' => $amt, 'total_amount' => $amt, 'amount_paid' => $paid,
+            'credits_applied' => '0.00', 'balance_due' => bcsub($amt, $paid, 2),
         ]);
     };
     $d = new DateTimeImmutable($today);
@@ -119,9 +128,20 @@ if ($withFix) {
         'due_yesterday' => $mk('YESTERDAY', $d->modify('-1 day')->format('Y-m-d'), '200.00'),
         'due_in_5'      => $mk('IN5', $d->modify('+5 days')->format('Y-m-d'), '400.00'),
     ];
+    if ($fixMode === '2') {
+        // Outstanding invoices the tiles count but the old drill-down dropped.
+        $state['ids'] += [
+            'part_today'     => $mk('PART-TODAY', $today, '300.00', 'partially_paid', '100.00'),
+            'part_yesterday' => $mk('PART-YESTERDAY', $d->modify('-1 day')->format('Y-m-d'), '500.00', 'partially_paid', '450.00'),
+            'overdue_2'      => $mk('OVERDUE-2', $d->modify('-2 days')->format('Y-m-d'), '25.00', 'overdue'),
+            'part_45'        => $mk('PART-45', $d->modify('-45 days')->format('Y-m-d'), '30.00', 'partially_paid', '20.00'),
+            'part_100'       => $mk('PART-100', $d->modify('-100 days')->format('Y-m-d'), '15.00', 'partially_paid', '10.00'),
+        ];
+    }
     // The pre-fix predicate, evaluated under the pinned clock (non-vacuity proof).
+    // Scoped to the three 'sent' base invoices so the extended fixture doesn't shift it.
     $state['legacy_overdue_ids'] = array_map('intval', array_column(db_select(
-        'SELECT id FROM invoices WHERE customer_id = ? AND due_date < CURDATE() ORDER BY id', [$custId]
+        "SELECT id FROM invoices WHERE customer_id = ? AND status = 'sent' AND due_date < CURDATE() ORDER BY id", [$custId]
     ), 'id'));
 }
 
@@ -151,15 +171,15 @@ PHP);
  *
  * @param string $endpoint repo-relative endpoint path
  * @param string $query    query string ({cust} is replaced with the fixture customer id)
- * @param bool   $fixture  insert the fixture customer + invoices first
+ * @param bool|string $fixture false/true = none/base fixture; '2' = base + partially_paid/overdue
  * @return array decoded harness state (+ 'json' = decoded endpoint body)
  */
-function run_scenario(string $endpoint, string $query, bool $fixture): array
+function run_scenario(string $endpoint, string $query, bool|string $fixture): array
 {
     global $harnessFile, $ROOT;
     $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harnessFile) . ' '
         . escapeshellarg($ROOT) . ' ' . escapeshellarg($endpoint) . ' '
-        . escapeshellarg($query) . ' ' . ($fixture ? '1' : '0') . ' 2>&1';
+        . escapeshellarg($query) . ' ' . (is_string($fixture) ? $fixture : ($fixture ? '1' : '0')) . ' 2>&1';
     $out = (string) shell_exec($cmd);
     $pos = strrpos($out, '@@STATE@@');
     if ($pos === false) {
@@ -225,6 +245,41 @@ try {
     check('L.2 aging=ar30 lists ONLY the invoice due yesterday',
         $listIds($a30) === [(int) $a30['ids']['due_yesterday']],
         'got=' . json_encode($listIds($a30)) . ' expected=' . json_encode([(int) $a30['ids']['due_yesterday']]));
+
+    // ── P: tile ↔ drill-down parity incl. partially_paid + overdue ───────────
+    // One kpis run with the extended fixture; its delta over $base (no fixture) is
+    // what the tiles show for this customer. Each bucket's list must show exactly
+    // those invoices. Fixture ids differ per subprocess, so sets are compared by
+    // invoice-number suffix.
+    $kx = run_scenario('api/v1/invoices/kpis.php', '', '2')['json']['data'] ?? null;
+    check('P.0 kpis endpoint returned success with the extended fixture', is_array($kx) && is_array($kb));
+    $expected = [
+        'current' => ['IN5', 'PART-TODAY', 'TODAY'],
+        'ar30'    => ['OVERDUE-2', 'PART-YESTERDAY', 'YESTERDAY'],
+        'ar60'    => ['PART-45'],
+        'ar90'    => ['PART-100'],
+    ];
+    foreach ($expected as $bucket => $suffixes) {
+        $run   = run_scenario('api/v1/invoices/index.php', "customer_id={cust}&aging={$bucket}&per_page=100", '2');
+        $items = $run['json']['data']['items'] ?? null;
+        $got   = [];
+        $sum   = '0.00';
+        foreach (is_array($items) ? $items : [] as $r) {
+            $got[] = preg_replace('/^SMOKE-LOCALDATE-\d+-/', '', (string) $r['invoice_number']);
+            $sum   = bcadd($sum, (string) $r['balance_due'], 2);
+        }
+        sort($got);
+        check("P.{$bucket}.1 aging={$bucket} lists " . implode(' + ', $suffixes),
+            $got === $suffixes, 'got=' . json_encode($got) . ' body=' . substr((string) ($run['output'] ?? ''), 0, 200));
+        if (is_array($kx) && is_array($kb)) {
+            $cntDelta = (int) $kx["{$bucket}_cnt"] - (int) $kb["{$bucket}_cnt"];
+            $totDelta = bcsub((string) $kx["{$bucket}_total"], (string) $kb["{$bucket}_total"], 2);
+            check("P.{$bucket}.2 list count == tile count delta ({$cntDelta})",
+                count($got) === $cntDelta, 'list=' . count($got) . " tile_delta={$cntDelta}");
+            check("P.{$bucket}.3 list balance_due sum == tile total delta ({$totDelta})",
+                bccomp($sum, $totDelta, 2) === 0, "list_sum={$sum} tile_delta={$totDelta}");
+        }
+    }
 } catch (\Throwable $e) {
     echo "\nEXCEPTION: {$e->getMessage()}\n{$e->getTraceAsString()}\n";
     $failures[] = 'exception';

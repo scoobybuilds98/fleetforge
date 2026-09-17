@@ -86,11 +86,15 @@ if ($customerFilter = clean_string($_GET['customer_filter'] ?? null)) {
 // a due_date range + an outstanding-status constraint so the list shows
 // only the invoices contributing to that bucket.
 //
-// Buckets mirror the aggregates in app/admin/invoices/index.php:
-//   current → status='sent'  AND due_date >= today
-//   ar30    → status IN ('sent','overdue') AND today-30d <= due_date < today
-//   ar60    → status IN ('sent','overdue') AND today-60d <= due_date < today-30d
-//   ar90    → status IN ('sent','overdue') AND due_date < today-60d
+// Buckets mirror the tile aggregates in api/v1/invoices/kpis.php EXACTLY — status
+// set included. The list used to omit 'partially_paid' (current = 'sent' only;
+// ar30/60/90 = 'sent','overdue'), so clicking a tile listed fewer invoices than
+// the tile counted: every part-paid invoice was invisible in the drill-down.
+// Change the status sets here and in kpis.php together.
+//   current → status IN ('sent','partially_paid')           AND due_date >= today
+//   ar30    → status IN ('sent','partially_paid','overdue') AND today-30d <= due_date < today
+//   ar60    → status IN ('sent','partially_paid','overdue') AND today-60d <= due_date < today-30d
+//   ar90    → status IN ('sent','partially_paid','overdue') AND due_date < today-60d
 //
 // "today" is bound as ff_today() rather than SQL CURDATE(): due_date is a DATE
 // holding a company-local calendar day, but db.php pins the session to +00:00 so
@@ -103,13 +107,13 @@ if ($aging !== null && $aging !== '') {
     $today = ff_today();
     switch ($aging) {
         case 'current':
-            $where[] = "i.status = 'sent'";
+            $where[] = "i.status IN ('sent','partially_paid')";
             // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
             $where[] = "i.due_date >= ?";
             $params[] = $today;
             break;
         case 'ar30':
-            $where[] = "i.status IN ('sent','overdue')";
+            $where[] = "i.status IN ('sent','partially_paid','overdue')";
             // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
             $where[] = "i.due_date <  ?";
             $params[] = $today;
@@ -117,7 +121,7 @@ if ($aging !== null && $aging !== '') {
             $params[] = $today;
             break;
         case 'ar60':
-            $where[] = "i.status IN ('sent','overdue')";
+            $where[] = "i.status IN ('sent','partially_paid','overdue')";
             // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
             $where[] = "i.due_date <  ? - INTERVAL 30 DAY";
             $params[] = $today;
@@ -125,7 +129,7 @@ if ($aging !== null && $aging !== '') {
             $params[] = $today;
             break;
         case 'ar90':
-            $where[] = "i.status IN ('sent','overdue')";
+            $where[] = "i.status IN ('sent','partially_paid','overdue')";
             // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
             $where[] = "i.due_date <  ? - INTERVAL 60 DAY";
             $params[] = $today;

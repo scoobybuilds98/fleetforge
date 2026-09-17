@@ -21,9 +21,10 @@ declare(strict_types=1);
  * api/v1/compliance/kpis.php — no full page reload needed.
  *
  * Features:
- *   - Color-coded expiry cells: Red=expired / Yellow=≤30d / Green=>30d / Gray=null
- *   - Filter bar: yard, status, window (7/14/30/60/90 days)
- *   - CSV export via ?export=csv — includes from/to dates + status per column
+ *   - Color-coded expiry cells: Red=expired (before today) / Yellow=today..+30d / Green=>30d / Gray=null
+ *   - Filter bar: q, yard, status, window (7/14/30/60/90 days), expired_only (KPI tile)
+ *   - CSV export via ?export=csv — includes from/to dates + status per column;
+ *     honours EVERY grid filter (q + expired_only included) so it matches the screen
  *   - 3 KPI tiles refresh dynamically after every save
  *   - Sidebar badge (compliance_alerts) auto-updates on every page load
  *
@@ -71,6 +72,21 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     // CURDATE() is the UTC day on this connection, so an evening export used a
     // window one day later than the on-screen filter it was exported from.
     $csvToday = date('Y-m-d');
+
+    // expired_only + q mirror api/v1/compliance/index.php exactly. The export used
+    // to ignore both, so exporting from the Expired tile or a search returned the
+    // WHOLE fleet (or the whole yard) instead of the rows on screen. Any filter the
+    // grid API gains must be added here too, or the CSV silently drifts again.
+    if (clean_string($_GET['expired_only'] ?? '') === '1') {
+        // Strictly before today — a document expiring today is still valid.
+        $where[]  = "(
+            (eu.cvi_expiry IS NOT NULL AND eu.cvi_expiry < ?)
+            OR (eu.registration_expiry IS NOT NULL AND eu.registration_expiry < ?)
+        )";
+        $params[] = $csvToday;
+        $params[] = $csvToday;
+    }
+
     $window = clean_int($_GET['window'] ?? 0) ?? 0;
     if ($window > 0) {
         $where[]  = "(
@@ -81,6 +97,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $params[] = $window;
         $params[] = $csvToday;
         $params[] = $window;
+    }
+
+    if ($q = clean_string($_GET['q'] ?? null)) {
+        $like     = '%' . $q . '%';
+        $where[]  = '(eu.unit_number LIKE ? OR et.name LIKE ?)';
+        $params[] = $like;
+        $params[] = $like;
     }
 
     $whereSQL = implode(' AND ', $where);
@@ -715,15 +738,24 @@ function FF_Compliance() {
             if (this.filters.status) params.set('status', this.filters.status);
             if (this.filters.window && this.filters.window !== '0')
                 params.set('window', this.filters.window);
+            // Without this an export from the Expired tile listed every unit.
+            if (this.filters.expired_only === '1')
+                params.set('expired_only', '1');
             window.location.href = `<?= base_url('compliance') ?>?${params}`;
         },
 
         // ── Cell colour ───────────────────────────────────────────────────────
         expiryStatus(date) {
             if (!date) return 'none';
+            // Same rule as the server (KPI tiles, expired_only filter, CSV):
+            // expired = expiry STRICTLY before company-local today, so a document
+            // expiring today is still valid (amber). `<=` painted it red while the
+            // tiles and export still counted it as valid.
             const today = FF_localDate();
-            const in30  = FF_localDate(Date.now() + 30 * 86400000);
-            if (date <= today) return 'expired';
+            // +30 calendar days on the date itself (noon UTC), not now + 30×24h —
+            // the millisecond offset lands on the wrong day across a DST change.
+            const in30  = new Date(Date.parse(today + 'T12:00:00Z') + 30 * 86400000).toISOString().slice(0, 10);
+            if (date < today)  return 'expired';
             if (date <= in30)  return 'warning';
             return 'ok';
         },

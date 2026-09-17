@@ -25,8 +25,12 @@ use FleetForge\Notifications\MorningBriefingRenderer;
 try {
     $tokens = TokenBudgetMonitor::snapshot();
 
+    // report_cache has no created_at column — the row timestamp is generated_at.
+    // Selecting created_at threw 42S22 and 500'd the whole Insights endpoint.
+    // Aliased back to created_at so the fallback below (and the response
+    // shape) stay unchanged; brief_content.php uses the same alias.
     $latestBrief = db_row(
-        "SELECT id, created_at, result_data FROM report_cache
+        "SELECT id, generated_at AS created_at, result_data FROM report_cache
           WHERE report_type = 'ai_fleet_brief'
           ORDER BY id DESC LIMIT 1"
     );
