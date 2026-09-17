@@ -718,27 +718,20 @@ HTML;
     private static function renderCFBody(array $r): string
     {
         $h = '<table class="rpt">';
-        $h .= '<tr class="group"><td colspan="2">Operating Activities</td></tr>';
-        $h .= '<tr><td>Net Income</td><td class="amt">' . self::money($r['net_income']) . '</td></tr>';
-        foreach (['depreciation' => 'Depreciation', 'asset_disposal' => 'Asset Disposals', 'bad_debt' => 'Bad Debt', 'fx_revaluation' => 'FX Revaluation'] as $k => $label) {
-            $h .= '<tr><td>+ ' . $label . '</td><td class="amt">' . self::money($r['non_cash'][$k]) . '</td></tr>';
+        if (!$r['is_tied_out']) {
+            $h .= '<tr><td colspan="2" style="color:#990000;">⚠ Cash tie-out difference ' . self::money($r['tie_diff']) . '</td></tr>';
         }
-        foreach ($r['working_capital'] as $wc) {
-            $h .= '<tr><td>Δ ' . htmlspecialchars((string) $wc['label']) . '</td><td class="amt">' . self::money($wc['cash_impact']) . '</td></tr>';
+        // Same row layout as the report page and ReportPdfRenderer::cashFlow().
+        foreach (ReportingService::cashFlowStatementRows($r) as $row) {
+            $label = htmlspecialchars($row['label']);
+            if ($row['type'] === 'section') {
+                $h .= '<tr class="group"><td colspan="2">' . $label . '</td></tr>';
+            } elseif ($row['type'] === 'line') {
+                $h .= '<tr><td>' . ($row['indent'] ? '&nbsp;&nbsp;&nbsp;' : '') . $label . '</td><td class="amt">' . self::money($row['amount']) . '</td></tr>';
+            } else {
+                $h .= '<tr class="total"><td>' . $label . '</td><td class="amt">' . self::money($row['amount']) . '</td></tr>';
+            }
         }
-        $h .= '<tr class="total"><td>Net Cash from Operating</td><td class="amt">' . self::money($r['operating_cash']) . '</td></tr>';
-        $h .= '<tr class="group"><td colspan="2">Investing Activities</td></tr>';
-        $h .= '<tr><td>Asset Acquisitions</td><td class="amt">(' . self::money($r['investing']['asset_acquisitions']) . ')</td></tr>';
-        $h .= '<tr><td>Asset Disposal Proceeds</td><td class="amt">' . self::money($r['investing']['asset_disposal_proceeds']) . '</td></tr>';
-        $h .= '<tr class="total"><td>Net Cash from Investing</td><td class="amt">' . self::money($r['investing']['net']) . '</td></tr>';
-        $h .= '<tr class="group"><td colspan="2">Financing Activities</td></tr>';
-        $h .= '<tr><td>Long-Term Debt (net)</td><td class="amt">' . self::money($r['financing']['long_term_debt_net']) . '</td></tr>';
-        $h .= '<tr><td>Dividends</td><td class="amt">(' . self::money($r['financing']['dividends']) . ')</td></tr>';
-        $h .= '<tr class="total"><td>Net Cash from Financing</td><td class="amt">' . self::money($r['financing']['net']) . '</td></tr>';
-        $h .= '<tr class="total"><td>Net Change in Cash</td><td class="amt">' . self::money($r['net_change']) . '</td></tr>';
-        $h .= '<tr><td>Opening Cash</td><td class="amt">' . self::money($r['opening_cash']) . '</td></tr>';
-        $h .= '<tr class="total"><td>Closing Cash (calculated)</td><td class="amt">' . self::money($r['closing_cash_calc']) . '</td></tr>';
-        $h .= '<tr><td>Closing Cash (GL 1010)</td><td class="amt">' . self::money($r['closing_cash_gl']) . '</td></tr>';
         $h .= '</table>';
         return $h;
     }

@@ -12,11 +12,24 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
+
+### F74 — Deploy S-CASHFLOW-TIE, then confirm which accounts count as cash 🟡 PARTIAL (report correctness — no data change, no migration)
+
+**Surfaced by:** S-CASHFLOW-TIE (2026-09-17).
+**Affects:** Accounting → Reports → Cash Flow (page, PDF export, year-end package PDF, AI narrative) and Working Trial Balance.
+**Detail:**
+- The Cash Flow Statement did not tie to the GL. On the dev dataset 2026 YTD was off $73,698.48 and full years were off $660k–$869k. **Prod (checked read-only 2026-09-17):** prod has no cash movement at all yet, but its current statement reports a **−$78.19** phantom net change for 2026 (credit notes posted to 2060 Customer Credits, which the old code never looked at). After deploy it reads $0.00 and ties.
+- The Working Trial Balance's Unadj CY / AJEs / Adj CY columns were one month's activity while PY Balance was a cumulative balance, so every variance was meaningless. After deploy every column is a balance (balance-sheet accounts cumulative, P&L accounts fiscal year-to-date) with a computed "Retained Earnings — prior years not yet closed" row.
+- Cash is now: accounts flagged "bank account" in the chart of accounts, any GL account linked to a checking/savings account under Accounting → Banking, the default cash account setting, a QuickBooks "undeposited funds" mapping, or an account whose name contains "undeposited". On prod today that is **1010 Cash — Operating Account (CAD)** and **1020 Cash — USD Account**.
+**Operator action (prod is read-only for the agent — run it yourself):**
+1. Deploy the latest `main` (`sudo /var/www/fleetforge/bin/deploy.sh`). No migration.
+2. If the business holds cash anywhere else (petty cash, a second chequing account, undeposited receipts), flag that GL account as a bank account or link it under Banking — otherwise its movements show as working-capital changes instead of cash.
+3. Open Cash Flow for 2026 YTD: Closing cash should equal "Closing cash per GL (1010, 1020)" and no amber tie-out banner should show. If the banner ever appears, report it — it means an entry was not classified.
 
 ### F71 — Deploy S-TRAINING-VIDEO-BUGFIX, run its migration, then fix two prod drafts that bill mileage twice 🔴 BLOCKING (money — drafts only, nothing sent)
 
@@ -527,6 +540,13 @@ INV-2026-02128 before sending it.
 
 
 ## 🟢 DEFERRED — queued for follow-up sessions
+
+### F75 — Demo dataset registers fixed assets with no GL cost entry 🟢 DEFERRED (dev/demo data only)
+
+**Surfaced by:** S-CASHFLOW-TIE (2026-09-17).
+**Affects:** the dev / presentation dataset (S-DEMO-MULTIYEAR), not prod — all 166 prod assets are `is_opening_balance = 1`.
+**Detail:** the dev register holds 49 fixed assets ($4,419,510.00, `is_opening_balance = 0`, acquired 2019-04 → 2025-10) but **no journal entry ever debits 1210/1230/1250/1270**, while depreciation of $956,846.69 was posted to 1220. So the balance sheet shows accumulated depreciation with no cost behind it (negative net PP&E), and the Cash Flow Statement — which now reads investing activity from the GL instead of the register — shows no equipment purchases. The old statement reported $660k–$869k/yr of "asset acquisitions" that never touched cash, which is what broke its tie-out.
+**Action:** when the demo pipeline is next rebuilt (`docs/DEMO_SEED_MANIFEST.md`), post each non-opening-balance asset's acquisition as a JE (DR asset cost / CR cash or AP, or a loan for financed units) — or mark pre-2023 assets `is_opening_balance = 1` with an opening-balance JE. No code change needed.
 
 ### F64 — Deploy S-CUSTOMER-NOTIFICATIONS + run migration 202608070001 🟡 PARTIAL (Task 1 already effective on code deploy)
 

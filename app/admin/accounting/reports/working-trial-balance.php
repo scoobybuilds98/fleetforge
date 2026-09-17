@@ -8,13 +8,16 @@
  * flags, lead schedule drill-down, and workpaper annotations.
  *
  * Server renders period dropdown + tickmark legend; Alpine fetches
- * the 10-column WTB on Run.
+ * the 10-column WTB on Run. Every amount column is a balance (balance-sheet
+ * accounts cumulative, income-statement accounts fiscal YTD) — the API's
+ * `basis` string is shown under the table so the reader knows (S-CASHFLOW-TIE;
+ * the columns used to mix one period's activity with a cumulative PY balance).
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php,
  *           includes/footer.php, includes/partials/accounting-nav.php,
  *           api/v1/accounting/reports/working-trial-balance.php,
  *           api/v1/accounting/workpaper-annotations/{create,index}.php
- * @session  S-ACCT-WTB
+ * @session  S-ACCT-WTB, S-CASHFLOW-TIE
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
@@ -208,7 +211,8 @@ require_once FF_ROOT . '/includes/header.php';
                                     x-text="item.row.var_pct !== null ? Number(item.row.var_pct).toFixed(2) + '%' : '—'"></td>
                                 <td class="text-secondary text-sm" x-text="item.row.ref || ''"></td>
                                 <td>
-                                    <button class="btn btn-ghost btn-xs" title="Add annotation"
+                                    <!-- computed rows (unclosed prior-year earnings) have no account to annotate -->
+                                    <button x-show="!item.row.is_computed" class="btn btn-ghost btn-xs" title="Add annotation"
                                             @click="openAnnotationModal(item.row.account_id)">+</button>
                                 </td>
                             </tr>
@@ -254,6 +258,8 @@ require_once FF_ROOT . '/includes/header.php';
                     </tr>
                 </tfoot>
             </table>
+            <p style="margin:0;padding:10px 12px;font-size:0.75rem;color:var(--text-secondary);border-top:1px solid var(--border-default);"
+               x-text="data.basis + ' PY = ' + (data.py_period ? data.py_period.end_date : '') + '.'"></p>
         </div>
     </template>
 

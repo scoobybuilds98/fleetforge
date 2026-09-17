@@ -3,12 +3,16 @@
 /**
  * app/admin/accounting/reports/cash-flow.php
  *
- * Cash Flow Statement page (indirect method per ASPE 1540). Renders
- * the operating / investing / financing waterfall. Amber banner if
- * the calculated closing cash differs from the GL 1010 balance by
- * more than $1 (known issue, S-QBO-27).
+ * Cash Flow Statement page (indirect method per ASPE 1540). Renders the
+ * operating / investing / financing waterfall from the API's statement_rows —
+ * the same row layout both PDF renderers use (ReportingService::
+ * cashFlowStatementRows()), so the page and the exports cannot drift.
  *
- * @session S036
+ * The statement ties by construction (S-CASHFLOW-TIE): closing cash equals
+ * the GL balance of every cash account, so the amber banner only appears if
+ * a journal line escaped classification — a bug, not a known difference.
+ *
+ * @session S036, S-CASHFLOW-TIE
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
@@ -62,7 +66,8 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="report && !report.is_tied_out">
         <div class="alert alert-warning" style="margin-bottom:14px;font-size:0.85rem;">
             <strong>Cash tie-out difference</strong> <span x-text="fmt(report.tie_diff)"></span>.
-            Calculated closing cash does not match the GL 1010 balance (known issue, S-QBO-27).
+            Calculated closing cash does not match the GL balance of the cash accounts. Every journal line
+            should land on exactly one statement line, so this points to an unclassified entry — please report it.
         </div>
     </template>
 
@@ -75,56 +80,27 @@ require_once FF_ROOT . '/includes/header.php';
     <template x-if="!loading && report">
         <div class="card" style="padding:18px;overflow-x:auto;">
             <table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
-                <tbody>
-                    <tr style="background:var(--bg-elev);">
-                        <td colspan="2" style="padding:8px 10px;font-weight:600;">Operating Activities</td>
-                    </tr>
-                    <tr><td style="padding:6px 14px;">Net Income</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.net_income)"></td></tr>
-                    <tr><td style="padding:6px 22px;">+ Depreciation</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.non_cash.depreciation)"></td></tr>
-                    <tr><td style="padding:6px 22px;">+ Asset Disposals</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.non_cash.asset_disposal)"></td></tr>
-                    <tr><td style="padding:6px 22px;">+ Bad Debt</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.non_cash.bad_debt)"></td></tr>
-                    <tr><td style="padding:6px 22px;">+ FX Revaluation</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.non_cash.fx_revaluation)"></td></tr>
-                    <template x-for="wc in report.working_capital" :key="wc.label">
-                        <tr><td style="padding:6px 22px;" x-text="'Δ ' + wc.label"></td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(wc.cash_impact)"></td></tr>
-                    </template>
-                    <tr style="border-top:1px solid var(--border-default);font-weight:600;background:var(--bg-elev);">
-                        <td style="padding:8px 10px;">Net Cash from Operating</td>
-                        <td class="font-mono" style="padding:8px 10px;text-align:right;" x-text="fmt(report.operating_cash)"></td>
-                    </tr>
-
-                    <tr style="background:var(--bg-elev);">
-                        <td colspan="2" style="padding:8px 10px;font-weight:600;">Investing Activities</td>
-                    </tr>
-                    <tr><td style="padding:6px 14px;">Asset Acquisitions</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="'(' + fmt(report.investing.asset_acquisitions) + ')'"></td></tr>
-                    <tr><td style="padding:6px 14px;">Asset Disposal Proceeds</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.investing.asset_disposal_proceeds)"></td></tr>
-                    <tr style="border-top:1px solid var(--border-default);font-weight:600;background:var(--bg-elev);">
-                        <td style="padding:8px 10px;">Net Cash from Investing</td>
-                        <td class="font-mono" style="padding:8px 10px;text-align:right;" x-text="fmt(report.investing.net)"></td>
-                    </tr>
-
-                    <tr style="background:var(--bg-elev);">
-                        <td colspan="2" style="padding:8px 10px;font-weight:600;">Financing Activities</td>
-                    </tr>
-                    <tr><td style="padding:6px 14px;">Long-Term Debt (net)</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.financing.long_term_debt_net)"></td></tr>
-                    <tr><td style="padding:6px 14px;">Dividends / Owner Draws</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="'(' + fmt(report.financing.dividends) + ')'"></td></tr>
-                    <tr style="border-top:1px solid var(--border-default);font-weight:600;background:var(--bg-elev);">
-                        <td style="padding:8px 10px;">Net Cash from Financing</td>
-                        <td class="font-mono" style="padding:8px 10px;text-align:right;" x-text="fmt(report.financing.net)"></td>
-                    </tr>
-
-                    <!-- grand-total rows: --bg-selected is the brand tint defined in BOTH theme blocks (the old hardcoded light blue left white-on-pale text unreadable in dark mode) -->
-                    <tr style="border-top:2px solid var(--border-default);background:var(--bg-selected);">
-                        <td style="padding:10px;font-weight:700;">Net Change in Cash</td>
-                        <td class="font-mono" style="padding:10px;text-align:right;font-weight:700;" x-text="fmt(report.net_change)"></td>
-                    </tr>
-                    <tr><td style="padding:6px 14px;">Opening Cash</td><td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(report.opening_cash)"></td></tr>
-                    <tr style="background:var(--bg-selected);font-weight:700;">
-                        <td style="padding:10px;">Closing Cash (calc)</td>
-                        <td class="font-mono" style="padding:10px;text-align:right;" x-text="fmt(report.closing_cash_calc)"></td>
-                    </tr>
-                    <tr><td style="padding:6px 14px;color:var(--text-secondary);">Closing Cash (GL 1010)</td><td class="font-mono" style="padding:6px 10px;text-align:right;color:var(--text-secondary);" x-text="fmt(report.closing_cash_gl)"></td></tr>
-                </tbody>
+                <!-- Row layout comes from the API (ReportingService::cashFlowStatementRows) — one
+                     <tbody> per row so each x-for iteration renders exactly one root element.
+                     Grand-total rows use --bg-selected, the brand tint defined in BOTH theme blocks
+                     (the old hardcoded light blue left white-on-pale text unreadable in dark mode). -->
+                <template x-for="(row, i) in (report.statement_rows || [])" :key="i">
+                    <tbody>
+                        <tr :style="rowStyle(row)">
+                            <td :colspan="row.type === 'section' ? 2 : 1"
+                                :style="'padding:' + (row.type === 'line' ? '6px ' + (row.indent ? 22 : 14) + 'px' : '8px 10px')"
+                                x-text="row.label"></td>
+                            <template x-if="row.type !== 'section'">
+                                <td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="fmt(row.amount)"></td>
+                            </template>
+                        </tr>
+                    </tbody>
+                </template>
             </table>
+            <p x-show="report.cash_accounts && report.cash_accounts.length" style="margin:10px 2px 0;font-size:0.75rem;color:var(--text-secondary);">
+                Cash = <span x-text="(report.cash_accounts || []).map(a => a.code + ' ' + a.name).join(' · ')"></span>
+                (bank accounts, undeposited funds and the default cash account). Amounts in CAD.
+            </p>
         </div>
     </template>
 </div>
@@ -202,6 +178,12 @@ function cfReport() {
                 body: JSON.stringify({ name, report_type: 'cash_flow', parameters: this.form })
             });
             await this.loadSavedList();
+        },
+        rowStyle(row) {
+            if (row.type === 'section')  return 'background:var(--bg-elev);font-weight:600;';
+            if (row.type === 'subtotal') return 'border-top:1px solid var(--border-default);font-weight:600;background:var(--bg-elev);';
+            if (row.type === 'total')    return 'border-top:2px solid var(--border-default);background:var(--bg-selected);font-weight:700;';
+            return '';
         },
         fmt(s) {
             if (s === null || s === undefined || s === '') return '—';

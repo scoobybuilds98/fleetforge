@@ -9,6 +9,8 @@ declare(strict_types=1);
  * @method  GET
  * @query   period_start (required), period_end (required), format? (json|pdf)
  * @auth    Session required; require_permission('journal_entries','view')
+ * @returns 200 cashFlow() result + statement_rows (the ordered display layout
+ *          shared with both PDF renderers — ReportingService::cashFlowStatementRows())
  *
  * Spec ref: FLEETFORGE_ACCOUNTING_SPEC.md §10 + §21.3
  * Session:  S036
@@ -41,4 +43,6 @@ if ($format === 'pdf') {
     exit;
 }
 
+// The page renders these rows as-is so its layout can never drift from the PDFs.
+$report['statement_rows'] = ReportingService::cashFlowStatementRows($report);
 json_success($report);

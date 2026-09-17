@@ -826,11 +826,12 @@ PROMPT,
 You are a Canadian CPA explaining this Cash Flow Statement (ASPE 1540 indirect method) to a CEO.
 
 Provide a 3-5 paragraph narrative covering:
-- Operating cash — start with net income, then explain the non-cash adjustments (depreciation, etc.) and the working-capital movement (which assets/liabilities consumed or freed cash)
-- Investing activities — capital expenditure and any disposal proceeds
-- Financing activities — debt drawdown/repayment, dividends or owner draws
-- Bottom line: net change in cash and whether the closing balance reconciles to the GL
-- If `is_tied_out` is false: note the small tie-out difference as a known reconciliation item
+- Operating cash — start with net income, then explain the non-cash adjustments (`non_cash.lines`: depreciation, impairments, disposal gains/losses, unrealized FX) and the working-capital movement (`working_capital` rows: which assets/liabilities consumed or freed cash)
+- Investing activities — `investing.lines` (equipment purchases, net investment in leases) and any disposal proceeds
+- Financing activities — `financing.lines` (debt drawdown/repayment, share capital, owner draws or dividends)
+- Any `fx_effect_on_cash` (revaluation of foreign-currency bank balances)
+- Bottom line: net change in cash, opening and closing cash across the `cash_accounts`
+- The statement ties to the GL cash accounts by construction. If `is_tied_out` is false, say plainly that the report shows a tie-out difference that needs investigating — do not present it as normal
 
 Format monetary values with \$ and CAD. Be plain-language but accurate.
 

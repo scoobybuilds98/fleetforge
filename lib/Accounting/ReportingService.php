@@ -4,9 +4,9 @@ declare(strict_types=1);
 /**
  * lib/Accounting/ReportingService.php
  *
- * Financial reporting engine — produces the four canonical management
- * reports (Profit & Loss, Balance Sheet, Cash Flow Statement, Fixed
- * Asset Schedule) from posted JE data. All monetary arithmetic via
+ * Financial reporting engine — produces the canonical management reports
+ * (Profit & Loss, Balance Sheet, Cash Flow Statement, Working Trial
+ * Balance, Fixed Asset Schedule) from posted JE data. All monetary arithmetic via
  * bcmath; all balance queries delegate to AccountingService so a single
  * implementation is the source of truth for "what does this account
  * have on it as of date X".
@@ -607,56 +607,72 @@ class ReportingService
     }
 
     /**
-     * Split asset rows into current vs long-term. Convention: account codes
-     * starting with 11- are current (cash, AR, inventory), 12-15 are long-term
-     * (fixed assets, intangibles). If no clear hint, default to current.
+     * Split asset rows into current vs long-term (see isLongTermAsset()).
      */
     private static function splitAssetsByTerm(array $assets): array
     {
         $current   = [];
         $longTerm  = [];
         foreach ($assets as $key => $row) {
-            $code = (string) $row['code'];
-            $group = strtolower((string) ($row['coa_group'] ?? ''));
-            // Subtype + name hints catch accounts seeded without a coa_group
-            // (e.g. 1600 Net Investment in Lease — Long-Term).
-            $subtype = strtolower((string) ($row['account_subtype'] ?? ''));
-            $name    = strtolower((string) ($row['name'] ?? ''));
-            $isLongTerm = (
-                str_starts_with($code, '12') || str_starts_with($code, '13') ||
-                str_starts_with($code, '14') || str_starts_with($code, '15') ||
-                str_contains($group, 'fixed') ||
-                str_contains($group, 'long') ||
-                $subtype === 'fixed_asset' || str_contains($subtype, 'long') ||
-                str_contains($name, 'long-term')
-            );
-            if ($isLongTerm) $longTerm[$key] = $row;
-            else             $current[$key]  = $row;
+            if (self::isLongTermAsset($row)) $longTerm[$key] = $row;
+            else                             $current[$key]  = $row;
         }
         return [$current, $longTerm];
     }
 
     /**
-     * Split liability rows into current vs long-term. Convention: codes
-     * starting with 25- are long-term debt, everything else is current.
+     * Split liability rows into current vs long-term (see isLongTermLiability()).
      */
     private static function splitLiabilitiesByTerm(array $liabs): array
     {
         $current  = [];
         $longTerm = [];
         foreach ($liabs as $key => $row) {
-            $code = (string) $row['code'];
-            $group = strtolower((string) ($row['coa_group'] ?? ''));
-            $subtype = strtolower((string) ($row['account_subtype'] ?? ''));
-            $isLongTerm = (
-                str_starts_with($code, '25') || str_starts_with($code, '26') ||
-                str_contains($group, 'long') ||
-                str_contains($subtype, 'long')
-            );
-            if ($isLongTerm) $longTerm[$key] = $row;
-            else             $current[$key]  = $row;
+            if (self::isLongTermLiability($row)) $longTerm[$key] = $row;
+            else                                 $current[$key]  = $row;
         }
         return [$current, $longTerm];
+    }
+
+    /**
+     * Is this asset account long-term? Subtype / coa_group / name hints first
+     * (they catch accounts seeded without a coa_group, e.g. 1600 Net Investment
+     * in Lease — Long-Term), then the 12xx–15xx code convention. Anything
+     * without a hint is current. Shared by the balance sheet (current vs
+     * long-term split) and the cash flow statement (operating vs investing),
+     * so an account is classified the same way on both.
+     *
+     * @param array $row needs code, coa_group, account_subtype, name
+     * @return bool
+     */
+    private static function isLongTermAsset(array $row): bool
+    {
+        $code    = (string) ($row['code'] ?? '');
+        $group   = strtolower((string) ($row['coa_group'] ?? ''));
+        $subtype = strtolower((string) ($row['account_subtype'] ?? ''));
+        $name    = strtolower((string) ($row['name'] ?? ''));
+        return $subtype === 'fixed_asset' || str_contains($subtype, 'long')
+            || str_contains($group, 'fixed') || str_contains($group, 'long')
+            || str_contains($name, 'long-term')
+            || str_starts_with($code, '12') || str_starts_with($code, '13')
+            || str_starts_with($code, '14') || str_starts_with($code, '15');
+    }
+
+    /**
+     * Is this liability account long-term? Subtype / coa_group hints, then the
+     * 25xx–26xx code convention. Shared by the balance sheet and the cash flow
+     * statement (see isLongTermAsset()).
+     *
+     * @param array $row needs code, coa_group, account_subtype
+     * @return bool
+     */
+    private static function isLongTermLiability(array $row): bool
+    {
+        $code    = (string) ($row['code'] ?? '');
+        $group   = strtolower((string) ($row['coa_group'] ?? ''));
+        $subtype = strtolower((string) ($row['account_subtype'] ?? ''));
+        return str_contains($subtype, 'long') || str_contains($group, 'long')
+            || str_starts_with($code, '25') || str_starts_with($code, '26');
     }
 
     // ============================================================
@@ -664,221 +680,617 @@ class ReportingService
     // ============================================================
 
     /**
-     * Cash flow statement for a date range using the indirect method.
+     * Entry source types whose balance-sheet lines are not cash flows.
+     *
+     * For these entries the statement adds the P&L effect back as a named
+     * non-cash adjustment ('adjustment' key) and drops their non-cash
+     * balance-sheet lines — so a depreciation run never shows up as an
+     * "inflow" on accumulated depreciation, and a sales-type lease inception
+     * never shows the equipment it derecognises as sale proceeds. A line such
+     * an entry posts to a CASH account (disposal proceeds; the revaluation of
+     * the USD bank account) is real cash movement and is reported on the line
+     * named by 'cash'. Reversals inherit the source_type (JournalEntryService::
+     * reverse()), so a reversed run nets out inside its own adjustment.
+     *
+     * There is deliberately no 'bad_debt' entry: the source_type ENUM never had
+     * one. Write-offs post DR bad-debt expense / CR AR as source 'invoice' or
+     * 'damage_writeoff', so they sit inside the change in receivables (the
+     * direct write-off presentation) — the old "+ Bad Debt" row always read $0.
+     *
+     * 'year_end' has no adjustment: the closing entry moves P&L balances into
+     * retained earnings, and net income already excludes it (as the P&L does).
+     */
+    private const CF_NON_CASH_SOURCES = [
+        'depreciation'              => ['adjustment' => 'depreciation',    'cash' => 'investing'],
+        'impairment'                => ['adjustment' => 'impairment',      'cash' => 'investing'],
+        'asset_disposal'            => ['adjustment' => 'asset_disposal',  'cash' => 'investing'],
+        'fx_revaluation'            => ['adjustment' => 'fx_revaluation',  'cash' => 'fx_effect'],
+        'lease_inception'           => ['adjustment' => 'lease_inception', 'cash' => 'investing'],
+        'lease_residual_impairment' => ['adjustment' => 'impairment',      'cash' => 'investing'],
+        'lease_termination'         => ['adjustment' => 'impairment',      'cash' => 'investing'],
+        'year_end'                  => ['adjustment' => null,              'cash' => 'financing'],
+    ];
+
+    /** Display labels for the non-cash adjustments, in statement order. */
+    private const CF_ADJUSTMENT_LABELS = [
+        'depreciation'    => 'Depreciation',
+        'impairment'      => 'Impairment & lease residual write-offs',
+        'asset_disposal'  => 'Loss / (gain) on asset disposals',
+        'fx_revaluation'  => 'Unrealized foreign exchange loss / (gain)',
+        'lease_inception' => 'Sales-type lease inception (non-cash)',
+    ];
+
+    /**
+     * Liability-name hints that mark borrowings (financing) even when the
+     * account is typed current — e.g. 2070 "Current Portion of Long-Term Debt".
+     */
+    private const CF_DEBT_NAME_PATTERN = '/\b(loans?|debt|line of credit|credit facility|mortgages?|notes? payable|borrowings?|dividends? payable)\b/';
+
+    /**
+     * Cash flow statement for a date range (indirect method).
+     *
+     * TIES BY CONSTRUCTION. Every journal entry balances, so over any window
+     * Σ(debit − credit) on the cash accounts equals Σ(credit − debit) on every
+     * other line. Each posted/reversed line in the window lands in exactly one
+     * place: net income (P&L lines), a working-capital / investing / financing
+     * row (other balance-sheet lines, classified by account), a non-cash
+     * adjustment that cancels its own P&L lines (CF_NON_CASH_SOURCES), or a
+     * cash-line bucket (disposal proceeds / FX effect on cash). Net change in
+     * cash therefore equals the GL movement on the cash accounts; tie_diff is a
+     * runtime invariant, not a tolerance.
+     *
+     * Before S-CASHFLOW-TIE the statement treated only account 1010 as cash
+     * (1020 USD was ignored), read working capital from six hard-coded codes
+     * (two of them wrong: 1050 is GST receivable, 2070 is current debt — and
+     * 1040/1055/1060/1065/1070/1080/2020/2060 were missing), read investing
+     * from the fixed-asset register instead of the GL (register-only assets
+     * showed as cash spent), found no long-term debt (it looked for code 25xx;
+     * the chart uses 22xx) and no owner draws (it looked for "dividend").
+     *
+     * Account classification (cashFlowAccounts()):
+     *   cash       asset accounts flagged is_bank_account, linked from a
+     *              checking/savings acc_bank_accounts row, mapped as QBO
+     *              undeposited funds, the default cash setting, or named
+     *              "undeposited"
+     *   investing  fixed-asset / long-term assets (isLongTermAsset()) and the
+     *              lessor net-investment accounts (spec §21.3)
+     *   financing  equity, long-term liabilities, borrowings by name, and
+     *              line-of-credit bank accounts
+     *   operating  every other asset / liability (working capital)
+     *
+     * @param string $from YYYY-MM-DD inclusive
+     * @param string $to   YYYY-MM-DD inclusive
+     * @return array
      */
     public static function cashFlow(string $from, string $to): array
     {
-        $pl         = self::profitAndLoss($from, $to);
-        $netIncome  = $pl['net_income'];
-
-        // Non-cash adjustments
-        $depreciation     = self::sumJELinesBySourceType('depreciation', $from, $to, 'debit');
-        $assetDisposal    = self::sumJELinesBySourceType('asset_disposal', $from, $to, 'net');
-        $badDebt          = self::sumJELinesBySourceType('bad_debt', $from, $to, 'debit');
-        $fxRevaluation    = self::sumJELinesBySourceType('fx_revaluation', $from, $to, 'net');
-        $nonCashTotal = bcadd(bcadd(bcadd($depreciation, $assetDisposal, 2), $badDebt, 2), $fxRevaluation, 2);
-
-        // Working capital changes — opening vs closing balance comparison
         $beforeFrom = date('Y-m-d', strtotime($from . ' -1 day'));
-        $wcAccounts = self::wcAccountIds();
-        $wcChanges = [];
-        $wcTotal = '0.00';
-        foreach ($wcAccounts as $label => $acctIds) {
-            $opening = '0.00';
-            $closing = '0.00';
-            foreach ($acctIds as $aid) {
-                $opening = bcadd($opening, AccountingService::accountBalance($aid, $beforeFrom), 2);
-                $closing = bcadd($closing, AccountingService::accountBalance($aid, $to), 2);
+        $accounts   = self::cashFlowAccounts();
+
+        $sources = array_keys(self::CF_NON_CASH_SOURCES);
+        $srcIn   = implode(',', array_fill(0, count($sources), '?'));
+        $lines = \db_select(
+            "SELECT jel.account_id,
+                    CASE WHEN je.source_type IN ({$srcIn}) THEN je.source_type ELSE '' END AS non_cash_source,
+                    COALESCE(SUM(jel.debit), 0)  AS debit,
+                    COALESCE(SUM(jel.credit), 0) AS credit
+               FROM acc_journal_entry_lines jel
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+              WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                AND je.entry_date BETWEEN ? AND ?
+              GROUP BY jel.account_id, non_cash_source",
+            array_merge($sources, [$from, $to])
+        );
+
+        $netIncome   = '0.00';
+        $adjustments = array_fill_keys(array_keys(self::CF_ADJUSTMENT_LABELS), '0.00');
+        $bySection   = ['operating' => [], 'investing' => [], 'financing' => []];
+        $cashBuckets = ['investing' => '0.00', 'fx_effect' => '0.00', 'financing' => '0.00'];
+
+        foreach ($lines as $l) {
+            $acct = $accounts[(int) $l['account_id']];
+            $debitNet  = bcsub((string) $l['debit'], (string) $l['credit'], 2);  // debit − credit
+            $creditNet = bcmul($debitNet, '-1', 2);                               // credit − debit
+            $section   = $acct['cf_section'];
+            $rule      = $l['non_cash_source'] === '' ? null : self::CF_NON_CASH_SOURCES[$l['non_cash_source']];
+
+            if ($rule === null) {
+                if ($section === 'income') {
+                    $netIncome = bcadd($netIncome, $creditNet, 2);
+                } elseif ($section !== 'cash') {
+                    // A balance-sheet account's credit − debit is its cash effect:
+                    // an asset rising (debit) consumed cash, a liability or equity
+                    // account rising (credit) provided it.
+                    $id = (int) $acct['id'];
+                    $bySection[$section][$id] = bcadd($bySection[$section][$id] ?? '0.00', $creditNet, 2);
+                }
+                continue;
             }
-            $change = bcsub($closing, $opening, 2);
-            // For asset accounts (AR, prepaid): increase reduces cash, decrease increases cash
-            // For liability accounts (AP, accrued, deposits, tax payable): increase adds cash, decrease subtracts
-            $sign = in_array($label, ['ar', 'prepaid'], true) ? '-1' : '1';
-            $signedChange = bcmul($change, $sign, 2);
-            $wcChanges[] = ['label' => $label, 'opening' => $opening, 'closing' => $closing, 'change' => $change, 'cash_impact' => $signedChange];
-            $wcTotal = bcadd($wcTotal, $signedChange, 2);
+
+            if ($section === 'income') {
+                if ($rule['adjustment'] === null) continue; // closing entry — outside net income already
+                $netIncome = bcadd($netIncome, $creditNet, 2);
+                $adjustments[$rule['adjustment']] = bcadd($adjustments[$rule['adjustment']], $debitNet, 2);
+            } elseif ($section === 'cash') {
+                $cashBuckets[$rule['cash']] = bcadd($cashBuckets[$rule['cash']], $debitNet, 2);
+            }
+            // Non-cash balance-sheet lines of these entries are represented by
+            // the adjustment above — counting them too would double them.
+        }
+
+        $nonCashTotal = '0.00';
+        $nonCashLines = [];
+        foreach (self::CF_ADJUSTMENT_LABELS as $key => $label) {
+            $nonCashTotal = bcadd($nonCashTotal, $adjustments[$key], 2);
+            if (bccomp($adjustments[$key], '0', 2) !== 0) {
+                $nonCashLines[] = ['key' => $key, 'label' => $label, 'amount' => $adjustments[$key]];
+            }
+        }
+
+        [$wcRows, $wcTotal]         = self::cashFlowRows($bySection['operating'], $accounts);
+        [$invRows, $invAccountsNet] = self::cashFlowRows($bySection['investing'], $accounts);
+        [$finRows, $finAccountsNet] = self::cashFlowRows($bySection['financing'], $accounts);
+        if (bccomp($cashBuckets['financing'], '0', 2) !== 0) {
+            // Only reachable if a year-end closing entry ever touched a cash account.
+            $finRows[] = ['label' => 'Year-end closing entries', 'account_id' => null, 'code' => '', 'cash_impact' => $cashBuckets['financing']];
         }
 
         $operatingCash = bcadd(bcadd($netIncome, $nonCashTotal, 2), $wcTotal, 2);
+        $investingCash = bcadd($invAccountsNet, $cashBuckets['investing'], 2);
+        $financingCash = bcadd($finAccountsNet, $cashBuckets['financing'], 2);
+        $fxEffect      = $cashBuckets['fx_effect'];
+        $netChange     = bcadd(bcadd(bcadd($operatingCash, $investingCash, 2), $financingCash, 2), $fxEffect, 2);
 
-        // Investing: net of asset acquisitions (cost in period) and disposals proceeds
-        $investingAcq      = self::sumAssetAcquisitions($from, $to);
-        $investingProceeds = self::sumAssetDisposalProceeds($from, $to);
-        $investingCash     = bcsub($investingProceeds, $investingAcq, 2);
-
-        // Financing: long-term debt + dividends/owner draws (rows ON equity accounts whose name contains "dividend")
-        $longTermDebtNet = self::sumLongTermDebtNet($from, $to);
-        $dividends       = self::sumDividends($from, $to);
-        $financingCash   = bcsub($longTermDebtNet, $dividends, 2);
-
-        $netChange    = bcadd(bcadd($operatingCash, $investingCash, 2), $financingCash, 2);
-        $openingCash  = self::cashAccountBalance($beforeFrom);
-        $closingCashCalc = bcadd($openingCash, $netChange, 2);
-        $closingCashGL   = self::cashAccountBalance($to);
-        $tieDiff = bcsub($closingCashCalc, $closingCashGL, 2);
-        $isTiedOut = bccomp($tieDiff, '1.00', 2) <= 0 && bccomp($tieDiff, '-1.00', 2) >= 0;
+        $cash = self::cashAccountBalances($accounts, $beforeFrom, $to);
+        $closingCashCalc = bcadd($cash['opening'], $netChange, 2);
+        $tieDiff = bcsub($closingCashCalc, $cash['closing'], 2);
 
         return [
-            'period'             => ['from' => $from, 'to' => $to],
-            'net_income'         => $netIncome,
-            'non_cash' => [
-                'depreciation'      => $depreciation,
-                'asset_disposal'    => $assetDisposal,
-                'bad_debt'          => $badDebt,
-                'fx_revaluation'    => $fxRevaluation,
-                'total'             => $nonCashTotal,
-            ],
-            'working_capital'   => $wcChanges,
+            'period'     => ['from' => $from, 'to' => $to],
+            'net_income' => $netIncome,
+            'non_cash'   => $adjustments + ['total' => $nonCashTotal, 'lines' => $nonCashLines],
+            'working_capital'       => $wcRows,
             'working_capital_total' => $wcTotal,
-            'operating_cash'    => $operatingCash,
+            'operating_cash'        => $operatingCash,
             'investing' => [
-                'asset_acquisitions'    => $investingAcq,
-                'asset_disposal_proceeds' => $investingProceeds,
-                'net'                   => $investingCash,
+                'lines'                   => $invRows,
+                'asset_disposal_proceeds' => $cashBuckets['investing'],
+                'net'                     => $investingCash,
             ],
             'financing' => [
-                'long_term_debt_net' => $longTermDebtNet,
-                'dividends'          => $dividends,
-                'net'                => $financingCash,
+                'lines' => $finRows,
+                'net'   => $financingCash,
             ],
+            'fx_effect_on_cash' => $fxEffect,
             'net_change'        => $netChange,
-            'opening_cash'      => $openingCash,
+            'opening_cash'      => $cash['opening'],
             'closing_cash_calc' => $closingCashCalc,
-            'closing_cash_gl'   => $closingCashGL,
+            'closing_cash_gl'   => $cash['closing'],
+            'cash_accounts'     => $cash['accounts'],
             'tie_diff'          => $tieDiff,
-            'is_tied_out'       => $isTiedOut,
+            'is_tied_out'       => bccomp($tieDiff, '0', 2) === 0,
         ];
     }
 
     /**
-     * Non-cash P&L effect of every entry with the given source_type in a date
-     * range: SUM(debit − credit) over the P&L-type lines only (positive = an
-     * expense/loss to add back to net income; negative = an income/gain).
+     * The statement as ordered display rows — the single layout shared by the
+     * report page (via the API), the PDF export and the year-end package, so the
+     * three cannot drift apart.
      *
-     * WHY P&L lines only: every JE balances, so summing debit − credit over ALL
-     * of its lines is always 0 — the old 'net' mode reported $0 for asset
-     * disposals and FX revaluation no matter what posted. The old 'debit' mode
-     * summed both sides' debits, so a reversed depreciation run (original
-     * debits the expense, its reversal debits accumulated depreciation) was
-     * added back twice instead of netting to zero.
+     * Row { type: section|line|subtotal|total, label, amount (null for a section
+     * heading), indent (0|1) }.
      *
-     * @param string $sourceType acc_journal_entries.source_type
-     * @param string $from       YYYY-MM-DD inclusive
-     * @param string $to         YYYY-MM-DD inclusive
-     * @param string $dir        'debit' | 'net' (identical now; kept for call-site
-     *                           readability) — anything else returns 0.00
-     * @return string bcmath amount
+     * @param array $r cashFlow() result
+     * @return array<int, array{type:string,label:string,amount:?string,indent:int}>
      */
-    private static function sumJELinesBySourceType(string $sourceType, string $from, string $to, string $dir): string
+    public static function cashFlowStatementRows(array $r): array
     {
-        if (!in_array($dir, ['debit', 'net'], true)) {
-            return '0.00';
-        }
-        $typeIn = implode(',', array_fill(0, count(self::PL_TYPES), '?'));
-        $row = \db_row(
-            "SELECT COALESCE(SUM(jel.debit), 0) - COALESCE(SUM(jel.credit), 0) AS net
-               FROM acc_journal_entry_lines jel
-               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-               JOIN acc_accounts a ON a.id = jel.account_id
-              WHERE je.source_type = ?
-                AND a.account_type IN ({$typeIn})
-                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
-                AND je.entry_date BETWEEN ? AND ?",
-            array_merge([$sourceType], self::PL_TYPES, [$from, $to])
-        );
-        return bcadd((string) ($row['net'] ?? '0'), '0', 2);
-    }
-
-    /**
-     * Conventional account-code map for working capital. Returns
-     * [label => [account_id, ...]]. Resolves by code via grep, then by name fallback.
-     */
-    private static function wcAccountIds(): array
-    {
-        $byCode = static function (array $codes): array {
-            $placeholders = implode(',', array_fill(0, count($codes), '?'));
-            $rows = \db_select(
-                "SELECT id FROM acc_accounts WHERE code IN ({$placeholders}) AND is_active = 1",
-                $codes
-            );
-            return array_map(static fn($r) => (int) $r['id'], $rows);
+        $rows = [];
+        $add  = static function (string $type, string $label, ?string $amount = null, int $indent = 0) use (&$rows): void {
+            $rows[] = ['type' => $type, 'label' => $label, 'amount' => $amount, 'indent' => $indent];
         };
 
+        $add('section', 'Operating Activities');
+        $add('line', 'Net income', $r['net_income']);
+        foreach ($r['non_cash']['lines'] as $l) $add('line', $l['label'], $l['amount'], 1);
+        foreach ($r['working_capital'] as $wc) $add('line', 'Change in ' . $wc['label'], $wc['cash_impact'], 1);
+        $add('subtotal', 'Net cash from operating activities', $r['operating_cash']);
+
+        $add('section', 'Investing Activities');
+        foreach ($r['investing']['lines'] as $l) $add('line', $l['label'], $l['cash_impact'], 1);
+        if (bccomp($r['investing']['asset_disposal_proceeds'], '0', 2) !== 0) {
+            $add('line', 'Proceeds from asset disposals', $r['investing']['asset_disposal_proceeds'], 1);
+        }
+        $add('subtotal', 'Net cash from investing activities', $r['investing']['net']);
+
+        $add('section', 'Financing Activities');
+        foreach ($r['financing']['lines'] as $l) $add('line', $l['label'], $l['cash_impact'], 1);
+        $add('subtotal', 'Net cash from financing activities', $r['financing']['net']);
+
+        if (bccomp($r['fx_effect_on_cash'], '0', 2) !== 0) {
+            $add('line', 'Effect of exchange-rate changes on cash', $r['fx_effect_on_cash']);
+        }
+        $add('total', 'Net change in cash', $r['net_change']);
+        $add('line', 'Opening cash', $r['opening_cash']);
+        $add('total', 'Closing cash', $r['closing_cash_calc']);
+        $codes = implode(', ', array_map(static fn($a) => $a['code'], $r['cash_accounts']));
+        $add('line', 'Closing cash per GL' . ($codes !== '' ? " ({$codes})" : ''), $r['closing_cash_gl']);
+        return $rows;
+    }
+
+    /**
+     * Every account keyed by id, each with a 'cf_section' of income | cash |
+     * operating | investing | financing. Includes inactive and header accounts
+     * so no journal line can fall outside the statement.
+     *
+     * Driven by account type/subtype, the is_bank_account flag and the account
+     * links other modules already maintain (bank accounts, the QBO
+     * undeposited-funds mapping, the lessor settings) — not by account codes.
+     *
+     * @return array<int, array>
+     */
+    private static function cashFlowAccounts(): array
+    {
+        $cashIds = $creditLineIds = $leaseIds = [];
+        foreach (\db_select("SELECT gl_account_id, account_type FROM acc_bank_accounts") as $b) {
+            if (in_array($b['account_type'], ['checking', 'savings'], true)) $cashIds[(int) $b['gl_account_id']] = true;
+            if ($b['account_type'] === 'line_of_credit')                     $creditLineIds[(int) $b['gl_account_id']] = true;
+        }
+        foreach (\db_select(
+            "SELECT ff_account_id FROM acc_qbo_account_map
+              WHERE critical_category = 'undeposited_funds' AND ff_account_id IS NOT NULL"
+        ) as $m) {
+            $cashIds[(int) $m['ff_account_id']] = true;
+        }
+        $defaultCash = (int) AccountingService::setting('accounting.default_cash_account_id', 0);
+        if ($defaultCash > 0) $cashIds[$defaultCash] = true;
+
+        // The lessor's net investment (+ its deferred IDC and unearned-income
+        // contra) is one receivable split across accounts; spec §21.3 reports
+        // it under investing. Keeping every piece in one section also makes the
+        // monthly current/long-term reclass net to zero instead of showing as an
+        // operating outflow matched by an investing inflow.
+        foreach ([
+            'accounting.lessor_ni_current_account_id',
+            'accounting.lessor_ni_longterm_account_id',
+            'accounting.lessor_deferred_idc_account_id',
+            'accounting.lessor_unearned_finance_income_account_id',
+        ] as $key) {
+            $id = (int) AccountingService::setting($key, 0);
+            if ($id > 0) $leaseIds[$id] = true;
+        }
+
+        $out = [];
+        foreach (\db_select(
+            "SELECT id, code, name, account_type, account_subtype, normal_balance, coa_group,
+                    currency, is_bank_account, is_active, sort_order
+               FROM acc_accounts"
+        ) as $a) {
+            $id   = (int) $a['id'];
+            $name = strtolower((string) $a['name']);
+            if (in_array($a['account_type'], self::PL_TYPES, true)) {
+                $section = 'income';
+            } elseif ($a['account_type'] === 'asset') {
+                if ((int) $a['is_bank_account'] === 1 || isset($cashIds[$id]) || str_contains($name, 'undeposited')) {
+                    $section = 'cash';
+                } elseif (isset($leaseIds[$id]) || self::isLongTermAsset($a)) {
+                    $section = 'investing';
+                } else {
+                    $section = 'operating';
+                }
+            } elseif ($a['account_type'] === 'liability') {
+                if (isset($leaseIds[$id])) {
+                    $section = 'investing';
+                } elseif (isset($creditLineIds[$id]) || self::isLongTermLiability($a)
+                    || preg_match(self::CF_DEBT_NAME_PATTERN, $name) === 1) {
+                    $section = 'financing';
+                } else {
+                    $section = 'operating';
+                }
+            } else {
+                // Equity: share capital, owner drawings / dividends, and any
+                // direct retained-earnings entry (the year-end close is excluded).
+                $section = 'financing';
+            }
+            $a['cf_section'] = $section;
+            $out[$id] = $a;
+        }
+        return $out;
+    }
+
+    /**
+     * Turn account_id => cash impact into display rows (chart order, zero rows
+     * dropped) plus their total.
+     *
+     * @param array<int,string> $impacts  account_id => credit − debit
+     * @param array<int,array>  $accounts cashFlowAccounts()
+     * @return array{0: array<int, array{label:string,account_id:int,code:string,cash_impact:string}>, 1: string}
+     */
+    private static function cashFlowRows(array $impacts, array $accounts): array
+    {
+        $ids = array_keys(array_filter($impacts, static fn($v) => bccomp($v, '0', 2) !== 0));
+        usort($ids, static fn($x, $y) =>
+            [(int) $accounts[$x]['sort_order'], $accounts[$x]['code']] <=> [(int) $accounts[$y]['sort_order'], $accounts[$y]['code']]);
+
+        $rows  = [];
+        $total = '0.00';
+        foreach ($ids as $id) {
+            $rows[] = [
+                'label'       => $accounts[$id]['name'],
+                'account_id'  => $id,
+                'code'        => $accounts[$id]['code'],
+                'cash_impact' => $impacts[$id],
+            ];
+            $total = bcadd($total, $impacts[$id], 2);
+        }
+        return [$rows, $total];
+    }
+
+    /**
+     * Opening (end of $beforeFrom) and closing (end of $to) balance of every
+     * cash account, plus the per-account detail. Accounts with no balance at
+     * either date are listed only while active, so a dormant bank account
+     * doesn't clutter the footer.
+     *
+     * @param array<int,array> $accounts   cashFlowAccounts()
+     * @param string           $beforeFrom YYYY-MM-DD
+     * @param string           $to         YYYY-MM-DD
+     * @return array{opening:string, closing:string, accounts:array}
+     */
+    private static function cashAccountBalances(array $accounts, string $beforeFrom, string $to): array
+    {
+        $cash = array_filter($accounts, static fn($a) => $a['cf_section'] === 'cash');
+        $out  = ['opening' => '0.00', 'closing' => '0.00', 'accounts' => []];
+        if (!$cash) return $out;
+
+        $in  = implode(',', array_fill(0, count($cash), '?'));
+        $bal = [];
+        foreach (\db_select(
+            "SELECT jel.account_id,
+                    COALESCE(SUM(CASE WHEN je.entry_date <= ? THEN jel.debit - jel.credit ELSE 0 END), 0) AS opening,
+                    COALESCE(SUM(jel.debit - jel.credit), 0) AS closing
+               FROM acc_journal_entry_lines jel
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+              WHERE jel.account_id IN ({$in})
+                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                AND je.entry_date <= ?
+              GROUP BY jel.account_id",
+            array_merge([$beforeFrom], array_keys($cash), [$to])
+        ) as $b) {
+            $bal[(int) $b['account_id']] = $b;
+        }
+
+        uasort($cash, static fn($x, $y) => [(int) $x['sort_order'], $x['code']] <=> [(int) $y['sort_order'], $y['code']]);
+        foreach ($cash as $id => $a) {
+            $opening = bcadd((string) ($bal[$id]['opening'] ?? '0'), '0', 2);
+            $closing = bcadd((string) ($bal[$id]['closing'] ?? '0'), '0', 2);
+            $out['opening'] = bcadd($out['opening'], $opening, 2);
+            $out['closing'] = bcadd($out['closing'], $closing, 2);
+            if (!(int) $a['is_active'] && bccomp($opening, '0', 2) === 0 && bccomp($closing, '0', 2) === 0) continue;
+            $out['accounts'][] = [
+                'account_id' => $id,
+                'code'       => $a['code'],
+                'name'       => $a['name'],
+                'currency'   => $a['currency'],
+                'opening'    => $opening,
+                'closing'    => $closing,
+            ];
+        }
+        return $out;
+    }
+
+    // ============================================================
+    // WORKING TRIAL BALANCE (spec §23.2)
+    // ============================================================
+
+    /** Journal entry types that count as adjusting entries (S-ACCT-AJE, D-AJE-3). */
+    private const AJE_ENTRY_TYPES = ['adjusting', 'reclassifying', 'prior_period'];
+
+    /**
+     * Working Trial Balance v2 — GL# | Account | Lead | PY Balance | Unadj CY |
+     * AJEs | Adj CY | Var $ | Var % | Ref.
+     *
+     * EVERY AMOUNT COLUMN IS A BALANCE, on the same basis as the balance sheet
+     * and P&L:
+     *   - balance-sheet accounts: cumulative balance at the date
+     *   - income-statement accounts: fiscal year-to-date (Jan 1 → the date)
+     *   - plus a computed "Retained Earnings — prior years not yet closed" row
+     *     (the balance sheet's figure), which is what keeps debits = credits
+     *     when earlier years were never closed
+     *   Adj CY    = that balance at the period's end date
+     *   AJEs      = this period's adjusting / reclassifying / prior-period entries
+     *   Unadj CY  = Adj CY − AJEs (the balance before this period's adjustments)
+     *   PY        = the same balance at the comparison date
+     *   Var $ / % = Adj CY − PY — like-for-like
+     *
+     * WHY (S-CASHFLOW-TIE): Unadj CY / AJEs / Adj CY used to be the selected
+     * PERIOD's activity only, while PY Balance was a cumulative balance — so
+     * Var $ compared a month's movement with a multi-year balance (July 2026 on
+     * dev showed cash "down $697,340" in a month cash rose $21,401), and PY
+     * revenue was every unclosed year since inception rather than the prior
+     * year. Inactive accounts were also dropped even when they carried a balance.
+     *
+     * @param array  $period      acc_periods row (id, name, start_date, end_date, year, status)
+     * @param array  $pyPeriod    ['id' => ?int, 'name' => string, 'end_date' => YYYY-MM-DD]
+     * @param string $materiality non-negative decimal; > 0 enables the flags
+     * @return array { period, py_period, materiality, basis, accounts[], totals, is_balanced }
+     */
+    public static function workingTrialBalance(array $period, array $pyPeriod, string $materiality = '0.00'): array
+    {
+        $cy = self::trialBalanceAt((string) $period['end_date']);
+        $py = self::trialBalanceAt((string) $pyPeriod['end_date']);
+
+        // This period's adjusting entries, per account, in one pass. Periods are
+        // assigned from entry_date (JournalEntryService::create()), so every AJE
+        // with this period_id falls inside the Adj CY balance above.
+        $ajeTypes = self::AJE_ENTRY_TYPES;
+        $ajeIn    = implode(',', array_fill(0, count($ajeTypes), '?'));
+        $ajeNet   = [];
+        foreach (\db_select(
+            "SELECT jel.account_id, COALESCE(SUM(jel.debit - jel.credit), 0) AS net
+               FROM acc_journal_entry_lines jel
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+              WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                AND je.period_id = ?
+                AND je.entry_type IN ({$ajeIn})
+              GROUP BY jel.account_id",
+            array_merge([(int) $period['id']], $ajeTypes)
+        ) as $r) {
+            $ajeNet[(int) $r['account_id']] = (string) $r['net'];
+        }
+
+        // AJE-line drilldown (most recent 5 per account in this period).
+        $ajeLinesByAcct = [];
+        foreach (\db_select(
+            "SELECT jel.account_id, je.id AS je_id, je.entry_number, je.description,
+                    jel.debit, jel.credit, je.entry_date
+               FROM acc_journal_entry_lines jel
+               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
+              WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                AND je.period_id = ?
+                AND je.entry_type IN ({$ajeIn})
+              ORDER BY je.entry_date DESC, je.id DESC",
+            array_merge([(int) $period['id']], $ajeTypes)
+        ) as $line) {
+            $aid = (int) $line['account_id'];
+            if (count($ajeLinesByAcct[$aid] ?? []) >= 5) continue;
+            $ajeLinesByAcct[$aid][] = [
+                'je_id'        => (int) $line['je_id'],
+                'entry_number' => $line['entry_number'],
+                'description'  => $line['description'],
+                'entry_date'   => $line['entry_date'],
+                'debit'        => $line['debit'],
+                'credit'       => $line['credit'],
+            ];
+        }
+
+        // No is_active filter: an inactive account that still carries a balance
+        // must stay on the trial balance or debits stop equalling credits.
+        $accounts = \db_select(
+            "SELECT id, code, name, account_type, normal_balance, lead_schedule_code, coa_group, sort_order
+               FROM acc_accounts
+              WHERE is_header = 0
+              ORDER BY sort_order ASC, code ASC"
+        );
+        // Computed equity row, placed after the equity accounts by the page's
+        // type grouping. Debit − credit convention like every other balance.
+        $accounts[] = [
+            'id' => 'retained_earnings_unclosed', 'code' => '', 'name' => 'Retained Earnings — prior years not yet closed',
+            'account_type' => 'equity', 'normal_balance' => 'credit', 'lead_schedule_code' => null, 'coa_group' => 'Equity',
+            'is_computed' => true,
+        ];
+
+        $result = [];
+        $totals = ['py_balance' => '0.00', 'unadj_cy' => '0.00', 'ajes' => '0.00', 'adj_cy' => '0.00', 'debits' => '0.00', 'credits' => '0.00'];
+
+        foreach ($accounts as $acct) {
+            $aid      = empty($acct['is_computed']) ? (int) $acct['id'] : $acct['id'];
+            $isDebit  = $acct['normal_balance'] === 'debit';
+            // Balances arrive as debit − credit; show each on its normal side.
+            $toNormal = static fn(string $debitNet): string => $isDebit ? bcadd($debitNet, '0', 2) : bcmul($debitNet, '-1', 2);
+
+            $adjCy  = $toNormal($cy[$aid] ?? '0');
+            $pyBal  = $toNormal($py[$aid] ?? '0');
+            $ajeAmt = $toNormal(is_int($aid) ? ($ajeNet[$aid] ?? '0') : '0');
+            $unadjCy = bcsub($adjCy, $ajeAmt, 2);
+
+            if (bccomp($adjCy, '0', 2) === 0 && bccomp($pyBal, '0', 2) === 0 && bccomp($ajeAmt, '0', 2) === 0) {
+                continue;
+            }
+
+            $varAmt = bcsub($adjCy, $pyBal, 2);
+            $varPct = null;
+            $absPy  = ltrim($pyBal, '-');
+            if (bccomp($absPy, '0', 2) !== 0) {
+                $varPct = bcmul(bcdiv($varAmt, $absPy, 6), '100', 2);
+            }
+
+            $balanceFlag = $varianceFlag = null;
+            if (bccomp($materiality, '0', 2) > 0) {
+                if (bccomp(ltrim($adjCy, '-'), $materiality, 2) > 0)  $balanceFlag  = 'red';
+                if (bccomp(ltrim($varAmt, '-'), $materiality, 2) > 0) $varianceFlag = 'yellow';
+            }
+
+            $totals['py_balance'] = bcadd($totals['py_balance'], $pyBal, 2);
+            $totals['unadj_cy']   = bcadd($totals['unadj_cy'], $unadjCy, 2);
+            $totals['ajes']       = bcadd($totals['ajes'], $ajeAmt, 2);
+            $totals['adj_cy']     = bcadd($totals['adj_cy'], $adjCy, 2);
+            // Debit/credit columns from the underlying side, so a contra balance
+            // (a negative normal-side amount) lands on the opposite column.
+            $onDebitSide = $isDebit === (bccomp($adjCy, '0', 2) >= 0);
+            $totals[$onDebitSide ? 'debits' : 'credits'] = bcadd($totals[$onDebitSide ? 'debits' : 'credits'], ltrim($adjCy, '-'), 2);
+
+            $result[] = [
+                'account_id'         => $aid,
+                'code'               => $acct['code'],
+                'name'               => $acct['name'],
+                'account_type'       => $acct['account_type'],
+                'normal_balance'     => $acct['normal_balance'],
+                'lead_schedule_code' => $acct['lead_schedule_code'],
+                'coa_group'          => $acct['coa_group'],
+                'py_balance'         => $pyBal,
+                'unadj_cy'           => $unadjCy,
+                'ajes'               => $ajeAmt,
+                'adj_cy'             => $adjCy,
+                'var_amt'            => $varAmt,
+                'var_pct'            => $varPct,
+                'balance_flag'       => $balanceFlag,
+                'variance_flag'      => $varianceFlag,
+                'ref'                => $acct['lead_schedule_code'],
+                'aje_entries'        => is_int($aid) ? ($ajeLinesByAcct[$aid] ?? []) : [],
+                'is_computed'        => !empty($acct['is_computed']),
+            ];
+        }
+
         return [
-            'ar'                => $byCode(['1030']),
-            'prepaid'           => $byCode(['1050']),
-            'ap'                => $byCode(['2010']),
-            'accrued_liabs'     => $byCode(['2070']),
-            'customer_deposits' => $byCode(['2050']),
-            'tax_payable'       => $byCode(['2030', '2040', '2080']),
+            'period'      => $period,
+            'py_period'   => $pyPeriod,
+            'materiality' => $materiality,
+            'basis'       => 'Balances at each date: balance-sheet accounts cumulative, income-statement accounts '
+                           . 'fiscal year-to-date. Unadj CY = Adj CY before this period\'s adjusting entries; '
+                           . 'Var = Adj CY − PY.',
+            'accounts'    => $result,
+            'totals'      => $totals,
+            'is_balanced' => bccomp($totals['debits'], $totals['credits'], 2) === 0,
         ];
     }
 
-    private static function sumAssetAcquisitions(string $from, string $to): string
+    /**
+     * Trial-balance basis balances at a date, as debit − credit per account id:
+     * cumulative for balance-sheet accounts, fiscal year-to-date for
+     * income-statement accounts, plus 'retained_earnings_unclosed' — every
+     * earlier year's P&L not moved to retained earnings by a year-end close
+     * (the same figure buildBSBlock() shows). The entries sum to zero.
+     *
+     * @param string $asOf YYYY-MM-DD
+     * @return array<int|string, string>
+     */
+    private static function trialBalanceAt(string $asOf): array
     {
-        // S-FA-IMPORT: opening-balance assets predate the system — their
-        // acquisition_date is when they were booked, not when cash moved, and
-        // there is no GL entry behind them. Counting them here would report an
-        // investing outflow that never happened and break the cash tie-out.
-        $row = \db_row(
-            "SELECT COALESCE(SUM(acquisition_cost), 0) AS total
-               FROM acc_fixed_assets
-              WHERE acquisition_date BETWEEN ? AND ?
-                AND is_opening_balance = 0",
-            [$from, $to]
-        );
-        return (string) ($row['total'] ?? '0.00');
-    }
-
-    private static function sumAssetDisposalProceeds(string $from, string $to): string
-    {
-        $row = \db_row(
-            "SELECT COALESCE(SUM(proceeds), 0) AS total
-               FROM acc_asset_disposals
-              WHERE disposal_date BETWEEN ? AND ?",
-            [$from, $to]
-        );
-        return (string) ($row['total'] ?? '0.00');
-    }
-
-    private static function sumLongTermDebtNet(string $from, string $to): string
-    {
-        // Account codes starting with '25' are long-term debt by convention.
-        $row = \db_row(
-            "SELECT COALESCE(SUM(jel.credit - jel.debit), 0) AS net
+        $fyStart = substr($asOf, 0, 4) . '-01-01'; // fiscal year = calendar year (A4)
+        $out = [];
+        $priorEarnings = '0.00';
+        foreach (\db_select(
+            "SELECT jel.account_id, a.account_type,
+                    COALESCE(SUM(jel.debit - jel.credit), 0) AS cumulative,
+                    COALESCE(SUM(CASE WHEN je.entry_date >= ? THEN jel.debit - jel.credit ELSE 0 END), 0) AS fiscal_ytd
                FROM acc_journal_entry_lines jel
                JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                JOIN acc_accounts a ON a.id = jel.account_id
-              WHERE a.code LIKE '25%%'
-                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
-                AND je.entry_date BETWEEN ? AND ?",
-            [$from, $to]
-        );
-        return (string) ($row['net'] ?? '0.00');
-    }
-
-    private static function sumDividends(string $from, string $to): string
-    {
-        $row = \db_row(
-            "SELECT COALESCE(SUM(jel.debit - jel.credit), 0) AS net
-               FROM acc_journal_entry_lines jel
-               JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-               JOIN acc_accounts a ON a.id = jel.account_id
-              WHERE a.account_type = 'equity'
-                AND LOWER(a.name) LIKE '%dividend%'
-                AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
-                AND je.entry_date BETWEEN ? AND ?",
-            [$from, $to]
-        );
-        return (string) ($row['net'] ?? '0.00');
-    }
-
-    private static function cashAccountBalance(string $asOf): string
-    {
-        // GL account 1010 — primary operating cash, per spec
-        $row = \db_row("SELECT id FROM acc_accounts WHERE code = '1010'");
-        if (!$row) return '0.00';
-        return AccountingService::accountBalance((int) $row['id'], $asOf);
+              WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                AND je.entry_date <= ?
+              GROUP BY jel.account_id, a.account_type",
+            [$fyStart, $asOf]
+        ) as $r) {
+            if (in_array($r['account_type'], self::PL_TYPES, true)) {
+                $out[(int) $r['account_id']] = (string) $r['fiscal_ytd'];
+                $priorEarnings = bcadd($priorEarnings, bcsub((string) $r['cumulative'], (string) $r['fiscal_ytd'], 2), 2);
+            } else {
+                $out[(int) $r['account_id']] = (string) $r['cumulative'];
+            }
+        }
+        $out['retained_earnings_unclosed'] = $priorEarnings;
+        return $out;
     }
 
     // ============================================================

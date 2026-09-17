@@ -102,8 +102,11 @@ class ReportPdfRenderer
         if (!$report['is_balanced']) {
             $diff = bcsub($report['totals']['debits'], $report['totals']['credits'], 2);
             $html .= '<div class="banner-amber">WTB unbalanced — total debits and credits differ by '
-                   . self::money(ltrim($diff, '-')) . '. This may reflect the known AR drift; '
-                   . 'verify on screen before signing off.</div>';
+                   . self::money(ltrim($diff, '-')) . '. Verify on screen before signing off.</div>';
+        }
+
+        if (!empty($report['basis'])) {
+            $html .= '<p style="font-size:8pt;color:#555;margin:0 0 6px;">' . htmlspecialchars($report['basis']) . '</p>';
         }
 
         $mat = $report['materiality'] ?? '0.00';
@@ -414,41 +417,25 @@ class ReportPdfRenderer
         $html  = self::headerHtml($title, $period);
         if (!$report['is_tied_out']) {
             $html .= '<div class="banner-amber">Cash tie-out difference '
-                  . self::money($report['tie_diff']) . '</div>';
+                  . self::money($report['tie_diff']) . ' — calculated closing cash does not match the GL cash accounts.</div>';
         }
         $html .= '<table class="rpt">';
-
-        $html .= '<tr class="group"><td colspan="2"><strong>Operating Activities</strong></td></tr>';
-        $html .= '<tr><td>Net Income</td><td class="amt">' . self::money($report['net_income']) . '</td></tr>';
-        $html .= '<tr><td class="indent">+ Depreciation</td><td class="amt">' . self::money($report['non_cash']['depreciation']) . '</td></tr>';
-        $html .= '<tr><td class="indent">+ Asset Disposals</td><td class="amt">' . self::money($report['non_cash']['asset_disposal']) . '</td></tr>';
-        $html .= '<tr><td class="indent">+ Bad Debt Expense</td><td class="amt">' . self::money($report['non_cash']['bad_debt']) . '</td></tr>';
-        $html .= '<tr><td class="indent">+ FX Revaluation</td><td class="amt">' . self::money($report['non_cash']['fx_revaluation']) . '</td></tr>';
-        foreach ($report['working_capital'] as $wc) {
-            $html .= '<tr><td class="indent">Δ ' . htmlspecialchars((string) $wc['label']) . '</td>';
-            $html .= '<td class="amt">' . self::money($wc['cash_impact']) . '</td></tr>';
+        // Layout comes from ReportingService::cashFlowStatementRows() — the same
+        // rows the report page and the year-end package render.
+        foreach (ReportingService::cashFlowStatementRows($report) as $row) {
+            $label = htmlspecialchars($row['label']);
+            if ($row['type'] === 'section') {
+                $html .= '<tr class="group"><td colspan="2"><strong>' . $label . '</strong></td></tr>';
+                continue;
+            }
+            $amount = self::money($row['amount']);
+            if ($row['type'] === 'line') {
+                $html .= '<tr><td' . ($row['indent'] ? ' class="indent"' : '') . '>' . $label . '</td><td class="amt">' . $amount . '</td></tr>';
+            } else {
+                $html .= '<tr class="' . ($row['type'] === 'total' ? 'grand' : 'subtotal') . '"><td><strong>' . $label
+                      . '</strong></td><td class="amt"><strong>' . $amount . '</strong></td></tr>';
+            }
         }
-        $html .= '<tr class="subtotal"><td><strong>Net Cash from Operating</strong></td>';
-        $html .= '<td class="amt"><strong>' . self::money($report['operating_cash']) . '</strong></td></tr>';
-
-        $html .= '<tr class="group"><td colspan="2"><strong>Investing Activities</strong></td></tr>';
-        $html .= '<tr><td>Asset Acquisitions</td><td class="amt">(' . self::money($report['investing']['asset_acquisitions']) . ')</td></tr>';
-        $html .= '<tr><td>Asset Disposal Proceeds</td><td class="amt">' . self::money($report['investing']['asset_disposal_proceeds']) . '</td></tr>';
-        $html .= '<tr class="subtotal"><td><strong>Net Cash from Investing</strong></td>';
-        $html .= '<td class="amt"><strong>' . self::money($report['investing']['net']) . '</strong></td></tr>';
-
-        $html .= '<tr class="group"><td colspan="2"><strong>Financing Activities</strong></td></tr>';
-        $html .= '<tr><td>Long-Term Debt (net)</td><td class="amt">' . self::money($report['financing']['long_term_debt_net']) . '</td></tr>';
-        $html .= '<tr><td>Dividends / Owner Draws</td><td class="amt">(' . self::money($report['financing']['dividends']) . ')</td></tr>';
-        $html .= '<tr class="subtotal"><td><strong>Net Cash from Financing</strong></td>';
-        $html .= '<td class="amt"><strong>' . self::money($report['financing']['net']) . '</strong></td></tr>';
-
-        $html .= '<tr class="grand"><td><strong>Net Change in Cash</strong></td>';
-        $html .= '<td class="amt"><strong>' . self::money($report['net_change']) . '</strong></td></tr>';
-        $html .= '<tr><td>Opening Cash</td><td class="amt">' . self::money($report['opening_cash']) . '</td></tr>';
-        $html .= '<tr class="grand"><td><strong>Closing Cash (calc)</strong></td>';
-        $html .= '<td class="amt"><strong>' . self::money($report['closing_cash_calc']) . '</strong></td></tr>';
-        $html .= '<tr><td>Closing Cash (GL 1010)</td><td class="amt">' . self::money($report['closing_cash_gl']) . '</td></tr>';
         $html .= '</table>';
 
         self::emit($html, $title, 'A4', 'P');

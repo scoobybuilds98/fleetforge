@@ -2284,7 +2284,13 @@ Cash Flow from Financing Activities
 Net Increase / (Decrease) in Cash                   $X,XXX.XX
 Cash at beginning of period                          $X,XXX.XX
 Cash at end of period                                $X,XXX.XX
-Tie-out check: "Cash at end of period" must equal GL cash balance (account 1010) as of period_end ± $1.
+Tie-out check: "Cash at end of period" must equal the GL balance of ALL cash accounts as of period_end — exactly, not ± $1. **Amended 2026-09-16 (S-CASHFLOW-TIE, D-CASHFLOW-TIE-1/2):**
+- Cash = asset accounts flagged `is_bank_account`, linked from a checking/savings `acc_bank_accounts` row, mapped as QBO `undeposited_funds`, the `accounting.default_cash_account_id` setting, or named "undeposited". (Was account 1010 only — 1020 USD was ignored.)
+- Every non-cash balance-sheet account is classified from type/subtype/flags (no code list): fixed-asset / long-term assets and the lessor net-investment accounts → investing; equity, long-term liabilities, borrowings by name ("loan", "debt", "line of credit"…) and line-of-credit bank links → financing; everything else → operating working capital, one row per account. Investing reads the GL, never the fixed-asset register.
+- Non-cash adjustments are keyed by entry source_type: depreciation; impairment + lease residual impairment + lease termination write-offs; (gain)/loss on disposal; unrealized FX; sales-type lease inception. Their balance-sheet lines are not repeated as flows; a cash line inside such an entry is reported as disposal proceeds (investing) or "Effect of exchange-rate changes on cash".
+- Bad debt has no separate add-back: write-offs post DR 6160 / CR AR with source 'invoice'/'damage_writeoff', so they sit inside the change in AR (direct write-off presentation).
+- Year-end closing entries are outside the statement (net income already excludes them).
+- Because every line lands in exactly one statement line, the statement ties by construction; `tie_diff` ≠ 0 is a defect. Guard: `tests/_smoke_cash_flow_ties.php`.
 21.4 Asset Schedule
 Endpoint: GET /api/v1/accounting/reports/asset-schedule?as_of_date=YYYY-MM-DD&category=all|tractors|trailers|equipment
 Output: PP&E continuity by category — opening cost, additions, disposals, ending cost; opening accumulated depreciation, current-period depreciation, accumulated depreciation on disposals, ending accumulated depreciation; net carrying amount.
@@ -2502,6 +2508,7 @@ CodeSectionA-100Cash and equivalentsB-100AR TradeB-110AR Aging detailB-200Allowa
 Endpoints:
 
 GET /api/v1/accounting/reports/working-trial-balance?period_id=N&materiality=X.XX — returns the 10-column WTB.
+Column basis (clarified 2026-09-16, S-CASHFLOW-TIE / D-WTB-BALANCE-BASIS): every amount column is a BALANCE — balance-sheet accounts cumulative, income-statement accounts fiscal year-to-date, plus a computed "Retained Earnings — prior years not yet closed" row so debits = credits when earlier years were never closed. Adj CY = balance at the period end; AJEs = this period's adjusting / reclassifying / prior_period entries; Unadj CY = Adj CY − AJEs; PY Balance = the same basis at the comparison date; Var $ / Var % = Adj CY − PY. (Before this, Unadj/AJEs/Adj CY were the single period's activity while PY was cumulative, so the variance compared a month's movement with a multi-year balance.) Computed by `ReportingService::workingTrialBalance()`.
 GET /api/v1/accounting/reports/lead-schedule?code=A-100&period_id=N — returns lead schedule detail.
 
 Lead schedule auto-generator — produces a per-balance-sheet-account schedule with the standard layout: opening balance, activity by source (JE or sub-ledger), ending balance, reconciliation block tying to source documents.
