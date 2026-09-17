@@ -10,7 +10,7 @@ The staff-training course is a set of narrated video chapters, one for each part
 
 - The four tiles show **Chapters Completed**, **Course Progress** (weighted by chapter length, so a long chapter counts for more), **Time Watched** and **Time Remaining**.
 - Pick any chapter from the **Chapters** list on the right, or click **Start Course** / **Continue Training** to open the first chapter you haven't finished.
-- Captions are on by default. Use the **CC** button on the player to turn them off.
+- Subtitles are built into each video, so they always show.
 - **Previous** and **Next** step through the chapters in order.
 
 ## How your progress is saved

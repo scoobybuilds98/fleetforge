@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-TRAINING-CAPTIONS-DOUBLE** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **Training player no longer shows subtitles twice.**
+
 **S-TRAINING-MODULE** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **In-app Training page with per-user progress + resume, and a super-admin Team Report; videos served from storage (S3 in prod). Operator F79 publishes the videos.**
 
 **S-TRAINING-VIDEO-GAPS** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **Training series gap-fill (34 chapters, new Accounting: Advanced) + 3 accounting page-crash fixes (residual reviews, impairment, JE detail) + Book vs Tax rows rendering.**

@@ -197,9 +197,12 @@ function trainingPage() {
             this._autoplay = autoplay;
             v.innerHTML = '';
             v.src = API + '/stream?id=' + c.id;
+            // Captions are already burned into the picture by the recorder, so the
+            // text track stays OFF by default — showing it doubles the subtitles.
+            // It remains available from the player's CC menu (and to screen readers).
             if (c.has_captions) {
                 const t = document.createElement('track');
-                t.kind = 'captions'; t.label = 'English'; t.srclang = 'en'; t.default = true;
+                t.kind = 'captions'; t.label = 'English'; t.srclang = 'en';
                 t.src = API + '/stream?kind=captions&id=' + c.id;
                 v.appendChild(t);
             }
