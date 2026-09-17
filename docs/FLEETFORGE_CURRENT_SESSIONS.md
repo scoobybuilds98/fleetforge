@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-TRAINING-MODULE** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **In-app Training page with per-user progress + resume, and a super-admin Team Report; videos served from storage (S3 in prod). Operator F79 publishes the videos.**
+
 **S-TRAINING-VIDEO-GAPS** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **Training series gap-fill (34 chapters, new Accounting: Advanced) + 3 accounting page-crash fixes (residual reviews, impairment, JE detail) + Book vs Tax rows rendering.**
 
 **S-UTC-STAMPS** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **The remaining Pacific-wall-time DATETIME columns now store UTC — writers and readers together — plus a one-time repair for historical rows.** ~90 columns across portal/staff auth and lockouts, credit applications, credit notes + AR aging/statements/QBO TxnDates, Samsara/odometer stamps, accounting stamps, AI chat/pending changes, messenger and QuickBooks map stamps. New JS `FF_parseUtc/FF_formatUtc`; `ff_now_utc('+N')` made DST-safe. Also fixed: QBO CreditMemo TxnDate used the UTC day; journal-entry show page 500; customers/show date-only values rendering the previous day. `scripts/migrate_local_stamps_to_utc.php` (LocalStampMigrator: per-row DST offsets, past/future selection modes, idempotent markers) repairs existing rows — operator runs it on prod right after deploy (F78). New `tests/_smoke_utc_stamps.php` 12/12. No schema change.

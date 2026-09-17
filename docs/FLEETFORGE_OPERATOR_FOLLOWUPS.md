@@ -47,6 +47,18 @@
 
 ---
 
+### F79 — Publish the training videos to prod (S3) so the new Training page has chapters 🟡 PARTIAL (feature — page shows "No training videos have been published yet" until done)
+
+**Surfaced by:** S-TRAINING-MODULE (2026-09-17).
+**Why:** the Training page and its progress tracking ship with the deploy (migration `202609171900_S-TRAINING-MODULE_training_tables.sql` creates the tables), but the rendered videos are gitignored and only exist on the dev machine at `/Users/avi/Documents/fleetforge/training-videos/`.
+**Operator action:**
+1. Deploy `main` (the migration runs as usual).
+2. Copy the chapter files (not the combined full-course file) to the server:
+   `rsync -av --include='[0-9][0-9]-*.mp4' --include='[0-9][0-9]-*.srt' --include='[0-9][0-9]-*.timeline.json' --exclude='*' /Users/avi/Documents/fleetforge/training-videos/ fleetforge:/tmp/training-videos/`
+3. Dry run: `sudo -u www-data php /var/www/fleetforge/scripts/training/publish_videos.php --dir=/tmp/training-videos` (should list 34 chapters).
+4. Apply: `sudo -u www-data php /var/www/fleetforge/scripts/training/publish_videos.php --dir=/tmp/training-videos --apply` — uploads to S3 under `training/` and fills `training_videos`. Re-running after a re-record keeps everyone's progress.
+5. `rm -rf /tmp/training-videos`. Same on Northland if it should have the course.
+
 ### F74 — Deploy S-CASHFLOW-TIE, then confirm which accounts count as cash 🟡 PARTIAL (report correctness — no data change, no migration)
 
 **Surfaced by:** S-CASHFLOW-TIE (2026-09-17).

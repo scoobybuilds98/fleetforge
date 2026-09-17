@@ -187,6 +187,14 @@ class StorageClient
     // INT-1: settings table FIRST, .env SECOND. Returns 'local'
     // by default so a fresh install never tries to talk to S3.
     // ============================================================
+    // isRemote() — true when files live in S3. Callers that must choose
+    // between redirecting to a presigned URL and streaming bytes themselves
+    // (e.g. training video Range requests) need to know the driver.
+    public static function isRemote(): bool
+    {
+        return self::driver() === 's3';
+    }
+
     private static function driver(): string
     {
         $driver = (string) (

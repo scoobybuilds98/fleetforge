@@ -221,6 +221,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'Training',
+        'icon'   => 'academic-cap',
+        'url'    => '/training',
+        'module' => null,   // S-TRAINING-MODULE: every staff user; team report gated in-page to super_admin
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Help Center',
         'icon'   => 'book-open',
         'url'    => '/help',

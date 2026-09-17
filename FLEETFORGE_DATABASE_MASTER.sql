@@ -4046,6 +4046,38 @@ CREATE TABLE `user_mfa_backup_codes` (
   KEY `idx_user_used` (`user_id`,`used_at`),
   CONSTRAINT `user_mfa_backup_codes_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `training_progress` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int unsigned NOT NULL,
+  `video_id` int unsigned NOT NULL,
+  `position_seconds` int unsigned NOT NULL DEFAULT '0',
+  `max_position_seconds` int unsigned NOT NULL DEFAULT '0',
+  `percent` tinyint unsigned NOT NULL DEFAULT '0',
+  `completed_at` datetime DEFAULT NULL,
+  `started_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `last_watched_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_training_progress_user_video` (`user_id`,`video_id`),
+  KEY `idx_training_progress_video` (`video_id`),
+  CONSTRAINT `fk_training_progress_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_training_progress_video` FOREIGN KEY (`video_id`) REFERENCES `training_videos` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `training_videos` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `slug` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `chapter_no` smallint unsigned NOT NULL DEFAULT '0',
+  `title` varchar(160) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `duration_seconds` int unsigned NOT NULL DEFAULT '0',
+  `video_key` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `captions_key` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `is_active` tinyint(1) NOT NULL DEFAULT '1',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_training_video_slug` (`slug`),
+  KEY `idx_training_video_order` (`is_active`,`chapter_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `user_permission_overrides` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `user_id` int unsigned NOT NULL,
