@@ -909,6 +909,10 @@ class BankService
                 // the old CASE ignored credits_applied (a credited invoice
                 // could never reach the right state) and marked 'overdue'
                 // regardless of due_date.
+                // Business DATE vs company-local today: due_date is a Pacific
+                // calendar day but SQL CURDATE() is the UTC day — an evening NSF
+                // would flag an invoice due today 'overdue' (ff_today). Params
+                // follow textual order: amount, today, invoice id.
                 \db_execute(
                     "UPDATE invoices SET
                         amount_paid = GREATEST(0, amount_paid - ?),
@@ -917,11 +921,11 @@ class BankService
                         status = CASE
                             WHEN total_amount - credits_applied - amount_paid <= 0 THEN 'paid'
                             WHEN amount_paid > 0 OR credits_applied > 0 THEN 'partially_paid'
-                            WHEN due_date < CURDATE() THEN 'overdue'
+                            WHEN due_date < ? THEN 'overdue'
                             ELSE 'sent'
                         END
                      WHERE id = ? AND deleted_at IS NULL",
-                    [$alloc['amount'], $alloc['invoice_id']]
+                    [$alloc['amount'], \ff_today(), $alloc['invoice_id']]
                 );
 
                 // S-AUDIT-BILLING-ENGINE-1 #9: leases.total_paid was never

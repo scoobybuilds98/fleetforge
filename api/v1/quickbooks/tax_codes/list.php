@@ -52,7 +52,11 @@ try {
     // D-QBO-9-5: historical filter on the FF side. Apply only when
     // the row has an FF link (qbo_only rows always pass).
     if (!$showHistorical) {
-        $where[] = "(m.ff_tax_rate_id IS NULL OR (r.is_active = 1 AND r.effective_from <= CURDATE() AND (r.effective_to IS NULL OR r.effective_to > CURDATE())))";
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+        // Params pushed with the fragment so COUNT + data queries stay aligned.
+        $where[]  = "(m.ff_tax_rate_id IS NULL OR (r.is_active = 1 AND r.effective_from <= ? AND (r.effective_to IS NULL OR r.effective_to > ?)))";
+        $params[] = ff_today();
+        $params[] = ff_today();
     }
 
     if ($q !== '') {

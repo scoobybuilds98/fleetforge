@@ -23,16 +23,25 @@ require_method('GET');
 require_auth_api();
 require_permission('invoices', 'view');
 
+// Aging buckets compare invoices.due_date (a DATE holding a company-local calendar
+// day) against "today". SQL CURDATE() is the UTC day (db.php pins the session to
+// +00:00), so after 5pm Pacific (4pm in winter) it is already tomorrow and every bucket boundary
+// slides a day. Bind ff_today() (APP_TIMEZONE date) instead; interval arithmetic
+// stays in SQL on the bound value.
+$today = ff_today();
+
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $arCurrent = db_row(
     "SELECT COUNT(*) AS cnt,
             COALESCE(SUM(CASE WHEN currency = 'USD'
                               THEN balance_due * COALESCE(exchange_rate_to_cad, 1)
                               ELSE balance_due END), 0) AS total
        FROM invoices
-      WHERE status IN ('sent','partially_paid') AND due_date >= CURDATE() AND deleted_at IS NULL",
-    []
+      WHERE status IN ('sent','partially_paid') AND due_date >= ? AND deleted_at IS NULL",
+    [$today]
 );
 
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $ar30 = db_row(
     "SELECT COUNT(*) AS cnt,
             COALESCE(SUM(CASE WHEN currency = 'USD'
@@ -40,12 +49,13 @@ $ar30 = db_row(
                               ELSE balance_due END), 0) AS total
        FROM invoices
       WHERE status IN ('sent','partially_paid','overdue')
-        AND due_date < CURDATE()
-        AND due_date >= CURDATE() - INTERVAL 30 DAY
+        AND due_date < ?
+        AND due_date >= ? - INTERVAL 30 DAY
         AND deleted_at IS NULL",
-    []
+    [$today, $today]
 );
 
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $ar60 = db_row(
     "SELECT COUNT(*) AS cnt,
             COALESCE(SUM(CASE WHEN currency = 'USD'
@@ -53,12 +63,13 @@ $ar60 = db_row(
                               ELSE balance_due END), 0) AS total
        FROM invoices
       WHERE status IN ('sent','partially_paid','overdue')
-        AND due_date < CURDATE() - INTERVAL 30 DAY
-        AND due_date >= CURDATE() - INTERVAL 60 DAY
+        AND due_date < ? - INTERVAL 30 DAY
+        AND due_date >= ? - INTERVAL 60 DAY
         AND deleted_at IS NULL",
-    []
+    [$today, $today]
 );
 
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $ar90 = db_row(
     "SELECT COUNT(*) AS cnt,
             COALESCE(SUM(CASE WHEN currency = 'USD'
@@ -66,9 +77,9 @@ $ar90 = db_row(
                               ELSE balance_due END), 0) AS total
        FROM invoices
       WHERE status IN ('sent','partially_paid','overdue')
-        AND due_date < CURDATE() - INTERVAL 60 DAY
+        AND due_date < ? - INTERVAL 60 DAY
         AND deleted_at IS NULL",
-    []
+    [$today]
 );
 
 // I03: dispatchers (invoices:view, payments:NONE) get the AR-aging COUNTS but not

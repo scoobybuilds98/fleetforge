@@ -542,6 +542,52 @@ function ff_km_to_lease_unit(array $lease, $km): string
 }
 }
 
+// ============================================================
+// ff_today() — the company-local business day, for binding into SQL
+//
+// WHY: includes/db.php pins the PDO session to time_zone '+00:00' (every
+// DATETIME is stored UTC), so SQL CURDATE() / DATE(NOW()) is the UTC day —
+// after 5pm Pacific (4pm in winter) it is already TOMORROW. Business DATE columns (due_date,
+// start_date, end_date, expiry dates, payment_date, billing periods) are
+// Pacific calendar days, so comparing them to CURDATE() flipped invoices to
+// "overdue", compliance docs to "expired" and KPIs to the next month a day
+// early every evening. Bind the company-local day instead (company.timezone,
+// else APP_TIMEZONE — see ff_business_timezone()):
+//   "WHERE due_date < ?"  with  [ff_today()]
+// Month arithmetic on the bound value stays in SQL: "? - INTERVAL 30 DAY".
+// Do NOT use it for DATETIME/timestamp columns (created_at, sent_at…) — those
+// are UTC and compare correctly against NOW().
+// S-SQL-LOCAL-DATE (2026-09-16)
+// ============================================================
+if (!function_exists('ff_business_timezone')) {
+/**
+ * The company's business timezone: settings.company.timezone, falling back to
+ * APP_TIMEZONE. Delegates to \FleetForge\GPS\BusinessDayWindow::timezone() so
+ * ff_today(), AccountingService::businessToday() and the Samsara billing
+ * windows (S-GPS-LOCAL-WINDOW) share ONE definition of "a local day" — a
+ * deployment whose company.timezone differs from APP_TIMEZONE must not bill,
+ * age and report against two different calendars.
+ *
+ * @return DateTimeZone
+ */
+function ff_business_timezone(): DateTimeZone
+{
+    return \FleetForge\GPS\BusinessDayWindow::timezone();
+}
+}
+
+if (!function_exists('ff_today')) {
+/**
+ * Company-local "today" as Y-m-d, in ff_business_timezone().
+ *
+ * @return string e.g. '2026-09-16'
+ */
+function ff_today(): string
+{
+    return (new DateTimeImmutable('now', ff_business_timezone()))->format('Y-m-d');
+}
+}
+
 // clean_date() — return a validated Y-m-d date string, or null
 // Rejects invalid calendar dates (e.g. Feb 30).
 if (!function_exists('clean_date')) {

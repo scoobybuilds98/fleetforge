@@ -78,19 +78,19 @@ try {
             c.credit_limit,
             c.outstanding_balance,
             c.risk_score AS old_score,
-            (SELECT MAX(DATEDIFF(CURDATE(), i.due_date))
+            (SELECT MAX(DATEDIFF(?, i.due_date))
                 FROM invoices i
                 WHERE i.customer_id = c.id
                   AND i.deleted_at IS NULL
                   AND i.status IN ('sent','overdue','partially_paid')
                   AND i.balance_due > 0
-                  AND i.due_date < CURDATE()
+                  AND i.due_date < ?
             ) AS max_overdue_days,
             (SELECT COUNT(*)
                 FROM invoices i
                 WHERE i.customer_id = c.id
                   AND i.deleted_at IS NULL
-                  AND i.due_date < CURDATE()
+                  AND i.due_date < ?
                   AND i.due_date >= ?
                   AND (
                       (i.status IN ('sent','overdue','partially_paid') AND i.balance_due > 0)
@@ -113,7 +113,11 @@ try {
             ) AS damage_count_12mo
          FROM customers c
          WHERE c.deleted_at IS NULL",
-        [$cutoff12months, $cutoff6months, $cutoff12months]
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+        // (session time_zone '+00:00'), a day ahead after 5pm Pacific (4pm in winter), so the
+        // three invoices.due_date comparisons bind ff_today() instead.
+        // Order = textual '?' order: DATEDIFF, due_date <, due_date <, then cutoffs.
+        [ff_today(), ff_today(), ff_today(), $cutoff12months, $cutoff6months, $cutoff12months]
     );
 
     foreach ($customers as $cust) {

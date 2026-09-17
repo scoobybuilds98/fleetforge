@@ -866,7 +866,11 @@ class FleetForgeTools
             $like = "%{$q}%"; $params[] = $like; $params[] = $like;
         }
         if (($expDays = (int) ($input['expiring_within_days'] ?? 0)) > 0) {
-            $where[] = 'd.expiration_date IS NOT NULL AND d.expiration_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)';
+            // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+            // (session pinned +00:00), a day ahead every Pacific evening (ff_today).
+            // Param order matches the fragment: today first, then the day count.
+            $where[] = 'd.expiration_date IS NOT NULL AND d.expiration_date <= DATE_ADD(?, INTERVAL ? DAY)';
+            $params[] = ff_today();
             $params[] = $expDays;
         }
         if (!empty($input['current_only'])) {
@@ -985,18 +989,21 @@ class FleetForgeTools
 
         $limit = ToolRegistry::MAX_ROWS;
 
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+        // (session pinned +00:00), so days_overdue ran +1 every Pacific evening (ff_today).
         return db_select(
             "SELECT i.id, i.invoice_number,
                     i.company_name_snapshot AS customer_name,
                     i.total_amount, i.amount_paid, i.balance_due,
                     i.currency, i.due_date,
-                    DATEDIFF(CURDATE(), i.due_date) AS days_overdue,
+                    DATEDIFF(?, i.due_date) AS days_overdue,
                     i.contract_number_snapshot AS contract_number
              FROM invoices i
              WHERE i.status = 'overdue'
                AND i.deleted_at IS NULL
              ORDER BY days_overdue DESC
-             LIMIT {$limit}"
+             LIMIT {$limit}",
+            [ff_today()]
         );
     }
 
@@ -1015,19 +1022,24 @@ class FleetForgeTools
         // WHY: CASE-based aging buckets in a single query for efficiency.
         // Balances are CAD-normalized (see getRevenueByPeriod) so AR matches Reports.
         $b = \FleetForge\Reports\ReportBuilder::cad('i.balance_due', 'i');
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+        // (session pinned +00:00), which shifted every bucket a day each Pacific
+        // evening (ff_today). One bound today per bucket, in textual order.
+        $today = ff_today();
         $row = db_row(
             "SELECT
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) <= 0 THEN {$b} ELSE 0 END) AS current_amount,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 1 AND 30 THEN {$b} ELSE 0 END) AS days_1_30,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 31 AND 60 THEN {$b} ELSE 0 END) AS days_31_60,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) BETWEEN 61 AND 90 THEN {$b} ELSE 0 END) AS days_61_90,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), i.due_date) > 90 THEN {$b} ELSE 0 END) AS days_90_plus,
+                SUM(CASE WHEN DATEDIFF(?, i.due_date) <= 0 THEN {$b} ELSE 0 END) AS current_amount,
+                SUM(CASE WHEN DATEDIFF(?, i.due_date) BETWEEN 1 AND 30 THEN {$b} ELSE 0 END) AS days_1_30,
+                SUM(CASE WHEN DATEDIFF(?, i.due_date) BETWEEN 31 AND 60 THEN {$b} ELSE 0 END) AS days_31_60,
+                SUM(CASE WHEN DATEDIFF(?, i.due_date) BETWEEN 61 AND 90 THEN {$b} ELSE 0 END) AS days_61_90,
+                SUM(CASE WHEN DATEDIFF(?, i.due_date) > 90 THEN {$b} ELSE 0 END) AS days_90_plus,
                 SUM({$b}) AS total_outstanding,
                 COUNT(*) AS invoice_count
              FROM invoices i
              WHERE i.balance_due > 0
                AND i.status NOT IN ('void', 'written_off', 'draft')
-               AND i.deleted_at IS NULL"
+               AND i.deleted_at IS NULL",
+            [$today, $today, $today, $today, $today]
         );
 
         return $row ?? ['total_outstanding' => 0, 'invoice_count' => 0];
@@ -1126,11 +1138,14 @@ class FleetForgeTools
         $today    = date('Y-m-d');
 
         // WHY: UNION ALL across the tracked compliance date columns to capture all expiry types
+        // days_until_expiry binds company-local today (ff_today): SQL CURDATE() is the
+        // UTC day, so it read a day short every Pacific evening. Each subquery's
+        // SELECT-list ? precedes its WHERE ?s, hence [today, from, to] per branch.
         return db_select(
             "SELECT * FROM (
                 SELECT eu.id AS unit_id, eu.unit_number, 'CVI' AS document_type,
                        eu.cvi_expiry AS expiry_date,
-                       DATEDIFF(eu.cvi_expiry, CURDATE()) AS days_until_expiry
+                       DATEDIFF(eu.cvi_expiry, ?) AS days_until_expiry
                 FROM equipment_units eu
                 WHERE eu.cvi_expiry IS NOT NULL
                   AND eu.cvi_expiry BETWEEN ? AND ?
@@ -1141,7 +1156,7 @@ class FleetForgeTools
 
                 SELECT eu.id AS unit_id, eu.unit_number, 'Registration' AS document_type,
                        eu.registration_expiry AS expiry_date,
-                       DATEDIFF(eu.registration_expiry, CURDATE()) AS days_until_expiry
+                       DATEDIFF(eu.registration_expiry, ?) AS days_until_expiry
                 FROM equipment_units eu
                 WHERE eu.registration_expiry IS NOT NULL
                   AND eu.registration_expiry BETWEEN ? AND ?
@@ -1150,7 +1165,7 @@ class FleetForgeTools
             ) AS expiring
             ORDER BY days_until_expiry ASC
             LIMIT {$limit}",
-            [$today, $deadline, $today, $deadline]
+            [ff_today(), $today, $deadline, ff_today(), $today, $deadline]
         );
     }
 
@@ -2002,18 +2017,23 @@ class FleetForgeTools
         // CAD-normalize AP balances (operator policy; see getRevenueByPeriod).
         // acc_bills carries currency + exchange_rate_to_cad.
         $b = \FleetForge\Reports\ReportBuilder::cad('b.balance_due', 'b');
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+        // (session pinned +00:00), which shifted every bucket a day each Pacific
+        // evening (ff_today). One bound today per bucket, in textual order.
+        $today = ff_today();
         $row = db_row(
             "SELECT
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) <= 0 THEN {$b} ELSE 0 END) AS current_amount,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 1 AND 30 THEN {$b} ELSE 0 END) AS days_1_30,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 31 AND 60 THEN {$b} ELSE 0 END) AS days_31_60,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) BETWEEN 61 AND 90 THEN {$b} ELSE 0 END) AS days_61_90,
-                SUM(CASE WHEN DATEDIFF(CURDATE(), b.due_date) > 90 THEN {$b} ELSE 0 END) AS days_90_plus,
+                SUM(CASE WHEN DATEDIFF(?, b.due_date) <= 0 THEN {$b} ELSE 0 END) AS current_amount,
+                SUM(CASE WHEN DATEDIFF(?, b.due_date) BETWEEN 1 AND 30 THEN {$b} ELSE 0 END) AS days_1_30,
+                SUM(CASE WHEN DATEDIFF(?, b.due_date) BETWEEN 31 AND 60 THEN {$b} ELSE 0 END) AS days_31_60,
+                SUM(CASE WHEN DATEDIFF(?, b.due_date) BETWEEN 61 AND 90 THEN {$b} ELSE 0 END) AS days_61_90,
+                SUM(CASE WHEN DATEDIFF(?, b.due_date) > 90 THEN {$b} ELSE 0 END) AS days_90_plus,
                 SUM({$b}) AS total_outstanding,
                 COUNT(*) AS bill_count
              FROM acc_bills b
              WHERE b.balance_due > 0
-               AND b.status NOT IN ('void', 'paid', 'draft')"
+               AND b.status NOT IN ('void', 'paid', 'draft')",
+            [$today, $today, $today, $today, $today]
         );
 
         return $row ?? ['total_outstanding' => 0, 'bill_count' => 0];
@@ -2414,6 +2434,9 @@ class FleetForgeTools
         }
 
         // ── 14-month rolling history → scenario averages ───────
+        // The two business-DATE windows below (invoice_date; completed/requested
+        // date) bind company-local today (ff_today): SQL CURDATE() is the UTC day,
+        // a day ahead every Pacific evening. Param order: unit id, then today.
         $monthlyRows = db_select(
             "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS ym,
                     COALESCE(SUM(ili.amount), 0) AS revenue
@@ -2425,9 +2448,9 @@ class FleetForgeTools
                AND i.deleted_at IS NULL
                AND i.status NOT IN ('void', 'written_off')
                AND ili.is_credit = 0
-               AND i.invoice_date >= (CURDATE() - INTERVAL 13 MONTH)
+               AND i.invoice_date >= (? - INTERVAL 13 MONTH)
              GROUP BY ym",
-            [$eqUnitId]
+            [$eqUnitId, ff_today()]
         );
         $revByMonth = [];
         foreach ($monthlyRows as $r) $revByMonth[$r['ym']] = (string) $r['revenue'];
@@ -2439,13 +2462,15 @@ class FleetForgeTools
              WHERE equipment_unit_id = ?
                AND status = 'completed'
                AND deleted_at IS NULL
-               AND COALESCE(completed_date, requested_date) >= (CURDATE() - INTERVAL 13 MONTH)
+               AND COALESCE(completed_date, requested_date) >= (? - INTERVAL 13 MONTH)
              GROUP BY ym",
-            [$eqUnitId]
+            [$eqUnitId, ff_today()]
         );
         $mntByMonth = [];
         foreach ($mntMonthRows as $r) $mntByMonth[$r['ym']] = (string) $r['cost'];
 
+        // damage_claims.created_at is a UTC DATETIME, so UTC CURDATE() is the
+        // matching frame here — intentionally left as-is.
         $dmgMonthRows = db_select(
             "SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym,
                     COALESCE(SUM(COALESCE(actual_repair_cost, estimated_repair_cost, 0)), 0) AS cost

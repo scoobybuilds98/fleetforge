@@ -29,8 +29,10 @@ $collectedThisMonth = db_row(
     "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS cnt
      FROM payments
      WHERE deleted_at IS NULL AND status = 'cleared'
-       AND payment_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')",
-    []
+       AND payment_date >= DATE_FORMAT(?, '%Y-%m-01')",
+    // Business DATE vs company-local today: SQL CURDATE() is the UTC day, so
+    // after 5pm Pacific (4pm in winter) on the last of a month it would already be next month (ff_today).
+    [ff_today()]
 );
 
 // Total outstanding AR (unpaid + partially_paid invoices, non-void)
@@ -46,8 +48,10 @@ $arOverdue = db_row(
     "SELECT COALESCE(SUM(balance_due), 0) AS total, COUNT(*) AS cnt
      FROM invoices
      WHERE deleted_at IS NULL AND status IN ('sent', 'partially_paid', 'overdue')
-       AND due_date < CURDATE()",
-    []
+       AND due_date < ?",
+    // Business DATE vs company-local today: SQL CURDATE() is the UTC day, which
+    // flips invoices due today to overdue every evening after 5pm Pacific (4pm in winter) (ff_today).
+    [ff_today()]
 );
 
 // Payments recorded today

@@ -140,18 +140,24 @@ class AnomalyDetector
     // ────────────────────────────────────────────────────────────
     private static function detectOverdueSpikes(): array
     {
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+        // (db.php pins time_zone '+00:00'), which is TOMORROW after 5pm Pacific (4pm in winter) —
+        // and the nightly scan (cron/ai_anomaly_scan.php, 02:00 on a UTC server clock)
+        // runs in the Pacific evening, so days-overdue was overstated by one on
+        // every scan. Bind ff_today() instead.
         $rows = db_select(
             "SELECT i.customer_id,
                     i.company_name_snapshot AS customer_name,
                     COUNT(*) AS overdue_count,
                     SUM(i.balance_due) AS total_overdue,
-                    MAX(DATEDIFF(CURDATE(), i.due_date)) AS max_days_overdue
+                    MAX(DATEDIFF(?, i.due_date)) AS max_days_overdue
              FROM invoices i
              WHERE i.status = 'overdue'
                AND i.deleted_at IS NULL
              GROUP BY i.customer_id, i.company_name_snapshot
              HAVING overdue_count >= 3 OR max_days_overdue > 60
-             ORDER BY total_overdue DESC"
+             ORDER BY total_overdue DESC",
+            [ff_today()]
         );
 
         $alerts = [];
@@ -188,15 +194,18 @@ class AnomalyDetector
     // ────────────────────────────────────────────────────────────
     private static function detectComplianceRisks(): array
     {
-        // WHY: compute the window bounds in SQL (CURDATE / DATE_ADD) so the date
-        // comparison stays in the DB's timezone. Mixing PHP date() (APP_TIMEZONE,
-        // America/Vancouver) with UTC DB date columns produced a one-day
-        // divergence at the nightly cron's 04:30-UTC run time. `db_today` carries
-        // CURDATE() back so the PHP-side `$expired` check uses the same clock.
+        // WHY: cvi_expiry / registration_expiry are Pacific business DATEs, but SQL
+        // CURDATE() is the UTC day (db.php pins time_zone '+00:00') — the nightly
+        // scan runs in the Pacific evening, when UTC is already TOMORROW, so a doc
+        // expiring today was reported EXPIRED a day early. Bind the company-local
+        // ff_today() at every "today" (window arithmetic stays in SQL on the bound
+        // value). `db_today` echoes that same bound value back so the PHP-side
+        // `$expired` check uses exactly the clock the SQL used.
+        $today = ff_today();
         $rows = db_select(
-            "SELECT eu.id AS unit_id, eu.unit_number, CURDATE() AS db_today,
-                    SUM(CASE WHEN eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS cvi_expiring,
-                    SUM(CASE WHEN eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS reg_expiring,
+            "SELECT eu.id AS unit_id, eu.unit_number, ? AS db_today,
+                    SUM(CASE WHEN eu.cvi_expiry <= DATE_ADD(?, INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS cvi_expiring,
+                    SUM(CASE WHEN eu.registration_expiry <= DATE_ADD(?, INTERVAL 14 DAY) THEN 1 ELSE 0 END) AS reg_expiring,
                     LEAST(
                         COALESCE(eu.cvi_expiry, '9999-12-31'),
                         COALESCE(eu.registration_expiry, '9999-12-31')
@@ -204,11 +213,14 @@ class AnomalyDetector
              FROM equipment_units eu
              WHERE eu.status NOT IN ('decommissioned', 'inactive')
                AND eu.deleted_at IS NULL
-               AND (eu.cvi_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY)
-                    OR eu.registration_expiry <= DATE_ADD(CURDATE(), INTERVAL 14 DAY))
+               AND (eu.cvi_expiry <= DATE_ADD(?, INTERVAL 14 DAY)
+                    OR eu.registration_expiry <= DATE_ADD(?, INTERVAL 14 DAY))
              GROUP BY eu.id, eu.unit_number
              HAVING (cvi_expiring + reg_expiring) >= 2
-                OR earliest_expiry < CURDATE()"
+                OR earliest_expiry < ?",
+            // One bind per '?', in textual order: db_today, cvi window, reg
+            // window, WHERE cvi window, WHERE reg window, HAVING expired.
+            [$today, $today, $today, $today, $today, $today]
         );
 
         $alerts = [];
@@ -245,8 +257,12 @@ class AnomalyDetector
     // ────────────────────────────────────────────────────────────
     private static function detectMaintenanceSpikes(): array
     {
-        // WHY (TZ): the 30-day window is computed in SQL (DATE_SUB(CURDATE(...)))
-        // so it doesn't drift against UTC DB dates like a PHP date() value would.
+        // WHY (TZ): wo.completed_date is a company-local business DATE, so the
+        // 30-day window is anchored on the bound ff_today() (arithmetic stays in
+        // SQL) — SQL CURDATE() is the UTC day and is already TOMORROW when the
+        // nightly scan runs in the Pacific evening. The TIMESTAMPDIFF(MONTH, eu.created_at, CURDATE()) terms are
+        // deliberately left on CURDATE(): created_at is a UTC DATETIME, so the
+        // UTC day is the matching clock for that month count.
         // WHY (baseline): the comparison must EXCLUDE the recent window —
         // eu.total_maintenance_cost is the monotonic all-time total that already
         // contains recent_cost, so the old "(lifetime/months)*2" baseline was
@@ -267,7 +283,7 @@ class AnomalyDetector
                         SUM(wo.total_cost) AS recent_cost,
                         COUNT(*) AS recent_count
                  FROM maintenance_work_orders wo
-                 WHERE wo.completed_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                 WHERE wo.completed_date >= DATE_SUB(?, INTERVAL 30 DAY)
                    AND wo.status = 'completed'
                    AND wo.deleted_at IS NULL
                  GROUP BY wo.equipment_unit_id
@@ -275,7 +291,9 @@ class AnomalyDetector
              WHERE eu.deleted_at IS NULL
                AND TIMESTAMPDIFF(MONTH, eu.created_at, CURDATE()) >= 2
              HAVING recent_cost > prior_monthly_avg * 2
-                AND recent_cost > 500"
+                AND recent_cost > 500",
+            // Single '?' = the completed_date window anchor (business DATE).
+            [ff_today()]
         );
 
         $alerts = [];

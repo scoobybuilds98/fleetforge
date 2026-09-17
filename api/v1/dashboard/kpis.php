@@ -191,12 +191,15 @@ $sentInvoices = (int) db_count(
 );
 
 // ── KPI 11: This Month's Collections ─────────────────────────
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day, so after
+// 5pm Pacific (4pm in winter) on the last of a month it would already count NEXT month (ff_today).
 $collectionsRow = db_row(
     "SELECT COALESCE(SUM(amount), 0) AS total
        FROM payments
-      WHERE MONTH(payment_date) = MONTH(CURDATE())
-        AND YEAR(payment_date)  = YEAR(CURDATE())
-        AND deleted_at IS NULL"
+      WHERE MONTH(payment_date) = MONTH(?)
+        AND YEAR(payment_date)  = YEAR(?)
+        AND deleted_at IS NULL",
+    [ff_today(), ff_today()]
 );
 $monthlyCollections = bcround((string) $collectionsRow['total'], 2);
 

@@ -91,26 +91,44 @@ if ($customerFilter = clean_string($_GET['customer_filter'] ?? null)) {
 //   ar30    → status IN ('sent','overdue') AND today-30d <= due_date < today
 //   ar60    → status IN ('sent','overdue') AND today-60d <= due_date < today-30d
 //   ar90    → status IN ('sent','overdue') AND due_date < today-60d
+//
+// "today" is bound as ff_today() rather than SQL CURDATE(): due_date is a DATE
+// holding a company-local calendar day, but db.php pins the session to +00:00 so
+// CURDATE() is the UTC day — after 5pm Pacific (4pm in winter) it is tomorrow and every bucket
+// boundary slides a day. Each '?' fragment pushes its $params entry in the same
+// statement so positional order stays aligned (the aging fragments are appended
+// after every other filter, and $params feeds both the COUNT and the data query).
 $aging = clean_string($_GET['aging'] ?? null);
 if ($aging !== null && $aging !== '') {
+    $today = ff_today();
     switch ($aging) {
         case 'current':
             $where[] = "i.status = 'sent'";
-            $where[] = "i.due_date >= CURDATE()";
+            // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+            $where[] = "i.due_date >= ?";
+            $params[] = $today;
             break;
         case 'ar30':
             $where[] = "i.status IN ('sent','overdue')";
-            $where[] = "i.due_date <  CURDATE()";
-            $where[] = "i.due_date >= CURDATE() - INTERVAL 30 DAY";
+            // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+            $where[] = "i.due_date <  ?";
+            $params[] = $today;
+            $where[] = "i.due_date >= ? - INTERVAL 30 DAY";
+            $params[] = $today;
             break;
         case 'ar60':
             $where[] = "i.status IN ('sent','overdue')";
-            $where[] = "i.due_date <  CURDATE() - INTERVAL 30 DAY";
-            $where[] = "i.due_date >= CURDATE() - INTERVAL 60 DAY";
+            // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+            $where[] = "i.due_date <  ? - INTERVAL 30 DAY";
+            $params[] = $today;
+            $where[] = "i.due_date >= ? - INTERVAL 60 DAY";
+            $params[] = $today;
             break;
         case 'ar90':
             $where[] = "i.status IN ('sent','overdue')";
-            $where[] = "i.due_date <  CURDATE() - INTERVAL 60 DAY";
+            // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+            $where[] = "i.due_date <  ? - INTERVAL 60 DAY";
+            $params[] = $today;
             break;
         // any other value silently ignored — keeps the filter forgiving
     }

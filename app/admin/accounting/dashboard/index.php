@@ -69,20 +69,23 @@ $draftCount = db_count(
 );
 
 // Periods needing close (past months still open)
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $periodsNeedingClose = db_count(
     "SELECT COUNT(*)
      FROM acc_periods
      WHERE status = 'open'
-       AND end_date < CURDATE()"
+       AND end_date < ?",
+    [ff_today()]
 );
 
 // All periods for current year — for period status bar
+// Company-local year, not the UTC year: YEAR(CURDATE()) flips on Dec 31 evening (ff_today).
 $yearPeriods = db_select(
     "SELECT id, year, month, name, status
      FROM acc_periods
-     WHERE year = YEAR(CURDATE())
+     WHERE year = YEAR(?)
      ORDER BY month ASC",
-    []
+    [ff_today()]
 );
 
 $pageTitle = 'Accounting Dashboard';

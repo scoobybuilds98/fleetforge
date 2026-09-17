@@ -458,16 +458,20 @@ function run_dunning_letters(): array
     // The schema does not store letters per-invoice (acc_dunning_letters
     // has customer_id + invoice_count + total_overdue), so a single letter
     // covers all of a customer's overdue invoices.
+    // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+    // (session time_zone '+00:00'), so invoices.due_date compares against
+    // ff_today(). Params in textual '?' order: DATEDIFF, then due_date <.
     $candidates = db_select(
         "SELECT c.id, c.company_name, c.email,
-                MAX(DATEDIFF(CURDATE(), i.due_date)) AS max_days
+                MAX(DATEDIFF(?, i.due_date)) AS max_days
          FROM customers c
          JOIN invoices i ON i.customer_id = c.id
          WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL
            AND i.status IN ('sent','overdue','partially_paid')
-           AND i.balance_due > 0 AND i.due_date < CURDATE()
+           AND i.balance_due > 0 AND i.due_date < ?
          GROUP BY c.id, c.company_name, c.email
-         HAVING max_days >= 30"
+         HAVING max_days >= 30",
+        [ff_today(), ff_today()]
     );
 
     foreach ($candidates as $cust) {
@@ -488,13 +492,16 @@ function run_dunning_letters(): array
             // cycle; resending the same stage letter every day would
             // become harassment. If they've not paid in 60 days they get
             // reminder_60 once, then warning_90 30 days later, etc.
+            // acc_dunning_letters.sent_date is a DATE written with the
+            // company-local date('Y-m-d'); SQL CURDATE() is the UTC day, so
+            // the 30-day window anchors on ff_today() (3rd '?').
             $recent = db_row(
                 "SELECT id FROM acc_dunning_letters
                  WHERE customer_id = ?
                    AND letter_type = ?
-                   AND sent_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                   AND sent_date >= DATE_SUB(?, INTERVAL 30 DAY)
                  LIMIT 1",
-                [$custId, $letterType]
+                [$custId, $letterType, ff_today()]
             );
             if ($recent) {
                 $skipped++;

@@ -330,9 +330,13 @@ class PaymentWebhookHandler
         } else {
             $newStatus = $invoice['status'];
         }
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+        // (session pinned +00:00), so a webhook landing after 5pm Pacific (4pm in winter)
+        // stamped tomorrow's paid_date. Bind ff_today() — matches create.php /
+        // allocate.php, which set paid_date = date('Y-m-d').
         db_execute(
-            "UPDATE invoices SET amount_paid = ?, balance_due = ?, status = ?, paid_date = CASE WHEN ? = 'paid' THEN CURDATE() ELSE paid_date END WHERE id = ?",
-            [$newAmountPaid, $newBalanceDue, $newStatus, $newStatus, $ffInvoiceId]
+            "UPDATE invoices SET amount_paid = ?, balance_due = ?, status = ?, paid_date = CASE WHEN ? = 'paid' THEN ? ELSE paid_date END WHERE id = ?",
+            [$newAmountPaid, $newBalanceDue, $newStatus, $newStatus, ff_today(), $ffInvoiceId]
         );
 
         // g. Update customer.outstanding_balance counter (Trap 6 / D45).

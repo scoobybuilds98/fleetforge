@@ -39,27 +39,37 @@ class MorningBriefingRenderer
         $cutoff24h = date('Y-m-d H:i:s', strtotime('-24 hours'));
         $in7d      = date('Y-m-d', strtotime('+7 days'));
 
+        // Company-local business "today". SQL CURDATE() is the UTC day (the
+        // PDO session is pinned to +00:00), which is TOMORROW after 5pm
+        // Pacific — due_date is a Pacific calendar DATE (ff_today).
+        $today = ff_today();
+
         // Today's overdue invoices.
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
         $overdueRow = db_row(
             "SELECT COUNT(*) AS n, COALESCE(SUM(balance_due), 0) AS total
              FROM invoices
              WHERE deleted_at IS NULL
                AND status IN ('sent','overdue','partially_paid')
-               AND balance_due > 0 AND due_date < CURDATE()"
+               AND balance_due > 0 AND due_date < ?",
+            [$today]
         );
 
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+        // Param order: DATEDIFF (SELECT list) first, then the due_date filter.
         $topOverdue = db_select(
             "SELECT c.company_name,
                     COALESCE(SUM(i.balance_due), 0) AS total,
-                    MAX(DATEDIFF(CURDATE(), i.due_date)) AS max_days
+                    MAX(DATEDIFF(?, i.due_date)) AS max_days
              FROM customers c
              JOIN invoices i ON i.customer_id = c.id
              WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL
                AND i.status IN ('sent','overdue','partially_paid')
-               AND i.balance_due > 0 AND i.due_date < CURDATE()
+               AND i.balance_due > 0 AND i.due_date < ?
              GROUP BY c.id, c.company_name
              ORDER BY total DESC
-             LIMIT 5"
+             LIMIT 5",
+            [$today, $today]
         );
 
         // Compliance expiring within 7 days — CVI + Registration only. MVI and
@@ -298,6 +308,9 @@ class MorningBriefingRenderer
     public static function buildWeeklyPayload(): array
     {
         $weekStart = date('Y-m-d 00:00:00', strtotime('-7 days'));
+        // Company-local business "today" for the DATE-column filters below
+        // (payment_date, due_date). SQL CURDATE() is the UTC day (ff_today).
+        $today = ff_today();
 
         // Invoices generated in last 7 days
         $invoices7d = db_row(
@@ -309,10 +322,12 @@ class MorningBriefingRenderer
         );
 
         // Payments received in last 7 days
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
         $payments7d = db_row(
             "SELECT COUNT(*) AS n, COALESCE(SUM(amount), 0) AS total
                FROM payments
-              WHERE deleted_at IS NULL AND payment_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)"
+              WHERE deleted_at IS NULL AND payment_date >= DATE_SUB(?, INTERVAL 7 DAY)",
+            [$today]
         );
 
         // Active lease count + leases opened in last 7 days
@@ -326,14 +341,17 @@ class MorningBriefingRenderer
         );
 
         // Overdue snapshot (current — same as morning)
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
         $overdueNow = db_row(
             "SELECT COUNT(*) AS n, COALESCE(SUM(balance_due), 0) AS total
                FROM invoices
               WHERE deleted_at IS NULL AND status IN ('sent','overdue','partially_paid')
-                AND balance_due > 0 AND due_date < CURDATE()"
+                AND balance_due > 0 AND due_date < ?",
+            [$today]
         );
 
         // Top 5 overdue customers (current snapshot)
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
         $topOverdue = db_select(
             "SELECT c.company_name,
                     COALESCE(SUM(i.balance_due), 0) AS total
@@ -341,10 +359,11 @@ class MorningBriefingRenderer
                JOIN invoices i ON i.customer_id = c.id
               WHERE c.deleted_at IS NULL AND i.deleted_at IS NULL
                 AND i.status IN ('sent','overdue','partially_paid')
-                AND i.balance_due > 0 AND i.due_date < CURDATE()
+                AND i.balance_due > 0 AND i.due_date < ?
               GROUP BY c.id, c.company_name
               ORDER BY total DESC
-              LIMIT 5"
+              LIMIT 5",
+            [$today]
         );
 
         // Total open damage claims

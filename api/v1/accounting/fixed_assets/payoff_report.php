@@ -217,9 +217,11 @@ $rev6Rows = db_select(
        -- the fleet-wide report cannot disagree with the per-unit view.
        AND i.status NOT IN ('void', 'written_off', 'draft')
        AND ili.is_credit = 0
-       AND i.invoice_date >= (CURDATE() - INTERVAL 6 MONTH)
+       AND i.invoice_date >= (? - INTERVAL 6 MONTH)
      GROUP BY l.equipment_unit_id",
-    $unitIdList
+    // Business DATE (invoice_date) vs company-local today: SQL CURDATE() is the
+    // UTC day, so bind ff_today(). Its '?' comes AFTER the IN(...) list.
+    array_merge($unitIdList, [ff_today()])
 );
 foreach ($rev6Rows as $r) {
     $rev6ByUnit[(int) $r['eu_id']] = (string) $r['total'];
@@ -233,9 +235,11 @@ $mnt6Rows = db_select(
      WHERE equipment_unit_id IN ({$placeholders})
        AND status = 'completed'
        AND deleted_at IS NULL
-       AND COALESCE(completed_date, requested_date) >= (CURDATE() - INTERVAL 6 MONTH)
+       AND COALESCE(completed_date, requested_date) >= (? - INTERVAL 6 MONTH)
      GROUP BY equipment_unit_id",
-    $unitIdList
+    // Business DATEs vs company-local today: SQL CURDATE() is the UTC day, so
+    // bind ff_today(). Its '?' comes AFTER the IN(...) list.
+    array_merge($unitIdList, [ff_today()])
 );
 foreach ($mnt6Rows as $r) {
     $mnt6ByUnit[(int) $r['eu_id']] = (string) $r['total'];

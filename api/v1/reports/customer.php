@@ -323,6 +323,8 @@ switch ($view) {
 
     // ── Lease frequency ranking ───────────────────────────────────────────────
     case 'frequency':
+        // Business DATE vs company-local today: an unreturned lease's length runs
+        // to ff_today(), not SQL CURDATE() (the UTC day — tomorrow after ~5pm Pacific (4pm in winter)).
         $rows = db_select(
             "SELECT
                 l.customer_id,
@@ -335,7 +337,7 @@ switch ($view) {
                 MAX(l.start_date)                       AS last_lease_date,
                 COALESCE(AVG(
                     DATEDIFF(
-                        COALESCE(l.actual_return_date, CURDATE()),
+                        COALESCE(l.actual_return_date, ?),
                         l.start_date
                     ) + 1
                 ), 0)                                   AS avg_lease_days,
@@ -350,7 +352,7 @@ switch ($view) {
              GROUP BY l.customer_id, company_name, c.status
              ORDER BY lease_count DESC, company_name ASC
              LIMIT 50",
-            [$dateFrom, $dateTo]
+            [ff_today(), $dateFrom, $dateTo]
         );
 
         $top15 = array_slice($rows, 0, 15);

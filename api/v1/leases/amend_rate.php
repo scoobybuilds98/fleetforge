@@ -450,11 +450,10 @@ db_transaction(function () use (
 
     // 5 — affected draft invoices for future periods (audit only;
     // no auto-regeneration per D-A / D-D).
-    // S-AUDIT-LIFECYCLE-1 F4: CURDATE() not NOW() (billing_period_start is a
-    // DATE — the DATETIME compare silently excluded a draft whose period
-    // starts TODAY), >= not > for the same reason, and regular non-advance
-    // drafts only (mirrors update.php's candidate query). Any unsent draft
-    // will re-price if regenerated, so surface every regular one.
+    // S-AUDIT-LIFECYCLE-1 F4: no date predicate at all — an earlier NOW()-based
+    // filter silently excluded a draft whose period starts TODAY. Regular
+    // non-advance drafts only (mirrors update.php's candidate query). Any unsent
+    // draft will re-price if regenerated, so surface every regular one.
     $affectedDrafts = db_select(
         "SELECT id, invoice_number, billing_period_start, billing_period_end
          FROM invoices

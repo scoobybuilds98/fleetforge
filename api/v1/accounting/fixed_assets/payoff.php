@@ -308,10 +308,12 @@ $monthlyRows = db_select(
        -- with the hero on the very same page.
        AND i.status NOT IN ('void', 'written_off', 'draft')
        AND ili.is_credit = 0
-       AND i.invoice_date >= (CURDATE() - INTERVAL 13 MONTH)
+       AND i.invoice_date >= (? - INTERVAL 13 MONTH)
      GROUP BY ym
      ORDER BY ym ASC",
-    [$eqUnitId]
+    // Business DATE (invoice_date) vs company-local today: SQL CURDATE() is the
+    // UTC day (tomorrow after 5pm Pacific (4pm in winter)), so bind ff_today() instead.
+    [$eqUnitId, ff_today()]
 );
 
 $revenueByMonth = [];
@@ -327,9 +329,11 @@ $mntMonthRows = db_select(
      WHERE equipment_unit_id = ?
        AND status = 'completed'
        AND deleted_at IS NULL
-       AND COALESCE(completed_date, requested_date) >= (CURDATE() - INTERVAL 13 MONTH)
+       AND COALESCE(completed_date, requested_date) >= (? - INTERVAL 13 MONTH)
      GROUP BY ym",
-    [$eqUnitId]
+    // Business DATEs vs company-local today: SQL CURDATE() is the UTC day, so
+    // bind ff_today() instead.
+    [$eqUnitId, ff_today()]
 );
 foreach ($mntMonthRows as $r) {
     $mntByMonth[$r['ym']] = (string) $r['cost'];

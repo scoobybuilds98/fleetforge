@@ -129,15 +129,18 @@ class DunningLetterGenerator
             throw new \InvalidArgumentException("Customer #{$customerId} not found.");
         }
 
+        // Business DATE vs company-local today: due_date is a Pacific calendar
+        // day but SQL CURDATE() is the UTC day — after 5pm Pacific (4pm in winter) an invoice
+        // due today would be dunned as overdue (ff_today).
         $overdueInvoices = \db_select(
             "SELECT id, invoice_number, invoice_date, due_date, balance_due, total_amount
              FROM invoices
              WHERE customer_id = ? AND deleted_at IS NULL
                AND status IN ('sent','overdue','partially_paid')
                AND balance_due > 0
-               AND due_date < CURDATE()
+               AND due_date < ?
              ORDER BY due_date ASC",
-            [$customerId]
+            [$customerId, \ff_today()]
         );
 
         if (count($overdueInvoices) === 0) {

@@ -63,6 +63,10 @@ try {
     // Find all pending promises whose promise_date has passed. Loop predicate
     // is status='pending' only — once a promise is marked kept/broken, it
     // stays in that state. Manager flips manually if needed.
+    //
+    // Business DATE vs company-local today: promise_date is a Pacific calendar
+    // day but SQL CURDATE() is the UTC day (session pinned +00:00) — after 5pm
+    // Pacific it would judge today's promises as already expired (ff_today).
     // -----------------------------------------------------------------------
     $expiredPromises = db_select(
         "SELECT p.*, c.company_name, i.invoice_number
@@ -70,8 +74,8 @@ try {
          JOIN customers c ON c.id = p.customer_id
          LEFT JOIN invoices i ON i.id = p.invoice_id
          WHERE p.status = 'pending'
-           AND p.promise_date < CURDATE()",
-        []
+           AND p.promise_date < ?",
+        [ff_today()]
     );
 
     foreach ($expiredPromises as $promise) {

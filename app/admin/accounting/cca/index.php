@@ -23,8 +23,8 @@ require_once FF_ROOT . '/includes/auth.php';
 require_auth();
 require_permission('journal_entries', 'view');
 
-// Default fiscal year: most recent acc_periods year with posted JEs, or
-// CURDATE() year otherwise.
+// Default fiscal year: most recent acc_periods year with posted JEs, or the
+// current company-local year (PHP date('Y'), APP_TIMEZONE) otherwise.
 $defaultYear = (int) (db_row(
     "SELECT p.year FROM acc_periods p
       WHERE EXISTS (SELECT 1 FROM acc_journal_entries je

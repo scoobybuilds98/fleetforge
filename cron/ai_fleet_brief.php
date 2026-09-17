@@ -280,14 +280,18 @@ function gather_brief_metrics(): array
     )['n'] ?? 0);
 
     // AR
+    // Business DATE vs company-local today: SQL CURDATE() is the UTC day
+    // (session time_zone '+00:00'), so invoices.due_date compares against
+    // ff_today(), bound once per '?' (overdue SUM, CASE test, DATEDIFF).
     $ar = db_row(
         "SELECT
             COALESCE(SUM(balance_due), 0) AS total_outstanding,
-            SUM(due_date < CURDATE() AND balance_due > 0) AS overdue_count,
-            COALESCE(MAX(CASE WHEN due_date < CURDATE() AND balance_due > 0
-                              THEN DATEDIFF(CURDATE(), due_date) END), 0) AS oldest_overdue_days
+            SUM(due_date < ? AND balance_due > 0) AS overdue_count,
+            COALESCE(MAX(CASE WHEN due_date < ? AND balance_due > 0
+                              THEN DATEDIFF(?, due_date) END), 0) AS oldest_overdue_days
          FROM invoices
-         WHERE deleted_at IS NULL AND status IN ('sent','overdue','partially_paid')"
+         WHERE deleted_at IS NULL AND status IN ('sent','overdue','partially_paid')",
+        [ff_today(), ff_today(), ff_today()]
     );
 
     // Top 3 customers with worst risk score (HIGH first, then MEDIUM)

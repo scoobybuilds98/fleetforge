@@ -58,12 +58,20 @@ require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
 require_method('GET');
 require_auth_api();
 
+// Company-local business "today". The PDO session is pinned to UTC
+// (includes/db.php), so SQL CURDATE() is the UTC calendar day — after 5pm
+// Pacific it is already tomorrow. Every DATE column compared below (start_date,
+// end_date, due_date, invoice_date, pickup_date) holds a Pacific calendar day,
+// so each query binds this value instead of calling CURDATE().
+$today = ff_today();
+
 // ── Active leases — top 10, newest start_date first ───────────
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $activeLeases = db_select(
     "SELECT l.id, l.contract_number, l.start_date, l.end_date, l.status,
             l.monthly_rate, l.daily_rate, l.weekly_rate, l.currency,
             l.template_name_snapshot,
-            DATEDIFF(CURDATE(), l.start_date)               AS days_active,
+            DATEDIFF(?, l.start_date)                       AS days_active,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_name,
             COALESCE(u.unit_number,  l.unit_number_snapshot)  AS unit_number
      FROM leases l
@@ -72,30 +80,33 @@ $activeLeases = db_select(
      WHERE l.status = 'active' AND l.deleted_at IS NULL
      ORDER BY l.start_date DESC
      LIMIT 10",
-    []
+    [$today]
 );
 
 // ── Pending activations — top 10, most overdue start_date first ─
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $pendingLeases = db_select(
     "SELECT l.id, l.contract_number, l.start_date, l.end_date, l.created_at,
             l.monthly_rate, l.daily_rate, l.weekly_rate, l.currency,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_name,
             COALESCE(u.unit_number,  l.unit_number_snapshot)  AS unit_number,
-            DATEDIFF(CURDATE(), l.start_date) AS days_overdue
+            DATEDIFF(?, l.start_date) AS days_overdue
      FROM leases l
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE l.status = 'pending' AND l.deleted_at IS NULL
      ORDER BY l.start_date ASC
      LIMIT 10",
-    []
+    [$today]
 );
 
 // ── Upcoming returns — active leases ending within 60 days ─────
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+// Three placeholders (days_remaining, window start, window end) — one $today each.
 $upcomingReturns = db_select(
     "SELECT l.id, l.contract_number, l.end_date,
             l.monthly_rate, l.daily_rate, l.currency,
-            DATEDIFF(l.end_date, CURDATE()) AS days_remaining,
+            DATEDIFF(l.end_date, ?) AS days_remaining,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_name,
             COALESCE(u.unit_number,  l.unit_number_snapshot)  AS unit_number,
             l.template_name_snapshot
@@ -104,12 +115,12 @@ $upcomingReturns = db_select(
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE l.status = 'active'
        AND l.end_date IS NOT NULL
-       AND l.end_date >= CURDATE()
-       AND l.end_date <= DATE_ADD(CURDATE(), INTERVAL 60 DAY)
+       AND l.end_date >= ?
+       AND l.end_date <= DATE_ADD(?, INTERVAL 60 DAY)
        AND l.deleted_at IS NULL
      ORDER BY l.end_date ASC
      LIMIT 10",
-    []
+    [$today, $today, $today]
 );
 
 // ── Outstanding invoices — sent/overdue/partially_paid with balance > 0 ─
@@ -118,11 +129,12 @@ $upcomingReturns = db_select(
 // out fully-paid items that haven't transitioned to status='paid' yet.
 // 3-level COALESCE for customer name picks live name, falls back to invoice
 // snapshot, then to legacy customer_name_snapshot for the oldest rows.
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $invoices = db_select(
     "SELECT i.id, i.invoice_number, i.invoice_date,
             COALESCE(c.company_name, i.company_name_snapshot, i.customer_name_snapshot) AS customer_name,
             i.total_amount, i.balance_due, i.due_date, i.status,
-            DATEDIFF(CURDATE(), i.due_date) AS days_overdue
+            DATEDIFF(?, i.due_date) AS days_overdue
      FROM invoices i
      LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
      WHERE i.status IN ('sent', 'overdue', 'partially_paid')
@@ -130,7 +142,7 @@ $invoices = db_select(
        AND i.balance_due > 0
      ORDER BY i.due_date ASC
      LIMIT 10",
-    []
+    [$today]
 );
 
 // ── Upcoming reservations — confirmed/pending with pickup today or later ─
@@ -141,11 +153,13 @@ $invoices = db_select(
 // non-existent FKs. CONCAT('RES-', r.id) provides a human-readable reference.
 // NULL placeholders for unit/equipment keep the card template consistent.
 // days_until_pickup is computed so the card can colour-code urgency.
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+// Two placeholders (days_until_pickup, pickup window start) — one $today each.
 $reservations = db_select(
     "SELECT r.id,
             CONCAT('RES-', r.id)                              AS reservation_number,
             r.status, r.pickup_date, r.pickup_time, r.quantity,
-            DATEDIFF(r.pickup_date, CURDATE())                AS days_until_pickup,
+            DATEDIFF(r.pickup_date, ?)                        AS days_until_pickup,
             NULL                                              AS unit_number,
             NULL                                              AS equipment_type,
             NULL                                              AS return_date,
@@ -153,19 +167,23 @@ $reservations = db_select(
      FROM reservations r
      LEFT JOIN customers c ON c.id = r.customer_id AND c.deleted_at IS NULL
      WHERE r.status IN ('confirmed', 'pending')
-       AND r.pickup_date >= CURDATE()
+       AND r.pickup_date >= ?
        AND r.deleted_at IS NULL
      ORDER BY r.pickup_date ASC
      LIMIT 10",
-    []
+    [$today, $today]
 );
 
 // ── Expiring this month — active leases ending this calendar month ─
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+// On the last evening of a month the UTC day is already next month, so the
+// "this month" boundary must come from $today too. Three placeholders
+// (days_remaining, YEAR, MONTH) — one $today each.
 $expiringThisMonth = db_select(
     "SELECT l.id, l.contract_number, l.end_date,
             l.monthly_rate, l.daily_rate, l.currency,
             l.template_name_snapshot,
-            DATEDIFF(l.end_date, CURDATE()) AS days_remaining,
+            DATEDIFF(l.end_date, ?) AS days_remaining,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_name,
             COALESCE(u.unit_number,  l.unit_number_snapshot)  AS unit_number
      FROM leases l
@@ -173,36 +191,38 @@ $expiringThisMonth = db_select(
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE l.status = 'active'
        AND l.end_date IS NOT NULL
-       AND YEAR(l.end_date)  = YEAR(CURDATE())
-       AND MONTH(l.end_date) = MONTH(CURDATE())
+       AND YEAR(l.end_date)  = YEAR(?)
+       AND MONTH(l.end_date) = MONTH(?)
        AND l.deleted_at IS NULL
      ORDER BY l.end_date ASC
      LIMIT 10",
-    []
+    [$today, $today, $today]
 );
 
 // ── Draft invoices — oldest draft first (longest sitting in draft) ─
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $draftInvoices = db_select(
     "SELECT i.id, i.invoice_number, i.invoice_date, i.total_amount,
             COALESCE(c.company_name, i.company_name_snapshot, i.customer_name_snapshot) AS customer_name,
-            DATEDIFF(CURDATE(), i.invoice_date) AS days_in_draft
+            DATEDIFF(?, i.invoice_date) AS days_in_draft
      FROM invoices i
      LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
      WHERE i.status = 'draft'
        AND i.deleted_at IS NULL
      ORDER BY i.invoice_date ASC
      LIMIT 10",
-    []
+    [$today]
 );
 
 // ── High-value leases — top 10 active by effective monthly rate ───
 // Normalise all billing cadences to a comparable monthly figure:
 // weekly_rate * 4.33 and daily_rate * 30 so GREATEST() picks the right row.
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $highValueLeases = db_select(
     "SELECT l.id, l.contract_number, l.start_date, l.end_date,
             l.monthly_rate, l.daily_rate, l.weekly_rate, l.currency,
             l.template_name_snapshot,
-            DATEDIFF(CURDATE(), l.start_date) AS days_active,
+            DATEDIFF(?, l.start_date) AS days_active,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_name,
             COALESCE(u.unit_number,  l.unit_number_snapshot)  AS unit_number
      FROM leases l
@@ -216,32 +236,35 @@ $highValueLeases = db_select(
          COALESCE(l.daily_rate,   0) * 30
      ) DESC
      LIMIT 10",
-    []
+    [$today]
 );
 
 // ── Recently activated — leases that went active in the last 7 days ─
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+// Two placeholders (days_active, 7-day window start) — one $today each.
 $recentlyActivated = db_select(
     "SELECT l.id, l.contract_number, l.start_date, l.end_date,
             l.monthly_rate, l.daily_rate, l.currency,
             l.template_name_snapshot,
-            DATEDIFF(CURDATE(), l.start_date) AS days_active,
+            DATEDIFF(?, l.start_date) AS days_active,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_name,
             COALESCE(u.unit_number,  l.unit_number_snapshot)  AS unit_number
      FROM leases l
      LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
      LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
      WHERE l.status = 'active'
-       AND l.start_date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+       AND l.start_date >= DATE_SUB(?, INTERVAL 7 DAY)
        AND l.deleted_at IS NULL
      ORDER BY l.start_date DESC
      LIMIT 10",
-    []
+    [$today, $today]
 );
 
 // ── Overdue payments — invoices past due, biggest balance first ───
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
 $overduePayments = db_select(
     "SELECT i.id, i.invoice_number, i.due_date, i.balance_due, i.total_amount,
-            DATEDIFF(CURDATE(), i.due_date) AS days_overdue,
+            DATEDIFF(?, i.due_date) AS days_overdue,
             COALESCE(c.company_name, i.company_name_snapshot, i.customer_name_snapshot) AS customer_name
      FROM invoices i
      LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
@@ -250,7 +273,7 @@ $overduePayments = db_select(
        AND i.balance_due > 0
      ORDER BY i.balance_due DESC
      LIMIT 10",
-    []
+    [$today]
 );
 
 $payload = [

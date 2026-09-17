@@ -160,12 +160,16 @@ class TaxCodeMatcher
      */
     public static function matchAll(array $qboTaxCodes): array
     {
+        // Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+        // One bind per positional '?' (each placeholder consumes its own param).
+        $today   = ff_today();
         $ffRates = db_select(
             "SELECT id, name, province, country, gst_rate, pst_rate, hst_rate, effective_from, effective_to
                FROM tax_rates
               WHERE is_active = 1
-                AND effective_from <= CURDATE()
-                AND (effective_to IS NULL OR effective_to > CURDATE())"
+                AND effective_from <= ?
+                AND (effective_to IS NULL OR effective_to > ?)",
+            [$today, $today]
         );
 
         $decisions     = [];

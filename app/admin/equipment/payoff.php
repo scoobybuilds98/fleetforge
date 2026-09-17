@@ -190,8 +190,11 @@ foreach (db_select(
       WHERE l.equipment_unit_id = ? AND l.deleted_at IS NULL
         AND i.deleted_at IS NULL AND i.status NOT IN ('void','written_off','draft')
         AND ili.is_credit = 0
-        AND i.invoice_date >= (CURDATE() - INTERVAL 24 MONTH)
-      GROUP BY ym ORDER BY ym DESC", [$unitId]
+        AND i.invoice_date >= (? - INTERVAL 24 MONTH)
+      GROUP BY ym ORDER BY ym DESC",
+    // Business DATE (invoice_date) vs company-local today: SQL CURDATE() is the
+    // UTC day (tomorrow after 5pm Pacific (4pm in winter)), so bind ff_today() instead.
+    [$unitId, ff_today()]
 ) as $r) { $revByMonth[$r['ym']] = (string) $r['rev']; }
 
 // Maintenance by month
@@ -201,8 +204,11 @@ foreach (db_select(
             COALESCE(SUM(total_cost),0) AS cost
        FROM maintenance_work_orders
       WHERE equipment_unit_id = ? AND status = 'completed' AND deleted_at IS NULL
-        AND COALESCE(completed_date,requested_date) >= (CURDATE() - INTERVAL 24 MONTH)
-      GROUP BY ym", [$unitId]
+        AND COALESCE(completed_date,requested_date) >= (? - INTERVAL 24 MONTH)
+      GROUP BY ym",
+    // Business DATEs (completed/requested_date) vs company-local today: SQL
+    // CURDATE() is the UTC day, so bind ff_today() instead.
+    [$unitId, ff_today()]
 ) as $r) { $mntByMonth[$r['ym']] = (string) $r['cost']; }
 
 // Damage by month
@@ -278,14 +284,18 @@ $dmgTotal = array_reduce($damageClaims, fn($c, $r) =>
 // ── Utilisation analysis ──────────────────────────────────────────────────────
 // Days on lease = SUM(DATEDIFF(end_date, start_date)+1) for completed+active leases.
 // Denominator = days since acquired_date (or asset acquisition_date).
+// WHY ff_today() is bound 3x: start_date/end_date are business DATEs (Pacific
+// calendar days) but SQL CURDATE() is the UTC day, which after 5pm Pacific (4pm in winter) is
+// tomorrow and would add a phantom day to every open lease. Params follow the
+// textual order of the placeholders: LEAST(COALESCE(end_date, ?), ?), MAX(..., ?), unit.
 $utilRow = db_row(
     "SELECT COUNT(*) AS lease_count,
-            COALESCE(SUM(DATEDIFF(LEAST(COALESCE(end_date, CURDATE()), CURDATE()), start_date) + 1), 0) AS days_on_lease,
+            COALESCE(SUM(DATEDIFF(LEAST(COALESCE(end_date, ?), ?), start_date) + 1), 0) AS days_on_lease,
             COALESCE(MIN(start_date), NULL) AS first_lease_start,
-            COALESCE(MAX(COALESCE(end_date, CURDATE())), NULL) AS last_lease_end
+            COALESCE(MAX(COALESCE(end_date, ?)), NULL) AS last_lease_end
        FROM leases
       WHERE equipment_unit_id = ? AND status != 'cancelled' AND deleted_at IS NULL",
-    [$unitId]
+    [ff_today(), ff_today(), ff_today(), $unitId]
 );
 
 $acquiredDate = $asset['acquisition_date'] ?? $unit['acquired_date'] ?? null;

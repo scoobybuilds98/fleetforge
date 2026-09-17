@@ -38,12 +38,14 @@ $unitsOut = db_count(
 );
 
 // Documents expiring in 30 days
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day, so every
+// evening a doc expiring today drops out of the window a day early (ff_today).
 $docsExpiring = db_count(
     "SELECT COUNT(*) FROM documents
      WHERE entity_type = 'customer' AND entity_id = ?
-     AND expiration_date IS NOT NULL AND expiration_date BETWEEN CURDATE() AND CURDATE() + INTERVAL 30 DAY
+     AND expiration_date IS NOT NULL AND expiration_date BETWEEN ? AND ? + INTERVAL 30 DAY
      AND deleted_at IS NULL",
-    [$cid]
+    [$cid, ff_today(), ff_today()]
 );
 
 // ── Active Leases (compact list) ────────────────────────────

@@ -33,12 +33,14 @@ require_permission('tax_management', 'view');
 $openCount       = db_count("SELECT COUNT(*) FROM acc_tax_filing_periods WHERE status = 'open'");
 $calculatedCount = db_count("SELECT COUNT(*) FROM acc_tax_filing_periods WHERE status = 'calculated'");
 $filedCount      = db_count("SELECT COUNT(*) FROM acc_tax_filing_periods WHERE status = 'filed'");
+// Business DATE (period_end) vs company-local year: YEAR(CURDATE()) is the UTC year (ff_today).
 $ytdNetOwing     = db_row(
     "SELECT COALESCE(SUM(net_tax_owing), 0) AS total
      FROM acc_tax_filing_periods
      WHERE tax_type = 'gst_hst'
        AND status IN ('calculated','filed','remitted')
-       AND YEAR(period_end) = YEAR(CURDATE())"
+       AND YEAR(period_end) = YEAR(?)",
+    [ff_today()]
 )['total'] ?? '0.00';
 
 // Distinct years for filter dropdown — covers all periods on file.

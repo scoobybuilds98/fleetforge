@@ -34,11 +34,13 @@ require_permission('fixed_assets', 'view');
 $totalRuns    = db_count("SELECT COUNT(*) FROM acc_depreciation_runs");
 $previewRuns  = db_count("SELECT COUNT(*) FROM acc_depreciation_runs WHERE status = 'preview'");
 $postedRuns   = db_count("SELECT COUNT(*) FROM acc_depreciation_runs WHERE status = 'posted'");
+// Fiscal period year vs company-local year: YEAR(CURDATE()) is the UTC year (ff_today).
 $ytdTotal     = db_row(
     "SELECT COALESCE(SUM(r.total_depreciation), 0) AS total
      FROM acc_depreciation_runs r
      JOIN acc_periods p ON p.id = r.period_id
-     WHERE r.status = 'posted' AND p.year = YEAR(CURDATE())"
+     WHERE r.status = 'posted' AND p.year = YEAR(?)",
+    [ff_today()]
 )['total'] ?? '0.00';
 
 $pageTitle = 'Depreciation Runs';

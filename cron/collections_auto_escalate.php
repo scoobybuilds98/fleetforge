@@ -59,20 +59,25 @@ try {
     // Find all active customers and their max days overdue across unpaid
     // invoices. WHY: max determines tier (a single 90-day invoice means
     // 'collections' regardless of newer invoices' ages).
+    //
+    // Business DATE vs company-local today: invoices.due_date is a Pacific
+    // calendar day but SQL CURDATE() is the UTC day (session pinned +00:00),
+    // so after 5pm Pacific (4pm in winter) it is tomorrow — ages/overdue would be off by one.
+    // Both placeholders bind ff_today(), in textual order (SELECT, then JOIN).
     // -----------------------------------------------------------------------
     $customers = db_select(
         "SELECT c.id, c.company_name, c.collection_status,
-                COALESCE(MAX(DATEDIFF(CURDATE(), i.due_date)), 0) AS max_days_overdue,
+                COALESCE(MAX(DATEDIFF(?, i.due_date)), 0) AS max_days_overdue,
                 COALESCE(SUM(i.balance_due), 0) AS total_ar
          FROM customers c
          LEFT JOIN invoices i ON i.customer_id = c.id
              AND i.deleted_at IS NULL
              AND i.status IN ('sent','overdue','partially_paid')
              AND i.balance_due > 0
-             AND i.due_date < CURDATE()
+             AND i.due_date < ?
          WHERE c.deleted_at IS NULL AND c.status = 'active'
          GROUP BY c.id, c.company_name, c.collection_status",
-        []
+        [ff_today(), ff_today()]
     );
 
     foreach ($customers as $cust) {
