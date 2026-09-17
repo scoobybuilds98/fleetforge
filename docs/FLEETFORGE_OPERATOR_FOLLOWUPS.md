@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
@@ -540,6 +540,26 @@ INV-2026-02128 before sending it.
 
 
 ## 🟢 DEFERRED — queued for follow-up sessions
+
+### F76 — Deploy S-GPS-LOCAL-WINDOW, then decide whether to regenerate 23 trailer-mileage drafts 🟢 DEFERRED (non-blocking; PHP only, drafts only)
+
+**Surfaced by:** S-GPS-LOCAL-WINDOW (2026-09-17).
+**Affects:** per-invoice Samsara mileage on samsara-mode leases. Nothing has been sent (prod invoices never leave draft).
+**Detail:** the Samsara distance for an invoice period used a UTC-midnight window, i.e. 5pm → 5pm Pacific
+(4pm → 4pm in winter). Read-only prod check: 64 completed samsara-mode leases, **all trailers**; **24 draft + 5 void**
+invoices carry a Samsara `period_distance_km`, and **23 of the drafts have mileage lines (~$2.9k total)**, periods
+2025-06-01 → 2025-11-14 (e.g. INV-2026-00088 MTTS43-1 10,910 km / $406.77, INV-2026-00095 MTTS47 10,711 km / $399.32).
+Each of those distances is off by the driving in roughly 7–8 hours at each end of the period: it picked up the evening
+before the start date and dropped the evening of the last day. For a lease's final period that evening is lost, not
+moved. The 24 drafts span 22 leases.
+**Operator action:**
+1. Deploy the latest `main` (no migration, no schema, no `FF_ASSET_VERSION` bump). Invoices created after that use local days.
+2. Decide on the 23 existing drafts. Regenerating a draft re-fetches Samsara on the corrected window (none of these
+   drafts has a closing odometer reading, so the engine goes back to Samsara). Samsara must still hold 2025 history for it to work.
+   If a re-fetch fails, the draft loses its mileage line, so check each regenerated draft before sending. Leaving them
+   as they are is also reasonable given the small shift. Void invoices need no action.
+
+---
 
 ### F75 — Demo dataset registers fixed assets with no GL cost entry 🟢 DEFERRED (dev/demo data only)
 

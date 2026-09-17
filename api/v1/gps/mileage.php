@@ -8,7 +8,8 @@ declare(strict_types=1);
 // the actual_mileage field. Spec §10 Feature 2.
 //
 // Calls SamsaraClient::getMileageForLease() using the unit's
-// gps_device_id. Returns km driven since lease start.
+// samsara_vehicle_id. Returns km driven since lease start, over
+// whole company-local days (BusinessDayWindow, S-GPS-LOCAL-WINDOW).
 //
 // NEVER blocking: if GPS unavailable, returns odometer=null
 // and source='unavailable'. Close-lease flow continues.
@@ -51,10 +52,14 @@ if (!$lease) {
 }
 
 // ── Determine date range: lease start → today (or end date if set)
+// S-GPS-LOCAL-WINDOW: "today" comes from the business timezone — the same
+// zone getMileageForLease() (via BusinessDayWindow) uses to turn these dates
+// into a local-midnight GPS window, so the clamp and the window agree.
+$today     = \FleetForge\Accounting\AccountingService::businessToday();
 $startDate = $lease['start_date'];
-$endDate   = $lease['actual_return_date'] ?? $lease['end_date'] ?? date('Y-m-d');
-if ($endDate > date('Y-m-d')) {
-    $endDate = date('Y-m-d'); // don't query future dates
+$endDate   = $lease['actual_return_date'] ?? $lease['end_date'] ?? $today;
+if ($endDate > $today) {
+    $endDate = $today; // don't query future dates
 }
 
 $vehicleId  = (string) ($lease['samsara_vehicle_id'] ?? '');

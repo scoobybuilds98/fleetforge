@@ -850,8 +850,15 @@ class InvoiceGenerator
             ) {
                 try {
                     $samsara   = new \FleetForge\GPS\SamsaraClient();
-                    $startDtUtc = (new \DateTimeImmutable($periodStart . ' 00:00:00', new \DateTimeZone('UTC')));
-                    $endDtUtc   = (new \DateTimeImmutable($periodEnd   . ' 23:59:59', new \DateTimeZone('UTC')));
+                    // S-GPS-LOCAL-WINDOW: the period is a BUSINESS date range, so
+                    // the GPS window must start/end at company-local midnight.
+                    // Anchoring on UTC midnight made a Pacific "Sep 1–30" window
+                    // run Aug 31 5pm → Sep 30 5pm, pushing last-evening driving
+                    // onto the next invoice. The shared helper keeps billing, the
+                    // close-form pre-fill and period_distance on one definition.
+                    $gpsWindow  = \FleetForge\GPS\BusinessDayWindow::toUtc((string) $periodStart, (string) $periodEnd);
+                    $startDtUtc = $gpsWindow['start'];
+                    $endDtUtc   = $gpsWindow['end'];
                     $samsaraResult = $samsara->getDistanceForPeriod(
                         (string) $lease['samsara_vehicle_id'],
                         $startDtUtc, $endDtUtc, 'km',
@@ -859,7 +866,15 @@ class InvoiceGenerator
                     );
                     if ($samsaraResult['distance'] !== null) {
                         $periodDistanceKm   = (string) $samsaraResult['distance'];
-                        $odometerSource     = $samsaraResult['source'] ?? 'gps';
+                        // invoices.odometer_source is enum('gps','manual','estimated')
+                        // but getDistanceForPeriod reports the FEED ('obd' for an
+                        // ECU truck). Every Samsara feed is GPS-gateway data, so
+                        // clamp to 'gps' — an unclamped 'obd' is a STRICT 1265 that
+                        // aborted the whole invoice (only ever masked by the
+                        // fixture, which always answers 'gps').
+                        $samsaraSource      = (string) ($samsaraResult['source'] ?? 'gps');
+                        $odometerSource     = in_array($samsaraSource, ['gps', 'manual', 'estimated'], true)
+                            ? $samsaraSource : 'gps';
                         $odometerFetchedAt  = (new \DateTime())->format('Y-m-d H:i:s');
                     }
                     // audit_log row regardless of success/failure (D102/D123 pattern —
@@ -875,9 +890,10 @@ class InvoiceGenerator
                         'entity_id'    => $leaseId,
                         'entity_label' => $lease['contract_number'] ?? null,
                         'notes'        => sprintf(
-                            'InvoiceGenerator Samsara distance fetch (S-MILEAGE-2B D-C): vehicle=%s period=%s..%s distance=%s source=%s reason=%s',
+                            'InvoiceGenerator Samsara distance fetch (S-MILEAGE-2B D-C): vehicle=%s period=%s..%s window_utc=%s..%s distance=%s source=%s reason=%s',
                             (string) $lease['samsara_vehicle_id'],
                             $periodStart, $periodEnd,
+                            $startDtUtc->format('Y-m-d\TH:i:s\Z'), $endDtUtc->format('Y-m-d\TH:i:s\Z'),
                             (string) ($samsaraResult['distance'] ?? 'null'),
                             (string) ($samsaraResult['source'] ?? 'none'),
                             (string) ($samsaraResult['reason'] ?? 'ok')

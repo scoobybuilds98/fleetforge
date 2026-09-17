@@ -43,6 +43,28 @@ class SamsaraClient
     private string $orgId;
     private string $projectRoot;
 
+    /**
+     * Test-only HTTP transport override for the history-query path
+     * (httpRequest). Smokes install a closure that records the exact URL and
+     * returns canned Samsara JSON, so window/boundary assertions run through
+     * the REAL request builder + bookend math with zero network I/O — even on
+     * a dev box that has a live API key configured. Static so it also reaches
+     * clients constructed internally (InvoiceGenerator does `new SamsaraClient`).
+     * Never set in application code.
+     *
+     * @var null|callable(string $method, string $url): array{code:int, body:?string}
+     */
+    private static $httpTransportOverride = null;
+
+    /**
+     * Install (or clear with null) the test-only transport. See the property
+     * docblock — only tests/ may call this.
+     */
+    public static function setHttpTransportForTesting(?callable $transport): void
+    {
+        self::$httpTransportOverride = $transport;
+    }
+
     public function __construct()
     {
         // INT-1: settings table FIRST, then fall back to .env.
@@ -118,13 +140,16 @@ class SamsaraClient
             return null;
         }
 
-        // Build UTC instants from the lease date strings. getDistanceForPeriod
-        // re-normalizes to UTC and widens by ±24h internally, so plain
-        // midnight→end-of-day bounds are correct here.
+        // S-GPS-LOCAL-WINDOW: lease dates are BUSINESS dates, so the window
+        // runs from company-local midnight on $start to local midnight after
+        // $end (exclusive). This used to anchor on UTC midnight, which for a
+        // Pacific company cut the window off at 5pm on the last day and
+        // disagreed with the invoice path. BusinessDayWindow is the one shared
+        // conversion; getDistanceForPeriod still adds its ±24h bookend margin.
         try {
-            $utc      = new \DateTimeZone('UTC');
-            $startUtc = new \DateTimeImmutable($start . 'T00:00:00', $utc);
-            $endUtc   = new \DateTimeImmutable($end   . 'T23:59:59', $utc);
+            $window   = BusinessDayWindow::toUtc($start, $end);
+            $startUtc = $window['start'];
+            $endUtc   = $window['end'];
         } catch (\Throwable $e) {
             $this->log('GPS_SKIP', "Invalid date range start=$start end=$end — " . $e->getMessage());
             return null;
@@ -1193,6 +1218,10 @@ class SamsaraClient
      * documented in S-MILEAGE-1B / D-A.
      *
      * @param  string             $samsaraVehicleId  Samsara vehicle/trailer ID
+     * Callers holding business DATES (billing periods, lease dates) must build
+     * these instants with BusinessDayWindow::toUtc() — never UTC midnight — so
+     * every surface agrees on where a local day starts (S-GPS-LOCAL-WINDOW).
+     *
      * @param  \DateTimeImmutable $startUtc          Period start (any TZ; normalized to UTC)
      * @param  \DateTimeImmutable $endUtc            Period end   (any TZ; normalized to UTC)
      * @param  string             $unit              'km' (default) or 'miles'
@@ -1868,6 +1897,18 @@ class SamsaraClient
      */
     private function httpRequest(string $method, string $url): array
     {
+        // Test seam (S-GPS-LOCAL-WINDOW): a smoke-installed transport replaces
+        // cURL entirely so hermetic tests can never reach api.samsara.com.
+        if (self::$httpTransportOverride !== null) {
+            $mocked = (self::$httpTransportOverride)($method, $url);
+            return [
+                'code'        => (int) ($mocked['code'] ?? 0),
+                'body'        => isset($mocked['body']) ? (string) $mocked['body'] : null,
+                'error'       => (string) ($mocked['error'] ?? ''),
+                'retry_after' => $mocked['retry_after'] ?? null,
+            ];
+        }
+
         $headerAccumulator = [];
         $ch = curl_init($url);
         curl_setopt_array($ch, [

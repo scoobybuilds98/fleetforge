@@ -9,8 +9,12 @@ declare(strict_types=1);
  *
  * Query params:
  *   equipment_unit_id  int     required
- *   period_start       string  required  — any strtotime-parseable datetime (UTC assumed when no TZ)
- *   period_end         string  required  — maps to end-of-day when only a date is given (23:59:59)
+ *   period_start       string  required  — datetime; a naive value (no offset) is read as
+ *                                           company-local wall time (settings.company.timezone)
+ *   period_end         string  required  — datetime, same rule. When BOTH bounds are plain
+ *                                           'Y-m-d' dates the window is the whole local days
+ *                                           [start 00:00, end+1 00:00) via BusinessDayWindow
+ *                                           — the exact window invoices bill (S-GPS-LOCAL-WINDOW)
  *   unit               string  optional  — 'km' (default) or 'miles'
  *
  * Return shape — always HTTP 200, never 5xx:
@@ -55,7 +59,7 @@ declare(strict_types=1);
  * @method   GET
  * @auth     Session required
  * @session  S-UNIT-DISTANCE-SECTION
- * @depends  api/bootstrap.php, lib/GPS/SamsaraClient.php
+ * @depends  api/bootstrap.php, lib/GPS/SamsaraClient.php, lib/GPS/BusinessDayWindow.php
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -64,6 +68,7 @@ require_method('GET');
 require_auth_api();
 require_permission('equipment', 'view');
 
+use FleetForge\GPS\BusinessDayWindow;
 use FleetForge\GPS\SamsaraClient;
 
 // ── Inputs ──────────────────────────────────────────────────────────
@@ -84,20 +89,32 @@ if ($periodEnd === '') {
     json_error('VALIDATION_ERROR', 'period_end is required.', 422);
 }
 
-// ── Map period_end to end-of-day when only a date is given ──────────
-// If the caller supplies "2026-06-16" (no time part), treat it as
-// "2026-06-16 23:59:59" so the final day's travel is included.
-if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $periodEnd)) {
-    $periodEnd .= ' 23:59:59';
-}
-
-$startTs = strtotime($periodStart);
-$endTs   = strtotime($periodEnd);
-if ($startTs === false || $startTs === 0) {
-    json_error('VALIDATION_ERROR', 'period_start is not a valid datetime.', 422);
-}
-if ($endTs === false || $endTs === 0) {
-    json_error('VALIDATION_ERROR', 'period_end is not a valid datetime.', 422);
+// ── Build the UTC window ──────────────────────────────────────────────
+// S-GPS-LOCAL-WINDOW: date-only pairs are business days and go through the
+// same BusinessDayWindow conversion as InvoiceGenerator, so the distance shown
+// here for "Sep 1 → Sep 30" matches what the September invoice bills. Values
+// with a time part (the equipment page sends datetime-local wall time) are
+// parsed in the business timezone rather than PHP's process default, so an
+// operator whose company.timezone differs from APP_TIMEZONE still gets their
+// own wall clock. An explicit offset in the string always wins.
+$dateOnly = '/^\d{4}-\d{2}-\d{2}$/';
+try {
+    if (preg_match($dateOnly, $periodStart) && preg_match($dateOnly, $periodEnd)) {
+        $window   = BusinessDayWindow::toUtc($periodStart, $periodEnd);
+        $startUtc = $window['start'];
+        $endUtc   = $window['end'];
+    } else {
+        $bizTz = BusinessDayWindow::timezone();
+        $utc   = new DateTimeZone('UTC');
+        // A lone date on one side still means that whole local day.
+        if (preg_match($dateOnly, $periodEnd)) {
+            $periodEnd .= ' 23:59:59';
+        }
+        $startUtc = (new DateTimeImmutable($periodStart, $bizTz))->setTimezone($utc);
+        $endUtc   = (new DateTimeImmutable($periodEnd,   $bizTz))->setTimezone($utc);
+    }
+} catch (\Throwable $e) {
+    json_error('VALIDATION_ERROR', 'period_start / period_end must be valid dates or datetimes.', 422);
 }
 
 // ── Resolve unit ─────────────────────────────────────────────────────
@@ -116,9 +133,6 @@ if (!$eu['samsara_vehicle_id']) {
 }
 
 // ── Call getDistanceForPeriod ─────────────────────────────────────────
-$startUtc = new DateTimeImmutable('@' . $startTs, new DateTimeZone('UTC'));
-$endUtc   = new DateTimeImmutable('@' . $endTs,   new DateTimeZone('UTC'));
-
 $client = new SamsaraClient();
 $result = $client->getDistanceForPeriod(
     $eu['samsara_vehicle_id'],
