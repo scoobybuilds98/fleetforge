@@ -16,6 +16,15 @@ declare(strict_types=1);
  *   - Applications history table
  *   - Void modal (requires reason)
  *
+ * Financial redaction (I03): the page is reachable with invoices:view alone
+ * (dispatchers, payments:NONE). For viewers failing can_view_financials() the
+ * money fields are nulled at the source and every dollar surface is withheld —
+ * the Total/Remaining tiles, the Amount Applied column + Total Applied footer,
+ * the Apply to Invoice card (every input is a dollar figure) and its
+ * CN_REMAINING_CENTS script constant, and the void modal's balance figure.
+ * Number, customer, source, status, currency, dates, reason and the linked
+ * invoices stay visible. Mirrors api/v1/credit_notes/show.php.
+ *
  * D32: All CSS classes verified in app.css.
  * D30: asset_url() / base_url() for links.
  *
@@ -100,6 +109,22 @@ $applications = db_select(
     [$id]
 );
 
+// I03 serve-time redaction — mirrors api/v1/credit_notes/show.php, which already
+// strips amount/amount_remaining/amount_applied for roles without payments:view.
+// The page used to render all three (tiles, history table, void modal) AND embed
+// the remaining balance in the applyForm() script, so a dispatcher saw every
+// figure the API hid. Null them at the SOURCE so a template reference that
+// escapes a gate below renders format_currency()'s '—', never the real figure.
+$canSeeMoney = can_view_financials();
+if (!$canSeeMoney) {
+    $cn['amount']           = null;
+    $cn['amount_remaining'] = null;
+    foreach ($applications as &$_app) {
+        $_app['amount_applied'] = null;
+    }
+    unset($_app);
+}
+
 // Source label map (PHP-side for server-rendered sections)
 $sourceLabels = [
     'mileage_overpayment' => 'Mileage Overpayment',
@@ -118,6 +143,12 @@ $sourceLabels = [
 $isApplicable = in_array($cn['status'], ['active', 'partially_used'], true);
 $canEdit      = can('invoices', 'edit');
 $canCreate    = can('invoices', 'create');
+// Applying credit is driven entirely by dollar figures (credit remaining, the
+// picked invoice's balance, the amount to apply, the Max fill), so it is offered
+// only to users who can see them. No built-in role has invoices:edit without
+// payments:view — this only bites per-user overrides, who fall through to the
+// Edit Metadata card instead. api/v1/credit_notes/apply.php is unchanged.
+$showApply    = $canEdit && $isApplicable && $canSeeMoney;
 
 $pageTitle      = 'Credit Note ' . e($cn['credit_note_number']);
 $helpModuleSlug = 'credit-notes';
@@ -183,8 +214,11 @@ $qboPanel = [
 require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 ?>
 
-<!-- Summary tiles -->
-<div class="stat-grid" style="margin-bottom:1.5rem;">
+<!-- Summary tiles — the two money tiles are dropped (not zeroed: "$0.00 remaining"
+     would misreport the note as used up) for non-financial viewers, so the
+     .stat-grid--N modifier is resolved from the real tile count. -->
+<div class="stat-grid <?= $canSeeMoney ? 'stat-grid--4' : 'stat-grid--2' ?>" style="margin-bottom:1.5rem;">
+    <?php if ($canSeeMoney): ?>
     <div class="stat-card">
         <div class="stat-label">Total Amount</div>
         <div class="stat-value font-mono"><?= format_currency($cn['amount']) ?> <?= e($cn['currency']) ?></div>
@@ -195,6 +229,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
         <?php $used = bcsub((string)$cn['amount'], (string)$cn['amount_remaining'], 2); ?>
         <div class="stat-delta"><?= format_currency($used) ?> applied</div>
     </div>
+    <?php endif; ?>
     <div class="stat-card">
         <div class="stat-label">Source</div>
         <div class="stat-value" style="font-size:1rem;"><?= e($sourceLabels[$cn['source']] ?? $cn['source']) ?></div>
@@ -263,8 +298,8 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
         <?php endif; ?>
     </div>
 
-    <!-- Apply to Invoice card (shown only when credit is usable) -->
-    <?php if ($canEdit && $isApplicable): ?>
+    <!-- Apply to Invoice card (shown only when credit is usable and its figures are visible) -->
+    <?php if ($showApply): ?>
     <div class="card" x-data="applyForm()">
         <div class="card-header"><strong>Apply to Invoice</strong></div>
         <div class="card-body">
@@ -371,7 +406,9 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                 <tr>
                     <th>Invoice</th>
                     <th>Invoice Status</th>
+                    <?php if ($canSeeMoney): ?>
                     <th style="text-align:right;">Amount Applied</th>
+                    <?php endif; ?>
                     <th>Applied By</th>
                     <th>Applied At</th>
                     <th>Status</th>
@@ -399,7 +436,9 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                         ?>
                         <span class="<?= $invBadge ?>"><?= e(ucfirst(str_replace('_', ' ', $app['invoice_status']))) ?></span>
                     </td>
+                    <?php if ($canSeeMoney): ?>
                     <td class="font-mono" style="text-align:right;"><?= format_currency($app['amount_applied']) ?> <?= e($cn['currency']) ?></td>
+                    <?php endif; ?>
                     <td><?= e($app['applied_by_name'] ?? '—') ?></td>
                     <td><?= e(format_datetime($app['applied_at'])) ?></td>
                     <td x-data="{ busy:false, msg:'',
@@ -430,6 +469,8 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                 </tr>
                 <?php endforeach; ?>
             </tbody>
+            <?php // The footer carries only the Total Applied figure — nothing to show without it. ?>
+            <?php if ($canSeeMoney): ?>
             <tfoot>
                 <tr>
                     <th colspan="2">Total Applied</th>
@@ -446,6 +487,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                     <th colspan="3"></th>
                 </tr>
             </tfoot>
+            <?php endif; ?>
         </table>
     </div>
 </div>
@@ -463,7 +505,11 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
             <div class="modal-body">
                 <div x-show="error" class="alert alert-danger" x-text="error" style="margin-bottom:1rem;"></div>
                 <p style="margin:0 0 1rem;">You are about to void <strong><?= e($cn['credit_note_number']) ?></strong>.
+                   <?php if ($canSeeMoney): ?>
                    Remaining balance of <strong class="font-mono"><?= format_currency($cn['amount_remaining']) ?></strong> will be cancelled.
+                   <?php else: ?>
+                   Its remaining balance will be cancelled.
+                   <?php endif; ?>
                    This action cannot be undone.</p>
                 <label class="form-label">Reason (required)</label>
                 <textarea class="form-input" rows="3" x-model="reason" :disabled="submitting"
@@ -482,6 +528,11 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 <?php endif; ?>
 
 <script>
+<?php
+// applyForm() embeds the note's remaining balance in page source, so it is only
+// emitted alongside the card that uses it — a financial viewer's page (see $showApply).
+if ($showApply):
+?>
 function applyForm() {
     // Credit still available on this note, in integer cents (server-rendered).
     const CN_REMAINING_CENTS = <?= (int) bcmul((string) $cn['amount_remaining'], '100', 0) ?>;
@@ -598,6 +649,7 @@ function applyForm() {
         }
     };
 }
+<?php endif; ?>
 
 function editMeta() {
     return {
