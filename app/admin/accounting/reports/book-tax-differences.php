@@ -93,9 +93,11 @@ require_once FF_ROOT . '/includes/header.php';
                             <th>Nature</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        <template x-for="item in data.items" :key="item.item">
-                            <template>
+                    <!-- Alpine x-for needs ONE root element per item; the old inner bare <template>
+                         never rendered, so the report showed only its total. A <tbody> per item
+                         (valid HTML: a table may have many) holds the value row and its note row. -->
+                    <template x-for="item in data.items" :key="item.item">
+                        <tbody>
                                 <tr :style="parseFloat(item.temp_diff) !== 0 ? 'background:var(--bg-subtle);' : ''">
                                     <td x-text="item.item"></td>
                                     <td class="font-mono text-right" x-text="'$' + money(item.book_amount)"></td>
@@ -107,11 +109,10 @@ require_once FF_ROOT . '/includes/header.php';
                                     </td>
                                 </tr>
                                 <tr x-show="item.note">
-                                    <td colspan="5" style="font-size:0.75rem;color:var(--text-secondary);font-style:italic;background:#fafafa;padding:4px 14px 8px;border-top:none;" x-text="item.note"></td>
+                                    <td colspan="5" style="font-size:0.75rem;color:var(--text-secondary);font-style:italic;background:var(--bg-subtle);padding:4px 14px 8px;border-top:none;" x-text="item.note"></td>
                                 </tr>
-                            </template>
-                        </template>
-                    </tbody>
+                        </tbody>
+                    </template>
                     <tfoot>
                         <tr style="font-weight:600;border-top:2px solid var(--border-default);">
                             <td colspan="3">Total Temporary Difference</td>

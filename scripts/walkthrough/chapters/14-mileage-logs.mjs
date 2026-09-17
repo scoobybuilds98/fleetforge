@@ -104,6 +104,17 @@ export default {
       },
     },
     {
+      say: 'Entry Details shows the unit, the linked lease, the reading, who recorded it, the notes and when it was created. Edit opens a small form to correct the reading, its unit, the date or the notes; we will cancel.',
+      run: async (d) => {
+        if (!onPage(d, '/mileage_logs/show')) return;
+        await d.highlight('.card:has(.card-title:text-is("Entry Details"))', 'Entry details', 2400);
+        await d.click('.page-header-actions button:has-text("Edit")');
+        await d.wait(600);
+        await d.highlight('#edit-section', 'Edit entry', 2200);
+        await d.click('#edit-section button:has-text("Cancel")');
+      },
+    },
+    {
       say: 'Now the key point: a mileage log entry does not bill anything by itself. To see what does, open the lease. This Summit Carriers lease is set to Manual mileage tracking.',
       run: async (d) => {
         await d.nav('Leases', '/leases');

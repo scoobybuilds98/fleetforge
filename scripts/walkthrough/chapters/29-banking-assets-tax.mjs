@@ -5,7 +5,12 @@
  * Schedule 8; GST/HST & PST filing (tax dashboard, GST34 generator, remittances);
  * FX revaluation; the year-end close console; accounting settings.
  *
- * Records created: none. This chapter is a TOUR. Every state-changing control is
+ * Records created on commit (WT_COMMIT=1 or a real recording):
+ *   - one GST/HST filing period 2026-04-01 to 2026-06-30, quarterly, then Calc (status
+ *     'calculated'; no GL posting). Never filed or remitted. Plain dry runs skip the
+ *     period detail + GST34 generate steps because no period exists.
+ * Also shown: bank transaction detail (bank-transactions/show) and the GST34 generator.
+ * Otherwise this chapter is a TOUR. Every state-changing control is
  * hovered only: Import CSV, Transfer, Add Account, Start (reconciliation), New Asset,
  * Dispose/Impair, Generate Preview, Reverse, Compute/Lock (CCA), New Filing Period,
  * Generate GST34, Preview/Post Revaluation, year-end checklist boxes, Start Year-End
@@ -29,6 +34,19 @@ const openMenu = async (d, group, label) => {
   await d.click(menuItem(label), { nav: true });
 };
 
+/** Date inputs: set the value directly (typing digits depends on the browser locale). */
+async function fillDate(d, sel, iso) {
+  await d.hover(sel, 300);
+  await d.page.locator(sel).filter({ visible: true }).first().fill(iso);
+  await d.wait(300);
+}
+
+/** Wait for the GST34 fetch to finish (button stops saying Loading). */
+async function settleGst(d) {
+  await d.page.waitForFunction(() => ![...document.querySelectorAll('button')].some((b) => /Computing/.test(b.textContent) && b.offsetParent), null, { timeout: 20000 }).catch(() => {});
+  await d.wait(900);
+}
+
 async function syncSelects(d) {
   await d.page.evaluate(() => {
     const host = [...document.querySelectorAll('[x-data]')].find((e) => { try { return 'gl_mapping' in window.Alpine.$data(e); } catch { return false; } });
@@ -50,7 +68,7 @@ export default {
   subtitle: 'Bank reconciliation, the asset register and depreciation, sales-tax filing, FX and closing the year.',
   start: '/accounting/dashboard',
   intro: 'In this chapter we will tour banking and reconciliation, fixed assets and depreciation, G S T and P S T filing, foreign exchange revaluation, the year-end close, and accounting settings.',
-  outro: 'That completes the accounting module. Next, how Fleet Forge keeps QuickBooks Online in sync.',
+  outro: 'That covers banking, fixed assets, tax and year-end. Next, the advanced accounting screens: capital leases, capital spending, impairment and disclosures.',
   scenes: [
     {
       say: 'Open Banking and choose Bank Accounts. Each bank account is linked to a cash account in the general ledger, and its balance comes from that ledger account.',
@@ -83,6 +101,15 @@ export default {
         await d.wait(1200);
         await d.hover('[name="status"]', 900);
         await d.highlight('table thead', 'Status and JE #', 1800);
+      },
+    },
+    {
+      say: 'Click View on a line to open the transaction: the bank account, date, amount, reference and the date it cleared. You can attach the bank’s supporting document at the bottom.',
+      run: async (d) => {
+        await d.click('table tbody tr >> nth=0 >> a:has-text("View")', { nav: true });
+        await d.wait(1200);
+        await d.highlight('.card >> nth=0', 'Transaction detail', 2200);
+        await d.hover('button:has-text("Upload Document")', 900);
       },
     },
     {
@@ -172,12 +199,70 @@ export default {
       },
     },
     {
+      say: 'Click New Filing Period, choose G S T or H S T, enter the first and last day of the period and the filing frequency, then click Create Period. The filing due date is worked out from the frequency.',
+      caption: 'Click New Filing Period, choose GST/HST, enter the first and last day of the period and the filing frequency, then click Create Period. The filing due date is worked out from the frequency.',
+      run: async (d) => {
+        await d.click('button:has-text("New Filing Period")');
+        await d.wait(900);
+        await d.select('[x-model="createForm.tax_type"]', 'gst_hst');
+        await fillDate(d, '[x-model="createForm.period_start"]', '2026-04-01');
+        await fillDate(d, '[x-model="createForm.period_end"]', '2026-06-30');
+        await d.select('[x-model="createForm.frequency"]', 'quarterly');
+        await d.click('button:has-text("Create Period")', { commit: true });
+        await d.page.waitForTimeout(1800);
+        if (await d.exists('button:has-text("Create Period")', 500)) await d.click('.modal-footer button:has-text("Cancel")');
+      },
+    },
+    {
+      say: 'Calc adds up sales, tax collected and input tax credits for the period from posted journal entries. File then records that the return was submitted, and Remit records the payment; we will not do either here.',
+      run: async (d) => {
+        const row = 'table tbody tr:has-text("2026-04-01")';
+        if (!(await d.exists(row, 2500))) { d.log('(dry) no filing period row — create was skipped'); return; }
+        await d.click(`${row} button:has-text("Calc")`);
+        await d.wait(900);
+        await d.click('.modal:has(#ff-confirm-title) button:not(:has-text("Cancel"))', { commit: true });
+        await d.page.waitForTimeout(2000);
+        if (await d.exists('.modal:has(#ff-confirm-title) button:has-text("Cancel")', 500)) await d.click('.modal:has(#ff-confirm-title) button:has-text("Cancel")');
+        if (await d.exists(`${row} button:has-text("File")`, 2500)) await d.hover(`${row} button:has-text("File")`, 1600);
+      },
+    },
+    {
+      say: 'View opens the period: the totals and net tax owing, the remittance history, and every invoice and vendor bill behind the numbers, so the return can be checked line by line.',
+      run: async (d) => {
+        const row = 'table tbody tr:has-text("2026-04-01")';
+        if (!(await d.exists(row, 1500))) { d.log('(dry) no filing period row — detail page skipped'); return; }
+        await d.click(`${row} a:has-text("View")`, { nav: true });
+        await d.wait(1500);
+        await d.highlight('.stat-grid', 'Sales, tax, ITCs, net owing', 2000);
+        await d.scroll(600);
+        await d.wait(900);
+        await d.scroll(-600);
+        await d.click('a:has-text("Back to list")', { nav: true });
+      },
+    },
+    {
       say: 'The shortcut cards open the G S T 34 generator for the C R A return, the input tax credit documentation, and tax detail by province and customer.',
       caption: 'The shortcut cards open the GST34 generator for the CRA return, the input tax credit documentation, and tax detail by province and customer.',
       run: async (d) => {
         await d.hover('a:has-text("GST34 Generator"), :text("GST34 Generator")', 1000);
         await d.hover(':text("ITC Documentation")', 900);
         await d.hover(':text("Tax Detail by Province")', 900);
+      },
+    },
+    {
+      say: 'The G S T 34 generator lays out the return line by line for the chosen filing period. Click a line for the detail behind it. Nothing is sent to the C R A from here; the downloads are copies for your records.',
+      caption: 'The GST34 generator lays out the return line by line for the chosen filing period. Click a line for the detail behind it. Nothing is sent to the CRA from here; the downloads are copies for your records.',
+      run: async (d) => {
+        await d.click('a:has-text("GST34 Generator")', { nav: true });
+        await d.wait(1200);
+        await d.hover('select[x-model\\.number="periodId"]', 800);
+        if (await d.page.locator('button:has-text("Generate GST34")').isEnabled()) {
+          await d.click('button:has-text("Generate GST34")');
+          await settleGst(d);
+          await d.highlight('table:has(th:has-text("Line"))', 'Return lines', 2200);
+        } else d.log('(dry) no filing period — Generate GST34 disabled');
+        await d.hover('button:has-text("Download PDF")', 900);
+        await d.goto('/accounting/tax');
       },
     },
     {

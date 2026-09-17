@@ -1,5 +1,5 @@
 /*
- * Chapter 33 — Customer Portal
+ * Chapter 34 — Customer Portal
  * Admin side: Users → Portal Users (tiles, the Create & Invite form filled but only hovered —
  * the API always emails an invite), a portal user's page (reset link / deactivate hovered).
  * Customer side: the portal login page, then the portal as Kyle Thompson (primary contact,

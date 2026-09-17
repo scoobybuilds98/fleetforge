@@ -2,7 +2,8 @@
  * Chapter 26 — Accounting: Dashboard & General Ledger
  * Accounting dashboard, the grouped accounting menu, chart of accounts, the account
  * ledger, journal entries (list, detail, and creating a balanced manual entry),
- * recurring journal-entry templates, and accounting periods (close / lock — toured,
+ * recurring journal-entry templates (list, detail, and the New Template form — filled in
+ * and cancelled, never saved), and accounting periods (close / lock — toured,
  * never executed: the Close Period confirm is opened and cancelled).
  *
  * Records created on commit (WT_COMMIT=1 or a real recording):
@@ -10,6 +11,9 @@
  *     "Accrue September yard utilities — BC Hydro", ref BCH-0926
  *     DR 6060 Utilities 1,240.00 / CR 2020 Accrued Liabilities 1,240.00
  *     (reverse it from the Posted tab to undo).
+ *
+ * The journal-entry detail page is opened from the accounting dashboard's recent entries
+ * (the register itself only opens a pop-up).
  *
  * Inline helpers (implemented via d.page, no recorder changes):
  *   - coaRender(): the Chart of Accounts page only computes its row count inside the
@@ -159,6 +163,27 @@ export default {
       },
     },
     {
+      say: 'Each entry also has its own page. Recent entries on the accounting dashboard link to it, as do the bills, payments and bank lines that posted them. The header shows the status, type, period, and the source document that created the entry.',
+      run: async (d) => {
+        await d.click(acctNav('Dashboard'), { nav: true });
+        await d.wait(900);
+        await d.click('a[href*="journal-entries/show"] >> nth=0', { nav: true });
+        await d.wait(1200);
+        await d.highlight('.page-header', 'Status and type', 1400);
+        await d.highlight('.card:has-text("Entry Date")', 'Period, source, reference', 2200);
+      },
+    },
+    {
+      say: 'The lines show each account, the customer or vendor involved, and debits and credits that total the same. The QuickBooks card shows whether the entry has been pushed. This page is read-only; reversing is done from the register.',
+      run: async (d) => {
+        await d.scroll(400);
+        await d.highlight('.card:has-text("Journal Lines")', 'Lines, party, balanced totals', 2400);
+        await d.scroll(-400);
+        await d.highlight('.card:has-text("QuickBooks Sync")', 'QuickBooks sync', 1600);
+        await d.click('a:has-text("Back to list")', { nav: true });
+      },
+    },
+    {
       say: "Now let's record a manual entry. Click New Journal Entry. The date decides which accounting period it lands in, and that period must be open.",
       run: async (d) => {
         await d.click('button:has-text("New Journal Entry")');
@@ -243,7 +268,45 @@ export default {
         await d.click('a:has-text("Fleet insurance premium")', { nav: true });
         await d.wait(1200);
         await d.highlight('table', 'Template lines', 2000);
-        await d.hover('button:has-text("Post Now")', 900);
+        await d.hover('button:has-text("Pause")', 900);
+      },
+    },
+    {
+      say: 'To set one up, go back to the list and click New Template. Give it a clear name, then choose monthly, quarterly or annually and the day of the month it posts.',
+      run: async (d) => {
+        await d.click(acctNav('Recurring JEs'), { nav: true });
+        await d.click('a:has-text("New Template"), button:has-text("New Template")', { nav: true });
+        await d.type('[x-model="form.name"]', 'Head office phone and internet — Telus', { delay: 28 });
+        await d.select('[x-model="form.frequency"]', 'monthly');
+        await d.type('input[x-model\\.number="form.day_of_month"]', '15');
+      },
+    },
+    {
+      say: 'Nothing posts before the start date. Leave the end date blank for an open-ended template, and leave Post automatically unticked so each month arrives as a draft for review.',
+      run: async (d) => {
+        await d.highlight('[x-model="form.start_date"]', 'Start date', 1200);
+        await d.hover('[x-model="form.end_date"]', 900);
+        await d.highlight('[x-model="form.auto_post"]', 'Unticked = draft for review', 1800);
+      },
+    },
+    {
+      say: 'Build the lines exactly like a journal entry. Here we debit Utilities and credit Accrued Liabilities for two hundred and ten dollars.',
+      caption: 'Build the lines exactly like a journal entry. Here we debit 6060 Utilities and credit 2020 Accrued Liabilities for $210.00.',
+      run: async (d) => {
+        await d.select('select[x-model\\.number="l.account_id"] >> nth=0', '60');
+        await d.type('input[x-model="l.description"] >> nth=0', 'Monthly phone and internet — head office');
+        await d.type('input[x-model\\.number="l.debit"] >> nth=0', '210');
+        await d.select('select[x-model\\.number="l.account_id"] >> nth=1', '22');
+        await d.type('input[x-model="l.description"] >> nth=1', 'Telus accrual — invoice to follow');
+        await d.type('input[x-model\\.number="l.credit"] >> nth=1', '210');
+      },
+    },
+    {
+      say: 'Create Template stays disabled until debits equal credits. We will cancel here rather than save it.',
+      run: async (d) => {
+        await d.highlight('table tfoot', 'Balanced', 1600);
+        await d.hover('button:has-text("Create Template")', 1200);
+        await d.click('a:has-text("Cancel")', { nav: true });
       },
     },
     {

@@ -1,10 +1,12 @@
 /*
- * Chapter 31 — Users, Roles & Permissions
+ * Chapter 32 — Users, Roles & Permissions
  * The Team list, inviting a staff user (form filled, Send Invitation only hovered — the
  * API always emails an invite), the five roles and the role-default permission matrix,
  * a user's profile and per-user overrides (reason modal opened then cancelled), when
  * permission changes take effect, the super-admin Lockout tab (hover only — nobody is
- * locked), MFA requirements, and the Audit Log.
+ * locked), MFA requirements, the full-page Role Permissions editor (looked at, nothing changed),
+ * the My Profile two-factor setup page (step 1 only — Continue is hovered, nobody is enrolled),
+ * and the Audit Log.
  *
  * Creates / changes NO records: there are no commit clicks in this chapter.
  * Demo users: Frank Dispatcher (id 9, no existing overrides) for the per-user matrix.
@@ -115,6 +117,23 @@ export default {
       run: async (d) => { await d.scroll(1400); await d.wait(900); await d.scroll(1400); await d.wait(700); await d.scroll(-2800); },
     },
     {
+      say: 'Full page view opens the same role editor on a page of its own. The tabs across the top show how many users have each role, and the banner reminds you how many people a change will reach.',
+      run: async (d) => {
+        await d.click('a:has-text("Full page view")', { nav: true });
+        await d.click('a.rp-role-tab:has-text("Dispatcher")', { nav: true });
+        await d.highlight('.rp-role-tabs', 'Users per role', 2200);
+        await d.highlight('.rp-info-banner', 'Who a change affects', 2200);
+      },
+    },
+    {
+      say: 'It saves to exactly the same role defaults as the tab, with the same switches, section buttons and Reset all, so use whichever you find easier.',
+      run: async (d) => {
+        await d.hover('.perm-section-bulk-actions button:has-text("View") >> nth=0', 1000);
+        await d.hover('button:has-text("Reset all")', 1000);
+        await d.goto('/users');
+      },
+    },
+    {
       say: "Sometimes one person needs an exception. Back on the Team tab, open that user's profile. We'll open Frank Dispatcher.",
       run: async (d) => {
         await d.click(tab('Team'));
@@ -218,6 +237,18 @@ export default {
         await d.goto('/profile');
         await d.highlight('a:has-text("Set Up Two-Factor Authentication")', 'Self-service MFA setup', 2600);
       },
+    },
+    {
+      say: 'Setup takes three steps. Scan the Q R code with an authenticator app such as Google Authenticator, Authy or One Password, type the six-digit code it shows, then save your backup codes.',
+      caption: 'Setup takes three steps. Scan the QR code with an authenticator app such as Google Authenticator, Authy or 1Password, type the 6-digit code it shows, then save your backup codes.',
+      run: async (d) => {
+        await d.click('a:has-text("Set Up Two-Factor Authentication")', { nav: true });
+        await d.highlight('#mfa-setup-root', 'Three-step setup', 2600);
+      },
+    },
+    {
+      say: 'Two-factor only turns on once that code is confirmed. Keep the backup codes somewhere safe; each one signs you in once if your phone is not available. We will not enrol here.',
+      run: async (d) => { await d.hover('#mfa-setup-root button:has-text("Continue")', 2000); },
     },
     {
       say: 'Finally, the Audit Log in the sidebar. It is a read-only record of who created, changed, deleted or logged in, with the date, module, record and IP address.',

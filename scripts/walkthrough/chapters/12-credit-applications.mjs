@@ -10,9 +10,27 @@
  *     checkbox — that limit is written to the customer's credit limit.
  * No application is created and no email is sent.
  *
+ * Applicant view: raw tokens are never stored (only SHA-256 hashes), so no existing link can be
+ * opened. The chapter gives the dormant "opened" application (dev id 42) a temporary token + future
+ * expiry, opens /credit-application?token=… exactly as the applicant would, and puts the original
+ * token_hash / token_expires_at back in a finally block. The status is already 'opened', so the
+ * GET does not flip it; nothing is typed or submitted.
+ *
  * Helpers implemented inline via d.page: onPage() (skip post-commit checks in plain dry runs)
  * and commitClick() (tolerates the recorder's dry-run `log is not defined` skip-branch error).
  */
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
+const DEMO_APP_ID = 42;
+/** Dev-only PHP snippet with the app bootstrapped; returns the last stdout line. */
+const php = (code, env = {}) => execFileSync('php', ['-r',
+  `require 'config/app.php'; require_once FF_ROOT.'/includes/auth.php'; if (APP_ENV !== 'development') { fwrite(STDERR, "dev only\\n"); exit(1); } ${code}`],
+  { cwd: ROOT, encoding: 'utf8', env: { ...process.env, ...env } }).trim().split('\n').pop();
+let savedApp = null;
+const ccaSection = (n) => `.cca-section-title:has-text("§${n} ")`;
+
 const onPage = (d, frag) => d.page.url().includes(frag);
 // lib/overlay.js is injected into EVERY frame, so the filed-application <iframe> mounts its own
 // caption pill + cursor (restored from sessionStorage = a stale caption). Remove it from child frames.
@@ -102,6 +120,42 @@ export default {
       run: async (d) => {
         await d.click('.modal button:has-text("Close")');
         await d.hover('[role="tabpanel"] button:has-text("Send Application"), [role="tabpanel"] button:has-text("Re-send Application")', 2600);
+      },
+    },
+    {
+      say: 'This is what the customer sees when they open the link: your company name at the top and the application form below. There is nothing to log in to.',
+      run: async (d) => {
+        savedApp = php(`$r = db_row("SELECT token_hash, token_expires_at FROM customer_credit_applications WHERE id = ? AND status = 'opened' AND deleted_at IS NULL", [${DEMO_APP_ID}]); echo base64_encode(json_encode($r));`);
+        if (!JSON.parse(Buffer.from(savedApp, 'base64').toString() || 'null')) { savedApp = null; throw new Error('demo application not found'); }
+        const token = php(`$t = bin2hex(random_bytes(32)); db_execute("UPDATE customer_credit_applications SET token_hash = ?, token_expires_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ? AND status = 'opened'", [hash('sha256', $t), ${DEMO_APP_ID}]); echo $t;`);
+        await d.goto(`/credit-application?token=${token}`);
+        await d.highlight('header.cca-header', 'Your company branding', 2000);
+        await d.highlight(ccaSection(1), 'Company information', 1600);
+      },
+    },
+    {
+      say: 'The form is split into sections: company information, principals, insurance, equipment, credit information and trade references. Required fields are marked with a star.',
+      caption: 'The form is split into sections: company information, principals, insurance, equipment, credit information and trade references. Required fields are marked with *.',
+      run: async (d) => {
+        await d.highlight(ccaSection(2), 'Principals', 1200);
+        await d.highlight(ccaSection(3), 'Insurance', 1200);
+        await d.highlight(ccaSection(5), 'Credit information', 1200);
+        await d.highlight(ccaSection(6), 'Trade references', 1200);
+      },
+    },
+    {
+      say: 'At the end they can upload supporting documents, print their name, accept your terms and draw a signature, then click Submit Application. We will not submit this one.',
+      run: async (d) => {
+        try {
+          await d.highlight(ccaSection(7), 'Document upload', 1300);
+          await d.highlight('#sig-canvas', 'Signature pad', 1600);
+          await d.hover('button.cca-submit-btn', 1600);
+        } finally {
+          if (savedApp) {
+            php(`$r = json_decode(base64_decode(getenv('WT_SAVED')), true); db_execute("UPDATE customer_credit_applications SET token_hash = ?, token_expires_at = ? WHERE id = ?", [$r['token_hash'], $r['token_expires_at'], ${DEMO_APP_ID}]); echo 'ok';`, { WT_SAVED: savedApp });
+            savedApp = null;
+          }
+        }
       },
     },
     {

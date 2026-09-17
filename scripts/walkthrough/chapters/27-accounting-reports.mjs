@@ -2,17 +2,15 @@
  * Chapter 27 — Accounting: Financial Reports & Budgets
  * The Reports menu, Profit & Loss (date range, prior-year and budget comparisons),
  * Balance Sheet, Cash Flow (indirect method + bank tie-out), Trial Balance with
- * drill-down to the ledger, Per-Unit P&L fleet KPIs, the fixed-asset schedule, and
- * Budgets (list + the New Budget form, toured only).
+ * drill-down to the ledger, the Working Trial Balance + a lead schedule (A-100), Per-Unit
+ * P&L fleet KPIs, the fixed-asset schedule, and Budgets (list, the budget grid page, and
+ * the New Budget form, toured only).
  *
  * Records created: none. Export PDF / AI Narrative / Save Current are hovered, not
  * clicked (PDF opens a pop-up, AI calls an outside service, Save uses a browser prompt).
  * The Per-Unit P&L "Overhead basis" selector is hovered only — changing it writes a setting.
  *
- * Not shown on purpose (broken in the app at authoring time, 2026-09-16):
- *   - Budget detail page (budgets/show.php): htmlspecialchars(json_encode()) inside
- *     <script> → "Unexpected token '&'", the grid never initialises.
- *   - Working Trial Balance: header shows 16 accounts but no rows render.
+ * Not shown: budgets/edit.php (header edit) — nothing in the app links to it (2026-09-17).
  * Known cosmetic issues visible on camera: P&L / Balance Sheet render only the summary
  * rows (nested <template> inside x-for), and the Net Income / Total rows use a
  * hard-coded light background that is unreadable in dark mode.
@@ -143,6 +141,35 @@ export default {
       },
     },
     {
+      say: 'The Working Trial Balance is the accountant’s version. For the chosen period, each account shows its prior year-end balance, the balance before and after adjusting entries, and the change.',
+      run: async (d) => {
+        await openReport(d, 'Working Trial Balance');
+        await d.click('button:has(span:text-is("Run"))');
+        await settle(d);
+        await d.exists('table tbody a:has-text("A-100")', 20000);
+        await d.highlight('table thead', 'Prior year, unadjusted, adjustments, adjusted, variance', 2600);
+      },
+    },
+    {
+      say: 'Enter a materiality amount to flag balances and changes larger than it. The plus button on each row adds a workpaper note for the review file.',
+      run: async (d) => {
+        await d.highlight('[x-model="materiality"]', 'Materiality', 1400);
+        await d.hover('table tbody tr >> nth=1 >> button[title="Add annotation"]', 1200);
+        await d.scroll(600);
+        await d.wait(800);
+        await d.scroll(-600);
+      },
+    },
+    {
+      say: 'Each account belongs to a lead schedule, such as A one hundred for cash. Click the code to open the schedule: every account in the group, its opening and closing balance, and the entries in between.',
+      caption: 'Each account belongs to a lead schedule, such as A-100 for cash. Click the code to open the schedule: every account in the group, its opening and closing balance, and the entries in between.',
+      run: async (d) => {
+        await d.click('table tbody a:has-text("A-100")', { nav: true });
+        await d.wait(2000);
+        await d.highlight('.card:has-text("Opening:") >> nth=0', 'Opening, activity, closing', 2400);
+      },
+    },
+    {
       say: 'Per-Unit P and L shows profitability for each piece of equipment: revenue, direct costs, contribution, an overhead share and return on capital, plus fleet K P Is across the top.',
       caption: 'Per-Unit P&L shows profitability for each unit: revenue, direct costs, contribution, overhead share and return on capital, plus fleet KPIs across the top.',
       run: async (d) => {
@@ -180,6 +207,24 @@ export default {
       run: async (d) => {
         await d.highlight('table tbody tr >> nth=0', '2026 Operating Budget', 2000);
         await d.hover('table tbody tr:first-child :is(a, button):has-text("View")', 1200);
+      },
+    },
+    {
+      say: 'The budget page is a grid of twelve monthly amounts for each account, with the annual total on the right. Type over any month, add another account at the bottom, then click Save All Changes.',
+      run: async (d) => {
+        await d.click('table tbody tr:first-child :is(a, button):has-text("View")', { nav: true });
+        await d.wait(1500);
+        await d.highlight('table', 'Monthly grid', 2400);
+        await d.hover('[x-model="newAccountId"]', 800);
+        await d.hover('button:has-text("Save All Changes")', 1000);
+      },
+    },
+    {
+      say: 'Move to Draft reopens an active budget for changes, and Approve makes a draft active again. Variance Report compares the budget with actual results for the year.',
+      run: async (d) => {
+        await d.hover('button:has-text("Move to Draft"), button:has-text("Approve")', 1200);
+        await d.hover('a:has-text("Variance Report")', 1200);
+        await d.click('a:has-text("Back")', { nav: true });
       },
     },
     {

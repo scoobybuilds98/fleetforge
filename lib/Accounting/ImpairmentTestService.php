@@ -562,7 +562,7 @@ class ImpairmentTestService
             "SELECT t.*, a.asset_number, a.name AS asset_name,
                     a.net_book_value AS current_nbv,
                     je.entry_number AS je_entry_number,
-                    u.full_name AS tester_name
+                    u.name AS tester_name
                FROM acc_impairment_tests t
                LEFT JOIN acc_fixed_assets a ON a.id = t.asset_id
                LEFT JOIN acc_journal_entries je ON je.id = t.impairment_je_id
@@ -581,7 +581,7 @@ class ImpairmentTestService
                     a.asset_class, a.useful_life_years, a.salvage_value,
                     a.depreciation_start_date,
                     je.entry_number AS je_entry_number,
-                    u.full_name AS tester_name
+                    u.name AS tester_name
                FROM acc_impairment_tests t
                LEFT JOIN acc_fixed_assets a ON a.id = t.asset_id
                LEFT JOIN acc_journal_entries je ON je.id = t.impairment_je_id

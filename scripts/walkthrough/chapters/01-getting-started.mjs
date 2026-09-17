@@ -5,10 +5,41 @@
  * light/dark toggle, display settings, sounds, team chat, AI, notifications, account menu),
  * the "How this works" help drawer, the Help Center and the floating AI chat bubble.
  *
+ * Opens with the signed-out screens: the staff sign-in page (work email typed, the password field
+ * and Sign in only hovered — no password is ever typed), Forgot password (email typed, Send reset
+ * link only hovered — it emails), the two-factor code challenge (reached with a minted pre-auth
+ * session for Frank Dispatcher, id 9 — no code entered) and Accept Invitation (reached with a
+ * temporary invite token on the dormant invited user id 3; its name, email, token and expiry are
+ * put back at the end of the scene — nothing is submitted).
+ *
  * Creates no records. Side-effects on camera are cosmetic and reversed in the same scene:
  * the theme is toggled to light and back to dark, and text size is bumped up and back down
  * (both are saved as the recorder user's own preferences). No question is sent to the AI.
  */
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+
+const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..');
+let staffCookie = null;
+/** Run a dev-only PHP snippet with the app bootstrapped; returns the last stdout line. */
+const php = (code, env = {}) => execFileSync('php', ['-r',
+  `require 'config/app.php'; require_once FF_ROOT.'/includes/auth.php'; if (APP_ENV !== 'development') { fwrite(STDERR, "dev only\\n"); exit(1); } ${code}`],
+  { cwd: ROOT, encoding: 'utf8', env: { ...process.env, ...env } }).trim().split('\n').pop();
+/** Drop the recorder's staff cookie (kept for becomeStaff) and optionally set another session id. */
+async function signedOut(d, sid = null) {
+  const ctx = d.page.context();
+  staffCookie = staffCookie || (await ctx.cookies()).find((c) => c.name === 'ff_session') || null;
+  await ctx.clearCookies({ name: 'ff_session' });
+  if (sid) await ctx.addCookies([{ name: 'ff_session', value: sid, url: new URL(d.base).origin, httpOnly: true }]);
+}
+async function becomeStaff(d) {
+  if (!staffCookie) return;
+  const ctx = d.page.context();
+  await ctx.clearCookies({ name: 'ff_session' });
+  await ctx.addCookies([staffCookie]);
+}
+// Invited-user demo row for Accept Invitation (dormant dev invite, not a test-* or admin account).
+const INVITE_USER_ID = 3;
 const tile = (label) => `.stat-card:has(.stat-label:text-is("${label}"))`;
 const section = (title) => `h3.dashboard-section-title:text-is("${title}")`;
 const card = (title) => `.card:has(.card-title:text-is("${title}"))`;
@@ -24,15 +55,70 @@ export default {
   outro: 'That is the lay of the land. Next, we will look at Customers, the companies you rent equipment to.',
   scenes: [
     {
-      say: 'After you sign in, you land on the Dashboard. It is a live summary of the whole business, and every number on it links to the records behind it.',
-      run: async (d) => { await d.wait(2500); await d.highlight('h1.page-header-title', 'Dashboard', 1800); },
+      say: 'Every day starts at the sign-in page. Enter your work email and your password. Customers have their own portal, linked below the form.',
+      run: async (d) => {
+        await signedOut(d);
+        await d.goto('/auth/login');
+        await d.type('#email', 'jordan.mitchell@mainlandtts.ca', { delay: 40 });
+        await d.hover('#password', 1000);
+        await d.hover('.auth-portal-link', 900);
+      },
     },
     {
-      say: 'Active Revenue adds up the monthly rate of every active lease, in Canadian dollars. Fleet Utilization is the share of your fleet that is out on lease right now.',
-      caption: 'Active Revenue adds up the monthly rate of every active lease, in CAD. Fleet Utilization is the share of your fleet out on lease right now.',
+      say: 'Stay signed in keeps you logged in for thirty days, so only tick it on a computer you alone use. Five wrong passwords in a row lock the account for fifteen minutes.',
+      caption: 'Stay signed in keeps you logged in for 30 days, so only tick it on a computer you alone use. Five wrong passwords in a row lock the account for 15 minutes.',
+      run: async (d) => {
+        await d.highlight('label.form-check:has(#remember)', 'Stay signed in for 30 days', 1800);
+        await d.hover('button.btn-signin', 1200);
+      },
+    },
+    {
+      say: 'Forgot your password? The link above the password box asks for your email and sends a reset link that works for one hour. We will not send one here.',
+      run: async (d) => {
+        await d.click('a.auth-pw-forgot', { nav: true });
+        await d.type('#email', 'jordan.mitchell@mainlandtts.ca', { delay: 40 });
+        await d.highlight('button[type="submit"]:has-text("Send reset link")', 'Emails a 1-hour reset link', 2200);
+      },
+    },
+    {
+      say: 'If your account uses two-factor sign-in, the next screen asks for the six-digit code from your authenticator app. If your phone is not handy, use one of your saved backup codes instead.',
+      caption: 'If your account uses two-factor sign-in, the next screen asks for the 6-digit code from your authenticator app. If your phone is not handy, use one of your saved backup codes instead.',
+      run: async (d) => {
+        const sid = php(`_ff_session_start(); $_SESSION['ff_mfa_pending'] = ['user_id' => 9, 'started_at' => time()]; echo session_id(); session_write_close();`);
+        await signedOut(d, sid);
+        await d.goto('/auth/mfa_challenge');
+        await d.highlight('#code', 'Code from your authenticator app', 2200);
+        await d.hover('a.switch-link', 1200);
+      },
+    },
+    {
+      say: 'New staff start from an emailed invitation. The link opens this page, where they confirm their name and choose their own password of at least ten characters, then sign in.',
+      caption: 'New staff start from an emailed invitation. The link opens this page, where they confirm their name and choose their own password of at least 10 characters, then sign in.',
+      run: async (d) => {
+        const saved = php(`$r = db_row("SELECT name, email, invite_token, invite_token_expiry FROM users WHERE id = ? AND status = 'invited' AND email NOT LIKE '%@fleetforge.test'", [${INVITE_USER_ID}]); echo base64_encode(json_encode($r));`);
+        if (!JSON.parse(Buffer.from(saved, 'base64').toString() || 'null')) throw new Error('invite demo user not found');
+        try {
+          const token = php(`$t = bin2hex(random_bytes(32)); db_execute("UPDATE users SET invite_token = ?, invite_token_expiry = DATE_ADD(NOW(), INTERVAL 1 DAY), name = 'Jordan Mitchell', email = 'jordan.mitchell@mainlandtts.ca' WHERE id = ? AND status = 'invited'", [hash('sha256', $t), ${INVITE_USER_ID}]); echo $t;`);
+          await signedOut(d);
+          await d.goto(`/auth/accept_invite?token=${token}`);
+          await d.highlight('.invite-context', 'Who was invited, and their role', 2000);
+          await d.hover('#password', 900);
+          await d.hover('button[type="submit"]', 900);
+        } finally {
+          php(`$r = json_decode(base64_decode(getenv('WT_SAVED')), true); db_execute("UPDATE users SET name = ?, email = ?, invite_token = ?, invite_token_expiry = ? WHERE id = ?", [$r['name'], $r['email'], $r['invite_token'], $r['invite_token_expiry'], ${INVITE_USER_ID}]); echo 'ok';`, { WT_SAVED: saved });
+        }
+      },
+    },
+    {
+      say: 'After you sign in, you land on the Dashboard. It is a live summary of the whole business, and every number on it links to the records behind it.',
+      run: async (d) => { await becomeStaff(d); await d.goto('/dashboard'); await d.wait(2500); await d.highlight('h1.page-header-title', 'Dashboard', 1800); },
+    },
+    {
+      say: 'Active Revenue adds up the monthly rate of every active lease, in Canadian dollars. On Lease Now is the share of your fleet that is out on lease right now.',
+      caption: 'Active Revenue adds up the monthly rate of every active lease, in CAD. On Lease Now is the share of your fleet out on lease right now.',
       run: async (d) => {
         await d.highlight(tile('Active Revenue'), 'Monthly rates of active leases', 2600);
-        await d.highlight(tile('Fleet Utilization'), 'Units on lease ÷ fleet', 2600);
+        await d.highlight(tile('On Lease Now'), 'Units on lease ÷ fleet', 2600);
       },
     },
     {

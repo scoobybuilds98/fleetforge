@@ -98,6 +98,26 @@ export default {
       },
     },
     {
+      say: 'Click Edit to open the account form. It has the same sections as a new customer: identity and status, address, regulatory and tax numbers, billing contact, commercial terms, and tags.',
+      run: async (d) => {
+        await d.click('.page-header a.btn:text-is("Edit"), a.btn:text-is("Edit")', { nav: true });
+        await d.wait(900);
+        await d.hover('#status', 700);
+        await d.scroll(700);
+        await d.hover('#gst_number', 600);
+        await d.scroll(700);
+        await d.hover('#payment_terms', 700);
+      },
+    },
+    {
+      say: 'Status can only move along allowed steps; for example, an account on credit hold can go back to active or be suspended. Save Changes updates the account. We will click Cancel.',
+      run: async (d) => {
+        await d.hover('button:has-text("Save Changes")', 900);
+        await d.click('a.btn:has-text("Cancel")', { nav: true });
+        await d.wait(700);
+      },
+    },
+    {
       say: "Now let's add a new customer. Go back to the list and click New Customer.",
       run: async (d) => {
         await d.nav('Customers', '/customers');

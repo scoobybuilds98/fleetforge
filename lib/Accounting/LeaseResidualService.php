@@ -254,7 +254,7 @@ class LeaseResidualService
         return \db_select(
             "SELECT lrr.*, l.contract_number,
                     je.entry_number AS impairment_je_number,
-                    u.full_name AS reviewer_name
+                    u.name AS reviewer_name
                FROM acc_lease_residual_reviews lrr
                LEFT JOIN leases l ON l.id = lrr.lease_id
                LEFT JOIN acc_journal_entries je ON je.id = lrr.impairment_je_id

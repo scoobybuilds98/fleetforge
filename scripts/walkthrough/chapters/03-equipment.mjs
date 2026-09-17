@@ -167,6 +167,46 @@ export default {
       run: async (d) => { await d.click(tab('Payoff Analysis')); await d.wait(2000); await d.scroll(400); await d.scroll(-400); },
     },
     {
+      say: 'Click View Full Analysis for the complete payoff page. The top row shows the total invested, gross revenue, net revenue after costs, and how much is still to recover.',
+      run: async (d) => {
+        await d.click('a:has-text("View Full Analysis")', { nav: true });
+        await d.wait(1200);
+        await d.highlight('.card:has(:text-is("Still to Recover"))', 'Invested · earned · still to recover', 3000);
+      },
+    },
+    {
+      say: 'Payoff Projections estimate when the unit will be paid off, using the last twelve, six or three months of net revenue. Click a scenario to redraw the chart, or type your own monthly figure under Custom Projection.',
+      caption: 'Payoff Projections estimate when the unit will be paid off, using the last 12, 6 or 3 months of net revenue. Click a scenario to redraw the chart, or type your own monthly figure under Custom Projection.',
+      run: async (d) => {
+        await d.scroll(350);
+        await d.click('.card:has-text("12-month rolling avg")');
+        await d.wait(1500);
+        await d.hover('[x-model="customMonthly"]', 900);
+        await d.scroll(450);
+      },
+    },
+    {
+      say: 'Cost Structure breaks down the purchase price with taxes, delivery and setup, the monthly insurance and licensing costs, financing terms if the unit is financed, and depreciation.',
+      run: async (d) => {
+        await d.page.locator('h2:text-is("Cost Structure")').first().scrollIntoViewIfNeeded();
+        await d.wait(600);
+        await d.highlight('.card:has(.card-title:text-is("Acquisition Cost"))', 'Acquisition cost', 1600);
+        if (await d.exists('.card:has(.card-title:text-is("Financing"))', 800)) await d.hover('.card:has(.card-title:text-is("Financing"))', 900);
+        await d.hover('.card:has(.card-title:text-is("Depreciation"))', 900);
+      },
+    },
+    {
+      say: 'The summary subtracts maintenance, damage claims, financing and fixed costs from revenue. Only sent invoices count, never drafts. Below are revenue by lease, a monthly profit and loss, and every work order and claim.',
+      run: async (d) => {
+        await d.highlight('.card.earnings-summary', 'Revenue minus costs', 2400);
+        await d.page.locator('h2:text-is("Revenue by Lease")').first().scrollIntoViewIfNeeded();
+        await d.wait(900);
+        await d.scroll(700);
+        await d.wait(600);
+        await d.click('a:has-text("Back to Unit"), button:has-text("Back to Unit")', { nav: true });
+      },
+    },
+    {
       say: 'Damage Claims, Maintenance and Inspections show every claim, work order and inspection for this unit, and each has a button to start a new one already linked to it.',
       run: async (d) => {
         await d.click(tab('Damage Claims')); await d.wait(1200);
@@ -191,6 +231,26 @@ export default {
       },
     },
     {
+      say: 'To change a unit, click Edit Unit. You can change its type, brand, unit number, V I N, yard, tracking details, specifications, plate, mileage, compliance dates and notes.',
+      caption: 'To change a unit, click Edit Unit. You can change its type, brand, unit number, VIN, yard, tracking details, specifications, plate, mileage, compliance dates and notes.',
+      run: async (d) => {
+        await d.click('a:has-text("Edit Unit")', { nav: true });
+        await d.wait(900);
+        await d.hover('#unit_number', 600);
+        await d.scroll(600);
+        await d.hover('#mileage', 600);
+        await d.scroll(600);
+      },
+    },
+    {
+      say: 'Status is not on this form. It changes through actions such as leasing, maintenance or decommissioning. Save Changes updates the unit; we will click Cancel instead.',
+      run: async (d) => {
+        await d.hover('button:has-text("Save Changes")', 900);
+        await d.click('a.btn:has-text("Cancel")', { nav: true });
+        await d.wait(800);
+      },
+    },
+    {
       say: 'Now, how units are organised. Every unit belongs to an equipment type. Go back to Equipment and click Equipment Type.',
       run: async (d) => {
         await d.nav('Equipment', '/equipment');
@@ -212,6 +272,21 @@ export default {
         await d.wait(700);
         await d.scroll(700);
       },
+    },
+    {
+      say: 'To change an existing type, click Edit on its row. The form has the same four sections: identity and category, default dimensions, default rental rates, and compliance renewal intervals.',
+      run: async (d) => {
+        await d.goto('/equipment/templates');
+        await d.click('table tbody tr:has-text("Great Dane Champion") a:has-text("Edit")', { nav: true });
+        await d.wait(1200);
+        await d.hover('.card-title:text-is("Default Rental Rates")', 800);
+        await d.scroll(700);
+        await d.hover('.card-title:text-is("Compliance Renewal Intervals")', 800);
+      },
+    },
+    {
+      say: 'Saving changes the defaults only. Units you have already registered keep their own specifications. We will cancel.',
+      run: async (d) => { await d.click('a.btn:has-text("Cancel")', { nav: true }); await d.wait(600); },
     },
     {
       say: 'Types are grouped into categories, such as Chassis, Dry Van or Reefer. It is two levels only: a category holds types, and each type holds units. Open Manage Categories.',

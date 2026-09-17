@@ -22,7 +22,7 @@ export const VOICES = {
 };
 
 // Read letter-by-letter (spaces force it); everything else in caps is left to the model.
-const SPELL = ['AR', 'AP', 'GL', 'CCA', 'PO', 'ID', 'IP', 'US', 'MC', 'DOT', 'FF', 'ROI', 'PNG', 'BCC', 'CRA', 'VIN', 'FX', 'CVI', 'MVI', 'TR', 'RF', 'FB', 'DV', 'SD', 'CH', 'HEIC'];
+const SPELL = ['AR', 'AP', 'GL', 'CCA', 'PO', 'ID', 'IP', 'US', 'MC', 'DOT', 'FF', 'ROI', 'PNG', 'BCC', 'CRA', 'VIN', 'FX', 'CVI', 'MVI', 'TR', 'RF', 'FB', 'DV', 'SD', 'CH', 'HEIC', 'ASPE', 'CRA', 'WTB', 'CCA'];
 const DIGITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
 
 export function neuralText(t) {
@@ -41,7 +41,7 @@ export function neuralText(t) {
     .replace(/\bFleetForge\b/g, 'Fleet Forge').replace(/\bQBO\b/g, 'QuickBooks Online')
     .replace(/\bJEs\b/g, 'journal entries').replace(/\bJE\b/g, 'journal entry')
     .replace(/\bKPIs\b/g, 'K P Is').replace(/\bCAD\b/g, 'Canadian dollars')
-    .replace(/\bOK\b/g, 'okay');
+    .replace(/\bOK\b/g, 'okay').replace(/marked with \*/g, 'marked with an asterisk');
   for (const w of SPELL) s = s.replace(new RegExp(`\\b${w}\\b`, 'g'), [...w].join(' '));
   return s.replace(/\s{2,}/g, ' ').trim();
 }

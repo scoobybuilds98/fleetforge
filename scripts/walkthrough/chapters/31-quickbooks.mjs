@@ -1,9 +1,12 @@
 /*
- * Chapter 30 — QuickBooks Online Sync
+ * Chapter 31 — QuickBooks Online Sync
  * The QuickBooks section: dashboard (connection, KPIs, activity), sync queue, sync log,
  * drift detection, manual sync, the reference-data mapping pages (customers, vendors,
  * chart of accounts, tax codes, bank accounts, items), the per-transaction push pages
- * (invoices as the example), and QuickBooks settings / master controls.
+ * (invoices, credit memos, refund receipts, bills, bill payments, payments, journal entries),
+ * the drift event detail page (opened via the first row's View link), and QuickBooks settings /
+ * master controls. Retry buttons on push pages and Resolve/Accept/Suppress on the drift event
+ * are hovered only.
  *
  * Records created: none. PURE TOUR — nothing that talks to QuickBooks or writes a mapping
  * is clicked. Hovered only: Test Connection, Refresh Token Now, Retry/Delete/Clear (queue),
@@ -103,6 +106,23 @@ export default {
       },
     },
     {
+      say: 'View opens a single event: its category, record type, the Fleet Forge and QuickBooks values side by side, and the difference between them.',
+      caption: 'View opens a single event: its category, record type, the FleetForge and QuickBooks values side by side, and the difference between them.',
+      run: async (d) => {
+        await d.click('table tbody tr >> nth=0 >> a:has-text("View")', { nav: true });
+        await d.wait(1200);
+        await d.highlight('.card:has(h2:has-text("Drift Details"))', 'Drift details', 2600);
+      },
+    },
+    {
+      say: 'Resolve asks for a short note explaining what you found, and records who resolved it and when. Accept marks an intentional difference, and Suppress hides a known false alarm.',
+      run: async (d) => {
+        await d.hover('.card:has(h2:has-text("Actions")) button:has-text("Resolve")', 1300);
+        if (await d.exists('button:has-text("Accept")', 1000)) await d.hover('button:has-text("Accept")', 900);
+        if (await d.exists('button:has-text("Suppress")', 1000)) await d.hover('button:has-text("Suppress")', 900);
+      },
+    },
+    {
       say: 'Manual Sync holds the bulk tools. Force re-sync re-queues every mapped record of one type, but still obeys the master switch, so nothing is sent while sync is off.',
       run: async (d) => {
         await d.click(qboNav('Manual Sync'), { nav: true });
@@ -187,6 +207,58 @@ export default {
         await d.click(qboNav('Invoices'), { nav: true });
         await d.wait(1800);
         await d.highlight('table thead', 'Push status per invoice', 2200);
+      },
+    },
+    {
+      say: 'Credit Memos lists the credit notes created in Fleet Forge, each queued as a QuickBooks credit memo, with its customer, source and amount. A failed push usually means an unmapped customer or item.',
+      caption: 'Credit Memos lists the credit notes created in FleetForge, each queued as a QuickBooks credit memo, with its customer, source and amount. A failed push usually means an unmapped customer or item.',
+      run: async (d) => {
+        await d.click(qboNav('Credit Memos'), { nav: true });
+        await d.wait(1600);
+        await d.highlight('.kpi-grid--qbo', 'Push status counts', 2000);
+      },
+    },
+    {
+      say: 'Refund Receipts covers cash refunds of lease precharges. Marking a refund settled on the lease queues it here; refunds taken as credit go through Credit Memos instead.',
+      run: async (d) => {
+        await d.click(qboNav('Refund Receipts'), { nav: true });
+        await d.wait(1600);
+        await d.highlight('table thead', 'Lease, customer, refund amount, status', 2000);
+      },
+    },
+    {
+      say: 'Bills shows each vendor bill queued when it is approved in Fleet Forge accounting. The tiles count pushed, pending, failed and skipped bills, and failed rows get a Retry button once the cause is fixed.',
+      caption: 'Bills shows each vendor bill queued when it is approved in FleetForge accounting. The tiles count pushed, pending, failed and skipped bills, and failed rows get a Retry button once the cause is fixed.',
+      run: async (d) => {
+        await d.click(qboNav('Bills'), { nav: true });
+        await d.wait(1600);
+        await d.highlight('.kpi-grid--qbo', 'Push status counts', 2000);
+      },
+    },
+    {
+      say: 'Bill Payments lists vendor payments, queued when a bill payment is recorded, with the pay type, bank account and the bill it pays. Pre-flight failures name the problem, such as a currency mismatch.',
+      run: async (d) => {
+        await d.click(qboNav('Bill Payments'), { nav: true });
+        await d.wait(1600);
+        await d.highlight('table thead', 'Pay type, bank account, linked bill', 2000);
+      },
+    },
+    {
+      say: 'Payments works in both directions: customer payments recorded in Fleet Forge are pushed, and payments made online through QuickBooks are pulled in. Retry is only offered for payments that started in Fleet Forge, to avoid duplicates.',
+      caption: 'Payments works in both directions: customer payments recorded in FleetForge are pushed, and payments made online through QuickBooks are pulled in. Retry is only offered for payments that started in FleetForge, to avoid duplicates.',
+      run: async (d) => {
+        await d.click(qboNav('Payments'), { nav: true });
+        await d.wait(1600);
+        await d.highlight('table thead', 'Origin and status per payment', 2200);
+      },
+    },
+    {
+      say: 'Journal Entries lists entries queued when they are posted, such as fixed asset and tax remittance entries. Entries created by invoices, payments, credit notes and bills are skipped here, because those records push on their own pages.',
+      run: async (d) => {
+        await d.click(qboNav('Journal Entries'), { nav: true });
+        await d.wait(1600);
+        await d.hover('button:has-text("Fixed Asset")', 900);
+        await d.highlight('.kpi-grid--qbo', 'Push status counts', 2000);
       },
     },
     {

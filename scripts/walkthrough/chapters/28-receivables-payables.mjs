@@ -3,8 +3,10 @@
  * AR aging (expand a customer, reconciliation check), customer statements, collections
  * (notes / promise to pay / dunning letters / write-offs — Generate & Send is HOVERED ONLY),
  * customer deposits; then payables: the bills register, entering and approving a vendor
- * bill, the Record Payment dialog (opened and cancelled), AP payments, AP aging and
- * vendor credits.
+ * bill, the Record Payment dialog (opened and cancelled), AP payments (register, payment
+ * detail page, and the bill detail page linked from it), AP aging, vendor credits, and
+ * Auto-Categorization Rules (New Rule form filled and cancelled; reached by URL because
+ * no page links to it).
  *
  * Records created on commit (WT_COMMIT=1 or a real recording):
  *   - one APPROVED vendor bill for Bridgestone Tire Canada, vendor invoice # BTC-58213,
@@ -254,6 +256,26 @@ export default {
       },
     },
     {
+      say: 'Click View on a payment to open it: the bank account it came from, the method and reference, which bills it paid and how much went to each, and the journal entry it posted.',
+      run: async (d) => {
+        const row = (await d.exists('table tbody tr:has-text("APAY-2026-00056")', 1500)) ? 'table tbody tr:has-text("APAY-2026-00056")' : 'table tbody tr:has(a:has-text("View"))';
+        await d.click(`${row} a:has-text("View")`, { nav: true });
+        await d.wait(1200);
+        await d.scroll(450);
+        await d.highlight('.card:has-text("Bill Allocations")', 'Bills this payment paid', 2000);
+      },
+    },
+    {
+      say: 'Click a bill number to open the bill itself: vendor, dates, amount paid and balance due, each line with its expense account, and every payment applied to it.',
+      run: async (d) => {
+        await d.click('.card:has-text("Bill Allocations") a:has-text("BILL-")', { nav: true });
+        await d.wait(1200);
+        await d.scroll(500);
+        await d.highlight('.card:has-text("Payment History")', 'Payment history', 1800);
+        await d.scroll(-500);
+      },
+    },
+    {
       say: 'A P Aging mirrors receivables aging for the bills you owe, by vendor and days past due. Check Reconciliation compares it to the payables account in the ledger.',
       caption: 'AP Aging mirrors AR aging for the bills you owe, by vendor and days past due. Check Reconciliation compares it to the AP account in the ledger.',
       run: async (d) => {
@@ -269,6 +291,26 @@ export default {
         await openMenu(d, 'Payables', 'Vendor Credits');
         await d.wait(1200);
         await d.hover('button:has-text("New Credit")', 1400);
+      },
+    },
+    {
+      say: 'Auto-Categorization Rules suggest the expense account for a bill line, based on the vendor, its type, keywords in the description, or the amount. Lower priority numbers are checked first, and the switch at the top turns all rules on or off.',
+      run: async (d) => {
+        await d.goto('/accounting/categorization-rules');
+        await d.wait(1200);
+        await d.hover('button:text-is("ON"), button:text-is("OFF")', 1200);
+      },
+    },
+    {
+      say: 'Click New Rule, give it a name, set the conditions and the target account. When entering a bill, the Auto-Categorize button applies the matching rule to each line. We will cancel rather than save.',
+      run: async (d) => {
+        await d.click('button:has-text("+ New Rule")');
+        await d.wait(800);
+        await d.type('[x-model="form.name"]', 'Tire vendors to Tires expense', { delay: 25 });
+        await d.type('[x-model="form.vendor_name_pattern"]', 'tire');
+        await d.select('[x-model="form.account_id"]', { label: '6030 — Tires' });
+        await d.hover('button:has-text("Save Rule")', 900);
+        await d.click('button:text-is("Cancel")');
       },
     },
   ],

@@ -1,8 +1,8 @@
 /*
  * Chapter 11 — Payments & Credit Notes
  * Payments list + KPI tiles, a payment's detail page, recording a PARTIAL cheque payment
- * against an overdue Summit Carriers invoice (the form refuses an overpayment on camera
- * first), then credit notes: the list, issuing a goodwill credit and applying it to the
+ * against an overdue Summit Carriers invoice (an overpayment's credit-split warning and confirm
+ * dialog are shown and cancelled first), then credit notes: the list, issuing a goodwill credit and applying it to the
  * same invoice.
  *
  * Records created on commit:
@@ -11,8 +11,7 @@
  * Both reduce the invoice balance and Summit's outstanding balance on the dev DB.
  *
  * Helpers implemented inline via d.page: onPage() (skip post-commit scenes in plain dry runs,
- * where the commit click is not performed) and invoiceIdFor() (looks up the numeric invoice
- * id the credit-note Apply form needs, through the read-only invoices API).
+ * where the commit click is not performed).
  */
 const INVOICE = 'INV-2026-00289';
 const onPage = (d, frag) => d.page.url().includes(frag);
@@ -21,12 +20,6 @@ const onPage = (d, frag) => d.page.url().includes(frag);
 const commitClick = async (d, sel, opts = {}) => {
   try { await d.click(sel, { ...opts, commit: true }); } catch (e) { if (!/log is not defined/.test(e.message)) throw e; }
 };
-const invoiceIdFor = (d, number) => d.page.evaluate(async ([base, n]) => {
-  const r = await fetch(`${base}/api/v1/invoices/index.php?q=${encodeURIComponent(n)}`, { credentials: 'same-origin' });
-  const j = await r.json();
-  const hit = (j.data?.items || []).find((i) => i.invoice_number === n);
-  return hit ? String(hit.id) : '';
-}, [d.base, number]);
 
 export default {
   title: 'Payments & Credit Notes',
@@ -114,12 +107,14 @@ export default {
       },
     },
     {
-      say: 'The form will not accept more than the balance due. If you type a larger amount and click Record Payment, it stops and tells you the balance.',
+      say: 'If you type more than the balance due, a warning shows how much would become account credit, and Record Payment asks you to confirm that split. We will cancel.',
       run: async (d) => {
         await d.type('#amount', '6000');
+        await d.highlight('.alert-warning:has-text("Overpayment of")', 'Excess becomes account credit', 2000);
         await d.click('button[type="submit"]:has-text("Record Payment")');
         await d.wait(900);
-        await d.highlight('[data-error-for="amount"]', 'Over the balance', 2200);
+        await d.hover('#ff-confirm-modal button:has-text("Record payment")', 900);
+        await d.click('#ff-confirm-modal button:has-text("Cancel")');
       },
     },
     {
@@ -208,19 +203,35 @@ export default {
       },
     },
     {
-      say: 'To use it, go to Apply to Invoice. Enter the invoice’s I D, click Full to use the whole remaining credit, and click Apply Credit.',
-      caption: 'To use it, go to Apply to Invoice. Enter the invoice’s ID, click Full to use the whole remaining credit, and click Apply Credit.',
+      say: 'The tiles show the total amount, what remains after anything already applied, the source, and how many invoices it has credited. Credit Note Details lists the customer, any linked lease or invoice, the currency, expiry and who created it.',
       run: async (d) => {
         if (!onPage(d, '/credit_notes/show')) return;
-        const id = await invoiceIdFor(d, INVOICE);
-        await d.type('input[x-model="invoiceId"]', id);
-        await d.click('.card:has-text("Apply to Invoice") button:has-text("Full")');
+        await d.hover('.stat-card:has-text("Remaining Balance")', 1200);
+        await d.highlight('.card:has(.card-header:has-text("Credit Note Details"))', 'Details', 2400);
+      },
+    },
+    {
+      say: 'Void, at the top, cancels an unused or partly used credit and needs a reason. As the credit is applied, its status moves from Active to Partially Used, then Fully Used.',
+      run: async (d) => {
+        if (!onPage(d, '/credit_notes/show')) return;
+        await d.hover('button.btn-danger:has-text("Void")', 1500);
+      },
+    },
+    {
+      say: 'To use it, go to Apply to Invoice. Pick one of this customer’s open invoices, click Max to fill in the most you can apply, and click Apply Credit.',
+      run: async (d) => {
+        if (!onPage(d, '/credit_notes/show')) return;
+        const card = '.card:has(.card-header:has-text("Apply to Invoice"))';
+        await d.type(`${card} input.ff-picker-input`, INVOICE, { delay: 40 });
+        await d.page.locator(`.ff-picker-option:has-text("${INVOICE}")`).first().waitFor({ timeout: 15000 });
+        await d.click(`.ff-picker-option:has-text("${INVOICE}")`);
+        await d.click(`${card} button:has-text("Max")`);
         // The page reloads ~1.5 s after a successful apply; wait for that real navigation
         // (d.wait is shortened in dry runs). Times out harmlessly when the commit was skipped.
         const reloaded = d.page.waitForEvent('framenavigated', { timeout: 7000 }).catch(() => null);
         await commitClick(d, 'button:has-text("Apply Credit")');
         await d.wait(1200);
-        if (await reloaded) { await d.ready(); await d.caption('To use it, go to Apply to Invoice. Enter the invoice’s ID, click Full to use the whole remaining credit, and click Apply Credit.'); }
+        if (await reloaded) { await d.ready(); await d.caption('To use it, go to Apply to Invoice. Pick one of this customer’s open invoices, click Max to fill in the most you can apply, and click Apply Credit.'); }
       },
     },
     {
@@ -230,6 +241,7 @@ export default {
         if (!(await d.exists('.card:has-text("Application History")', 4000))) return;
         await d.scroll(500);
         await d.highlight('.card:has-text("Application History")', 'Credit applied', 3000);
+        if (await d.exists('button:has-text("Un-apply")', 1500)) await d.hover('button:has-text("Un-apply")', 1200);
       },
     },
     {

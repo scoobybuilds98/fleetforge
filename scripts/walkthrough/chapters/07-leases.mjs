@@ -110,8 +110,27 @@ export default {
       },
     },
     {
-      say: 'Edit Lease changes everything while a lease is pending. Once it is active, only a few fields can change, such as how mileage is tracked.',
+      say: 'Edit Lease changes dates, add-ons, precharge, notes and the purchase order number. Rates are read-only there; rate changes go through an amendment.',
       run: async (d) => { await d.highlight('a:has-text("Edit Lease")', 'Edit Lease', 2200); },
+    },
+    {
+      say: 'On an active lease, a banner warns that edits only affect invoices generated from now on. Sent invoices never change, and anything already billed, such as the cartage charge, stays locked.',
+      run: async (d) => {
+        await d.click('a:has-text("Edit Lease")', { nav: true });
+        await d.wait(900);
+        await d.highlight('.card-body:has-text("edits apply to future billing only")', 'Future billing only', 2800);
+      },
+    },
+    {
+      say: 'The start date and start time freeze at activation, and ending mileage and engine hours are captured when you close the lease. Save Changes applies the edit; we will click Cancel.',
+      run: async (d) => {
+        await d.hover('.form-hint:has-text("pickup date freezes at activation")', 1100);
+        await d.hover('.card-title:text-is("Rental Rates")', 900);
+        await d.page.locator('.form-hint:has-text("Set at lease close")').first().scrollIntoViewIfNeeded();
+        await d.hover('.form-hint:has-text("Set at lease close")', 900);
+        await d.click('a.btn:has-text("Cancel")', { nav: true });
+        await d.wait(700);
+      },
     },
     {
       say: 'The Rates card holds the daily, weekly and monthly rates, the mileage rate and allowance, and whether mileage is tracked manually, from Samsara, or not at all.',
@@ -319,6 +338,19 @@ export default {
         await d.scroll(800);
         await commitClick(d, 'button[type=submit]:has-text("Create Lease")', { nav: true });
         await d.wait(1200);
+      },
+    },
+    {
+      say: 'While a lease is still pending, Edit Lease also lets you move the start date and start time, for example if the pickup is rescheduled.',
+      run: async (d) => {
+        await onNewLease(d);
+        const leaseUrl = d.page.url();
+        await d.click('a:has-text("Edit Lease")', { nav: true });
+        await d.wait(700);
+        await d.hover('#start_date', 1000);
+        await d.hover('#start_time_h', 700);
+        await d.click('a.btn:has-text("Cancel")', { nav: true });
+        if (!/\/leases\/show\?id=/.test(d.page.url())) await d.goto(leaseUrl.replace(d.base, ''));
       },
     },
 
