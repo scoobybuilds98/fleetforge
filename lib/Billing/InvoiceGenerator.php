@@ -337,7 +337,8 @@ class InvoiceGenerator
                             (string)$lease['start_date']
                         );
                     }
-                } elseif (!empty($lease['end_date'])) {
+                } elseif (HolisticLeaseEngine::endDateIsKnownExtent($lease, $periodEnd)) {
+                    // S-LEASE-OVERRUN-BILLING: a lease still out past end_date keeps $periodEnd.
                     $extentEnd = (string)$lease['end_date'];
                 }
 
@@ -2654,7 +2655,8 @@ class InvoiceGenerator
                     );
                 }
                 $extentDefinitive = true;
-            } elseif (!empty($lease['end_date'])) {
+            } elseif (HolisticLeaseEngine::endDateIsKnownExtent($lease, $submittedEnd)) {
+                // S-LEASE-OVERRUN-BILLING: overrun (still out past end_date) stays open-ended.
                 $target = (string)$lease['end_date'];
                 $extentDefinitive = true;
             }

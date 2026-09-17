@@ -78,7 +78,7 @@ ok(!preg_match('/<th[^>]*>\s*Period\s*<\/th>/', $list), 'P1 list: no bare "Perio
 
 // ── P2–P5: picker lifecycle on a clean spanning lease ────────
 DbState::inTransaction(function () use ($gen) {
-    $lease = r2_lease(['start_date' => '2026-06-07', 'end_date' => '2026-07-07']);
+    $lease = r2_lease(['start_date' => '2026-06-07', 'end_date' => '2026-07-07', 'actual_return_date' => '2026-07-07', 'status' => 'completed']);
 
     // P2 — fresh lease, nothing billed.
     $m = ff_billable_months($lease);
@@ -144,7 +144,7 @@ DbState::inTransaction(function () use ($gen) {
     // 22 days Jul 24 → Aug 14: monthly tier applies (weeklyMath 22d > $1,500)
     // and the span straddles a boundary but is ≤ one calendar month → engine
     // basis 'monthly_short_flat' → generation writes ONE flat $1,500 invoice.
-    $lease = r2_lease(['start_date' => '2026-07-24', 'end_date' => '2026-08-14']);
+    $lease = r2_lease(['start_date' => '2026-07-24', 'end_date' => '2026-08-14', 'actual_return_date' => '2026-08-14', 'status' => 'completed']);
 
     $m = ff_billable_months($lease);
     eqs('1', count($m['months']), 'P10 ≤1-month straddle → ONE picker segment (not two)');
@@ -186,7 +186,7 @@ DbState::inTransaction(function () use ($gen) {
     // 9 days Jul 28 → Aug 05: weeklyMath(9d) $642.86 < $1,500 → monthly tier
     // does NOT apply (basis weekly_math); the span straddles Jul/Aug but
     // generation still writes ONE invoice for [Jul28, Aug05].
-    $lease = r2_lease(['start_date' => '2026-07-28', 'end_date' => '2026-08-05']);
+    $lease = r2_lease(['start_date' => '2026-07-28', 'end_date' => '2026-08-05', 'actual_return_date' => '2026-08-05', 'status' => 'completed']);
 
     $m = ff_billable_months($lease);
     eqs('1', count($m['months']), 'P11 weekly cross-month → ONE picker segment (not two)');
@@ -364,7 +364,7 @@ DbState::inTransaction(function () {
 // straddle from P10 must keep collapsing to ONE segment. This is the guard that
 // S-MONTHLY-SHORT-FLAT is not weakened by the fix.
 DbState::inTransaction(function () {
-    $lease = r2_lease(['start_date' => '2026-07-24', 'end_date' => '2026-08-14']);
+    $lease = r2_lease(['start_date' => '2026-07-24', 'end_date' => '2026-08-14', 'actual_return_date' => '2026-08-14', 'status' => 'completed']);
     $m = ff_billable_months($lease);
     ok($m['extent_definitive'] === true, 'P14 end_date set → extent_definitive=true');
     eqs('1', count($m['months']), 'P14 definite ≤1-month straddle STILL one segment (cap intact)');
@@ -375,7 +375,7 @@ DbState::inTransaction(function () {
 // 'void' branch never armed next_due_index, so fully_billed stayed true and the
 // void-then-regenerate recovery create.php advertises was a dead end.
 DbState::inTransaction(function () use ($gen) {
-    $lease = r2_lease(['start_date' => '2026-06-07', 'end_date' => '2026-07-07']);
+    $lease = r2_lease(['start_date' => '2026-06-07', 'end_date' => '2026-07-07', 'actual_return_date' => '2026-07-07', 'status' => 'completed']);
     $m   = ff_billable_months($lease);
     $jun = $m['months'][0];
     $b = $gen->generateForLease([
@@ -431,6 +431,34 @@ DbState::inTransaction(function () use ($gen) {
     $sum = '0.00';
     foreach ($b['invoices'] as $inv) { $sum = bcadd($sum, base_net((int)$inv['invoice_id']), 2); }
     eqs($truth['amount'], $sum, 'P16 the two invoices sum to the SAME lease total (money invariant)');
+});
+
+// P17 — S-LEASE-OVERRUN-BILLING: a lease STILL OUT past its expected end_date is open-ended.
+// Fixed-date fixtures above model a known end as a RETURNED lease (actual_return_date) because
+// a past end_date on an un-returned lease is an overrun: the unit is on rent, so billing must
+// continue month by month instead of stopping at end_date (which billed ~0 for later months).
+DbState::inTransaction(function () use ($gen) {
+    $m0    = date('Y-m-01', strtotime('first day of -2 months'));   // two months ago
+    $m0End = date('Y-m-t', strtotime($m0));
+    $m1    = date('Y-m-01', strtotime('first day of -1 month'));    // last month
+    $m1End = date('Y-m-t', strtotime($m1));
+    $lease = r2_lease(['start_date' => $m0, 'end_date' => $m0End]);   // expected back 2 months ago, never returned
+
+    $m = ff_billable_months($lease);
+    ok($m['extent_definitive'] === false, 'P17 overrun (past end_date, not returned) → extent NOT definitive');
+    ok(count($m['months']) >= 3, 'P17 picker keeps listing months past end_date through today (got ' . count($m['months']) . ')');
+
+    foreach ([[$m0, $m0End], [$m1, $m1End]] as $k => [$ps, $pe]) {
+        $b = $gen->generateForLease([
+            'lease_id' => $lease, 'single_segment' => true,
+            'period_start' => $ps, 'period_end' => $pe,
+            'billing_type' => 'full_month', 'invoice_type' => 'regular',
+            'created_by' => null, 'generation_source' => 'manual',
+        ]);
+        eqs('1', $b['count'], "P17 month {$k} → one invoice");
+        eqs($pe, db_row('SELECT billing_period_end e FROM invoices WHERE id=?', [$b['invoices'][0]['invoice_id']])['e'], "P17 month {$k} billed to the calendar month end, not end_date");
+        eqs('1500.00', base_net((int)$b['invoices'][0]['invoice_id']), "P17 month {$k} bills the full monthly rate");
+    }
 });
 
 echo "\n----------------------------------------------------------------------\n";

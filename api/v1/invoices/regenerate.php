@@ -136,7 +136,9 @@ if (($invoice['billing_type'] ?? '') === 'full_month' && $ts !== false) {
     $naturalStart = (string) $invoice['billing_period_start'];
     $naturalEnd   = (string) $invoice['billing_period_end'];
 }
-$leaseExtent = $lease['actual_return_date'] ?: ($lease['end_date'] ?: $naturalEnd);
+// S-LEASE-OVERRUN-BILLING: a lease still out past end_date has no known end yet — keep the natural period end.
+$leaseExtent = $lease['actual_return_date']
+    ?: (\FleetForge\Billing\HolisticLeaseEngine::endDateIsKnownExtent($lease, $naturalEnd) ? $lease['end_date'] : $naturalEnd);
 $periodStart = max($naturalStart, (string) $lease['start_date']);
 $periodEnd   = min($naturalEnd, (string) $leaseExtent);
 if ($periodStart > $periodEnd) {

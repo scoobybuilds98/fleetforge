@@ -101,7 +101,8 @@ function ff_billable_months(int $leaseId): ?array
     if (!empty($lease['actual_return_date'])) {
         $extent           = (string) $lease['actual_return_date'];
         $extentDefinitive = true;
-    } elseif (!empty($lease['end_date'])) {
+    } elseif (HolisticLeaseEngine::endDateIsKnownExtent($lease, date('Y-m-d'))) {
+        // S-LEASE-OVERRUN-BILLING: a lease still out past end_date is open-ended (extent = today).
         $extent           = (string) $lease['end_date'];
         $extentDefinitive = true;
     }

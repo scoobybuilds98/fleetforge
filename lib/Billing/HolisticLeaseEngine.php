@@ -891,6 +891,36 @@ class HolisticLeaseEngine
     }
 
     /**
+     * S-LEASE-OVERRUN-BILLING — does the lease's expected end_date still count as a
+     * known END of the lease, given the billing horizon we are billing to?
+     *
+     * The known-extent ladder is actual_return (closed) · end_date (expected) · else
+     * the horizon (period end / today). A lease that is STILL OUT past its expected
+     * end_date (no actual_return_date, end_date before the horizon) has overrun: the
+     * unit is on rent, so end_date is no longer its end. Treating it as the extent
+     * silently stopped monthly/batch billing at end_date — e.g. a lease expected back
+     * Sep 1 but still out billed ~1 day for September — deferring every overrun day to
+     * the closing invoice. Such a lease is treated as OPEN-ENDED (extent = horizon,
+     * not definitive), exactly like a lease with no end_date. Close still bills to the
+     * real return and reconcile_overshoot_invoices() credits anything billed past it.
+     *
+     * Callers still apply their own actual_return time-of-day rule; this only decides
+     * between end_date and the horizon when the lease has not been returned.
+     *
+     * @param array  $lease   needs actual_return_date, end_date (may be null/empty)
+     * @param string $horizon Y-m-d — the period end (generation) or today (picker)
+     * @return bool true when end_date should be used as the definitive extent
+     */
+    public static function endDateIsKnownExtent(array $lease, string $horizon): bool
+    {
+        if (!empty($lease['actual_return_date']) || empty($lease['end_date'])) {
+            return false;
+        }
+        // An expected end on/after the horizon is still ahead of us → a real known end.
+        return (string)$lease['end_date'] >= $horizon;
+    }
+
+    /**
      * S-LEASE-RENTAL-DAY-TIME — Compute the effective billable end date
      * from the raw return date + time-of-day comparison.
      *

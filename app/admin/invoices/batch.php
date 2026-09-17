@@ -133,8 +133,8 @@ require_once FF_ROOT . '/includes/header.php';
                                     <button type="button" class="batch-step-btn" @click="shiftMonth(1)" title="Next month" aria-label="Next month">&rarr;</button>
                                 </div>
                                 <div class="batch-quick-months">
-                                    <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('this_month')">This Month</button>
-                                    <button type="button" class="btn btn-secondary btn-sm" @click="applyPreset('last_month')">Last Month</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" @click="applyPeriodPreset('this_month')">This Month</button>
+                                    <button type="button" class="btn btn-secondary btn-sm" @click="applyPeriodPreset('last_month')">Last Month</button>
                                 </div>
                             </div>
                         </template>
@@ -597,11 +597,11 @@ require_once FF_ROOT . '/includes/header.php';
                             <strong x-text="reviewSelectedIds().length"></strong> selected for sending
                         </div>
                         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-                            <button type="button" class="btn btn-secondary btn-sm" :disabled="!reviewItems.length || downloading" @click="downloadBatch('zip')">
+                            <button type="button" class="btn btn-secondary btn-sm" :disabled="!reviewItems.length || !!downloading" @click="downloadBatch('zip')">
                                 <span x-show="downloading !== 'zip'">Download ZIP</span>
                                 <span x-show="downloading === 'zip'">Zipping…</span>
                             </button>
-                            <button type="button" class="btn btn-secondary btn-sm" :disabled="!reviewItems.length || downloading" @click="downloadBatch('pdf')">
+                            <button type="button" class="btn btn-secondary btn-sm" :disabled="!reviewItems.length || !!downloading" @click="downloadBatch('pdf')">
                                 <span x-show="downloading !== 'pdf'">Download combined PDF</span>
                                 <span x-show="downloading === 'pdf'">Merging…</span>
                             </button>
@@ -1102,6 +1102,10 @@ if ($_ffBrandPrimary): ?>
         --card-sheen:         inset 0 1px 0 rgba(255, 255, 255, 0.9);
     }
 
+    /* The shared confirm/prompt dialog (includes/footer.php, z 60) must sit ABOVE the review
+       overlay, or "Hold for review" opens its reason box underneath it where nobody can type. */
+    #ff-confirm-modal { z-index: 10001; }
+
     .batch-review-overlay {
         position: fixed; inset: 0; z-index: 10000;
         /* MUST re-assert color explicitly. `color` inherits as a COMPUTED
@@ -1395,7 +1399,14 @@ if ($_ffBrandPrimary): ?>
     .batch-add-results { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
     .batch-add-result-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--bg-surface-2); border-radius: var(--radius-md); font-size: 13px; }
 
-    .batch-row-active { background: var(--color-primary-light); }
+    /* --bg-selected is defined in every theme block (dark :root, light, system-dark);
+       --color-primary-light is a pale cream in the light block that system-dark never
+       resets, which left light row text unreadable on it. Paint the cells too, since
+       table cell backgrounds sit above the row's. The inset bar keeps the active row
+       findable at a glance. */
+    .batch-row-active,
+    .batch-row-active > td { background: var(--bg-selected); }
+    .batch-row-active > td:first-child { box-shadow: inset 3px 0 0 var(--color-primary); }
 
     @media (max-width: 1100px) {
         .batch-split, .batch-split.has-preview { grid-template-columns: 1fr; }
@@ -1873,7 +1884,10 @@ function BatchInvoicing(cfg) {
         // ==========================================================
         // Period helpers
         // ==========================================================
-        applyPreset(p) {
+        // Named apart from applyPreset (saved lease-selection presets): two methods with one
+        // name meant this later one silently replaced it, so clicking a saved preset only
+        // reloaded the list instead of re-selecting its leases.
+        applyPeriodPreset(p) {
             const [y, m] = cfg.today.split('-').map(Number);
             if (p === 'this_month') {
                 this.periodMode = 'month';
