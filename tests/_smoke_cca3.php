@@ -45,7 +45,7 @@ $SIG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAD
 $testParams = [
     'app_id'           => 9999,
     'customer_company' => 'Test Trucking Co.',
-    'submitted_at'     => date('Y-m-d H:i:s'),
+    'submitted_at'     => ff_now_utc(), // S-UTC-STAMPS: UTC column
     'submitted_ip'     => '127.0.0.1',
     'print_name_first' => 'Jane',
     'print_name_last'  => 'Smith',
@@ -167,7 +167,7 @@ if (!$testApp) {
     // Simulate the post-commit block on an existing row (don't change status)
     $appId      = (int)$testApp['id'];
     $customerId = (int)$testApp['customer_id'];
-    $now        = date('Y-m-d H:i:s');
+    $now        = ff_now_utc(); // S-UTC-STAMPS: UTC column
 
     // T5: Build and store rendered_html
     $renderParams = $testParams;

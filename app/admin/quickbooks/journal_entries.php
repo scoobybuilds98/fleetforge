@@ -404,7 +404,10 @@ function qboJournalEntriesAdmin(canEdit) {
             return sym + parseFloat(amt).toFixed(2);
         },
 
-        formatTs(ts) { return ts ? ts.replace('T', ' ').substring(0, 16) : '—'; },
+        // S-UTC-STAMPS: pushed_at (and refund settled_at) are UTC DATETIMEs —
+        // printing the raw string showed UTC wall time. Same 'YYYY-MM-DD HH:MM'
+        // shape, converted to the company timezone.
+        formatTs(ts) { return ts ? FF_formatUtc(ts, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).replace(',', '') : '—'; },
         truncate(s, n) { if (!s) return ''; return s.length > n ? s.substring(0, n) + '…' : s; },
     };
 }

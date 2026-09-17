@@ -295,7 +295,8 @@ class CcaService
             'terminal_loss'                    => $terminalLoss,
             'closing_ucc'                      => $closingUcc,
             'is_locked'                        => 0,
-            'computed_at'                      => date('Y-m-d H:i:s'),
+            // S-UTC-STAMPS: UTC, same as the column's CURRENT_TIMESTAMP default.
+            'computed_at'                      => \ff_now_utc(),
             'computed_by'                      => $userId,
         ];
     }

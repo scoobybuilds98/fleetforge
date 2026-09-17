@@ -1345,14 +1345,21 @@ class ReportingService
         }
 
         // Depreciation in the period (this run-line set is the YTD movement)
+        // S-UTC-STAMPS: run_date is a UTC DATETIME; $yearStart/$asOf are company-local
+        // business dates. The bounds are the UTC instants of those local midnights, so a
+        // run generated at 10pm local on Dec 31 (06:00 UTC Jan 1) still belongs to the
+        // old year. Semantics are kept EXACTLY as the former `run_date BETWEEN 'Y-01-01'
+        // AND 'asOf'` on local wall time: inclusive of local midnight at the start of
+        // $asOf and nothing later that day (the DATE bound meant 00:00:00). Widening it
+        // to the whole as-of day would change report numbers; flagged separately.
         $deprRows = \db_select(
             "SELECT drl.asset_id,
                     COALESCE(SUM(drl.depreciation), 0) AS ytd_depr
                FROM acc_depreciation_run_lines drl
                JOIN acc_depreciation_runs dr ON dr.id = drl.run_id
-              WHERE dr.run_date BETWEEN ? AND ?
+              WHERE dr.run_date >= ? AND dr.run_date <= ?
               GROUP BY drl.asset_id",
-            [$yearStart, $asOf]
+            [\ff_local_day_start_utc($yearStart), \ff_local_day_start_utc($asOf)]
         );
         $deprByAsset = [];
         foreach ($deprRows as $r) {

@@ -87,7 +87,8 @@ class RequestMessageService
             if ($newStatus !== null) {
                 $fields['status'] = $newStatus;
                 if (in_array($newStatus, ['resolved', 'closed'], true) && empty($req['resolved_at'])) {
-                    $fields['resolved_at'] = date('Y-m-d H:i:s');
+                    // UTC (S-UTC-STAMPS): portal view renders it via format_datetime().
+                    $fields['resolved_at'] = \ff_now_utc();
                 } elseif ($newStatus === 'open') {
                     $fields['resolved_at'] = null;
                 }

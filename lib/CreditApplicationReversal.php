@@ -168,7 +168,9 @@ class CreditApplicationReversal
             );
 
             // ── Mark the application reversed (append-only) ─────────────────
-            $now = date('Y-m-d H:i:s');
+            // S-UTC-STAMPS: reversed_at is UTC (ArAging compares it to the as-of
+            // day's UTC start; show page renders via format_datetime).
+            $now = ff_now_utc();
             db_update('credit_note_applications', [
                 'status'      => 'reversed',
                 'reversed_at' => $now,

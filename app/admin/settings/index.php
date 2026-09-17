@@ -1224,10 +1224,10 @@ $_graceMinutes = settings_get('lease.return_grace_minutes', '0') ?? '0';
                 <td><span class="badge <?= e($_cca_sb['class']) ?>"><?= e($_cca_sb['label']) ?></span></td>
                 <td style="color:var(--text-secondary);"><?= e($_cca['sent_by_name'] ?? '—') ?></td>
                 <td style="white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">
-                    <?= $_cca['sent_at'] ? e(date('M j, Y', strtotime($_cca['sent_at']))) : '—' ?>
+                    <?= $_cca['sent_at'] ? e(format_datetime($_cca['sent_at'], 'M j, Y')) : '—' /* S-UTC-STAMPS: UTC column → company-local day */ ?>
                 </td>
                 <td style="white-space:nowrap;color:var(--text-secondary);font-size:0.75rem;">
-                    <?= $_cca['submitted_at'] ? e(date('M j, Y', strtotime($_cca['submitted_at']))) : '—' ?>
+                    <?= $_cca['submitted_at'] ? e(format_datetime($_cca['submitted_at'], 'M j, Y')) : '—' /* S-UTC-STAMPS: UTC column → company-local day */ ?>
                 </td>
                 <td>
                     <?php if ($_cca_ob): ?>

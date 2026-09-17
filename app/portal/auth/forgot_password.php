@@ -47,7 +47,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($user) {
                 $token     = bin2hex(random_bytes(32));
                 $tokenHash = hash('sha256', $token);
-                $expiry    = date('Y-m-d H:i:s', time() + 7200); // 2 hours
+                // 2 hours, stored UTC (S-UTC-STAMPS) — reset_password.php compares as UTC.
+                $expiry    = ff_now_utc('+2 hours');
 
                 db_update('portal_users', [
                     'password_reset_token'  => $tokenHash,

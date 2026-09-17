@@ -66,7 +66,8 @@ $result = db_transaction(function () use ($id, $voidReason) {
         'status'      => 'void',
         'void_reason' => $voidReason,
         'voided_by'   => current_user_id(),
-        'voided_at'   => date('Y-m-d H:i:s'),
+        // S-UTC-STAMPS: voided_at is a UTC DATETIME (audit stamp, not a posting date).
+        'voided_at'   => ff_now_utc(),
         'balance_due' => '0.00',
     ], 'id = ?', [$id]);
 

@@ -444,9 +444,10 @@ function FF_CreditApps() {
 
         formatDate(dt) {
             if (!dt) return '—';
-            // Parse as local time by replacing space with T for ISO 8601 compatibility.
-            const d = new Date(dt.replace(' ', 'T'));
-            return d.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', year: 'numeric' });
+            // S-UTC-STAMPS: only sent_at / submitted_at use this — UTC DATETIMEs.
+            // FF_formatUtc parses them as UTC and renders the company-local day
+            // (new Date('Y-m-dTH:i:s') read them in the BROWSER's zone).
+            return FF_formatUtc(dt, { hour: undefined, minute: undefined });
         },
 
         formatMoney(val) {

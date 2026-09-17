@@ -100,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </div>
                         <div x-show="item.is_complete == 1 && item.completed_by_name" x-cloak style="font-size:0.7rem;color:var(--text-secondary);margin-top:2px;">
                             ✓ <span x-text="item.completed_by_name"></span>
-                            <span x-text="' · ' + (item.completed_at || '').substring(0, 16)"></span>
+                            <span x-text="' · ' + FF_formatUtc(item.completed_at)"></span><?php // S-UTC-STAMPS: completed_at is UTC ?>
                         </div>
                     </div>
                 </div>
@@ -182,7 +182,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <?php foreach ($priorClosures as $c): ?>
                             <tr style="border-bottom:1px solid var(--border-default);" <?= $c['status'] === 'reversed' ? 'style="opacity:0.6;"' : '' ?>>
                                 <td class="font-mono" style="padding:6px 10px;font-weight:600;"><?= (int) $c['fiscal_year'] ?></td>
-                                <td class="font-mono" style="padding:6px 10px;font-size:0.78rem;"><?= e(substr((string) $c['closed_at'], 0, 16)) ?></td>
+                                <td class="font-mono" style="padding:6px 10px;font-size:0.78rem;"><?= e(format_datetime($c['closed_at'], 'Y-m-d H:i')) /* S-UTC-STAMPS: UTC → company tz */ ?></td>
                                 <td style="padding:6px 10px;"><?= e($c['closed_by_name'] ?? 'system') ?></td>
                                 <td class="font-mono" style="padding:6px 10px;">
                                     <?php if ($c['closing_je_id']): ?>

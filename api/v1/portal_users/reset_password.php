@@ -55,7 +55,9 @@ if (!$target) {
 
 $plainToken = bin2hex(random_bytes(32));
 $tokenHash  = hash('sha256', $plainToken);
-$expiry     = date('Y-m-d H:i:s', strtotime('+24 hours'));
+// UTC (S-UTC-STAMPS): stored DATETIMEs are UTC; app/portal/auth/reset_password.php
+// compares the expiry against the UTC clock.
+$expiry     = ff_now_utc('+24 hours');
 
 db_update('portal_users', [
     'password_reset_token'  => $tokenHash,
@@ -107,7 +109,8 @@ db_insert('audit_log', [
 json_success([
     'id'         => $id,
     'email'      => $target['email'],
-    'expires_at' => $expiry,
+    // ISO-8601 with an explicit Z so a JSON consumer can't misread the UTC value as local.
+    'expires_at' => str_replace(' ', 'T', $expiry) . 'Z',
     'email_sent' => $emailSent,
     'message'    => $resetMsg,
 ]);

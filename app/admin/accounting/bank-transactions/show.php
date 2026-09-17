@@ -150,7 +150,7 @@ require_once FF_ROOT . '/includes/header.php';
         <?php if ($tx['matched_at']): ?>
         <div>
             <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">Matched</div>
-            <div><?= e($tx['matched_by_name'] ?? 'system') ?> <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e($tx['matched_at']) ?></span></div>
+            <div><?= e($tx['matched_by_name'] ?? 'system') ?> <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e(format_datetime($tx['matched_at'])) /* S-UTC-STAMPS: UTC → company tz */ ?></span></div>
         </div>
         <?php endif; ?>
         <?php if ($tx['je_id']): ?>

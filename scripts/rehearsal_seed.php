@@ -154,7 +154,8 @@ function rs_send_invoice(int $invoiceId, string $sentDate, ?string $toEmail): vo
             SET status = 'sent', sent_date = ?, sent_at = ?, sent_by = ?,
                 delivery_method = 'email', sent_to_email = ?
           WHERE id = ?",
-        [$sentDate, $sentDate . ' 09:00:00', RS_USER, $toEmail, $invoiceId]
+        // S-UTC-STAMPS: sent_at is a UTC DATETIME — 09:00 company-local on the sent date.
+        [$sentDate, (new DateTimeImmutable($sentDate . ' 09:00:00', ff_business_timezone()))->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s'), RS_USER, $toEmail, $invoiceId]
     );
 }
 

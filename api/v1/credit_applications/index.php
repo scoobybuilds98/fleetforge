@@ -69,7 +69,9 @@ foreach ($rows as &$row) {
     // Derived: a 'sent' link past its expiry can no longer be opened.
     $row['is_expired'] = ($row['status'] === 'sent'
         && !empty($row['token_expires_at'])
-        && strtotime((string) $row['token_expires_at']) < $now);
+        // S-UTC-STAMPS: token_expires_at is stored UTC — parse it as UTC, not
+        // as PHP-local (America/Vancouver) wall time.
+        && strtotime((string) $row['token_expires_at'] . ' UTC') < $now);
     // has_pdf drives the (S-CCA-3-wired) View link without exposing storage paths.
     $row['has_pdf']         = $row['generated_pdf_document_id'] !== null;
     $row['pdf_document_id'] = $row['generated_pdf_document_id'] !== null

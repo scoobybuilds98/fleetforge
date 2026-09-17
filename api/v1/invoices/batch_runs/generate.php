@@ -107,7 +107,9 @@ $approver = $run['decided_by']
     ? db_row("SELECT name, email FROM users WHERE id = ?", [(int) $run['decided_by']])
     : null;
 $approvedByLabel = $approver['name'] ?? 'unknown';
-$approvedAtLabel = $run['decided_at'] ?? '';
+// S-UTC-STAMPS: decided_at is stored UTC — the label lands in invoice
+// internal_notes + audit text, so render it as company-local wall time.
+$approvedAtLabel = !empty($run['decided_at']) ? ff_utc_to_local((string) $run['decided_at'], 'Y-m-d H:i:s') : '';
 
 $actioned = 0;
 $skipped  = 0;
@@ -259,7 +261,7 @@ db_execute(
       WHERE id = ?",
     [
         $userId,
-        date('Y-m-d H:i:s'),
+        ff_now_utc(), // S-UTC-STAMPS: generated_at is UTC (rendered via format_datetime)
         json_encode(array_column($invoices, 'invoice_id')),
         json_encode($generationResult, JSON_UNESCAPED_UNICODE),
         $id,

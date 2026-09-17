@@ -252,6 +252,8 @@ class QuickBooksClient
             throw new RuntimeException('QBO not connected — complete OAuth at Settings → QuickBooks before issuing API calls.');
         }
 
+        // S-UTC-STAMPS: new values are ISO-8601 with '+00:00' (offset honoured);
+        // a legacy bare 'Y-m-d H:i:s' is PHP-local wall time — strtotime reads both right.
         $expiresTs = strtotime($expiresAt);
         if ($expiresTs === false) {
             // Malformed timestamp — be safe and force a refresh.
@@ -335,11 +337,17 @@ class QuickBooksClient
         $accessExpiry  = $now + (int) ($decoded['expires_in'] ?? 3600);
         $refreshExpiry = $now + (int) ($decoded['x_refresh_token_expires_in'] ?? 8726400); // 101 days default
 
+        // S-UTC-STAMPS: stamps are ISO-8601 UTC WITH an explicit offset
+        // ('2026-09-17T01:03:17+00:00'), not bare PHP-local wall time. Every
+        // PHP reader uses strtotime(), which honours the offset — and still
+        // reads a legacy bare value as PHP-local — so ensureValidToken(), the
+        // refresh cron and the settings page keep exact timing on both shapes;
+        // JS readers (FF_parseUtc) no longer mistake the value for UTC/browser time.
         self::settings_write_qbo('access_token',              (string) $decoded['access_token']);
         self::settings_write_qbo('refresh_token',             (string) $decoded['refresh_token']);
-        self::settings_write_qbo('access_token_expires_at',   date('Y-m-d H:i:s', $accessExpiry));
-        self::settings_write_qbo('refresh_token_expires_at',  date('Y-m-d H:i:s', $refreshExpiry));
-        self::settings_write_qbo('last_token_refresh_at',     date('Y-m-d H:i:s', $now));
+        self::settings_write_qbo('access_token_expires_at',   gmdate('c', $accessExpiry));
+        self::settings_write_qbo('refresh_token_expires_at',  gmdate('c', $refreshExpiry));
+        self::settings_write_qbo('last_token_refresh_at',     gmdate('c', $now));
         self::settings_write_qbo('connection_status',         'connected');
         self::settings_write_qbo('connection_error',          '');
     }

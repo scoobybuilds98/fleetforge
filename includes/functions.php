@@ -678,7 +678,11 @@ if (!function_exists('ff_now_utc')) {
  */
 function ff_now_utc(string $modify = ''): string
 {
-    return $modify === '' ? gmdate('Y-m-d H:i:s') : gmdate('Y-m-d H:i:s', strtotime($modify));
+    // Apply the offset on a UTC clock. strtotime('+30 minutes') works on the PHP
+    // (Pacific) wall clock, so across a DST transition '+24 hours' came out as 23h
+    // or 25h and '+30 minutes' could even land in the past.
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    return ($modify === '' ? $now : $now->modify($modify))->format('Y-m-d H:i:s');
 }
 }
 

@@ -117,11 +117,11 @@ try {
         'collection_status'       => 'current',
     ]);
 
-    $now = date('Y-m-d H:i:s');
+    $now = ff_now_utc(); // S-UTC-STAMPS: CCA *_at columns are UTC
     $appId = (int) db_insert('customer_credit_applications', [
         'customer_id'      => $custId,
         'token_hash'       => hash('sha256', 'smoke_cca4_test_token_' . microtime()),
-        'token_expires_at' => date('Y-m-d H:i:s', time() + 86400),
+        'token_expires_at' => ff_now_utc('+1 day'),
         'status'           => 'submitted',
         'sent_at'          => $now,
         'submitted_at'     => $now,
@@ -369,7 +369,7 @@ if (str_contains($custShowSrc, '<th>Reviewed</th>'))
 else
     fail("T13a: 'Reviewed' column header missing from history table");
 
-if (str_contains($custShowSrc, 'app.reviewed_at') && str_contains($custShowSrc, "formatDate(app.reviewed_at)"))
+if (str_contains($custShowSrc, 'app.reviewed_at') && str_contains($custShowSrc, "formatUtcDate(app.reviewed_at)")) // S-UTC-STAMPS: UTC-aware formatter
     ok("T13b: reviewed_at date displayed in history table row (SC8 / D-CCA-4-E)");
 else
     fail("T13b: reviewed_at date missing from history table row");

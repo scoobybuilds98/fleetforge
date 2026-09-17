@@ -593,8 +593,9 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                         </div>
                                     </div>
                                     <div class="ff-show-caption">
+                                        <!-- S-UTC-STAMPS: precharge_invoiced_at / precharge_refund_settled_at are UTC DATETIMEs — company-local Y-m-d via FF_parseUtc, not new Date() (browser zone, bare string read as local) -->
                                         <template x-if="lease.precharge_invoiced_at">
-                                            <span x-text="'Billed on ' + new Date(lease.precharge_invoiced_at).toLocaleDateString('en-CA')"></span>
+                                            <span x-text="'Billed on ' + FF_localDate(FF_parseUtc(lease.precharge_invoiced_at))"></span>
                                         </template>
                                         <template x-if="!lease.precharge_invoiced_at">
                                             <span>Not yet billed</span>
@@ -603,7 +604,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                             <span x-text="' · Refund method: ' + lease.precharge_refund_method"></span>
                                         </template>
                                         <template x-if="lease.precharge_refund_settled_at">
-                                            <span x-text="' · Settled ' + new Date(lease.precharge_refund_settled_at).toLocaleDateString('en-CA')"></span>
+                                            <span x-text="' · Settled ' + FF_localDate(FF_parseUtc(lease.precharge_refund_settled_at))"></span>
                                         </template>
                                     </div>
                                     <!-- S-MILEAGE-3 D-B (i) / D-K: Mark Refund Settled (cash refund, not yet settled) -->
@@ -727,8 +728,9 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                                 <div class="text-xs text-secondary" style="margin-top:2px;">
                                                     <template x-if="lease.odometer_start_source === 'gps'">
                                                         <span>captured via GPS
+                                                            <!-- S-UTC-STAMPS: odometer_start_fetched_at is a UTC DATETIME; slice(0,10) was the UTC day (tomorrow after ~5pm Pacific) — take the company-local day -->
                                                             <template x-if="lease.odometer_start_fetched_at">
-                                                                <span>on <span x-text="formatDate(lease.odometer_start_fetched_at.slice(0,10))"></span></span>
+                                                                <span>on <span x-text="formatDate(FF_localDate(FF_parseUtc(lease.odometer_start_fetched_at)))"></span></span>
                                                             </template>
                                                         </span>
                                                     </template>
@@ -1552,8 +1554,9 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 <span>
                                     Lease started with odometer:
                                     <span class="font-mono" x-text="Number(lease.odometer_start_km).toLocaleString('en-CA', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' km'"></span>
+                                    <!-- S-UTC-STAMPS: fetched_at is a UTC DATETIME (formatDate() appends T00:00:00 → Invalid Date on a datetime) — convert to the company-local day first -->
                                     <template x-if="lease.odometer_start_source === 'gps'">
-                                        <span> (captured <span x-text="lease.odometer_start_fetched_at ? formatDate(lease.odometer_start_fetched_at) : formatDate(lease.start_date)"></span> via GPS)</span>
+                                        <span> (captured <span x-text="lease.odometer_start_fetched_at ? formatDate(FF_localDate(FF_parseUtc(lease.odometer_start_fetched_at))) : formatDate(lease.start_date)"></span> via GPS)</span>
                                     </template>
                                     <template x-if="lease.odometer_start_source === 'manual'">
                                         <span> (entered manually)</span>
@@ -3032,7 +3035,9 @@ function FF_LeaseDetail() {
         // Fleet Tracking dashboard uses, kept consistent on purpose.
         samsaraIsOnline() {
             if (!this.lease || !this.lease.samsara_last_connected_at) return false;
-            const last = new Date(this.lease.samsara_last_connected_at).getTime();
+            // S-UTC-STAMPS: bare UTC DATETIME — FF_parseUtc, not new Date() (browser zone).
+            const lastD = FF_parseUtc(this.lease.samsara_last_connected_at);
+            const last  = lastD ? lastD.getTime() : NaN;
             if (isNaN(last)) return false;
             return (Date.now() - last) < (8 * 3600 * 1000);
         },
@@ -3040,9 +3045,12 @@ function FF_LeaseDetail() {
         // Human relative time (e.g. "12m ago") for telemetry footers.
         // Falls back to "—" rather than "Invalid Date" so empty rows
         // render cleanly even before the first cron tick.
+        // S-UTC-STAMPS: only fed samsara_last_connected_at / samsara_last_synced_at
+        // (bare UTC DATETIMEs) — parse with FF_parseUtc, not new Date().
         formatRelative(ts) {
             if (!ts) return '—';
-            const t = new Date(ts).getTime();
+            const pd = FF_parseUtc(ts);
+            const t  = pd ? pd.getTime() : NaN;
             if (isNaN(t)) return '—';
             const diff = Math.max(0, Date.now() - t);
             const m    = Math.floor(diff / 60000);

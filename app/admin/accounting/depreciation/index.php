@@ -165,7 +165,7 @@ require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
                             <td><span class="badge badge-no-dot" :class="statusBadge(r.status)" x-text="r.status"></span></td>
                             <td class="text-right font-mono" x-text="r.asset_count"></td>
                             <td class="text-right font-mono" x-text="formatMoney(r.total_depreciation)"></td>
-                            <td class="text-sm" x-text="(r.run_date || '').slice(0,16).replace('T',' ')"></td>
+                            <td class="text-sm" x-text="FF_formatUtc(r.run_date)"></td><?php // S-UTC-STAMPS: run_date is a UTC DATETIME ?>
                             <td class="font-mono text-sm" x-text="r.journal_entry_id ? '#' + r.journal_entry_id : '—'"></td>
                             <td>
                                 <button class="btn btn-secondary btn-xs" @click="openDetail(r.id)">View</button>
@@ -214,7 +214,7 @@ require FF_ROOT . '/includes/partials/qbo-fa-sync-note.php'; ?>
                             <div><strong>Status:</strong> <span class="badge badge-no-dot" :class="statusBadge(detailRun.status)" x-text="detailRun.status"></span></div>
                             <div><strong>Asset Count:</strong> <span class="font-mono" x-text="detailRun.asset_count"></span></div>
                             <div><strong>Total:</strong> <span class="font-mono" x-text="formatMoney(detailRun.total_depreciation)"></span></div>
-                            <div><strong>Run Date:</strong> <span class="text-sm" x-text="(detailRun.run_date || '').slice(0,16).replace('T',' ')"></span></div>
+                            <div><strong>Run Date:</strong> <span class="text-sm" x-text="FF_formatUtc(detailRun.run_date)"></span></div>
                             <div><strong>JE #:</strong> <span class="font-mono" x-text="detailRun.journal_entry_id ? '#' + detailRun.journal_entry_id : '— (preview)'"></span></div>
                             <template x-if="detailRun.notes">
                                 <div style="grid-column: 1 / -1;"><strong>Notes:</strong> <span class="text-sm" x-text="detailRun.notes"></span></div>

@@ -113,9 +113,12 @@ $qsp_url  = ($qsp_qboId && $qsp_deepLink !== '')
     ? "https://{$qsp_host}/app/{$qsp_deepLink}?txnId=" . urlencode((string) $qsp_qboId)
     : null;
 
+// S-UTC-STAMPS: both callers pass UTC DATETIMEs (map pushed_at and
+// acc_qbo_sync_log.created_at) — parse as UTC. A bare strtotime() read them as
+// PHP-local, so "2 min ago" showed as "7 hr ago" / a future time.
 $qsp_timeAgo = static function (?string $ts): ?string {
     if (!$ts) return null;
-    $t = strtotime($ts);
+    $t = strtotime($ts . ' UTC');
     if ($t === false) return null;
     $diff = time() - $t;
     if ($diff < 60)      return $diff <= 1 ? 'just now' : $diff . ' seconds ago';
@@ -154,7 +157,7 @@ $qsp_token     = $qsp_mapping['qbo_sync_token'] ?? null;
                 </div>
             <?php endif; ?>
             <?php if ($qsp_mapping && !empty($qsp_mapping['pushed_at'])): ?>
-                <div title="<?= e((string) $qsp_mapping['pushed_at']) ?>">
+                <div title="<?= e(format_datetime($qsp_mapping['pushed_at'], 'Y-m-d H:i:s T')) ?>">
                     <span class="text-secondary">Pushed</span>
                     <span class="font-mono"><?= e($qsp_pushedRel ?? (string) $qsp_mapping['pushed_at']) ?></span>
                 </div>
@@ -196,7 +199,7 @@ $qsp_token     = $qsp_mapping['qbo_sync_token'] ?? null;
                         else                                       { $lr_badge = 'badge-neutral'; $lr_icon = '⋯'; }
                         ?>
                         <tr>
-                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e((string) $lr['created_at']) ?>">
+                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e(format_datetime($lr['created_at'], 'Y-m-d H:i:s T')) ?>">
                                 <?= e($qsp_timeAgo($lr['created_at']) ?? (string) $lr['created_at']) ?>
                             </td>
                             <td class="text-sm"><?= e(((string) ($lr['http_method'] ?? '')) . ' ' . ((string) ($lr['operation'] ?? ''))) ?></td>

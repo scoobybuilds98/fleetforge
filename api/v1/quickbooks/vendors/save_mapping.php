@@ -82,7 +82,7 @@ switch ($action) {
 }
 
 $userId = current_user_id();
-$now    = date('Y-m-d H:i:s');
+$now    = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
 try {
     $result = db_transaction(function () use ($action, $ffVendId, $qboVendId, $mappingId, $notes, $userId, $now): array {

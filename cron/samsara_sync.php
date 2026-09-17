@@ -64,7 +64,10 @@ $processed = 0;   // unit synced + telemetry written
 $movedUnit = 0;   // unit synced AND a breadcrumb row appended
 $skipped   = 0;   // Samsara returned no data for this vehicle
 $failed    = 0;   // DB or unexpected error during sync of this unit
-$now       = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: $now feeds samsara_last_synced_at + location_history.synced_at,
+// UTC DATETIMEs (db.php session +00:00). Samsara's ISO-8601 'Z' times below go
+// through gmdate(), not date(). (gps.log lines stay local — human-read log.)
+$now       = ff_now_utc();
 
 // Pending alerts keyed by type — filled per-unit, dispatched as
 // grouped notifications after the loop (one notif per type, not per unit).
@@ -173,7 +176,7 @@ try {
                 'samsara_last_location_address' => $gps['address'] ?? null,
                 'samsara_last_speed_kph'        => $gps['speed_kph'] ?? null,
                 'samsara_last_connected_at'     => isset($stats['last_connected_at'])
-                    ? date('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
+                    ? gmdate('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
                     : null,
                 'samsara_last_synced_at'        => $now,
                 'samsara_odometer_km'           => $stats['odometer_km'] ?? null,
@@ -215,7 +218,7 @@ try {
                             'heading'             => $gps['heading']   ?? null,
                             'address'             => $gps['address']   ?? null,
                             'recorded_at'         => isset($gps['time'])
-                                ? date('Y-m-d H:i:s', strtotime((string) $gps['time']))
+                                ? gmdate('Y-m-d H:i:s', strtotime((string) $gps['time']))
                                 : $now,
                             'synced_at'           => $now,
                         ]);
@@ -359,7 +362,7 @@ try {
                     'notification_type' => $type,
                     'status'            => 'sent',
                     // S-LOCAL-DAY-TS: sent_at is UTC like the DB-defaulted created_at. Not
-                    // $now — that local value also feeds the samsara sync timestamps above.
+                    // $now (also UTC since S-UTC-STAMPS, but stamped at tick start).
                     'sent_at'           => ff_now_utc(),
                 ]);
             }

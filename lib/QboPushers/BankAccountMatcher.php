@@ -203,7 +203,7 @@ class BankAccountMatcher
             );
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $snapshotRow = [
             'qbo_account_name_snapshot' => substr((string) ($qboSnapshot['name'] ?? ''), 0, 255),
             'qbo_currency_snapshot'     => self::canonicalCurrency((string) ($qboSnapshot['currency'] ?? 'CAD')),
@@ -315,7 +315,7 @@ class BankAccountMatcher
     public static function verifyMappingStillValid(?QuickBooksClient $client = null): array
     {
         $client = $client ?? new QuickBooksClient();
-        $now    = date('Y-m-d H:i:s');
+        $now    = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         $mapped = db_select(
             "SELECT id, ff_bank_account_id, qbo_bank_account_id,

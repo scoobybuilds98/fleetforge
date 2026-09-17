@@ -303,7 +303,7 @@ class PaymentPusher
             'qbo_sync_token' => (string) ($qboPayment['SyncToken'] ?? '0'),
             'push_status'    => 'voided',
             'push_error'     => null,
-            'last_synced_at' => date('Y-m-d H:i:s'),
+            'last_synced_at' => ff_now_utc(), // S-UTC-STAMPS: UTC
         ]);
 
         return [
@@ -923,7 +923,7 @@ class PaymentPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $payNum = (string) ($ff['payment_number'] ?? '');
         $errorMsg = "skipped: {$statusCode}" . ($payNum !== '' ? " (payment {$payNum})" : '');
 
@@ -945,7 +945,7 @@ class PaymentPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         // Find the first LinkedTxn from the response (the QBO invoice this
         // payment allocates to). Used for snapshot field qbo_linked_invoice_id.
         $linkedInvoiceId = null;
@@ -978,7 +978,7 @@ class PaymentPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffPaymentId, [
             'push_status'    => 'failed',
             'push_error'     => substr($errorMessage, 0, 65535),
@@ -995,7 +995,7 @@ class PaymentPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffPaymentId, [
             'push_status'    => 'failed_preflight',
             'push_error'     => substr($errorMessage, 0, 65535),
@@ -1019,7 +1019,7 @@ class PaymentPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffPaymentId, [
             'push_status'    => 'failed_preflight',
             'push_error'     => substr($errorMessage, 0, 65535),

@@ -83,7 +83,8 @@ if ((int) $snapshot['totals']['ok_count'] === 0) {
 }
 
 $userId = current_user_id();
-$now    = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: submitted_at is a UTC DATETIME (batch_run.php renders it via format_datetime).
+$now    = ff_now_utc();
 
 $runId = db_transaction(static function () use ($snapshot, $leaseIds, $periodStart, $periodEnd, $note, $userId, $now): int {
     $id = db_insert('invoice_batch_runs', [

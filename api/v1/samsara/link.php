@@ -138,7 +138,10 @@ if (empty($ping)) {
 
 $stats = $ping['stats'] ?? [];
 $gps   = $stats['gps']  ?? null;
-$now   = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: samsara_last_synced_at / location_history.synced_at are UTC
+// DATETIMEs (db.php pins the session to +00:00), and Samsara's ISO-8601 'Z'
+// times below go through gmdate() — date() would store Pacific wall time.
+$now   = ff_now_utc();
 
 // ── Build the column update set ─────────────────────────────
 // Static fields (name, vin, serial, gateway, entity_type) are
@@ -164,7 +167,7 @@ $update = [
     'samsara_last_location_address'=> $gps['address'] ?? null,
     'samsara_last_speed_kph'       => $gps['speed_kph'] ?? null,
     'samsara_last_connected_at'    => isset($stats['last_connected_at'])
-        ? date('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
+        ? gmdate('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
         : null,
     'samsara_last_synced_at'       => $now,
     'samsara_odometer_km'          => $stats['odometer_km'] ?? null,
@@ -196,7 +199,7 @@ db_transaction(static function () use ($unitId, $update, $gps, $samsaraVehicleId
             'heading'             => $gps['heading']   ?? null,
             'address'             => $gps['address']   ?? null,
             'recorded_at'         => isset($gps['time'])
-                ? date('Y-m-d H:i:s', strtotime((string) $gps['time']))
+                ? gmdate('Y-m-d H:i:s', strtotime((string) $gps['time']))
                 : $now,
             'synced_at'           => $now,
         ]);

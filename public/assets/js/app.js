@@ -4055,14 +4055,16 @@ function FF_Messenger() {
         },
 
         formatTime(ts) {
-            if (!ts) return '';
-            const d = new Date(ts.replace(' ', 'T'));
+            // S-UTC-STAMPS: messenger created_at / last_message_at are UTC
+            // DATETIMEs; new Date('Y-m-dTH:i:s') read them as browser-local (7–8h off).
+            const d = FF_parseUtc(ts);
+            if (!d) return '';
             return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
         },
 
         formatTimeShort(ts) {
-            if (!ts) return '';
-            const d = new Date(ts.replace(' ', 'T'));
+            const d = FF_parseUtc(ts); // S-UTC-STAMPS: UTC DATETIME
+            if (!d) return '';
             const now = new Date();
             const sameDay = d.toDateString() === now.toDateString();
             if (sameDay) {
@@ -4271,14 +4273,16 @@ function FF_PortalMessenger() {
         },
 
         formatTime(ts) {
-            if (!ts) return '';
-            const d = new Date(ts.replace(' ', 'T'));
+            // S-UTC-STAMPS: messenger created_at / last_message_at are UTC
+            // DATETIMEs; new Date('Y-m-dTH:i:s') read them as browser-local (7–8h off).
+            const d = FF_parseUtc(ts);
+            if (!d) return '';
             return d.toLocaleTimeString('en-CA', { hour: 'numeric', minute: '2-digit' });
         },
 
         formatTimeShort(ts) {
-            if (!ts) return '';
-            const d = new Date(ts.replace(' ', 'T'));
+            const d = FF_parseUtc(ts); // S-UTC-STAMPS: UTC DATETIME
+            if (!d) return '';
             const now = new Date();
             const sameDay = d.toDateString() === now.toDateString();
             if (sameDay) {

@@ -3270,11 +3270,14 @@ function FF_UnitDetail() {
         },
 
         // Format a datetime to a short date for the saved-logs table.
+        // S-UTC-STAMPS: period_start/period_end/created_at are bare UTC DATETIMEs —
+        // FF_parseUtc pins them to UTC and the date is taken in the company zone
+        // (new Date() read them in the browser's zone).
         distFormatDate(val) {
             if (!val) return '—';
-            const d = new Date(val);
-            if (isNaN(d.getTime())) return val;
-            return d.toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' });
+            const d = FF_parseUtc(val);
+            if (!d) return val;
+            return FF_formatUtc(d, { hour: undefined, minute: undefined });
         },
 
         // POST /api/v1/equipment_units/distance_logs/create — save current result.
@@ -3345,9 +3348,12 @@ function FF_UnitDetail() {
         // Compact "5 minutes ago" / "2 hours ago" formatter used by
         // both the mapping tab and the overview Samsara card so the
         // staleness indicator reads consistently.
+        // S-UTC-STAMPS: only fed samsara_last_synced_at / samsara_last_connected_at,
+        // bare UTC DATETIMEs — FF_parseUtc, not new Date() (browser zone).
         formatRelative(value) {
             if (!value) return '';
-            const ts = new Date(value).getTime();
+            const d  = FF_parseUtc(value);
+            const ts = d ? d.getTime() : NaN;
             if (isNaN(ts)) return value;
             const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
             if (diffSec < 60)    return 'just now';
@@ -3355,7 +3361,7 @@ function FF_UnitDetail() {
             if (diffSec < 86400) return Math.floor(diffSec/3600) + ' hr ago';
             const days = Math.floor(diffSec/86400);
             if (days < 7) return days + ' day' + (days > 1 ? 's' : '') + ' ago';
-            return new Date(value).toLocaleDateString();
+            return FF_formatUtc(value, { hour: undefined, minute: undefined });
         },
 
         statusBadgeClass(status) {

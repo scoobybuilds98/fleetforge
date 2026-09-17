@@ -81,7 +81,7 @@ try {
         json_error('QBO_CREATE_FAILED', 'QBO Item creation failed: ' . (string) $result['error'], 502);
     }
 
-    $now          = date('Y-m-d H:i:s');
+    $now          = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
     $isCredit     = ($ffItemType === 'base_rental_reconciliation_credit') ? 1 : 0;
     $presentation = ($ffItemType === 'gps' && $ffVariant !== null) ? $ffVariant : null;
 
@@ -111,8 +111,8 @@ try {
         'is_credit_variant'       => $isCredit,
         'presentation_variant'    => $presentation,
         'last_synced_at'          => $now,
-        // S-LOCAL-DAY-TS: last_pull_at is UTC everywhere else (pull.php NOW());
-        // last_synced_at keeps $now to match its other (PHP-local) writers.
+        // S-LOCAL-DAY-TS: last_pull_at is UTC everywhere else (pull.php NOW()).
+        // S-UTC-STAMPS: last_synced_at ($now) is UTC too — every writer converted.
         'last_pull_at'            => ff_now_utc(),
         'created_by_user_id'      => $userId,
     ]);

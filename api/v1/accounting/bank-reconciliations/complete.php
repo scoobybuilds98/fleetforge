@@ -161,7 +161,8 @@ db_transaction(function () use (
         'adjusted_book_balance' => $summary['adjusted_book_balance'],
         'difference'            => '0.00',
         'completed_by'          => $userId,
-        'completed_at'          => date('Y-m-d H:i:s'),
+        // S-UTC-STAMPS: completed_at is a UTC DATETIME (statement_date stays a business date).
+        'completed_at'          => ff_now_utc(),
     ], 'id = ?', [$id]);
 
     db_insert('audit_log', [

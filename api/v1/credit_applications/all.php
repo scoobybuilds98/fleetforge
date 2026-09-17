@@ -82,13 +82,17 @@ if ($outcome !== null) {
     $conditions[] = 'ca.review_outcome = ?';
     $params[]     = $outcome;
 }
-if ($dateFrom !== null && $dateFrom !== '') {
-    $conditions[] = 'DATE(ca.created_at) >= ?';
-    $params[]     = $dateFrom;
+// S-UTC-STAMPS: created_at is a UTC DATETIME but date_from/date_to are
+// company-LOCAL calendar days — DATE(created_at) is the UTC day, so a link sent
+// after ~5pm Pacific fell on the next day's filter. Compare against the UTC
+// instants of local midnight instead (sargable, DST-correct).
+if ($dateFrom !== null && $dateFrom !== '' && clean_date($dateFrom) !== null) {
+    $conditions[] = 'ca.created_at >= ?';
+    $params[]     = ff_local_day_start_utc($dateFrom);
 }
-if ($dateTo !== null && $dateTo !== '') {
-    $conditions[] = 'DATE(ca.created_at) <= ?';
-    $params[]     = $dateTo;
+if ($dateTo !== null && $dateTo !== '' && clean_date($dateTo) !== null) {
+    $conditions[] = 'ca.created_at < ?';
+    $params[]     = ff_local_day_start_utc(ff_local_date_add($dateTo, 1));
 }
 
 $whereSQL = 'WHERE ' . implode(' AND ', $conditions);
@@ -181,7 +185,8 @@ foreach ($rows as $row) {
         'is_expired'           => (
             $row['status'] === 'sent'
             && !empty($row['token_expires_at'])
-            && strtotime((string) $row['token_expires_at']) < $now
+            // S-UTC-STAMPS: token_expires_at is stored UTC — parse as UTC.
+            && strtotime((string) $row['token_expires_at'] . ' UTC') < $now
         ),
     ];
 }

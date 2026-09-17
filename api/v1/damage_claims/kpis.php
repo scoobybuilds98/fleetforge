@@ -33,17 +33,29 @@ $invoiced = db_count(
      WHERE status = 'invoiced' AND deleted_at IS NULL"
 );
 
+// S-UTC-STAMPS: damage_claims.created_at is UTC. "This year" is the company-
+// local calendar year: 00:00 local Jan 1 → 00:00 local Jan 1 next year, as
+// UTC bounds (sargable). YEAR(created_at) = YEAR(NOW()) used UTC years, so
+// claims filed after 4pm PST on Dec 31 counted toward the next year.
+$yearStartLocal = substr(ff_today(), 0, 4) . '-01-01';
+$yearBounds     = [
+    ff_local_day_start_utc($yearStartLocal),
+    ff_local_day_start_utc(((int) substr($yearStartLocal, 0, 4) + 1) . '-01-01'),
+];
+
 $yearTotal = db_count(
     "SELECT COUNT(*) FROM damage_claims
-     WHERE YEAR(created_at) = YEAR(NOW()) AND deleted_at IS NULL"
+     WHERE created_at >= ? AND created_at < ? AND deleted_at IS NULL",
+    $yearBounds
 );
 
 $avgRow = db_row(
     "SELECT AVG(estimated_repair_cost) AS avg_cost
      FROM damage_claims
      WHERE estimated_repair_cost IS NOT NULL
-       AND YEAR(created_at) = YEAR(NOW())
-       AND deleted_at IS NULL"
+       AND created_at >= ? AND created_at < ?
+       AND deleted_at IS NULL",
+    $yearBounds
 );
 $avgRepair = $avgRow ? round((float)($avgRow['avg_cost'] ?? 0), 2) : 0.00;
 

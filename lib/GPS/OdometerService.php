@@ -24,8 +24,8 @@ namespace FleetForge\GPS;
  *     success: bool,
  *     odometer_km: ?float,           // populated only on success
  *     source: 'gps'|'manual'|'unavailable',
- *     fetched_at: ?string,           // 'Y-m-d H:i:s' server time
- *     samsara_reading_at: ?string,   // 'Y-m-d H:i:s' if Samsara provided it
+ *     fetched_at: ?string,           // 'Y-m-d H:i:s' server time, UTC
+ *     samsara_reading_at: ?string,   // 'Y-m-d H:i:s' UTC, if Samsara provided it
  *     is_stale: bool,                // true when reading > 24h old
  *     reading_age_seconds: ?int,
  *     error: ?string,
@@ -112,8 +112,10 @@ class OdometerService
         $rawTime = $stats['last_connected_at'] ?? null;
         if ($rawTime) {
             try {
-                $dt = new \DateTime((string) $rawTime);
-                $samsaraReadingAt = $dt->format('Y-m-d H:i:s');
+                // S-UTC-STAMPS: Samsara sends ISO-8601 'Z'; normalise to UTC explicitly.
+                $utcTz = new \DateTimeZone('UTC');
+                $dt = new \DateTime((string) $rawTime, $utcTz);
+                $samsaraReadingAt = (clone $dt)->setTimezone($utcTz)->format('Y-m-d H:i:s');
                 $ageSeconds       = max(0, $now - $dt->getTimestamp());
                 $isStale          = $ageSeconds > (self::STALENESS_THRESHOLD_HOURS * 3600);
             } catch (\Throwable) {
@@ -125,7 +127,9 @@ class OdometerService
             'success'             => true,
             'odometer_km'         => round($odometerKm, 2),
             'source'              => 'gps',
-            'fetched_at'          => date('Y-m-d H:i:s', $now),
+            // S-UTC-STAMPS: UTC — activate.php stores it in leases.odometer_start_fetched_at
+            // and invoices.odometer_fetched_at (UTC DATETIMEs); date() was Pacific.
+            'fetched_at'          => gmdate('Y-m-d H:i:s', $now),
             'samsara_reading_at'  => $samsaraReadingAt,
             'is_stale'            => $isStale,
             'reading_age_seconds' => $ageSeconds,

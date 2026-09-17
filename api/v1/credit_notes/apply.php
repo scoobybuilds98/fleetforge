@@ -203,7 +203,9 @@ db_transaction(function () use (
         'invoice_id'     => $invoiceId,
         'amount_applied' => $amountApplied,
         'applied_by'     => current_user_id(),
-        'applied_at'     => date('Y-m-d H:i:s'),
+        // S-UTC-STAMPS: UTC like the column DEFAULT; ArAging/statement/QBO
+        // TxnDate map it back to the local business day (was PHP-local).
+        'applied_at'     => ff_now_utc(),
     ]);
 
     // ------------------------------------------------------------------

@@ -196,7 +196,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <template x-for="h in history" :key="h.id">
                             <tr style="border-bottom:1px solid var(--border-default);" :style="h.status === 'reversed' ? 'opacity:0.6;' : ''">
                                 <td style="padding:6px 10px;" x-text="h.period_name"></td>
-                                <td class="font-mono" style="padding:6px 10px;" x-text="(h.run_at || h.created_at || '').replace('T', ' ').substring(0, 16)"></td>
+                                <td class="font-mono" style="padding:6px 10px;" x-text="FF_formatUtc(h.run_at || h.created_at)"></td><?php // S-UTC-STAMPS: run_at and created_at are both UTC ?>
                                 <td class="font-mono" style="padding:6px 10px;text-align:right;" x-text="h.exchange_rate_used"></td>
                                 <td class="font-mono" style="padding:6px 10px;text-align:right;font-weight:600;"
                                     :style="(parseFloat(h.unrealized_gain_loss) > 0 ? 'color:var(--color-success);' : (parseFloat(h.unrealized_gain_loss) < 0 ? 'color:var(--color-danger);' : ''))"

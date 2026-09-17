@@ -76,8 +76,12 @@ $rawToken  = bin2hex(random_bytes(32));        // 64 hex chars
 $tokenHash = hash('sha256', $rawToken);        // 64 char SHA-256 — the ONLY copy stored
 $expiryDays = (int) settings_get('credit_application.token_expiry_days', 30);
 if ($expiryDays <= 0) { $expiryDays = 30; }
-$now       = date('Y-m-d H:i:s');
-$expiresAt = date('Y-m-d H:i:s', time() + ($expiryDays * 86400));
+// S-UTC-STAMPS: sent_at / token_expires_at are UTC DATETIMEs (db.php pins the
+// session to '+00:00'; every expiry check compares strtotime($v . ' UTC') with
+// time()). PHP-local date() stored Pacific wall time — the link lived 7-8h
+// longer than the setting said and every UTC-rendering surface showed it early.
+$now       = ff_now_utc();
+$expiresAt = gmdate('Y-m-d H:i:s', time() + ($expiryDays * 86400));
 
 // Public link shape (route lands in S-CCA-2). The raw token rides ONLY here.
 $publicUrl = base_url('credit-application') . '?token=' . $rawToken;

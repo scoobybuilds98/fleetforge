@@ -160,7 +160,7 @@ class CreditApplicationPusher
             'qbo_sync_token' => (string) ($qboPay['SyncToken'] ?? '0'),
             'push_status'    => 'voided',
             'push_error'     => null,
-            'last_synced_at' => date('Y-m-d H:i:s'),
+            'last_synced_at' => ff_now_utc(), // S-UTC-STAMPS: UTC
         ]);
         self::writeSyncLog($ffApplicationId, 'void', 'voided', "QBO apply Payment #{$qboPay['Id']} voided (un-applied)");
 
@@ -415,7 +415,7 @@ class CreditApplicationPusher
             throw new QuickBooksException("CreditApplication payload: amount_applied must be positive, got '{$amountApplied}'.");
         }
 
-        $txnDate = substr((string) ($app['applied_at'] ?? date('Y-m-d')), 0, 10);
+        $txnDate = self::txnDateFor($app);
 
         $payload = [
             'CustomerRef' => ['value' => $qboCustomerId],
@@ -451,6 +451,24 @@ class CreditApplicationPusher
     }
 
     /**
+     * QBO TxnDate for an application: the company-local business date of its
+     * applied_at stamp.
+     *
+     * WHY (S-UTC-STAMPS): applied_at is a UTC DATETIME; substr(…, 0, 10) would
+     * date a 10pm-Pacific application to the next day in QBO. The pushed date
+     * must stay the same local business date the books use.
+     *
+     * @param array $app credit_note_applications row
+     * @return string 'Y-m-d' (today, local, when the stamp is missing)
+     */
+    private static function txnDateFor(array $app): string
+    {
+        return !empty($app['applied_at'])
+            ? \ff_utc_to_local((string) $app['applied_at'])
+            : date('Y-m-d');
+    }
+
+    /**
      * PrivateNote JSON for QBO-side audit drill-down (accountant-only).
      */
     public static function buildPrivateNoteJson(array $app): string
@@ -482,8 +500,8 @@ class CreditApplicationPusher
         if (!self::ffApplicationExists($ffAppId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
-        $txnDate = substr((string) ($app['applied_at'] ?? date('Y-m-d')), 0, 10);
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
+        $txnDate = self::txnDateFor($app);
         self::upsertMappingRow($ffAppId, [
             'ff_credit_note_id_snapshot' => (int) $app['credit_note_id'],
             'ff_invoice_id_snapshot'     => (int) $app['invoice_id'],
@@ -509,7 +527,7 @@ class CreditApplicationPusher
         if (!self::ffApplicationExists($ffAppId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffAppId, [
             'ff_credit_note_id_snapshot' => (int) ($app['credit_note_id'] ?? 0),
             'ff_invoice_id_snapshot'     => (int) ($app['invoice_id'] ?? 0),
@@ -525,7 +543,7 @@ class CreditApplicationPusher
         if (!self::ffApplicationExists($ffAppId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffAppId, [
             'ff_credit_note_id_snapshot' => (int) ($app['credit_note_id'] ?? 0),
             'ff_invoice_id_snapshot'     => (int) ($app['invoice_id'] ?? 0),
@@ -541,7 +559,7 @@ class CreditApplicationPusher
         if (!self::ffApplicationExists($ffAppId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $msg = "skipped: {$skippedStatus} (application {$ffAppId})";
         self::upsertMappingRow($ffAppId, [
             'ff_credit_note_id_snapshot' => (int) ($app['credit_note_id'] ?? 0),

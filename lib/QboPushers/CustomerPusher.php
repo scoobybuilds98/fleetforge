@@ -408,7 +408,7 @@ class CustomerPusher
         array $qboCustomer,
         ?array $existingMapping
     ): void {
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $snapshot = [
             'qbo_customer_id'  => (string) $qboCustomer['Id'],
             'qbo_sync_token'   => (string) ($qboCustomer['SyncToken']                ?? '0'),
@@ -467,7 +467,7 @@ class CustomerPusher
             "SELECT id FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
             [$ffCustomerId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $errorWithCode = $httpCode > 0 ? "HTTP {$httpCode}: {$error}" : $error;
 
         if ($existing === null) {
@@ -510,7 +510,7 @@ class CustomerPusher
             "SELECT id FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
             [$ffCustomerId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         if ($existing === null) {
             db_insert('acc_qbo_customer_map', [
@@ -557,7 +557,7 @@ class CustomerPusher
             "SELECT id FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
             [$ffCustomerId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         if ($existing === null) {
             db_insert('acc_qbo_customer_map', [

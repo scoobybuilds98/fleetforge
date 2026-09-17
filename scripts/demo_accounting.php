@@ -28,7 +28,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../config/app.php';
 
 $userId = 1;
-$now    = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: $now feeds UTC audit stamps (posted_at, matched_at) — DATETIMEs are UTC.
+$now    = ff_now_utc();
 
 echo "=== FleetForge demo accounting seeder ===\n\n";
 
@@ -648,7 +649,10 @@ $cursor = $runStart;
 $endOfNow = new DateTimeImmutable(date('Y-m-01'));
 while ($cursor <= $endOfNow) {
     $monthEnd = $cursor->modify('last day of this month')->format('Y-m-d');
-    $runDate  = $monthEnd . ' 18:00:00';
+    // S-UTC-STAMPS: run_date is a UTC DATETIME; the demo run happens at 6pm LOCAL on
+    // month-end (01:00/02:00 UTC next day). The JE entry_date below stays $monthEnd.
+    $runDate  = (new DateTimeImmutable($monthEnd . ' 18:00:00', ff_business_timezone()))
+        ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     $periodId = periodForDate($monthEnd);
 
     // Assets in service this month with depreciable cost remaining.
@@ -719,8 +723,8 @@ while ($cursor <= $endOfNow) {
 
     $jeId = postJE(
         [
-            'entry_date'  => substr($runDate, 0, 10),
-            'description' => 'Monthly depreciation — ' . date('F Y', strtotime(substr($runDate, 0, 10))),
+            'entry_date'  => $monthEnd, // business date — NOT substr of the UTC run_date
+            'description' => 'Monthly depreciation — ' . date('F Y', strtotime($monthEnd)),
             'reference'   => "DEPR-$runId",
             'source_type' => 'depreciation',
             'source_id'   => $runId,
@@ -795,9 +799,10 @@ $capexDefs = [
 
 $capexCount = 0;
 foreach ($capexDefs as $c) {
-    $reqAt = $c['requested_days'] ? date('Y-m-d H:i:s', strtotime("-{$c['requested_days']} days")) : null;
-    $appAt = $c['approved_days']  ? date('Y-m-d H:i:s', strtotime("-{$c['approved_days']} days"))  : null;
-    $comAt = $c['status'] === 'completed' ? date('Y-m-d H:i:s', strtotime('-14 days')) : null;
+    // S-UTC-STAMPS: requested_at/approved_at/completed_at are UTC DATETIMEs.
+    $reqAt = $c['requested_days'] ? ff_now_utc("-{$c['requested_days']} days") : null;
+    $appAt = $c['approved_days']  ? ff_now_utc("-{$c['approved_days']} days")  : null;
+    $comAt = $c['status'] === 'completed' ? ff_now_utc('-14 days') : null;
 
     db_insert('acc_capex_requests', [
         'request_number'  => sprintf('CAPEX-%d-%03d', date('Y'), ++$capexCount),
@@ -848,7 +853,7 @@ foreach ($checklistItems as $item) {
         'item_label'   => $item['item_label'],
         'is_complete'  => $item['is_complete'],
         'completed_by' => $item['is_complete'] ? $userId : null,
-        'completed_at' => $item['is_complete'] ? date('Y-m-d H:i:s', strtotime('-' . random_int(5, 30) . ' days')) : null,
+        'completed_at' => $item['is_complete'] ? ff_now_utc('-' . random_int(5, 30) . ' days') : null, // S-UTC-STAMPS: UTC
         'sort_order'   => $item['sort_order'],
     ]);
 }

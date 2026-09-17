@@ -813,8 +813,14 @@ class InvoiceGenerator
             $odometerFetchedAt = null;
             if (!empty($params['odometer_fetched_at'])) {
                 try {
-                    $dt = new \DateTime((string) $params['odometer_fetched_at']);
-                    $odometerFetchedAt = $dt->format('Y-m-d H:i:s');
+                    // S-UTC-STAMPS: odometer_fetched_at is a UTC DATETIME. Callers pass
+                    // UTC 'Y-m-d H:i:s' (close/create endpoints, activate's
+                    // OdometerService, the monthly cron's samsara_last_synced_at,
+                    // regenerate's stored value) or an ISO string with an offset —
+                    // so a bare value defaults to UTC and the result is converted.
+                    $utcTz = new \DateTimeZone('UTC');
+                    $dt = new \DateTime((string) $params['odometer_fetched_at'], $utcTz);
+                    $odometerFetchedAt = $dt->setTimezone($utcTz)->format('Y-m-d H:i:s');
                 } catch (\Throwable) {
                     $odometerFetchedAt = null;
                 }
@@ -876,7 +882,7 @@ class InvoiceGenerator
                         $samsaraSource      = (string) ($samsaraResult['source'] ?? 'gps');
                         $odometerSource     = in_array($samsaraSource, ['gps', 'manual', 'estimated'], true)
                             ? $samsaraSource : 'gps';
-                        $odometerFetchedAt  = (new \DateTime())->format('Y-m-d H:i:s');
+                        $odometerFetchedAt  = ff_now_utc(); // S-UTC-STAMPS: UTC column (was PHP-local wall time)
                     }
                     // audit_log row regardless of success/failure (D102/D123 pattern —
                     // action='cron' since action ENUM doesn't include

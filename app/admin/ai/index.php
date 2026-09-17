@@ -1104,18 +1104,23 @@ function FF_AiChat() {
             el.style.height = Math.min(el.scrollHeight, 120) + 'px';
         },
 
+        // S-UTC-STAMPS: every caller passes a UTC DATETIME (ai_chat_sessions
+        // last_message_at / created_at, ai anomaly alert created_at). new Date()
+        // read the bare 'Y-m-d H:i:s' as BROWSER-local time (7–8h off in
+        // Pacific); FF_parseUtc reads it as UTC and the labels render in the
+        // company timezone.
         formatDate(d) {
-            if (!d) return '';
-            const dt = new Date(d);
-            const now = new Date();
-            const diff = now - dt;
+            const dt = FF_parseUtc(d);
+            if (!dt) return '';
+            const tz = window.FF_TIMEZONE || undefined;
+            const diff = Date.now() - dt.getTime();
             if (diff < 86400000) { // today
-                return dt.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' });
+                return dt.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', timeZone: tz });
             }
             if (diff < 604800000) { // this week
-                return dt.toLocaleDateString('en-CA', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+                return dt.toLocaleDateString('en-CA', { weekday: 'short', hour: '2-digit', minute: '2-digit', timeZone: tz });
             }
-            return dt.toLocaleDateString('en-CA', { month: 'short', day: 'numeric' });
+            return dt.toLocaleDateString('en-CA', { month: 'short', day: 'numeric', timeZone: tz });
         },
 
         formatNumber(n) {

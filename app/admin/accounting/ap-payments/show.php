@@ -174,7 +174,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
             <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">Voided</div>
             <div>
                 <?= e($payment['voided_by_name'] ?? 'system') ?>
-                <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e((string) $payment['voided_at']) ?></span>
+                <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e(format_datetime($payment['voided_at'])) /* S-UTC-STAMPS: UTC → company tz */ ?></span>
             </div>
         </div>
         <?php endif; ?>

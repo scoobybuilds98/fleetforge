@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-UTC-STAMPS** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **The remaining Pacific-wall-time DATETIME columns now store UTC — writers and readers together — plus a one-time repair for historical rows.** ~90 columns across portal/staff auth and lockouts, credit applications, credit notes + AR aging/statements/QBO TxnDates, Samsara/odometer stamps, accounting stamps, AI chat/pending changes, messenger and QuickBooks map stamps. New JS `FF_parseUtc/FF_formatUtc`; `ff_now_utc('+N')` made DST-safe. Also fixed: QBO CreditMemo TxnDate used the UTC day; journal-entry show page 500; customers/show date-only values rendering the previous day. `scripts/migrate_local_stamps_to_utc.php` (LocalStampMigrator: per-row DST offsets, past/future selection modes, idempotent markers) repairs existing rows — operator runs it on prod right after deploy (F78). New `tests/_smoke_utc_stamps.php` 12/12. No schema change.
+
 **S-TRAINING-VIDEOS** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **`scripts/walkthrough/` staff-training video pipeline: 33 narrated chapters + in-depth Batch Invoicing demo recorded from the DEV app, narrated by the Higgsfield voice Cillian; runbook in `scripts/walkthrough/AUTHORING.md`, renders gitignored under `training-videos/`.**
 
 **S-BATCH-INVOICING-UI-FIXES** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **Batch Invoicing: Download ZIP/PDF no longer permanently disabled, Hold-for-review prompt opens above the review, saved presets re-select their leases, active Review & Send row readable in dark mode.**

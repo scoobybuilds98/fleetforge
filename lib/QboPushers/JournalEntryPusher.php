@@ -954,7 +954,7 @@ class JournalEntryPusher
         if (!self::ffJeExists($ffJeId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $entryNum = (string) ($ff['entry_number'] ?? '');
         $errorMsg = "skipped: {$statusCode}" . ($entryNum !== '' ? " (JE {$entryNum})" : '');
         self::upsertMappingRow($ffJeId, [
@@ -970,7 +970,7 @@ class JournalEntryPusher
         if (!self::ffJeExists($ffJeId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         // FF balanced-total snapshot (sum of debits = sum of credits)
         $sums = db_row(
@@ -1001,7 +1001,7 @@ class JournalEntryPusher
         if (!self::ffJeExists($ffJeId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffJeId, [
             'push_status'    => 'failed',
             'push_error'     => substr($errorMessage, 0, 65535),
@@ -1014,7 +1014,7 @@ class JournalEntryPusher
         if (!self::ffJeExists($ffJeId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffJeId, [
             'push_status'    => 'failed_preflight',
             'push_error'     => substr($errorMessage, 0, 65535),
@@ -1029,7 +1029,7 @@ class JournalEntryPusher
         }
         $typedStates = ['failed_preflight_currency_mismatch', 'failed_preflight_field_too_long'];
         $persistedStatus = in_array($statusCode, $typedStates, true) ? $statusCode : 'failed_preflight';
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffJeId, [
             'push_status'    => $persistedStatus,
             'push_error'     => substr($errorMessage, 0, 65535),

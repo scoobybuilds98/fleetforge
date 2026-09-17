@@ -30,6 +30,12 @@ if (!$customerId) json_error('VALIDATION_ERROR', 'customer_id is required.', 422
 $dateTo   = clean_date($_GET['date_to'] ?? null) ?? date('Y-m-d');
 $dateFrom = clean_date($_GET['date_from'] ?? null) ?? date('Y-m-01', strtotime('-3 months'));
 
+// S-UTC-STAMPS: credit_note_applications.applied_at is a UTC DATETIME, while
+// date_from/date_to are company-local business dates. Bound the applications
+// by the UTC instants of local midnight (sargable, DST-correct).
+$fromStartUtc = ff_local_day_start_utc($dateFrom);
+$toEndUtc     = ff_local_day_start_utc(ff_local_date_add($dateTo, 1));
+
 // Fetch customer
 $customer = db_row(
     "SELECT id, company_name, contact_name, email, phone,
@@ -82,7 +88,8 @@ $openingRow = db_row(
      WHERE i.customer_id = ? AND i.deleted_at IS NULL
        AND i.invoice_date < ?
        AND i.status NOT IN ('draft','void')",
-    [$customerId, $dateFrom, $dateFrom, $customerId, $dateFrom, $dateFrom, $customerId, $dateFrom]
+    // 6th param = credit applications before 00:00 local on date_from (UTC instant)
+    [$customerId, $dateFrom, $dateFrom, $customerId, $dateFrom, $fromStartUtc, $customerId, $dateFrom]
 );
 $openingBalance = bcsub(
     (string)($openingRow['inv_total'] ?? '0.00'),
@@ -127,9 +134,9 @@ $credits = db_select(
      JOIN credit_notes cn ON cn.id = ca.credit_note_id AND cn.deleted_at IS NULL
      JOIN invoices inv ON inv.id = ca.invoice_id AND inv.deleted_at IS NULL
      WHERE cn.customer_id = ?
-       AND DATE(ca.applied_at) BETWEEN ? AND ?
+       AND ca.applied_at >= ? AND ca.applied_at < ?
      ORDER BY ca.applied_at ASC",
-    [$customerId, $dateFrom, $dateTo]
+    [$customerId, $fromStartUtc, $toEndUtc]
 );
 
 // Bad debt write-offs in range
@@ -171,7 +178,8 @@ foreach ($payments as $pay) {
 
 foreach ($credits as $cr) {
     $transactions[] = [
-        'date'        => substr($cr['applied_at'], 0, 10),
+        // S-UTC-STAMPS: the statement date is the LOCAL business day of the UTC stamp.
+        'date'        => ff_utc_to_local((string) $cr['applied_at']),
         'type'        => 'Credit',
         'reference'   => $cr['credit_note_number'],
         'description' => "Credit {$cr['credit_note_number']} → {$cr['applied_to_invoice']}",

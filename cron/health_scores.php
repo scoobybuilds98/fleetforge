@@ -149,7 +149,7 @@ try {
             if ($oldScore !== $score) {
                 db_update('equipment_units', [
                     'health_score'             => $score,
-                    'health_score_updated_at'  => date('Y-m-d H:i:s'),
+                    'health_score_updated_at'  => ff_now_utc(), // S-UTC-STAMPS: UTC DATETIME (was PHP-local wall time)
                 ], 'id = ?', [$unitId]);
                 $updated++;
             }

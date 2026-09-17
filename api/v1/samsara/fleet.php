@@ -207,7 +207,9 @@ foreach ($rows as $r) {
     // (Samsara's "we last heard from the gateway" time), NOT
     // samsara_last_synced_at (FleetForge's last cron tick).
     if (!empty($unit['samsara_last_connected_at'])) {
-        $lastConnTs = strtotime($unit['samsara_last_connected_at']);
+        // S-UTC-STAMPS: stored as UTC — a bare strtotime() would read it as
+        // Pacific wall time and every unit would look 7–8h more recent.
+        $lastConnTs = strtotime($unit['samsara_last_connected_at'] . ' UTC');
         if ($lastConnTs !== false) {
             $hoursSince = ($now - $lastConnTs) / 3600;
             if ($hoursSince >= $NOT_CONN_HARD_HOURS) {
@@ -254,7 +256,7 @@ $offlineCount = 0;
 foreach ($linked as $u) {
     $isOnline = false;
     if ($u['samsara_last_location_lat'] !== null && !empty($u['samsara_last_connected_at'])) {
-        $lastTs = strtotime($u['samsara_last_connected_at']);
+        $lastTs = strtotime($u['samsara_last_connected_at'] . ' UTC'); // S-UTC-STAMPS: UTC column
         if ($lastTs !== false && ($now - $lastTs) < ($NOT_CONN_WARN_HOURS * 3600)) {
             $isOnline = true;
         }

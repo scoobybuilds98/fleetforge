@@ -782,7 +782,7 @@ class BillPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $billNum = (string) ($ff['bill_number'] ?? '');
         $errorMsg = "skipped: {$statusCode}" . ($billNum !== '' ? " (bill {$billNum})" : '');
 
@@ -804,7 +804,7 @@ class BillPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $vendorMap = db_row(
             "SELECT qbo_vendor_id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
             [(int) $ff['vendor_id']]
@@ -837,7 +837,7 @@ class BillPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffBillId, [
             'push_status'    => 'failed',
             'push_error'     => substr($errorMessage, 0, 65535),
@@ -855,7 +855,7 @@ class BillPusher
             return;
         }
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffBillId, [
             'push_status'    => 'failed_preflight',
             'push_error'     => substr($errorMessage, 0, 65535),
@@ -879,7 +879,7 @@ class BillPusher
         $typedStates = ['failed_preflight_currency_mismatch', 'failed_preflight_field_too_long'];
         $persistedStatus = in_array($statusCode, $typedStates, true) ? $statusCode : 'failed_preflight';
 
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffBillId, [
             'push_status'    => $persistedStatus,
             'push_error'     => substr($errorMessage, 0, 65535),

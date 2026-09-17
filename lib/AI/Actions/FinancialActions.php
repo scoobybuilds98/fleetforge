@@ -246,7 +246,10 @@ class FinancialActions
 
         $override   = ($sentToEmailOverride !== null && function_exists('clean_email')) ? clean_email($sentToEmailOverride) : $sentToEmailOverride;
         $sentToEmail = ($override !== null && $override !== '') ? $override : $invoice['customer_email_snapshot'];
-        $now = date('Y-m-d H:i:s');
+        // S-UTC-STAMPS: $now stamps invoices.sent_at + leases.precharge_invoiced_at,
+        // both UTC DATETIMEs (readers: IS NULL gates, lease show "Billed on" via
+        // FF_formatUtc). sent_date below stays the LOCAL business date.
+        $now = ff_now_utc();
 
         db_transaction(function () use ($id, $invoice, $sentToEmail, $now, $userId, $userName, $ip): void {
             // Precharge lifecycle gate (S-MILEAGE-2A D-D)
@@ -461,7 +464,9 @@ class FinancialActions
         $revertedStatuses = [];
 
         db_transaction(function () use ($id, $payment, $allocations, $linkedCns, $reason, $userId, $userName, $ip, &$revertedStatuses): void {
-            db_update('payments', ['deleted_at' => date('Y-m-d H:i:s')], 'id = ?', [$id]);
+            // UTC like every DATETIME (S-UTC-STAMPS); ArAging compares it with the UTC
+            // end of the as-of local day.
+            db_update('payments', ['deleted_at' => ff_now_utc()], 'id = ?', [$id]);
 
             // S-AUDIT-BILLING-ENGINE-1 #8: void the (fully-unapplied — blockers
             // refused above) overpayment CNs WITH the payment. Deliberately NO
@@ -473,7 +478,7 @@ class FinancialActions
                     'status'           => 'void',
                     'amount_remaining' => '0.00',
                     'voided_by'        => $userId,
-                    'voided_at'        => date('Y-m-d H:i:s'),
+                    'voided_at'        => ff_now_utc(), // S-UTC-STAMPS: UTC like every credit_notes.voided_at writer
                     'internal_notes'   => "Auto-voided: source payment {$payment['payment_number']} voided (S-AUDIT-BILLING-ENGINE-1 — an overpayment credit lives and dies with its payment).",
                 ], 'id = ? AND status = ? AND amount_remaining = ?', [(int) $cn['id'], $cn['status'], $cn['amount_remaining']]);
                 if ($affected === 0) {

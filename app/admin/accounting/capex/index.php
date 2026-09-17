@@ -272,12 +272,12 @@ require_once FF_ROOT . '/includes/header.php';
                             <div><strong>Budget:</strong> <span class="font-mono" x-text="formatMoney(detailReq.budget_amount)"></span></div>
                             <div><strong>Actual:</strong> <span class="font-mono" x-text="detailReq.actual_amount ? formatMoney(detailReq.actual_amount) : '—'"></span></div>
                             <div><strong>Variance:</strong> <span class="font-mono" :class="varianceClass(detailReq)" x-text="detailReq.actual_amount ? formatMoney(detailReq.variance) : '—'"></span></div>
-                            <div><strong>Requested:</strong> <span class="text-sm" x-text="(detailReq.requested_at || '').slice(0,10)"></span></div>
+                            <div><strong>Requested:</strong> <span class="text-sm" x-text="FF_formatUtc(detailReq.requested_at, { hour: undefined, minute: undefined })"></span><?php // S-UTC-STAMPS: requested_at/approved_at/completed_at are UTC DATETIMEs — slicing gave the UTC date (tomorrow after 4–5pm) ?></div>
                             <template x-if="detailReq.approved_at">
-                                <div><strong>Approved:</strong> <span class="text-sm" x-text="(detailReq.approved_at || '').slice(0,10)"></span></div>
+                                <div><strong>Approved:</strong> <span class="text-sm" x-text="FF_formatUtc(detailReq.approved_at, { hour: undefined, minute: undefined })"></span></div>
                             </template>
                             <template x-if="detailReq.completed_at">
-                                <div><strong>Completed:</strong> <span class="text-sm" x-text="(detailReq.completed_at || '').slice(0,10)"></span></div>
+                                <div><strong>Completed:</strong> <span class="text-sm" x-text="FF_formatUtc(detailReq.completed_at, { hour: undefined, minute: undefined })"></span></div>
                             </template>
                             <template x-if="detailReq.linked_asset_number">
                                 <div style="grid-column:1/-1;"><strong>Linked Asset:</strong>

@@ -222,7 +222,7 @@ class VendorMatcher
 
         $claimedQboIds = $existingClaimedQboIds;
         $rescuedCount  = 0;
-        $now           = date('Y-m-d H:i:s');
+        $now           = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         foreach ($wedged as $w) {
             $candidate = null;

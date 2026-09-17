@@ -147,8 +147,11 @@ $odoSource    = in_array($odoSourceRaw, ['gps', 'manual', 'estimated'], true) ? 
 $odoFetchedAt = null;
 if (!empty($body['odometer_fetched_at'])) {
     try {
-        $dt = new DateTime((string) $body['odometer_fetched_at']);
-        $odoFetchedAt = $dt->format('Y-m-d H:i:s');
+        // S-UTC-STAMPS: store UTC. The client sends current_odometer's ISO string
+        // (offset honoured); a bare value is a stored UTC stamp. format() alone kept
+        // the offset's wall time (Pacific).
+        $dt = new DateTime((string) $body['odometer_fetched_at'], new DateTimeZone('UTC'));
+        $odoFetchedAt = $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
     } catch (\Throwable) {
         $odoFetchedAt = null;
     }

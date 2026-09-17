@@ -47,9 +47,10 @@ declare(strict_types=1);
  * DATING CHOICES / LIMITATIONS (documented, not hidden)
  *   - A payment reduces AR on payments.payment_date (standard aging practice),
  *     even if it was allocated to the invoice later.
- *   - credit_note_applications.applied_at / reversed_at are DB-default
- *     timestamps (UTC session), so an application made in the last hours of a
- *     Pacific business day can land on the next date — at most a 1-day skew.
+ *   - credit_note_applications.applied_at / reversed_at are UTC DATETIMEs
+ *     (S-UTC-STAMPS). They are dated to the COMPANY-LOCAL day: "after as-of"
+ *     means at/after 00:00 local on as-of + 1, compared as a UTC instant
+ *     (sargable, DST-correct) — a 10pm-local application stays on its own day.
  *   - Invoice total_amount changes after sending (sent invoices are frozen by
  *     the billing engine) are not re-dated.
  *   - Bad-debt recoveries are not modelled (none exist; the write-off amount is
@@ -82,6 +83,10 @@ final class ArAging
      */
     public static function asOf(string $asOf): array
     {
+        // S-UTC-STAMPS: credit-note application stamps are UTC instants; the
+        // end of the as-of LOCAL business day is 00:00 local on the next day.
+        $asOfEndUtc = \ff_local_day_start_utc(\ff_local_date_add($asOf, 1));
+
         $rows = \db_select(
             "SELECT i.id, i.invoice_number, i.customer_id,
                     COALESCE(c.company_name, i.company_name_snapshot, 'Unknown') AS company_name,
@@ -109,20 +114,20 @@ final class ArAging
                       FROM payment_allocations pa
                       JOIN payments p ON p.id = pa.payment_id
                      WHERE p.payment_date <= ?
-                       AND (   (p.deleted_at IS NOT NULL AND DATE(p.deleted_at) > ?)
+                       AND (   (p.deleted_at IS NOT NULL AND p.deleted_at >= ?)
                             OR (p.deleted_at IS NULL AND p.status IN ('failed', 'returned') AND p.returned_date > ?))
                      GROUP BY pa.invoice_id
                ) pa_undone ON pa_undone.invoice_id = i.id
                LEFT JOIN (
                     SELECT invoice_id, SUM(amount_applied) AS amt
                       FROM credit_note_applications
-                     WHERE status = 'applied' AND DATE(applied_at) > ?
+                     WHERE status = 'applied' AND applied_at >= ?
                      GROUP BY invoice_id
                ) cn_after ON cn_after.invoice_id = i.id
                LEFT JOIN (
                     SELECT invoice_id, SUM(amount_applied) AS amt
                       FROM credit_note_applications
-                     WHERE status = 'reversed' AND DATE(applied_at) <= ? AND DATE(reversed_at) > ?
+                     WHERE status = 'reversed' AND applied_at < ? AND reversed_at >= ?
                      GROUP BY invoice_id
                ) cn_undone ON cn_undone.invoice_id = i.id
                LEFT JOIN (
@@ -143,13 +148,18 @@ final class ArAging
                      -- a paid invoice only matters if money arrived after as-of
                      OR (i.status = 'paid'
                          AND (pa_after.amt IS NOT NULL OR cn_after.amt IS NOT NULL OR dep_after.amt IS NOT NULL))
-                     OR (i.status = 'written_off' AND DATE(i.written_off_at) > ?)
+                     OR (i.status = 'written_off' AND i.written_off_at >= ?)
                      -- only a SENT invoice was ever AR; a voided draft never was
                      OR (i.status = 'void' AND i.voided_date > ?
                          AND (i.sent_at IS NOT NULL OR i.sent_date IS NOT NULL))
                 )
               ORDER BY company_name ASC, i.due_date ASC, i.id ASC",
-            [$asOf, $asOf, $asOf, $asOf, $asOf, $asOf, $asOf, $asOf, $asOf, $asOf, $asOf]
+            // Params in textual order. DATETIME stamps (payment void = p.deleted_at #3,
+            // credit-note application/reversal #5–7, write-off #10) are UTC instants
+            // compared with the UTC end of the as-of LOCAL day; payment_date,
+            // returned_date, applied_date, invoice_date and voided_date are business
+            // DATEs compared with $asOf itself (S-UTC-STAMPS).
+            [$asOf, $asOf, $asOfEndUtc, $asOf, $asOfEndUtc, $asOfEndUtc, $asOfEndUtc, $asOf, $asOf, $asOfEndUtc, $asOf]
         );
 
         $totals       = array_fill_keys(array_merge(self::BUCKETS, ['total']), '0.00');

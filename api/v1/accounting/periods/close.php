@@ -50,7 +50,9 @@ db_transaction(function () use ($id, &$result) {
     }
 
     $userId = current_user_id();
-    $now    = date('Y-m-d H:i:s');
+    // S-UTC-STAMPS: closed_at is a UTC DATETIME (session is '+00:00'). Audit stamp
+    // only — the period's start_date/end_date business dates are untouched.
+    $now    = ff_now_utc();
 
     db_update('acc_periods', [
         'status'    => 'closed',

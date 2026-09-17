@@ -75,7 +75,11 @@ function cca_badge(string $status, ?string $outcome): array
 
 <?php foreach ($applications as $app):
     [$badgeLabel, $badgeClass] = cca_badge($app['status'], $app['review_outcome']);
-    $isExpired   = $app['token_expires_at'] && strtotime($app['token_expires_at']) < time();
+    // S-UTC-STAMPS: token_expires_at is stored UTC — parse as UTC. The stamps
+    // below (sent/opened/submitted/reviewed/created/expires) are UTC DATETIMEs,
+    // so they render through format_datetime(…, 'M j, Y') (company-local day),
+    // not format_date(), which reads them as server-local and slips a day after ~5pm.
+    $isExpired   = $app['token_expires_at'] && strtotime($app['token_expires_at'] . ' UTC') < time();
     $isSubmitted = in_array($app['status'], ['submitted', 'reviewed'], true);
     $isApproved  = $app['status'] === 'reviewed' && $app['review_outcome'] === 'approved';
 ?>
@@ -87,7 +91,7 @@ function cca_badge(string $status, ?string $outcome): array
         <div>
             <h2 class="portal-section-title" style="margin:0;">Credit Application</h2>
             <div style="font-size:0.8125rem;color:var(--text-secondary);margin-top:2px;">
-                Sent <?= e(format_date($app['sent_at'] ?? $app['created_at'])) ?>
+                Sent <?= e(format_datetime($app['sent_at'] ?? $app['created_at'], 'M j, Y')) ?>
             </div>
         </div>
         <span class="badge <?= e($badgeClass) ?>" style="font-size:0.8125rem;padding:5px 12px;"><?= e($badgeLabel) ?></span>
@@ -104,7 +108,7 @@ function cca_badge(string $status, ?string $outcome): array
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="white" style="width:18px;height:18px;"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5"/></svg>
                 </div>
                 <div style="font-size:0.75rem;font-weight:600;color:var(--text-primary);">Sent</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);"><?= e(format_date($app['sent_at'] ?? $app['created_at'])) ?></div>
+                <div style="font-size:0.75rem;color:var(--text-muted);"><?= e(format_datetime($app['sent_at'] ?? $app['created_at'], 'M j, Y')) ?></div>
             </div>
 
             <!-- Opened -->
@@ -118,7 +122,7 @@ function cca_badge(string $status, ?string $outcome): array
                     <?php endif; ?>
                 </div>
                 <div style="font-size:0.75rem;font-weight:600;color:var(--text-primary);">Opened</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);"><?= $openedDone ? e(format_date($app['opened_at'])) : '—' ?></div>
+                <div style="font-size:0.75rem;color:var(--text-muted);"><?= $openedDone ? e(format_datetime($app['opened_at'], 'M j, Y')) : '—' ?></div>
             </div>
 
             <!-- Submitted -->
@@ -132,7 +136,7 @@ function cca_badge(string $status, ?string $outcome): array
                     <?php endif; ?>
                 </div>
                 <div style="font-size:0.75rem;font-weight:600;color:var(--text-primary);">Submitted</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);"><?= $submittedDone ? e(format_date($app['submitted_at'])) : '—' ?></div>
+                <div style="font-size:0.75rem;color:var(--text-muted);"><?= $submittedDone ? e(format_datetime($app['submitted_at'], 'M j, Y')) : '—' ?></div>
             </div>
 
             <!-- Reviewed -->
@@ -159,7 +163,7 @@ function cca_badge(string $status, ?string $outcome): array
                     <?php endif; ?>
                 </div>
                 <div style="font-size:0.75rem;font-weight:600;color:var(--text-primary);">Reviewed</div>
-                <div style="font-size:0.75rem;color:var(--text-muted);"><?= $reviewedDone ? e(format_date($app['reviewed_at'])) : '—' ?></div>
+                <div style="font-size:0.75rem;color:var(--text-muted);"><?= $reviewedDone ? e(format_datetime($app['reviewed_at'], 'M j, Y')) : '—' ?></div>
             </div>
 
         </div><!-- /grid -->
@@ -206,9 +210,9 @@ function cca_badge(string $status, ?string $outcome): array
             </div>
             <?php else: ?>
             <div style="background:var(--badge-info-bg,var(--bg-secondary));border:1px solid var(--border-color);border-radius:8px;padding:14px 18px;font-size:0.875rem;color:var(--text-secondary);">
-                Your application link was sent to your email address on <?= e(format_date($app['sent_at'] ?? $app['created_at'])) ?>. Please check your inbox to complete the form.
+                Your application link was sent to your email address on <?= e(format_datetime($app['sent_at'] ?? $app['created_at'], 'M j, Y')) ?>. Please check your inbox to complete the form.
                 <?php if (!empty($app['token_expires_at'])): ?>
-                    The link expires <?= e(format_date($app['token_expires_at'])) ?>.
+                    The link expires <?= e(format_datetime($app['token_expires_at'], 'M j, Y')) ?>.
                 <?php endif; ?>
             </div>
             <?php endif; ?>
@@ -218,7 +222,7 @@ function cca_badge(string $status, ?string $outcome): array
         <?php if ($isSubmitted && ($app['print_name_first'] || $app['print_name_last'])): ?>
         <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-color);font-size:0.8125rem;color:var(--text-secondary);">
             Signed by: <strong><?= e(trim($app['print_name_first'] . ' ' . $app['print_name_last'])) ?></strong>
-            &mdash; <?= e(format_date($app['submitted_at'])) ?>
+            &mdash; <?= e(format_datetime($app['submitted_at'], 'M j, Y')) ?>
         </div>
         <?php endif; ?>
 

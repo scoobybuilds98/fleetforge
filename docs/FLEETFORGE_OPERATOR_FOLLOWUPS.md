@@ -12,11 +12,28 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-17 via S-LOCAL-DAY-TS — **F77** added (deploy: admin "forgot password" links were expired on creation; one-time timestamp side effects). Previously 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-17 via S-UTC-STAMPS — **F78** added (deploy, then run the one-time local→UTC timestamp repair on prod). Previously 2026-09-17 via S-LOCAL-DAY-TS — **F77** added (deploy: admin "forgot password" links were expired on creation; one-time timestamp side effects). Previously 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
+
+### F78 — Deploy S-UTC-STAMPS, then run the one-time timestamp repair on prod 🔴 BLOCKING (data correctness — run right after the deploy)
+
+**Surfaced by:** S-UTC-STAMPS (2026-09-17).
+**Why:** ~90 DATETIME columns were stored as Pacific wall time while the app reads DATETIMEs as UTC. The deploy makes them write and read UTC; rows written BEFORE the deploy still hold Pacific time until this repair shifts them (+7h PDT / +8h PST per value). Until it runs, pre-deploy stamps display 7–8h early, AR aging "as of" treats pre-deploy credit applications/payment voids on the wrong side of a day boundary, QBO TxnDates for re-pushed credit applications/refund receipts can move a day, and pre-deploy portal reset links / credit-application links expire 7–8h early.
+**Operator action:**
+1. Deploy `main`. Note the LOCAL wall time just before the deploy started, e.g. `2026-09-18 21:05:00`.
+2. Dry run (writes nothing; prints per-column row counts + before→after samples):
+   `sudo -u www-data php /var/www/fleetforge/scripts/migrate_local_stamps_to_utc.php --cutover="2026-09-18 21:05:00"`
+3. Apply — **soon after the deploy** (externally-dated Samsara/odometer columns are selected by row write time, so running it promptly keeps that selection tight):
+   `sudo -u www-data php /var/www/fleetforge/scripts/migrate_local_stamps_to_utc.php --cutover="2026-09-18 21:05:00" --apply`
+4. Re-running is safe: each converted column records a `settings` row `data_migration.utc_stamps.<table>.<column>` and is skipped next time. Do NOT delete those rows.
+5. Same on Northland.
+6. **Dev too:** the dev apply during S-UTC-STAMPS was undone by a concurrent training-video DB snapshot restore. Re-run the dry run + `--apply` on dev when no `scripts/walkthrough/record.mjs` recording is in progress (cutover = the local time just before the dev checkout at /Users/avi/Documents/fleetforge started running this commit — rows written by older code up to then are still local).
+**Also expect:** any re-seed of demo data (seed_portal_accounts / seed_marketing_demo) should happen AFTER the repair.
+
+---
 
 ### F77 — Deploy S-LOCAL-DAY-TS: admin "Forgot password" links have never worked on prod 🔴 BLOCKING (auth — LIVE NOW)
 

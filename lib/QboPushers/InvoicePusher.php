@@ -497,7 +497,7 @@ class InvoicePusher
         array $qboInvoice,
         ?array $existingMapping
     ): void {
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $data = [
             'qbo_invoice_id'            => (string) $qboInvoice['Id'],
             'qbo_sync_token'            => (string) ($qboInvoice['SyncToken'] ?? '0'),
@@ -544,7 +544,7 @@ class InvoicePusher
             "SELECT id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $errorWithCode = $httpCode > 0 ? "HTTP {$httpCode}: {$error}" : $error;
 
         if ($existing === null) {
@@ -587,7 +587,7 @@ class InvoicePusher
             "SELECT id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         if ($existing === null) {
             db_insert('acc_qbo_invoice_map', [
@@ -644,7 +644,7 @@ class InvoicePusher
             "SELECT id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         if ($existing === null) {
             db_insert('acc_qbo_invoice_map', [
@@ -867,7 +867,7 @@ class InvoicePusher
      */
     private static function recordVoid(int $ffInvoiceId, array $qboVoidedInvoice, array $existingMapping): void
     {
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         db_execute(
             "UPDATE acc_qbo_invoice_map
                 SET push_status     = 'voided',

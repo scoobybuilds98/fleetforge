@@ -82,7 +82,9 @@ db_transaction(function () use ($id, $reason, $cnCheck, &$result) {
         );
     }
 
-    $voidedAt = date('Y-m-d H:i:s');
+    // S-UTC-STAMPS: voided_at is UTC (show page renders it via format_datetime);
+    // also echoed in the JSON response as a UTC instant.
+    $voidedAt = ff_now_utc();
 
     db_update('credit_notes', [
         'status'          => 'void',

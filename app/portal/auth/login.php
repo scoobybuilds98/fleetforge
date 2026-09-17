@@ -79,8 +79,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Please accept your invitation first. Check your email for the invite link.';
             } elseif (!in_array($user['customer_status'], ['active', 'pending', 'credit_hold'], true)) {
                 $error = 'Your company account has been suspended. Please contact support.';
-            } elseif ($user['locked_until'] && strtotime($user['locked_until']) > time()) {
-                $remaining = (int) ceil((strtotime($user['locked_until']) - time()) / 60);
+            } elseif ($user['locked_until'] && strtotime($user['locked_until'] . ' UTC') > time()) {
+                // locked_until is UTC (S-UTC-STAMPS) — parse with an explicit zone.
+                $remaining = (int) ceil((strtotime($user['locked_until'] . ' UTC') - time()) / 60);
                 $error = "Account temporarily locked. Try again in {$remaining} minute" . ($remaining > 1 ? 's' : '') . '.';
             } elseif (!$user['password_hash'] || !password_verify($password, $user['password_hash'])) {
                 // Increment failed attempts
@@ -89,7 +90,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Lock after 5 failed attempts for 15 minutes
                 if ($attempts >= 5) {
-                    $updateData['locked_until'] = date('Y-m-d H:i:s', time() + 900);
+                    // UTC (S-UTC-STAMPS): read back with an explicit UTC zone above.
+                    $updateData['locked_until'] = gmdate('Y-m-d H:i:s', time() + 900);
                 }
                 db_update('portal_users', $updateData, 'id = ?', [(int) $user['id']]);
 

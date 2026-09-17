@@ -38,7 +38,8 @@ $userId = current_user_id();
 $payload = [
     'is_complete'  => $markComplete ? 1 : 0,
     'completed_by' => $markComplete ? $userId : null,
-    'completed_at' => $markComplete ? date('Y-m-d H:i:s') : null,
+    // S-UTC-STAMPS: completed_at is a UTC DATETIME; the page renders it via FF_formatUtc().
+    'completed_at' => $markComplete ? ff_now_utc() : null,
 ];
 db_update('acc_year_end_checklist', $payload, 'id = ?', [$id]);
 

@@ -116,7 +116,8 @@ db_transaction(function () use (
                 'status'           => $match ? 'matched' : 'unmatched',
                 'matched_type'     => $match['type'] ?? null,
                 'matched_id'       => $match['id'] ?? null,
-                'matched_at'       => $match ? date('Y-m-d H:i:s') : null,
+                // S-UTC-STAMPS: matched_at is a UTC DATETIME (transaction_date stays a business date).
+                'matched_at'       => $match ? ff_now_utc() : null,
                 'matched_by'       => $match ? $userId : null,
                 'created_by'       => $userId,
             ];

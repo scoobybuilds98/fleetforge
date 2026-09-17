@@ -221,7 +221,8 @@ while ($iteration < $maxIterations) {
                 'tokens_used' => $totalTokensAll,
             ]);
             db_update('ai_chat_sessions', [
-                'last_message_at' => date('Y-m-d H:i:s'),
+                // S-UTC-STAMPS: UTC like created_at (DB default).
+                'last_message_at' => ff_now_utc(),
             ], 'id = ?', [$sessionId]);
         }
 
@@ -295,7 +296,9 @@ $assistantMsgId = db_insert('ai_chat_messages', [
 ]);
 
 db_update('ai_chat_sessions', [
-    'last_message_at' => date('Y-m-d H:i:s'),
+    // S-UTC-STAMPS: UTC like created_at (DB default); the AI page parses both
+    // with FF_parseUtc.
+    'last_message_at' => ff_now_utc(),
 ], 'id = ?', [$sessionId]);
 
 // ── Send done event ────────────────────────────────────────

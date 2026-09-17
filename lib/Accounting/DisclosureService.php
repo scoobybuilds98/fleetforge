@@ -177,7 +177,7 @@ class DisclosureService
                 'note_content'      => $content,
                 'is_auto_generated' => 0,
                 'edited_by'         => $userId,
-                'edited_at'         => date('Y-m-d H:i:s'),
+                'edited_at'         => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
             ],
             'id = ?',
             [(int) $existing['id']]

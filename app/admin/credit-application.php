@@ -78,8 +78,9 @@ if ($isAdminPreview) {
         'customer_id'           => 0,
         'status'                => 'opened',
         'deleted_at'            => null,
-        'updated_at'            => date('Y-m-d H:i:s'),
-        'token_expires_at'      => date('Y-m-d H:i:s', strtotime('+30 days')),
+        // S-UTC-STAMPS: stamps mirror a real row — UTC like the DB columns.
+        'updated_at'            => ff_now_utc(),
+        'token_expires_at'      => ff_now_utc('+30 days'),
         'customer_company_name' => $companyName,
     ];
     $tokenParam = '';
@@ -111,7 +112,9 @@ if ($tokenParam === '') {
 
     if (!$app || $app['deleted_at'] !== null) {
         $pageState = 'invalid';
-    } elseif (strtotime($app['token_expires_at']) <= time()) {
+    } elseif (strtotime($app['token_expires_at'] . ' UTC') <= time()) {
+        // S-UTC-STAMPS: token_expires_at is stored UTC — parse it as UTC (bare
+        // strtotime() would read it as America/Vancouver wall time, +7-8h).
         $pageState = 'expired';
     } elseif (in_array($app['status'], ['submitted', 'reviewed'], true)) {
         // Post-submit PRG flash: show confirmation page on the redirect GET
@@ -302,7 +305,9 @@ if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminP
 
     // 6. Persist if no validation errors ────────────────────────────────────
     if (empty($errors)) {
-        $now           = date('Y-m-d H:i:s');
+        // S-UTC-STAMPS: submitted_at is a UTC DATETIME (read by format_datetime /
+        // FF_formatUtc, and cca_render_html converts it to local for the PDF).
+        $now           = ff_now_utc();
         $submittedIp   = (string)($_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '');
         $submittedUa   = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
         $uploadedDocIds = [];
@@ -508,7 +513,8 @@ if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminP
                         'default_font'  => 'dejavusans',
                         'tempDir'       => $tmpDir,
                     ]);
-                    $submittedDateLabel = $signed_date ?: date('Y-m-d');
+                    // Business-local date fallback (signed_date is the applicant's local date).
+                    $submittedDateLabel = $signed_date ?: ff_today();
                     $mpdf->SetTitle('Credit Application — ' . ($app['customer_company_name'] ?? '') . ' ' . $submittedDateLabel);
                     $mpdf->SetAuthor((string)(settings_get('company.name') ?: 'FleetForge'));
                     $mpdf->WriteHTML($renderedHtml);
@@ -1465,7 +1471,7 @@ $pageTitle = 'Credit Application — ' . e($companyName);
             <div class="cca-form-group">
                 <label class="cca-label" for="signed_date">Date <span class="req">*</span></label>
                 <input id="signed_date" name="signed_date" type="date" class="cca-input <?= isset($errors['signed_date']) ? 'has-error' : '' ?>"
-                       value="<?= e($old['signed_date'] ?? date('Y-m-d')) ?>" required>
+                       value="<?= e($old['signed_date'] ?? ff_today() /* S-UTC-STAMPS: company-local business day */) ?>" required>
                 <?php if (isset($errors['signed_date'])): ?><div class="cca-error-msg"><?= e($errors['signed_date']) ?></div><?php endif; ?>
             </div>
         </div>

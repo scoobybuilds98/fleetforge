@@ -378,9 +378,12 @@ function qboDrift(opts) {
 
         truncate(s, n) { if (!s) return '—'; return s.length > n ? s.slice(0, n - 1) + '…' : s; },
 
+        // S-UTC-STAMPS: every value shown here is a UTC DATETIME (map
+        // last_synced_at / MAX(last_pull_at), sync-log / queue / drift stamps).
+        // new Date('Y-m-dTH:i:s') read it as browser-local (7–8h off);
+        // FF_formatUtc parses UTC and renders in the company timezone.
         formatTs(s) {
-            if (!s) return '—';
-            try { return new Date(s.replace(' ', 'T')).toLocaleString(); } catch { return s; }
+            return FF_formatUtc(s);
         },
 
         // S-QBO-25: resolution-state badge — maps the four UI states to

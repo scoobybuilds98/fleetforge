@@ -33,7 +33,9 @@ use FleetForge\GPS\SamsaraClient;
 $userId   = current_user_id();
 $userName = current_user()['name'] ?? 'system';
 $ip       = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
-$now      = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: sync stamps are UTC DATETIMEs (db.php session +00:00);
+// Samsara's ISO-8601 'Z' times below go through gmdate(), not date().
+$now      = ff_now_utc();
 
 try {
     $client = new SamsaraClient();
@@ -160,7 +162,7 @@ try {
                     'samsara_last_location_address' => $gps['address'] ?? null,
                     'samsara_last_speed_kph'        => $gps['speed_kph'] ?? null,
                     'samsara_last_connected_at'     => isset($stats['last_connected_at'])
-                        ? date('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
+                        ? gmdate('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
                         : null,
                     'samsara_last_synced_at'        => $now,
                     'samsara_odometer_km'           => $stats['odometer_km'] ?? null,
@@ -188,7 +190,7 @@ try {
                         'heading'             => $gps['heading']   ?? null,
                         'address'             => $gps['address']   ?? null,
                         'recorded_at'         => isset($gps['time'])
-                            ? date('Y-m-d H:i:s', strtotime((string) $gps['time']))
+                            ? gmdate('Y-m-d H:i:s', strtotime((string) $gps['time']))
                             : $now,
                         'synced_at'           => $now,
                     ]);

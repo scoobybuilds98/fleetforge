@@ -109,7 +109,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isSuperAdmin) {
                 if ($target) {
                     $plainToken = bin2hex(random_bytes(32));
                     $tokenHash  = hash('sha256', $plainToken);
-                    $expiry     = date('Y-m-d H:i:s', strtotime('+24 hours'));
+                    // UTC (S-UTC-STAMPS): reset_password.php compares the expiry as UTC.
+                    $expiry     = ff_now_utc('+24 hours');
 
                     db_update('portal_users', [
                         'password_reset_token'  => $tokenHash,
@@ -210,8 +211,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $isSuperAdmin) {
                         'status'                => 'invited',
                         'is_primary'            => $isPrimary,
                         'password_reset_token'  => $tokenHash,
-                        'password_reset_expiry' => date('Y-m-d H:i:s', strtotime('+7 days')),
-                        'invite_sent_at'        => date('Y-m-d H:i:s'),
+                        // UTC (S-UTC-STAMPS): expiry compared as UTC; invite stamp shown via format_datetime().
+                        'password_reset_expiry' => ff_now_utc('+7 days'),
+                        'invite_sent_at'        => ff_now_utc(),
                     ]);
 
                     $resetUrl = base_url('portal/auth/reset_password') . '?token=' . $plainToken . '&email=' . urlencode($puEmail);
@@ -377,7 +379,7 @@ $statusBadge = [
                     <td><span class="badge <?= e($statusBadge[$pu['status']] ?? 'badge-neutral') ?>"><?= e(ucfirst($pu['status'])) ?></span></td>
                     <td class="font-mono" style="font-size:0.8125rem;"><?= $pu['last_login_at'] ? e(format_datetime($pu['last_login_at'])) : '<span style="color:var(--text-muted);">Never</span>' ?></td>
                     <td style="font-size:0.8125rem;">
-                        <?php if ($pu['locked_until'] && $pu['locked_until'] > date('Y-m-d H:i:s')): ?>
+                        <?php /* locked_until is UTC (S-UTC-STAMPS) — compare against the UTC clock */ if ($pu['locked_until'] && $pu['locked_until'] > ff_now_utc()): ?>
                             <span class="badge badge-danger">Locked</span>
                         <?php elseif ((int)$pu['login_attempts'] >= 3): ?>
                             <span class="badge badge-warning"><?= e((string)$pu['login_attempts']) ?> attempts</span>

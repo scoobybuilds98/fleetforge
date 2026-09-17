@@ -611,7 +611,10 @@ class FixedAssetService
             // Create run header (preview)
             $runId = \db_insert('acc_depreciation_runs', [
                 'period_id'         => $periodId,
-                'run_date'          => date('Y-m-d H:i:s'),
+                // S-UTC-STAMPS: run_date is the UTC moment the run was generated (the
+                // run's accounting period is period_id). ReportingService::assetSchedule()
+                // converts its business-date bounds to UTC to match.
+                'run_date'          => \ff_now_utc(),
                 'status'            => 'preview',
                 'total_depreciation'=> '0.00',
                 'asset_count'       => 0,
@@ -1260,7 +1263,7 @@ class FixedAssetService
             \db_update('acc_capex_requests', [
                 'status'       => 'approved',
                 'approved_by'  => $userId,
-                'approved_at'  => date('Y-m-d H:i:s'),
+                'approved_at'  => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
             ], 'id = ?', [$id]);
 
             self::audit(
@@ -1321,7 +1324,7 @@ class FixedAssetService
             \db_update('acc_capex_requests', [
                 'status'        => 'completed',
                 'completed_by'  => $userId,
-                'completed_at'  => date('Y-m-d H:i:s'),
+                'completed_at'  => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
                 'actual_amount' => isset($payload['actual_amount']) ? self::money($payload['actual_amount']) : $row['budget_amount'],
                 'asset_id'      => $assetId,
             ], 'id = ?', [$id]);
@@ -1603,9 +1606,10 @@ class FixedAssetService
                 'vendor_id'      => $wo['vendor_id'],
                 'requested_by'   => $userId,
                 'approved_by'    => $userId,
-                'approved_at'    => date('Y-m-d H:i:s'),
+                // S-UTC-STAMPS: approved_at/completed_at are UTC audit stamps.
+                'approved_at'    => \ff_now_utc(),
                 'completed_by'   => $userId,
-                'completed_at'   => date('Y-m-d H:i:s'),
+                'completed_at'   => \ff_now_utc(),
                 'justification'  => "Capitalized — total_cost \${$wo['total_cost']} > capex threshold",
             ]);
 
@@ -1663,7 +1667,7 @@ class FixedAssetService
                 'vendor_id'        => $wo['vendor_id'],
                 'requested_by'     => $userId,
                 'approved_by'      => $userId,
-                'approved_at'      => date('Y-m-d H:i:s'),
+                'approved_at'      => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
                 'rejected_reason'  => $reason,
                 'justification'    => "Expensed — does not meet capitalization criteria",
             ]);

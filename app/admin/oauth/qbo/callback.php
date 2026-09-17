@@ -189,10 +189,12 @@ $refreshExpiry = $now + (int) ($decoded['x_refresh_token_expires_in'] ?? 8726400
 
 QuickBooksClient::settings_write_qbo('access_token',             (string) $decoded['access_token']);
 QuickBooksClient::settings_write_qbo('refresh_token',            (string) $decoded['refresh_token']);
-QuickBooksClient::settings_write_qbo('access_token_expires_at',  date('Y-m-d H:i:s', $accessExpiry));
-QuickBooksClient::settings_write_qbo('refresh_token_expires_at', date('Y-m-d H:i:s', $refreshExpiry));
+// S-UTC-STAMPS: ISO-8601 UTC with explicit offset — same shape as
+// QuickBooksClient::refreshAccessToken(); strtotime() readers honour it.
+QuickBooksClient::settings_write_qbo('access_token_expires_at',  gmdate('c', $accessExpiry));
+QuickBooksClient::settings_write_qbo('refresh_token_expires_at', gmdate('c', $refreshExpiry));
 QuickBooksClient::settings_write_qbo('realm_id',                 $realmId);
-QuickBooksClient::settings_write_qbo('last_connected_at',        date('Y-m-d H:i:s', $now));
+QuickBooksClient::settings_write_qbo('last_connected_at',        gmdate('c', $now)); // S-UTC-STAMPS: ISO UTC
 QuickBooksClient::settings_write_qbo('connection_status',        'connected');
 QuickBooksClient::settings_write_qbo('connection_error',         '');
 

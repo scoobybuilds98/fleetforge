@@ -142,7 +142,8 @@ class OverflowCreditNotes
         }
 
         $voided = [];
-        $now    = date('Y-m-d H:i:s');
+        // S-UTC-STAMPS: voided_at is UTC (read via format_datetime on the show page).
+        $now    = \ff_now_utc();
 
         foreach ($live as $cn) {
             $isBlocked = \bccomp((string) $cn['amount_remaining'], (string) $cn['amount'], 2) !== 0

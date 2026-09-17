@@ -70,7 +70,7 @@ try {
     $ffOnlyCount  = 0;
     $qboOnlyCount = 0;
     $userId       = current_user_id();
-    $now          = date('Y-m-d H:i:s');
+    $now          = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
     foreach ($decisions as $d) {
         if ($d['ff_tax_rate_id'] !== null && isset($manualLockedFfIds[(int) $d['ff_tax_rate_id']])) {

@@ -43,12 +43,11 @@ $queueId   = isset($_GET['queue_id'])  ? (int) $_GET['queue_id']     : 0;
 $page      = max(1, (int) ($_GET['page'] ?? 1));
 $perPage   = min(100, max(10, (int) ($_GET['per_page'] ?? 50)));
 
-if ($dateFrom === '') {
-    $dateFrom = date('Y-m-d', strtotime('-7 days'));
-}
-if ($dateTo === '') {
-    $dateTo = date('Y-m-d');
-}
+// S-UTC-STAMPS: date_from/date_to are company-local calendar days (the page
+// builds them with FF_localDate). Invalid input falls back to the default
+// window instead of reaching the UTC-bound conversion below.
+$dateFrom = clean_date($dateFrom) ?? ff_local_date_add(ff_today(), -7);
+$dateTo   = clean_date($dateTo) ?? ff_today();
 
 $allowedDirection = ['push', 'pull'];
 $allowedEntity    = ['customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','companyinfo','query'];
@@ -58,10 +57,13 @@ $where  = [];
 $params = [];
 
 // Date window — always applied, default 7d.
+// S-UTC-STAMPS: acc_qbo_sync_log.created_at is UTC, so a local day runs from
+// local midnight (07:00/08:00 UTC) to the next local midnight — the old
+// 'date 00:00:00'..'date 23:59:59' bounds were UTC days, 7–8h early.
 $where[]  = 'created_at >= ?';
-$params[] = $dateFrom . ' 00:00:00';
-$where[]  = 'created_at <= ?';
-$params[] = $dateTo . ' 23:59:59';
+$params[] = ff_local_day_start_utc($dateFrom);
+$where[]  = 'created_at < ?';
+$params[] = ff_local_day_start_utc(ff_local_date_add($dateTo, 1));
 
 if ($direction !== '' && in_array($direction, $allowedDirection, true)) {
     $where[]  = 'direction = ?';

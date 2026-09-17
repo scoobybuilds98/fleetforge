@@ -5,7 +5,7 @@ declare(strict_types=1);
  * FleetForge — Mark Cash Refund Settled API
  *
  * @file        api/v1/leases/mark_refund_settled.php
- * @description Stamps `leases.precharge_refund_settled_at = NOW()` when
+ * @description Stamps `leases.precharge_refund_settled_at = NOW()` (UTC) when
  *              the operator confirms a cash refund has been physically
  *              disbursed (cheque issued, EFT sent, etc.). Companion
  *              endpoint to api/v1/leases/close.php — the D-B (i)
@@ -106,14 +106,17 @@ db_transaction(function () use ($id, &$result) {
 
     // ── Idempotency: 409 if already settled ────────────────────
     if ($lease['precharge_refund_settled_at'] !== null) {
-        $alreadySettledAt = $lease['precharge_refund_settled_at'];
+        // S-UTC-STAMPS: stored UTC — show the operator company-local wall time.
+        $alreadySettledAt = format_datetime($lease['precharge_refund_settled_at'], 'M j, Y g:i A');
         json_error('PRECHARGE_REFUND_ALREADY_SETTLED',
             "Cash refund for lease {$lease['contract_number']} already marked as settled on {$alreadySettledAt}.",
             409);
     }
 
     // ── Stamp settled_at = NOW() ──────────────────────────────
-    $now       = date('Y-m-d H:i:s');
+    // S-UTC-STAMPS: UTC DATETIME. RefundReceiptPusher maps it back to the local
+    // business date for QBO TxnDate; lease show renders via FF_formatUtc.
+    $now       = ff_now_utc();
     $user      = current_user();
     $changedBy = $user['name'] ?? 'system';
 
@@ -137,7 +140,7 @@ db_transaction(function () use ($id, &$result) {
             'S-MILEAGE-3 D-B (i): cash refund marked settled. lease=%s, balance=%s, settled_at=%s, settled_by=%s.',
             $lease['contract_number'],
             (string) $lease['precharge_balance'],
-            $now,
+            ff_utc_to_local($now, 'Y-m-d H:i:s'), // human note: local wall time (JSON below keeps the UTC column value)
             $changedBy
         ),
         'old_values'   => json_encode([

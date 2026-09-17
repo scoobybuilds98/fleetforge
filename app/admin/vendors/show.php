@@ -164,7 +164,8 @@ require_once FF_ROOT . '/includes/header.php';
         };
         $qm_title = $qboMapping['qbo_vendor_id'] ? 'qbo#' . $qboMapping['qbo_vendor_id'] : '';
         if (!empty($qboMapping['last_synced_at'])) {
-            $qm_title .= ($qm_title !== '' ? ' · ' : '') . 'last synced ' . $qboMapping['last_synced_at'];
+            // S-UTC-STAMPS: last_synced_at is UTC — show company-local time.
+            $qm_title .= ($qm_title !== '' ? ' · ' : '') . 'last synced ' . format_datetime($qboMapping['last_synced_at'], 'Y-m-d H:i:s T');
         }
     ?>
     <a href="<?= base_url('quickbooks/vendors') ?>?q=<?= e(rawurlencode($vendor['name'])) ?>"

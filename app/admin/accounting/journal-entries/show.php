@@ -57,9 +57,11 @@ if (!$entry) {
     exit;
 }
 
+// WHY c.company_name: customers has no `name` column — `c.name` threw SQLSTATE 42S22
+// and 500'd this page for EVERY journal entry (found verifying S-UTC-STAMPS).
 $lines = db_select(
     "SELECT l.*, a.code AS account_code, a.name AS account_name,
-            v.name AS vendor_name, c.name AS customer_name
+            v.name AS vendor_name, c.company_name AS customer_name
        FROM acc_journal_entry_lines l
        JOIN acc_accounts a ON a.id = l.account_id
   LEFT JOIN vendors v ON v.id = l.vendor_id
@@ -161,12 +163,13 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
         </div>
         <div>
             <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">Created</div>
-            <div><?= e($entry['created_by_name'] ?? 'system') ?> <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e($entry['created_at']) ?></span></div>
+            <?php // S-UTC-STAMPS: created_at/posted_at are UTC DATETIMEs — render in the company timezone, not raw. ?>
+            <div><?= e($entry['created_by_name'] ?? 'system') ?> <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e(format_datetime($entry['created_at'])) ?></span></div>
         </div>
         <?php if ($entry['posted_at']): ?>
         <div>
             <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">Posted</div>
-            <div><?= e($entry['posted_by_name'] ?? 'system') ?> <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e($entry['posted_at']) ?></span></div>
+            <div><?= e($entry['posted_by_name'] ?? 'system') ?> <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e(format_datetime($entry['posted_at'])) ?></span></div>
         </div>
         <?php endif; ?>
         <?php if ($entry['reversal_of_id'] && $entry['reversal_of_entry_number']): ?>

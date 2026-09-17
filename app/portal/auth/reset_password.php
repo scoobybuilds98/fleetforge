@@ -34,7 +34,9 @@ if ($tokenParam !== '') {
         [$tokenHash]
     );
 
-    if ($user && $user['password_reset_expiry'] && strtotime($user['password_reset_expiry']) > time()) {
+    // password_reset_expiry is UTC (S-UTC-STAMPS): parse with an explicit UTC zone,
+    // otherwise strtotime() reads it as Pacific and the link lives 7–8h too long.
+    if ($user && $user['password_reset_expiry'] && strtotime($user['password_reset_expiry'] . ' UTC') > time()) {
         $tokenValid = true;
         // WHY: $emailParam feeds the hidden email field below so password managers
         // can associate the new password with the correct account. The POST handler

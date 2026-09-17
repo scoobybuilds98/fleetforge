@@ -17,7 +17,7 @@ declare(strict_types=1);
  * @param array $params {
  *   app_id           int
  *   customer_company string   — FF customers.company_name (D-CCA-4: NOT applicant entry)
- *   submitted_at     string   — Y-m-d H:i:s
+ *   submitted_at     string   — Y-m-d H:i:s UTC (printed in the business timezone)
  *   submitted_ip     string
  *   print_name_first string
  *   print_name_last  string
@@ -63,10 +63,17 @@ if (!function_exists('cca_render_html')) {
         $references = $fd['references']  ?? [];
         $sigB64     = $p['signature_b64'] ?? '';
 
+        // S-UTC-STAMPS: submitted_at is a UTC DATETIME — print it in the company
+        // (business) timezone so the signed PDF shows the applicant's local time,
+        // not server-local-parsed UTC (7-8h early). rendered_html is a frozen
+        // snapshot: rows rendered before the cutover already carry local text.
         $submittedAt = $p['submitted_at'] ?? '';
         if ($submittedAt !== '') {
-            $ts = strtotime($submittedAt);
-            $submittedAt = $ts ? date('F j, Y \a\t g:i A', $ts) : $submittedAt;
+            try {
+                $submittedAt = ff_utc_to_local((string) $submittedAt, 'F j, Y \a\t g:i A');
+            } catch (\Throwable) {
+                // unparseable — print the raw value rather than fail the render
+            }
         }
 
         // Brand colour (S-NORTHLAND-P0). This was hardcoded orange (#f97316)

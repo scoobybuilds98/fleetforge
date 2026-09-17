@@ -858,7 +858,7 @@ class BankService
                     'status'           => 'void',
                     'amount_remaining' => '0.00',
                     'voided_by'        => $userId,
-                    'voided_at'        => date('Y-m-d H:i:s'),
+                    'voided_at'        => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
                     'internal_notes'   => "Auto-voided: source payment {$payment['payment_number']} returned NSF (S-AUDIT-BILLING-ENGINE-1).",
                 ], 'id = ?', [(int) $cn['id']]);
                 \db_insert('audit_log', [
@@ -963,7 +963,8 @@ class BankService
                 'status'           => 'matched',
                 'matched_type'     => 'payment',
                 'matched_id'       => $paymentId,
-                'matched_at'       => date('Y-m-d H:i:s'),
+                // S-UTC-STAMPS: matched_at is a UTC DATETIME (transaction_date stays a business date).
+                'matched_at'       => \ff_now_utc(),
                 'matched_by'       => $userId,
                 'journal_entry_id' => (int) $je['id'],
                 'created_by'       => $userId,
@@ -1100,7 +1101,8 @@ class BankService
                 'status'           => 'matched',
                 'matched_type'     => 'bank_transfer',
                 'matched_id'       => $toAccountId,
-                'matched_at'       => date('Y-m-d H:i:s'),
+                // S-UTC-STAMPS: matched_at is a UTC DATETIME (transaction_date stays a business date).
+                'matched_at'       => \ff_now_utc(),
                 'matched_by'       => $userId,
                 'journal_entry_id' => (int) $je['id'],
                 'created_by'       => $userId,
@@ -1117,7 +1119,8 @@ class BankService
                 'status'           => 'matched',
                 'matched_type'     => 'bank_transfer',
                 'matched_id'       => $fromAccountId,
-                'matched_at'       => date('Y-m-d H:i:s'),
+                // S-UTC-STAMPS: matched_at is a UTC DATETIME (transaction_date stays a business date).
+                'matched_at'       => \ff_now_utc(),
                 'matched_by'       => $userId,
                 'journal_entry_id' => (int) $je['id'],
                 'created_by'       => $userId,

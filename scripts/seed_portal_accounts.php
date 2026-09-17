@@ -49,6 +49,21 @@ const DEMO_PASSWORD = 'Portal123!';   // shared login for every active demo port
 function money(float $v): string { return number_format($v, 2, '.', ''); }
 function token64(): string { return bin2hex(random_bytes(32)); }   // 64 hex chars
 function ts_ago(int $days, string $t = '10:00:00'): string { return date('Y-m-d', strtotime("-{$days} days")) . ' ' . $t; }
+/**
+ * ts_ago() as a UTC DATETIME string — for columns stored UTC (S-UTC-STAMPS:
+ * db.php pins the session to '+00:00' and format_datetime() reads them as UTC).
+ * The demo wall-clock time (e.g. 10:00 local) is kept, then converted, so the
+ * seeded "last login 10:00 a.m." still renders as 10:00 a.m. local.
+ *
+ * @param int    $days days before today (local calendar)
+ * @param string $t    local wall-clock time 'H:i:s'
+ * @return string 'Y-m-d H:i:s' in UTC
+ */
+function ts_ago_utc(int $days, string $t = '10:00:00'): string
+{
+    return (new DateTimeImmutable(ts_ago($days, $t), ff_business_timezone()))
+        ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
+}
 
 echo "=== FleetForge demo portal accounts ===\n\n";
 
@@ -102,9 +117,10 @@ foreach ($customers as $c) {
         'status'                  => $status,
         'is_primary'              => 1,
         'invite_token'            => $status === 'invited' ? token64() : null,
-        'invite_token_expiry'     => $status === 'invited' ? date('Y-m-d H:i:s', strtotime('+7 days')) : null,
-        'invite_sent_at'          => $status === 'invited' ? ts_ago(3) : null,
-        'last_login_at'           => $status === 'active' ? ts_ago(random_int(0, 9), sprintf('%02d:%02d:00', random_int(8, 18), random_int(0, 59))) : null,
+        // UTC (S-UTC-STAMPS): these portal_users stamps are stored/read as UTC.
+        'invite_token_expiry'     => $status === 'invited' ? ff_now_utc('+7 days') : null,
+        'invite_sent_at'          => $status === 'invited' ? ts_ago_utc(3) : null,
+        'last_login_at'           => $status === 'active' ? ts_ago_utc(random_int(0, 9), sprintf('%02d:%02d:00', random_int(8, 18), random_int(0, 59))) : null,
         'notification_preferences'=> json_encode(['invoice_sent' => true, 'payment_received' => true, 'lease_expiring' => true, 'request_update' => true]),
         'created_at'              => ts_ago(random_int(400, 900)),
     ]);
@@ -122,7 +138,7 @@ foreach ($customers as $c) {
             'password_hash'           => $pwHash,
             'status'                  => 'active',
             'is_primary'              => 0,
-            'last_login_at'           => ts_ago(random_int(1, 20)),
+            'last_login_at'           => ts_ago_utc(random_int(1, 20)), // UTC (S-UTC-STAMPS)
             'notification_preferences'=> json_encode(['invoice_sent' => true, 'payment_received' => false, 'lease_expiring' => true, 'request_update' => true]),
             'created_at'              => ts_ago(random_int(200, 500)),
         ]);
@@ -193,15 +209,16 @@ function build_form_data(array $c): array {
 /** Insert a credit application; renders HTML for submitted/reviewed apps. */
 function seed_credit_app(array $c, string $status, ?string $outcome, int $ageDays, ?float $approvedLimit, ?string $reviewNote): int {
     $cid  = (int) $c['id'];
-    $sentAt      = ts_ago($ageDays);
-    $openedAt    = in_array($status, ['opened', 'submitted', 'reviewed'], true) ? ts_ago($ageDays - 1) : null;
-    $submittedAt = in_array($status, ['submitted', 'reviewed'], true)          ? ts_ago($ageDays - 2) : null;
-    $reviewedAt  = $status === 'reviewed'                                       ? ts_ago(max(1, $ageDays - 5)) : null;
+    // UTC (S-UTC-STAMPS): every customer_credit_applications *_at is a UTC DATETIME.
+    $sentAt      = ts_ago_utc($ageDays);
+    $openedAt    = in_array($status, ['opened', 'submitted', 'reviewed'], true) ? ts_ago_utc($ageDays - 1) : null;
+    $submittedAt = in_array($status, ['submitted', 'reviewed'], true)          ? ts_ago_utc($ageDays - 2) : null;
+    $reviewedAt  = $status === 'reviewed'                                       ? ts_ago_utc(max(1, $ageDays - 5)) : null;
 
     $row = [
         'customer_id'      => $cid,
         'token_hash'       => hash('sha256', token64()),
-        'token_expires_at' => date('Y-m-d H:i:s', strtotime($sentAt . ' +30 days')),
+        'token_expires_at' => gmdate('Y-m-d H:i:s', strtotime($sentAt . ' UTC +30 days')), // UTC
         'status'           => $status,
         'review_outcome'   => $outcome,
         'terms_accepted'   => in_array($status, ['submitted', 'reviewed'], true) ? 1 : 0,
@@ -222,7 +239,7 @@ function seed_credit_app(array $c, string $status, ?string $outcome, int $ageDay
         $row['form_data']        = json_encode($fd, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $row['print_name_first'] = $first;
         $row['print_name_last']  = $last;
-        $row['signed_date']      = substr((string) $submittedAt, 0, 10);
+        $row['signed_date']      = ff_utc_to_local((string) $submittedAt); // local business date of the UTC stamp
         $row['terms_version']    = 'snapshot';
         $row['terms_url']        = base_url('legal/credit-terms');
         $row['submitted_ip']     = '198.51.100.' . random_int(2, 250);
@@ -341,7 +358,7 @@ foreach ($portalUserByCustomer as $cid => $puId) {
             'status'            => $status,
             'assigned_to'       => $status === 'open' ? null : ADMIN_USER,
             'response'          => $resolved ? 'Thanks for reaching out — this has been handled. Let us know if anything else comes up.' : null,
-            'resolved_at'       => $resolved ? ts_ago(max(1, $ageDays - random_int(1, 5))) : null,
+            'resolved_at'       => $resolved ? ts_ago_utc(max(1, $ageDays - random_int(1, 5))) : null, // UTC (S-UTC-STAMPS)
             'created_at'        => ts_ago($ageDays),
         ]);
         $reqCount++;

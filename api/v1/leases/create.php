@@ -430,7 +430,7 @@ if ($odoStartRaw !== null && $odoStartRaw !== '') {
     // metadata spoofable; the form fetches the reading seconds before
     // submitting anyway, so the server clock is the honest value.
     if ($odometerStartSource === 'gps') {
-        $odometerStartFetchedAt = date('Y-m-d H:i:s');
+        $odometerStartFetchedAt = ff_now_utc(); // S-UTC-STAMPS: UTC DATETIME column
     }
 
     // SAMSARA-3: auto-derive the legacy integer `mileage_at_start` column

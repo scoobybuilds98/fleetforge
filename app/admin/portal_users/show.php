@@ -163,8 +163,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <div class="form-group" style="margin-bottom:0;">
                     <label class="form-label" style="font-size:0.75rem;color:var(--text-muted);">Security</label>
                     <div style="font-size:0.875rem;">
-                        <?php if ($pu['locked_until'] && $pu['locked_until'] > date('Y-m-d H:i:s')): ?>
-                            <span class="badge badge-danger">Locked until <?= e($pu['locked_until']) ?></span>
+                        <?php /* locked_until is UTC (S-UTC-STAMPS): compare to the UTC clock, display local */ if ($pu['locked_until'] && $pu['locked_until'] > ff_now_utc()): ?>
+                            <span class="badge badge-danger">Locked until <?= e(format_datetime($pu['locked_until'])) ?></span>
                         <?php elseif ((int) $pu['login_attempts'] >= 3): ?>
                             <span class="badge badge-warning">
                                 <?= e((string) $pu['login_attempts']) ?> failed attempts

@@ -55,7 +55,7 @@ class MessengerService
         if ($existing) {
             \db_update('messenger_thread_reads', [
                 'last_read_message_id' => $lastReadMessageId,
-                'last_read_at'         => date('Y-m-d H:i:s'),
+                'last_read_at'         => \ff_now_utc(), // S-UTC-STAMPS: UTC like messenger_messages.created_at
             ], 'id = ?', [(int) $existing['id']]);
         } else {
             \db_insert('messenger_thread_reads', [
@@ -63,7 +63,7 @@ class MessengerService
                 'admin_user_id'        => $adminId,
                 'portal_user_id'       => null,
                 'last_read_message_id' => $lastReadMessageId,
-                'last_read_at'         => date('Y-m-d H:i:s'),
+                'last_read_at'         => \ff_now_utc(), // S-UTC-STAMPS: UTC like messenger_messages.created_at
             ]);
         }
     }
@@ -89,7 +89,7 @@ class MessengerService
         if ($existing) {
             \db_update('messenger_thread_reads', [
                 'last_read_message_id' => $lastReadMessageId,
-                'last_read_at'         => date('Y-m-d H:i:s'),
+                'last_read_at'         => \ff_now_utc(), // S-UTC-STAMPS: UTC like messenger_messages.created_at
             ], 'id = ?', [(int) $existing['id']]);
         } else {
             \db_insert('messenger_thread_reads', [
@@ -97,7 +97,7 @@ class MessengerService
                 'admin_user_id'        => null,
                 'portal_user_id'       => $portalUserId,
                 'last_read_message_id' => $lastReadMessageId,
-                'last_read_at'         => date('Y-m-d H:i:s'),
+                'last_read_at'         => \ff_now_utc(), // S-UTC-STAMPS: UTC like messenger_messages.created_at
             ]);
         }
     }

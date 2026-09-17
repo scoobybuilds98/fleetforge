@@ -264,12 +264,15 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
                 </div>
                 <table style="width:100%;font-size:13px;border-collapse:collapse;">
                     <?php if ($app['submitted_at']): ?>
+                    <?php /* S-UTC-STAMPS: submitted_at / reviewed_at / opened_at / created_at are UTC
+                             DATETIMEs — format_datetime() renders them in the company timezone
+                             (date(strtotime()) read them as server-local wall time). */ ?>
                     <tr><td style="color:var(--text-secondary);padding:3px 8px 3px 0;">Submitted</td>
-                        <td><?= e(date('M j, Y g:i A', strtotime($app['submitted_at']))) ?></td></tr>
+                        <td><?= e(format_datetime($app['submitted_at'], 'M j, Y g:i A')) ?></td></tr>
                     <?php endif; ?>
                     <?php if ($app['reviewed_at']): ?>
                     <tr><td style="color:var(--text-secondary);padding:3px 8px 3px 0;">Reviewed</td>
-                        <td><?= e(date('M j, Y g:i A', strtotime($app['reviewed_at']))) ?></td></tr>
+                        <td><?= e(format_datetime($app['reviewed_at'], 'M j, Y g:i A')) ?></td></tr>
                     <?php endif; ?>
                 </table>
             </div>
@@ -308,9 +311,9 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
                         <td style="word-break:break-all;font-size:11px;"><?= e(substr($app['submitted_user_agent'], 0, 100)) ?><?= strlen((string)$app['submitted_user_agent']) > 100 ? '…' : '' ?></td></tr>
                     <?php endif; ?>
                     <tr><td style="color:var(--text-secondary);padding:3px 8px 3px 0;vertical-align:top;">Link Sent</td>
-                        <td><?= $app['created_at'] ? e(date('M j, Y', strtotime($app['created_at']))) : '—' ?></td></tr>
+                        <td><?= $app['created_at'] ? e(format_datetime($app['created_at'], 'M j, Y')) : '—' ?></td></tr>
                     <tr><td style="color:var(--text-secondary);padding:3px 8px 3px 0;vertical-align:top;">Opened</td>
-                        <td><?= $app['opened_at'] ? e(date('M j, Y g:i A', strtotime($app['opened_at']))) : '—' ?></td></tr>
+                        <td><?= $app['opened_at'] ? e(format_datetime($app['opened_at'], 'M j, Y g:i A')) : '—' ?></td></tr>
                 </table>
             </div>
         </div>
@@ -433,7 +436,7 @@ $backLabel = $fromCustomer ? '← Back to Customer' : '← All Applications';
 
                 <?php if ($app['reviewed_at'] && $app['reviewed_by_name']): ?>
                 <p style="font-size:11px;color:var(--text-secondary);margin:12px 0 0;padding-top:10px;border-top:1px solid var(--color-border);">
-                    Last reviewed <?= e(date('M j, Y g:i A', strtotime($app['reviewed_at']))) ?>
+                    Last reviewed <?= e(format_datetime($app['reviewed_at'], 'M j, Y g:i A')) /* S-UTC-STAMPS: UTC column */ ?>
                     by <?= e($app['reviewed_by_name']) ?>
                 </p>
                 <?php endif; ?>

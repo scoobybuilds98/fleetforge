@@ -334,7 +334,7 @@ class RefundReceiptPusher
         $desc      = 'Mileage prepayment refund on close' . ($contract !== '' ? " ({$contract})" : '');
 
         // TxnDate from the settle timestamp (when money actually moved).
-        $txnDate = substr((string) ($lease['precharge_refund_settled_at'] ?? date('Y-m-d')), 0, 10);
+        $txnDate = self::txnDateFor($lease);
 
         $payload = [
             'CustomerRef'         => ['value' => $qboCustomerId],
@@ -377,6 +377,23 @@ class RefundReceiptPusher
         return $payload;
     }
 
+    /**
+     * QBO TxnDate for a settled cash refund: the company-local business date of
+     * precharge_refund_settled_at.
+     *
+     * WHY (S-UTC-STAMPS): the column is a UTC DATETIME; substr(…, 0, 10) would
+     * date an evening-Pacific settlement to the next day in QBO.
+     *
+     * @param array $lease leases row
+     * @return string 'Y-m-d' (today, local, when the stamp is missing)
+     */
+    private static function txnDateFor(array $lease): string
+    {
+        return !empty($lease['precharge_refund_settled_at'])
+            ? \ff_utc_to_local((string) $lease['precharge_refund_settled_at'])
+            : date('Y-m-d');
+    }
+
     /** PrivateNote JSON for QBO-side audit drill-down. */
     public static function buildPrivateNoteJson(array $lease): string
     {
@@ -385,7 +402,10 @@ class RefundReceiptPusher
             'ff_contract_number'  => (string) ($lease['contract_number'] ?? ''),
             'refund_method'       => 'cash',
             'refund_amount'       => (string) ($lease['precharge_balance'] ?? '0.00'),
-            'settled_at'          => (string) ($lease['precharge_refund_settled_at'] ?? ''),
+            // S-UTC-STAMPS: column is UTC; keep the note in local wall time as before.
+            'settled_at'          => !empty($lease['precharge_refund_settled_at'])
+                ? \ff_utc_to_local((string) $lease['precharge_refund_settled_at'], 'Y-m-d H:i:s')
+                : '',
             'pushed_at'           => date('c'),
         ];
         return json_encode($note, JSON_UNESCAPED_SLASHES) ?: '{}';
@@ -405,8 +425,8 @@ class RefundReceiptPusher
         if (!self::ffLeaseExists($ffLeaseId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
-        $txnDate = substr((string) ($lease['precharge_refund_settled_at'] ?? date('Y-m-d')), 0, 10);
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
+        $txnDate = self::txnDateFor($lease);
         self::upsertMappingRow($ffLeaseId, [
             'ff_customer_id_snapshot'     => (int) ($lease['customer_id'] ?? 0),
             'ff_contract_number_snapshot' => (string) ($lease['contract_number'] ?? ''),
@@ -433,7 +453,7 @@ class RefundReceiptPusher
         if (!self::ffLeaseExists($ffLeaseId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffLeaseId, [
             'ff_customer_id_snapshot'     => (int) ($lease['customer_id'] ?? 0),
             'ff_contract_number_snapshot' => (string) ($lease['contract_number'] ?? ''),
@@ -449,7 +469,7 @@ class RefundReceiptPusher
         if (!self::ffLeaseExists($ffLeaseId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffLeaseId, [
             'ff_customer_id_snapshot'     => (int) ($lease['customer_id'] ?? 0),
             'ff_contract_number_snapshot' => (string) ($lease['contract_number'] ?? ''),
@@ -465,7 +485,7 @@ class RefundReceiptPusher
         if (!self::ffLeaseExists($ffLeaseId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $contract = (string) ($lease['contract_number'] ?? '');
         $msg = "skipped: {$skippedStatus}" . ($contract !== '' ? " ({$contract})" : '');
         self::upsertMappingRow($ffLeaseId, [

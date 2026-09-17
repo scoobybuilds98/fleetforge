@@ -149,6 +149,16 @@ try {
     $refreshExp   = (string) settings_get('quickbooks.refresh_token_expires_at', '');
     $connError    = (string) settings_get('quickbooks.connection_error', '');
 
+    // S-UTC-STAMPS: token stamps are written as ISO-8601 UTC ('…+00:00');
+    // rows written before that are bare PHP-local wall time. strtotime() reads
+    // both correctly, so normalise to ISO UTC here — the dashboard's
+    // FF_formatUtc() then renders either shape in the company timezone.
+    $isoStamp = static function (string $v): ?string {
+        if ($v === '') return null;
+        $ts = strtotime($v);
+        return $ts === false ? $v : gmdate('c', $ts);
+    };
+
     $refreshExpiresInDays = null;
     if ($refreshExp !== '') {
         $expTs = strtotime($refreshExp);
@@ -181,8 +191,8 @@ try {
             'status'                       => $connStatus,
             'environment'                  => $environment,
             'realm_id'                     => $realmId,
-            'last_connected_at'            => $connectedAt !== '' ? $connectedAt : null,
-            'last_token_refresh_at'        => $tokenRefresh !== '' ? $tokenRefresh : null,
+            'last_connected_at'            => $isoStamp($connectedAt),
+            'last_token_refresh_at'        => $isoStamp($tokenRefresh),
             'refresh_token_expires_in_days'=> $refreshExpiresInDays,
             'connection_error'             => $connError !== '' ? $connError : null,
         ],

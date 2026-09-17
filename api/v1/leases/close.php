@@ -157,8 +157,11 @@ if (isset($body['odometer_at_close_km']) && $body['odometer_at_close_km'] !== ''
         $odoSource = in_array($srcRaw, ['gps', 'manual'], true) ? $srcRaw : 'manual';
         if ($odoSource === 'gps' && !empty($body['odometer_fetched_at'])) {
             try {
-                $dt = new DateTime((string) $body['odometer_fetched_at']);
-                $odoFetchedAt = $dt->format('Y-m-d H:i:s');
+                // S-UTC-STAMPS: store UTC. The close form sends either current_odometer's
+                // ISO string (offset honoured) or the unit's samsara_last_synced_at — a
+                // bare stored UTC stamp, hence the UTC default zone.
+                $dt = new DateTime((string) $body['odometer_fetched_at'], new DateTimeZone('UTC'));
+                $odoFetchedAt = $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
             } catch (\Throwable) {
                 $odoFetchedAt = null;
             }
@@ -1754,7 +1757,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // (queue row commits atomically with the CN; enqueue never throws).
             \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $refundCnId, 'create');
 
-            $settledAtSql = date('Y-m-d H:i:s');
+            // S-UTC-STAMPS: precharge_refund_settled_at is a UTC DATETIME (readers
+            // converted by the S-UTC-STAMPS refund area); date() was Pacific wall time.
+            $settledAtSql = ff_now_utc();
         }
         // else: $refundMethod === 'cash' — settledAtSql stays null;
         // operator stamps later via api/v1/leases/mark_refund_settled.php.

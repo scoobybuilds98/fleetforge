@@ -452,14 +452,12 @@ function qboBankAccountMapping() {
             };
         },
 
-        formatTs(iso) {
-            if (!iso) return '—';
-            try {
-                const d = new Date(iso);
-                return d.toLocaleString();
-            } catch (_) {
-                return iso;
-            }
+        // S-UTC-STAMPS: every value shown here is a UTC DATETIME (map
+        // last_synced_at) or ISO-8601 with an offset (last_bank_cdc_at).
+        // new Date('Y-m-dTH:i:s') read it as browser-local (7–8h off);
+        // FF_formatUtc parses UTC and renders in the company timezone.
+        formatTs(s) {
+            return FF_formatUtc(s);
         },
 
         flashError(j) {

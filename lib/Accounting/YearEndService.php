@@ -370,7 +370,8 @@ class YearEndService
                 // ── Insert closure row (without package_path/hash yet — generated below)
                 $closureId = \db_insert('acc_year_end_closures', [
                     'fiscal_year'   => $fiscalYear,
-                    'closed_at'     => date('Y-m-d H:i:s'),
+                    // S-UTC-STAMPS: UTC, matching the periods' locked_at = NOW() above.
+                    'closed_at'     => \ff_now_utc(),
                     'closed_by'     => $userId,
                     'closing_je_id' => $closingJeId,
                     'package_path'  => null,

@@ -50,7 +50,9 @@ db_transaction(function () use ($id, &$result) {
     }
 
     $userId = current_user_id();
-    $now    = date('Y-m-d H:i:s');
+    // S-UTC-STAMPS: locked_at is a UTC DATETIME (session is '+00:00'; YearEndService
+    // already stamps it with NOW()). Audit stamp only — never a period date.
+    $now    = ff_now_utc();
 
     db_update('acc_periods', [
         'status'     => 'locked',

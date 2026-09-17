@@ -105,7 +105,8 @@ db_transaction(function () use ($id, $matchedType, $matchedId, $userId, $txn) {
         'status'       => 'matched',
         'matched_type' => $matchedType,
         'matched_id'   => $matchedId,
-        'matched_at'   => date('Y-m-d H:i:s'),
+        // S-UTC-STAMPS: matched_at is a UTC DATETIME (transaction_date stays a business date).
+        'matched_at'   => ff_now_utc(),
         'matched_by'   => $userId,
     ], 'id = ?', [$id]);
 

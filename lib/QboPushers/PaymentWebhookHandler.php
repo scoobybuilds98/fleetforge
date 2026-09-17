@@ -297,7 +297,7 @@ class PaymentWebhookHandler
             'origin'               => 'qbo_payments_webhook',  // D-QBO-13-1
             'reference_number'     => substr($referenceNumber, 0, 100),
             'payment_date'         => $txnDate,
-            'received_at'          => date('Y-m-d H:i:s'),
+            'received_at'          => \ff_now_utc(),   // UTC like every DATETIME (S-UTC-STAMPS)
             'status'               => 'cleared',   // QBO Payments == real money received
             'overpayment_amount'   => $overpayment,
             'overpayment_action'   => bccomp($overpayment, '0', 2) > 0 ? 'credit_to_account' : null,
@@ -393,8 +393,9 @@ class PaymentWebhookHandler
             'webhook_event_id'      => $webhookEventId,
             'realm_id'              => $realmId,
             'push_status'           => 'pulled_from_qbo',
-            'pulled_at'             => date('Y-m-d H:i:s'),
-            'last_synced_at'        => date('Y-m-d H:i:s'),
+            // S-UTC-STAMPS: map stamps are UTC (like every pusher's $now).
+            'pulled_at'             => ff_now_utc(),
+            'last_synced_at'        => ff_now_utc(),
         ]);
 
         // i. AutoEntryBridge::onPaymentReceived posts the DR Cash / CR AR JE.

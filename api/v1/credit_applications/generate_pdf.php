@@ -95,7 +95,8 @@ try {
         'default_font'  => 'dejavusans',
         'tempDir'       => $tmpDir,
     ]);
-    $submittedDateLabel = $app['signed_date'] ?: date('Y-m-d');
+    // S-UTC-STAMPS: fallback is the company-local business day, not server-local.
+    $submittedDateLabel = $app['signed_date'] ?: ff_today();
     $mpdf->SetTitle('Credit Application — ' . ($app['customer_company_name'] ?? '') . ' ' . $submittedDateLabel);
     $mpdf->SetAuthor((string)(settings_get('company.name') ?: 'FleetForge'));
     $mpdf->WriteHTML($renderedHtml);

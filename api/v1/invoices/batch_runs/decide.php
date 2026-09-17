@@ -68,7 +68,9 @@ if ($run['status'] !== 'pending') {
 $newStatus = $decision === 'approve' ? 'approved' : 'rejected';
 $userId    = current_user_id();
 $userName  = current_user()['name'] ?? 'System';
-$now       = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: decided_at is a UTC DATETIME (batch_run.php renders it via
+// format_datetime; generate.php localises it for its "approved on" notes).
+$now       = ff_now_utc();
 
 // ── Two-eyes gate (S-BATCH-APPROVAL) ────────────────────────────────
 // Settings → General → Invoices & Billing → "Allow self-approval of batch

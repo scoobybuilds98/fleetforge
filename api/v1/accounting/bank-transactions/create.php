@@ -123,7 +123,8 @@ $newId = db_transaction(function () use (
         'status'           => $jeId ? 'matched' : 'unmatched',
         'matched_type'     => $jeId ? 'journal_entry' : null,
         'matched_id'       => $jeId,
-        'matched_at'       => $jeId ? date('Y-m-d H:i:s') : null,
+        // S-UTC-STAMPS: matched_at is a UTC DATETIME (transaction_date stays a business date).
+        'matched_at'       => $jeId ? ff_now_utc() : null,
         'matched_by'       => $jeId ? $userId : null,
         'journal_entry_id' => $jeId,
         'notes'            => $notes,

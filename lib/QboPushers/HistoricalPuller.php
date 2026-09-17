@@ -164,7 +164,7 @@ class HistoricalPuller
             'checkpoints'        => json_encode(new \stdClass()),
             'remediation_status' => 'not_run',
             'started_by'         => $userId,
-            'started_at'         => date('Y-m-d H:i:s'),
+            'started_at'         => ff_now_utc(), // S-UTC-STAMPS: UTC like created_at
         ]);
     }
 
@@ -177,6 +177,8 @@ class HistoricalPuller
      * Resume point for an entity type: MAX(pushed_at) of its map rows for the
      * active realm (D-QBO-27-2). Null = pull from the beginning. Reference
      * types (no map metadata) return null — their pullers do full pulls.
+     * The value is the raw UTC DATETIME (S-UTC-STAMPS); pullTransactional()
+     * converts it to company-local time for the QBO query.
      */
     public static function resumePoint(string $entityType): ?string
     {
@@ -247,7 +249,7 @@ class HistoricalPuller
             $fields['error_message'] = substr($error, 0, 4000);
         }
         if (in_array($status, ['completed', 'failed', 'stopped_gate'], true)) {
-            $fields['finished_at'] = date('Y-m-d H:i:s');
+            $fields['finished_at'] = ff_now_utc(); // S-UTC-STAMPS: UTC like started_at
         }
         db_update('acc_qbo_historical_pull_runs', $fields, 'id = ?', [$runId]);
     }
@@ -320,6 +322,12 @@ class HistoricalPuller
 
         $tally = ['pulled' => 0, 'inserted' => 0, 'updated' => 0, 'skipped' => 0];
         $since = self::resumePoint($entityType);
+        // S-UTC-STAMPS: pushed_at (hence the resume point) is now a UTC
+        // DATETIME. The bare timestamp sent in the QBO query below was
+        // company-local wall time before — keep sending that same local value.
+        if ($since !== null) {
+            $since = ff_utc_to_local($since, 'Y-m-d H:i:s');
+        }
         $client = new QuickBooksClient();
         $qboType = self::qboEntityName($entityType);
 

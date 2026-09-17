@@ -190,7 +190,7 @@ function portal_login(array $user, bool $rememberMe = false): void
 
     // Update last_login fields
     db_update('portal_users', [
-        'last_login_at' => date('Y-m-d H:i:s'),
+        'last_login_at' => ff_now_utc(), // UTC (S-UTC-STAMPS): rendered via format_datetime()
         'last_login_ip' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
         'login_attempts' => 0,
         'locked_until'   => null,

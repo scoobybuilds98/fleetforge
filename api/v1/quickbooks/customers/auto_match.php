@@ -87,7 +87,7 @@ try {
     $decisions = CustomerMatcher::matchAll($qboCustomers);
 
     $userId = current_user_id();
-    $now    = date('Y-m-d H:i:s');
+    $now    = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
     // Apply ALL mapping decisions atomically. Previously the loop ran in
     // autocommit, so a uq_ff_customer collision midway (when an FF customer was

@@ -166,7 +166,9 @@ class JournalEntryService
                 'currency'         => $header['currency'] ?? 'CAD',
                 'exchange_rate'    => $header['exchange_rate'] ?? null,
                 'posted_by'        => $status === 'posted' ? $userId : null,
-                'posted_at'        => $status === 'posted' ? date('Y-m-d H:i:s') : null,
+                // S-UTC-STAMPS: posted_at/submitted_at/approved_at are UTC audit stamps.
+                // entry_date + period_id (the posting's business date) are unaffected.
+                'posted_at'        => $status === 'posted' ? \ff_now_utc() : null,
                 'created_by'       => $userId,
             ]);
 
@@ -283,7 +285,7 @@ class JournalEntryService
                 'status'       => 'posted',
                 'entry_status' => 'posted',
                 'posted_by'    => $userId,
-                'posted_at'    => date('Y-m-d H:i:s'),
+                'posted_at'    => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
             ], 'id = ?', [$entryId]);
 
             \db_insert('audit_log', [
@@ -378,7 +380,7 @@ class JournalEntryService
                 'currency'      => $original['currency'],
                 'exchange_rate' => $original['exchange_rate'],
                 'posted_by'     => $userId,
-                'posted_at'     => date('Y-m-d H:i:s'),
+                'posted_at'     => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
                 'created_by'    => $userId,
             ]);
 
@@ -482,7 +484,7 @@ class JournalEntryService
             \db_update('acc_journal_entries', [
                 'entry_status'    => 'submitted',
                 'submitted_by_id' => $userId,
-                'submitted_at'    => date('Y-m-d H:i:s'),
+                'submitted_at'    => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
             ], 'id = ?', [$entryId]);
 
             \db_insert('audit_log', [
@@ -555,7 +557,7 @@ class JournalEntryService
             \db_update('acc_journal_entries', [
                 'entry_status'   => 'approved',
                 'approved_by_id' => $userId,
-                'approved_at'    => date('Y-m-d H:i:s'),
+                'approved_at'    => \ff_now_utc(), // S-UTC-STAMPS: UTC audit stamp
             ], 'id = ?', [$entryId]);
 
             \db_insert('audit_log', [

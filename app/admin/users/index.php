@@ -385,7 +385,7 @@ require_once FF_ROOT . '/includes/header.php';
                                           x-text="mfaBadge(row).label"></span>
                                 </td>
                                 <td x-text="relTime(row.last_login_at)"
-                                    :title="row.last_login_at ? new Date(row.last_login_at).toLocaleString() : ''"></td>
+                                    :title="row.last_login_at ? FF_formatUtc(row.last_login_at) : ''"></td>
                                 <td @click.stop="">
                                     <a :href="'<?= base_url('users/show') ?>?id=' + row.id"
                                        class="btn btn-secondary btn-sm">View</a>
@@ -601,7 +601,7 @@ require_once FF_ROOT . '/includes/header.php';
                                           x-text="portalStatusLabel(row.status)"></span>
                                 </td>
                                 <td x-text="relTime(row.last_login_at)"
-                                    :title="row.last_login_at ? new Date(row.last_login_at).toLocaleString() : ''"></td>
+                                    :title="row.last_login_at ? FF_formatUtc(row.last_login_at) : ''"></td>
                                 <td @click.stop="">
                                     <a :href="'<?= base_url('portal_users/show') ?>?id=' + row.id"
                                        class="btn btn-secondary btn-sm">View</a>
@@ -945,7 +945,10 @@ function teamList() {
         },
         relTime(iso) {
             if (!iso) return 'Never';
-            const then = new Date(iso).getTime();
+            // users.last_login_at is a UTC DATETIME (NOW()); a bare 'Y-m-d H:i:s' given to
+            // new Date() parses as BROWSER-local time, skewing "Nh ago" by the UTC offset.
+            const parsed = FF_parseUtc(iso);
+            const then = parsed ? parsed.getTime() : NaN;
             if (isNaN(then)) return '—';
             const diff = Math.floor((Date.now() - then) / 1000);
             if (diff < 60)         return 'just now';
@@ -1096,9 +1099,12 @@ function portalList() {
         },
         // Shared with team tab — same relative-time helper, duplicated to
         // avoid coupling the two Alpine scopes.
+        // portal_users.last_login_at is UTC (S-UTC-STAMPS): FF_parseUtc, not
+        // new Date(), which reads a bare 'Y-m-d H:i:s' in the browser's zone.
         relTime(iso) {
             if (!iso) return 'Never';
-            const then = new Date(iso).getTime();
+            const d = FF_parseUtc(iso);
+            const then = d ? d.getTime() : NaN;
             if (isNaN(then)) return '—';
             const diff = Math.floor((Date.now() - then) / 1000);
             if (diff < 60)         return 'just now';

@@ -27,6 +27,13 @@ require_auth();
 require_permission('maintenance', 'view');
 
 // ── KPI tiles (server-rendered) ──────────────────────────────────────────────
+// S-UTC-STAMPS: created_at is UTC; "this year" = the company-local calendar
+// year as UTC bounds (same window as api/v1/damage_claims/kpis.php).
+$yearStartLocal = substr(ff_today(), 0, 4) . '-01-01';
+$yearBounds     = [
+    ff_local_day_start_utc($yearStartLocal),
+    ff_local_day_start_utc(((int) substr($yearStartLocal, 0, 4) + 1) . '-01-01'),
+];
 $kpis = [
     'open' => db_count(
         "SELECT COUNT(*) FROM damage_claims
@@ -39,7 +46,8 @@ $kpis = [
     ),
     'year_total' => db_count(
         "SELECT COUNT(*) FROM damage_claims
-         WHERE YEAR(created_at) = YEAR(NOW()) AND deleted_at IS NULL"
+         WHERE created_at >= ? AND created_at < ? AND deleted_at IS NULL",
+        $yearBounds
     ),
 ];
 
@@ -47,8 +55,9 @@ $avgRow = db_row(
     "SELECT AVG(estimated_repair_cost) AS avg_cost
      FROM damage_claims
      WHERE estimated_repair_cost IS NOT NULL
-       AND YEAR(created_at) = YEAR(NOW())
-       AND deleted_at IS NULL"
+       AND created_at >= ? AND created_at < ?
+       AND deleted_at IS NULL",
+    $yearBounds
 );
 $kpis['avg_repair'] = $avgRow ? (float)($avgRow['avg_cost'] ?? 0) : 0.0;
 

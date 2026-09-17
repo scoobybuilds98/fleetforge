@@ -110,7 +110,9 @@ if (($payload['kind'] ?? '') === 'action') {
     if ($proposal['status'] !== 'pending') {
         json_error('CONFLICT', 'This action is no longer pending (status: "' . $proposal['status'] . '").', 409);
     }
-    if (!empty($proposal['expires_at']) && strtotime($proposal['expires_at']) < time()) {
+    // S-UTC-STAMPS: expires_at is a UTC DATETIME (FleetForgeTools writes
+    // gmdate(time() + 1800)) — parse it as UTC, not PHP-local time.
+    if (!empty($proposal['expires_at']) && strtotime($proposal['expires_at'] . ' UTC') < time()) {
         db_update('ai_pending_changes', ['status' => 'expired'], 'id = ?', [$proposalId]);
         json_error('EXPIRED', 'This action proposal has expired. Ask the AI again for a fresh one.', 409);
     }
@@ -122,7 +124,7 @@ if (($payload['kind'] ?? '') === 'action') {
     // S-AI-AUDIT-HIGH-FIX.
     $claimed = db_update('ai_pending_changes', [
         'status'     => 'applied',
-        'applied_at' => date('Y-m-d H:i:s'),
+        'applied_at' => ff_now_utc(), // S-UTC-STAMPS: UTC like created_at
         'applied_by' => $userId,
     ], 'id = ? AND status = ?', [$proposalId, 'pending']);
     if ($claimed !== 1) {
@@ -190,7 +192,8 @@ if ($action === 'undo') {
 if ($proposal['status'] !== 'pending') {
     json_error('CONFLICT', 'This change is no longer pending (status: "' . $proposal['status'] . '").', 409);
 }
-if (!empty($proposal['expires_at']) && strtotime($proposal['expires_at']) < time()) {
+// S-UTC-STAMPS: expires_at is a UTC DATETIME — parse it as UTC.
+if (!empty($proposal['expires_at']) && strtotime($proposal['expires_at'] . ' UTC') < time()) {
     db_update('ai_pending_changes', ['status' => 'expired'], 'id = ?', [$proposalId]);
     json_error('EXPIRED', 'This change proposal has expired. Ask the AI again to get a fresh one.', 409);
 }
@@ -203,7 +206,7 @@ if (!$targets) {
 // UPDATE is the real gate — only one request flips pending→applied.
 $claimed = db_update('ai_pending_changes', [
     'status'     => 'applied',
-    'applied_at' => date('Y-m-d H:i:s'),
+    'applied_at' => ff_now_utc(), // S-UTC-STAMPS: UTC like created_at
     'applied_by' => $userId,
 ], 'id = ? AND status = ?', [$proposalId, 'pending']);
 if ($claimed !== 1) {

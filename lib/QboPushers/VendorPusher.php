@@ -440,7 +440,7 @@ class VendorPusher
         array $qboVendor,
         ?array $existingMapping
     ): void {
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $snapshot = [
             'qbo_vendor_id'    => (string) $qboVendor['Id'],
             'qbo_sync_token'   => (string) ($qboVendor['SyncToken']                ?? '0'),
@@ -494,7 +494,7 @@ class VendorPusher
             "SELECT id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
             [$ffVendorId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $errorWithCode = $httpCode > 0 ? "HTTP {$httpCode}: {$error}" : $error;
 
         if ($existing === null) {
@@ -534,7 +534,7 @@ class VendorPusher
             "SELECT id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
             [$ffVendorId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         if ($existing === null) {
             db_insert('acc_qbo_vendor_map', [
@@ -570,7 +570,7 @@ class VendorPusher
             "SELECT id FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
             [$ffVendorId]
         );
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
 
         if ($existing === null) {
             db_insert('acc_qbo_vendor_map', [

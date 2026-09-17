@@ -1774,9 +1774,11 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 
     // Inline time-ago helper — no canonical helper exists in lib/.
     // Returns NULL for NULL/empty input so the caller can skip rendering.
+    // S-UTC-STAMPS: callers pass UTC DATETIMEs (acc_qbo_invoice_map.pushed_at,
+    // acc_qbo_sync_log.created_at) — parse as UTC, not PHP-local.
     $rp_time_ago = static function (?string $ts): ?string {
         if (!$ts) return null;
-        $t = strtotime($ts);
+        $t = strtotime($ts . ' UTC');
         if ($t === false) return null;
         $diff = time() - $t;
         if ($diff < 60)      return $diff <= 1 ? 'just now' : $diff . ' seconds ago';
@@ -1811,7 +1813,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
                 </div>
             <?php endif; ?>
             <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['pushed_at'])): ?>
-                <div title="<?= e((string)$qboInvoiceMapping['pushed_at']) ?>">
+                <div title="<?= e(format_datetime($qboInvoiceMapping['pushed_at'], 'Y-m-d H:i:s T')) ?>">
                     <span class="text-secondary">Pushed</span>
                     <span class="font-mono"><?= e($rp_pushed_rel ?? (string)$qboInvoiceMapping['pushed_at']) ?></span>
                 </div>
@@ -1865,7 +1867,7 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
                         }
                         ?>
                         <tr>
-                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e((string)$lr['created_at']) ?>">
+                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e(format_datetime($lr['created_at'], 'Y-m-d H:i:s T')) ?>">
                                 <?= e($rp_time_ago($lr['created_at']) ?? (string)$lr['created_at']) ?>
                             </td>
                             <td class="text-sm"><?= e(($lr['http_method'] ?? '') . ' ' . ($lr['operation'] ?? '')) ?></td>
@@ -2622,7 +2624,8 @@ $nonTaxableSubtotal = bcadd($nonTaxableSubtotal, '0', 2);
                         <div class="text-sm"><?= e($ca['credit_note_reason'] ?? '') ?></div>
                     </td>
                     <td class="font-mono text-sm">
-                        <div><?= format_date($ca['applied_at']) ?></div>
+                        <?php /* S-UTC-STAMPS: applied_at is a UTC DATETIME — show its company-local day (format_date() would take the UTC day). */ ?>
+                        <div><?= e(format_datetime($ca['applied_at'], 'M j, Y')) ?></div>
                         <?php if (!empty($ca['applied_by_name'])): ?>
                             <div class="text-sm text-secondary" style="font-size:11px;">by <?= e($ca['applied_by_name']) ?></div>
                         <?php endif; ?>

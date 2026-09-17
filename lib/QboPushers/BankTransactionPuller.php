@@ -291,7 +291,9 @@ class BankTransactionPuller
                 [$composite]
             );
 
-            $now = date('Y-m-d H:i:s');
+            // S-UTC-STAMPS: last_pulled_at / first_seen_at are UTC (first_seen_at's
+            // column DEFAULT is CURRENT_TIMESTAMP on the +00:00 session).
+            $now = ff_now_utc();
 
             if ($existing) {
                 $unchanged =
@@ -389,8 +391,10 @@ class BankTransactionPuller
         if (!$map) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
-        $note = "[markStale {$now}] {$reason}";
+        // S-UTC-STAMPS: last_pulled_at is UTC; the human-readable notes stamp
+        // stays company-local wall time as before.
+        $now = ff_now_utc();
+        $note = '[markStale ' . ff_utc_to_local($now, 'Y-m-d H:i:s') . "] {$reason}";
         db_execute(
             "UPDATE acc_qbo_bank_transaction_map
                 SET pull_status   = 'superseded',

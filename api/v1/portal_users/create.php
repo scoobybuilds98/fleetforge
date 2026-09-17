@@ -121,8 +121,10 @@ try {
         'status'                => 'invited',
         'is_primary'            => $isPrimary,
         'password_reset_token'  => $tokenHash,
-        'password_reset_expiry' => date('Y-m-d H:i:s', strtotime('+7 days')),
-        'invite_sent_at'        => date('Y-m-d H:i:s'),
+        // UTC (S-UTC-STAMPS): expiry compared as UTC by portal reset_password.php;
+        // invite stamp rendered via format_datetime() (UTC → local).
+        'password_reset_expiry' => ff_now_utc('+7 days'),
+        'invite_sent_at'        => ff_now_utc(),
     ]);
 } catch (\PDOException $e) {
     // Narrow on the email key so the customer_id FK / other 23000s surface for

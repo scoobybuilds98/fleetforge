@@ -394,7 +394,9 @@ class FxRevaluationService
                     'total_ar_cad_revalued'   => $snapshot['total_cad_revalued'],
                     'unrealized_gain_loss'    => $totalDelta,
                     'status'                  => 'posted',
-                    'run_at'                  => date('Y-m-d H:i:s'),
+                    // S-UTC-STAMPS: run_at is a UTC DATETIME like created_at (the page falls
+                    // back between them); revaluation_date stays the business date.
+                    'run_at'                  => \ff_now_utc(),
                     'journal_entry_id'        => null, // set after JE creates
                     'created_by'              => $userId,
                 ]);

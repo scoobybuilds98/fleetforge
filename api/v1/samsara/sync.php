@@ -78,7 +78,9 @@ function ff_samsara_sync_one(array $unit, SamsaraClient $client): array
     // updated upstream and we were called from an older path.
     $entityType = (string) ($unit['samsara_entity_type'] ?? 'vehicle');
     $stats      = $client->getEntityStats($entityType, $vehicleId);
-    $now        = date('Y-m-d H:i:s');
+    // S-UTC-STAMPS: sync stamps are UTC DATETIMEs (db.php session +00:00);
+    // Samsara's ISO-8601 'Z' times below go through gmdate(), not date().
+    $now        = ff_now_utc();
 
     if (empty($stats)) {
         return [
@@ -104,7 +106,7 @@ function ff_samsara_sync_one(array $unit, SamsaraClient $client): array
         'samsara_last_location_address' => $gps['address'] ?? null,
         'samsara_last_speed_kph'        => $gps['speed_kph'] ?? null,
         'samsara_last_connected_at'     => isset($stats['last_connected_at'])
-            ? date('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
+            ? gmdate('Y-m-d H:i:s', strtotime((string) $stats['last_connected_at']))
             : null,
         'samsara_last_synced_at'        => $now,
         'samsara_odometer_km'           => $stats['odometer_km'] ?? null,
@@ -144,7 +146,7 @@ function ff_samsara_sync_one(array $unit, SamsaraClient $client): array
                 'heading'             => $gps['heading']   ?? null,
                 'address'             => $gps['address']   ?? null,
                 'recorded_at'         => isset($gps['time'])
-                    ? date('Y-m-d H:i:s', strtotime((string) $gps['time']))
+                    ? gmdate('Y-m-d H:i:s', strtotime((string) $gps['time']))
                     : $now,
                 'synced_at'           => $now,
             ]);

@@ -310,7 +310,8 @@ class DriftChecker
             "INSERT INTO settings (`key`, `value`, value_type, group_name, is_public, is_sensitive)
                   VALUES (?, ?, 'string', 'quickbooks', 0, 0)
              ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
-            ['quickbooks.drift.last_check_at', date('Y-m-d H:i:s')]
+            // S-UTC-STAMPS: ISO-8601 UTC with offset (unambiguous for any reader).
+            ['quickbooks.drift.last_check_at', gmdate('c')]
         );
 
         return [

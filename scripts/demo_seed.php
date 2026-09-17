@@ -693,7 +693,7 @@ foreach ($leases as $l) {
     if (!empty($l['odometer_from_unit']) && !empty($unit['samsara_odometer_km'])) {
         $row['odometer_start_km']         = $unit['samsara_odometer_km'];
         $row['odometer_start_source']     = 'gps';
-        $row['odometer_start_fetched_at'] = date('Y-m-d H:i:s');
+        $row['odometer_start_fetched_at'] = ff_now_utc(); // S-UTC-STAMPS: UTC column
     } elseif (!empty($l['odometer_start_km'])) {
         $row['odometer_start_km']     = $l['odometer_start_km'];
         $row['odometer_start_source'] = 'manual';

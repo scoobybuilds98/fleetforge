@@ -115,6 +115,29 @@ $_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
     <script>
         window.FF_TIMEZONE  = <?= json_encode(settings_get('company.timezone', APP_TIMEZONE)) ?>;
         window.FF_BASE_PATH = <?= json_encode(FF_BASE_PATH) ?>;
+        // UTC DATETIME helpers (S-UTC-STAMPS). Stored DATETIMEs are UTC
+        // (includes/db.php pins the session to '+00:00'), but a bare
+        // 'YYYY-MM-DD HH:MM:SS' string passed to new Date() is parsed as the
+        // BROWSER's local time — every such stamp rendered 7–8h off. Parse with an
+        // explicit Z, render in the company timezone. Strings that already carry a
+        // zone (…Z / ±HH:MM) are honoured as-is; a date-only 'YYYY-MM-DD' is a
+        // calendar day, anchored at 12:00 UTC so it never slips a day when shown.
+        window.FF_parseUtc = function (v) {
+            if (v === null || v === undefined || v === '') return null;
+            if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+            var s = String(v).trim(), d;
+            if (/^\d{4}-\d{2}-\d{2}$/.test(s)) d = new Date(s + 'T12:00:00Z');
+            else if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) d = new Date(s.replace(' ', 'T') + 'Z');
+            else d = new Date(s);
+            return isNaN(d.getTime()) ? null : d;
+        };
+        window.FF_formatUtc = function (v, opts) {
+            var d = window.FF_parseUtc(v);
+            if (!d) return '—';
+            var o = Object.assign({ year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }, opts || {});
+            try { o.timeZone = window.FF_TIMEZONE || undefined; return d.toLocaleString('en-CA', o); }
+            catch (e) { delete o.timeZone; return d.toLocaleString('en-CA', o); }
+        };
     </script>
 </head>
 <body>

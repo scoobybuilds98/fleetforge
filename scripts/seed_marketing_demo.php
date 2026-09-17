@@ -782,7 +782,7 @@ foreach ($leaseDefs as $def) {
     if (isset($def['odoStart'])) {
         $row['odometer_start_km']     = money($def['odoStart']);
         $row['odometer_start_source'] = ($def['mileageMode'] ?? 'off') === 'samsara' ? 'gps' : 'manual';
-        if (($def['mileageMode'] ?? '') === 'samsara') $row['odometer_start_fetched_at'] = date('Y-m-d H:i:s');
+        if (($def['mileageMode'] ?? '') === 'samsara') $row['odometer_start_fetched_at'] = ff_now_utc(); // S-UTC-STAMPS: UTC column
     }
     if ($status === 'completed') {
         $row['closed_at']         = $actualReturn . ' 15:30:00';
@@ -903,7 +903,9 @@ foreach ($leaseRecords as $lr) {
             $params['odometer_at_period_start_km'] = money($odoCursor);
             $params['odometer_at_period_end_km']   = money($odoCursor + $delta);
             $params['odometer_source']             = $lr['mileageMode'] === 'samsara' ? 'gps' : 'manual';
-            $params['odometer_fetched_at']         = date('Y-m-d H:i:s', strtotime($pEnd . ' 09:00'));
+            // S-UTC-STAMPS: 09:00 company-local on the period end, stored as UTC.
+            $params['odometer_fetched_at']         = (new DateTimeImmutable($pEnd . ' 09:00', ff_business_timezone()))
+                ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
             $odoCursor += $delta;
         }
         // Feed engine-hours per period for the hourly (reefer engine-hours) lease so an
@@ -1070,8 +1072,11 @@ foreach ($leaseRecords as $lr) {
 
     // A few monthly distance-log rows (last 3 months) for the Distance Travelled section.
     for ($m = 3; $m >= 1; $m--) {
-        $pStart = (new DateTime("first day of -{$m} month"))->format('Y-m-d 00:00:00');
-        $pEnd   = (new DateTime('first day of -' . ($m - 1) . ' month'))->modify('-1 day')->format('Y-m-d 23:59:59');
+        // S-UTC-STAMPS: window bounds are local-calendar instants stored as UTC
+        // (local 00:00 on the 1st → local 23:59:59 on the last day).
+        $pStart = ff_local_day_start_utc((new DateTime("first day of -{$m} month"))->format('Y-m-d'));
+        $pEnd   = (new DateTimeImmutable((new DateTime('first day of -' . ($m - 1) . ' month'))->modify('-1 day')->format('Y-m-d 23:59:59'), ff_business_timezone()))
+            ->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
         $dist   = round($kmPerMonth * (0.85 + (random_int(0, 30) / 100)), 2);
         try {
             db_insert('equipment_distance_logs', [
@@ -1085,7 +1090,7 @@ foreach ($leaseRecords as $lr) {
                 'first_reading_at'  => $pStart,
                 'last_reading_at'   => $pEnd,
                 'label'             => DEMO_TAG . ' monthly distance',
-                'queried_at'        => date('Y-m-d H:i:s'),
+                'queried_at'        => ff_now_utc(), // S-UTC-STAMPS: UTC column
                 'created_by'        => DEMO_USER_ID,
             ]);
             $distLogs++;
@@ -1108,7 +1113,7 @@ foreach ($leaseRecords as $lr) {
                     'speed_kph'           => (string) random_int(0, 105),
                     'heading'             => random_int(0, 359),
                     'address'             => 'Hwy 1, BC',
-                    'recorded_at'         => date('Y-m-d H:i:s', strtotime("-{$h} hours")),
+                    'recorded_at'         => ff_now_utc("-{$h} hours"), // S-UTC-STAMPS: UTC column
                 ]);
                 $breadcrumbs++;
             } catch (\Throwable $e) { line("    ! breadcrumb skipped: " . $e->getMessage()); break; }
@@ -1142,7 +1147,7 @@ if ($connStatus === 'connected') {
     );
     $mapCount = (int) ceil(count($activeCustomerIds) * 0.7);
     foreach (array_slice($activeCustomerIds, 0, $mapCount) as $cid) {
-        $ts = date('Y-m-d H:i:s', strtotime('-' . random_int(1, 20) . ' days'));
+        $ts = gmdate('Y-m-d H:i:s', strtotime('-' . random_int(1, 20) . ' days')); // S-UTC-STAMPS: QBO map stamps are UTC
         try {
             db_execute("DELETE FROM acc_qbo_customer_map WHERE ff_customer_id = ?", [$cid]);
             db_insert('acc_qbo_customer_map', [
@@ -1166,7 +1171,7 @@ if ($connStatus === 'connected') {
         fn($i) => in_array($i['finalStatus'] ?? 'draft', ['sent','paid','partially_paid','overdue'], true)));
     $invCap = (int) ceil(count($issuedInvoices) * 0.6);
     foreach (array_slice($issuedInvoices, 0, $invCap) as $inv) {
-        $ts = date('Y-m-d H:i:s', strtotime($inv['periodEnd'] . ' +2 days'));
+        $ts = gmdate('Y-m-d H:i:s', strtotime($inv['periodEnd'] . ' +2 days')); // S-UTC-STAMPS: UTC instant of that local midnight
         try {
             db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = ?", [$inv['id']]);
             db_insert('acc_qbo_invoice_map', [

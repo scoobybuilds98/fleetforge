@@ -533,9 +533,12 @@ function qboAccountMapping() {
             return t.split('_').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
         },
 
+        // S-UTC-STAMPS: every value shown here is a UTC DATETIME (map
+        // last_synced_at / MAX(last_pull_at), sync-log / queue / drift stamps).
+        // new Date('Y-m-dTH:i:s') read it as browser-local (7–8h off);
+        // FF_formatUtc parses UTC and renders in the company timezone.
         formatTs(s) {
-            if (!s) return '—';
-            try { return new Date(String(s).replace(' ', 'T')).toLocaleString(); } catch { return s; }
+            return FF_formatUtc(s);
         },
     };
 }

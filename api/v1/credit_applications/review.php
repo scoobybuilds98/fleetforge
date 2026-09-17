@@ -136,7 +136,9 @@ if (!optimistic_lock_matches($submittedUpdatedAt, $app['updated_at'])) {
 $customerId = (int) $app['customer_id'];
 $userId     = current_user_id();
 $userName   = current_user()['name'] ?? 'unknown';
-$now        = date('Y-m-d H:i:s');
+// S-UTC-STAMPS: reviewed_at is a UTC DATETIME (rendered via format_datetime /
+// FF_formatUtc) — never PHP-local date().
+$now        = ff_now_utc();
 
 // ── If touching the customer row, load it now (outside txn) for lock check ─
 $custRow = null;

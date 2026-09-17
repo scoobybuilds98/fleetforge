@@ -429,9 +429,11 @@ function qboPaymentInitiationsAdmin() {
             return sym + parseFloat(amt).toFixed(2);
         },
 
+        // S-UTC-STAMPS: the stamps shown here are UTC DATETIMEs — printing the
+        // raw string showed UTC wall time. Same 'YYYY-MM-DD HH:MM' shape,
+        // converted to the company timezone.
         formatTs(ts) {
-            if (!ts) return '—';
-            return ts.replace('T', ' ').substring(0, 16);
+            return ts ? FF_formatUtc(ts, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).replace(',', '') : '—';
         },
 
         truncate(s, n) {
@@ -542,9 +544,11 @@ function qboPaymentsAdmin(canEdit) {
             return sym + parseFloat(amt).toFixed(2);
         },
 
+        // S-UTC-STAMPS: the stamps shown here are UTC DATETIMEs — printing the
+        // raw string showed UTC wall time. Same 'YYYY-MM-DD HH:MM' shape,
+        // converted to the company timezone.
         formatTs(ts) {
-            if (!ts) return '—';
-            return ts.replace('T', ' ').substring(0, 16);
+            return ts ? FF_formatUtc(ts, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).replace(',', '') : '—';
         },
 
         truncate(s, n) {

@@ -49,7 +49,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Generate invite token
                 $plainToken = bin2hex(random_bytes(32));
                 $tokenHash  = hash('sha256', $plainToken);
-                $expiry     = date('Y-m-d H:i:s', strtotime('+7 days'));
+                // UTC (S-UTC-STAMPS): DATETIMEs are UTC (db.php pins '+00:00');
+                // reset_password.php compares this expiry as UTC.
+                $expiry     = ff_now_utc('+7 days');
 
                 // WHY: use password_reset_token (not invite_token) so reset_password.php
                 // can validate the link. invite_token is reserved for remember-me cookies.
@@ -61,7 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'is_primary'            => 0,
                     'password_reset_token'  => $tokenHash,
                     'password_reset_expiry' => $expiry,
-                    'invite_sent_at'        => date('Y-m-d H:i:s'),
+                    'invite_sent_at'        => ff_now_utc(), // UTC: format_datetime() reads it as UTC
                 ]);
 
                 // Log invite URL (dev mode — no real email sending)
@@ -127,12 +129,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Generate new invite token
                 $plainToken = bin2hex(random_bytes(32));
                 $tokenHash  = hash('sha256', $plainToken);
-                $expiry     = date('Y-m-d H:i:s', strtotime('+7 days'));
+                // UTC (S-UTC-STAMPS): compared as UTC in reset_password.php.
+                $expiry     = ff_now_utc('+7 days');
 
                 db_update('portal_users', [
                     'password_reset_token'  => $tokenHash,
                     'password_reset_expiry' => $expiry,
-                    'invite_sent_at'        => date('Y-m-d H:i:s'),
+                    'invite_sent_at'        => ff_now_utc(), // UTC: format_datetime() reads it as UTC
                 ], 'id = ? AND customer_id = ?', [$targetId, $cid]);
 
                 // Log invite URL

@@ -272,7 +272,7 @@ class CreditMemoPusher
             'qbo_sync_token' => (string) ($qboCm['SyncToken'] ?? '0'),
             'push_status'    => 'voided',
             'push_error'     => null,
-            'last_synced_at' => date('Y-m-d H:i:s'),
+            'last_synced_at' => ff_now_utc(), // S-UTC-STAMPS: UTC
         ]);
 
         return [
@@ -566,7 +566,9 @@ class CreditMemoPusher
         }
 
         // TxnDate from created_at (credit_notes has no dedicated txn_date column).
-        $txnDate = substr((string) ($cn['created_at'] ?? date('Y-m-d')), 0, 10);
+        // created_at is a UTC DATETIME: take the company-LOCAL calendar day, or a
+        // credit note issued after 5pm Pacific (4pm PST) was pushed dated tomorrow.
+        $txnDate = !empty($cn['created_at']) ? \ff_utc_to_local((string) $cn['created_at']) : \ff_today();
 
         $payload = [
             'CustomerRef' => ['value' => $qboCustomerId],
@@ -637,7 +639,7 @@ class CreditMemoPusher
         if (!self::ffCreditNoteExists($ffCreditNoteId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffCreditNoteId, [
             'qbo_credit_memo_id'            => (string) $qboCm['Id'],
             'qbo_sync_token'                => (string) ($qboCm['SyncToken'] ?? '0'),
@@ -661,7 +663,7 @@ class CreditMemoPusher
         if (!self::ffCreditNoteExists($ffCreditNoteId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffCreditNoteId, [
             'push_status'    => 'failed',
             'push_error'     => substr($error, 0, 2000),
@@ -675,7 +677,7 @@ class CreditMemoPusher
         if (!self::ffCreditNoteExists($ffCreditNoteId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         self::upsertMappingRow($ffCreditNoteId, [
             'push_status'    => $status,
             'push_error'     => substr($reason, 0, 2000),
@@ -689,7 +691,7 @@ class CreditMemoPusher
         if (!self::ffCreditNoteExists($ffCreditNoteId)) {
             return;
         }
-        $now = date('Y-m-d H:i:s');
+        $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $num = (string) ($cn['credit_note_number'] ?? '');
         $msg = "skipped: {$skippedStatus}" . ($num !== '' ? " (CN {$num})" : '');
         self::upsertMappingRow($ffCreditNoteId, [

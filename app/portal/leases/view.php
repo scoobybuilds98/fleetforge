@@ -412,12 +412,13 @@ $statusBadge = match($lease['status']) {
                     <span style="color:var(--text-secondary); font-size:0.8125rem;">
                         · Credit note <?= e($refundData['credit_note_number']) ?>
                         <?php if ($refundData['issued_at']): ?>
-                            issued on <?= e(format_date($refundData['issued_at'])) ?>
+                            issued on <?= e(format_datetime($refundData['issued_at'], 'M j, Y')) /* credit_notes.created_at is UTC → local day */ ?>
                         <?php endif; ?>
                     </span>
                 <?php elseif ($refundData['method'] === 'cash' && !empty($refundData['settled_at'])): ?>
                     <span style="color:var(--text-secondary); font-size:0.8125rem;">
-                        · Paid on <?= e(format_date($refundData['settled_at'])) ?>
+                        <?php /* S-UTC-STAMPS: settled_at is a UTC DATETIME — format_date() would take its UTC calendar day; render the company-local day. */ ?>
+                        · Paid on <?= e(format_datetime($refundData['settled_at'], 'M j, Y')) ?>
                     </span>
                 <?php endif; ?>
             </div>

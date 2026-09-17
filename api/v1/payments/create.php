@@ -251,7 +251,7 @@ db_transaction(function () use (
         'check_number'     => $checkNumber,
         'card_last_four'   => $cardLastFour,
         'payment_date'     => $paymentDate,
-        'received_at'      => date('Y-m-d H:i:s'),
+        'received_at'      => ff_now_utc(),   // UTC like every DATETIME (S-UTC-STAMPS)
         'status'           => 'cleared',
         'overpayment_amount'   => $overpaymentAmount,
         'overpayment_action'   => bccomp($overpaymentAmount, '0', 2) > 0 ? 'credit_to_account' : null,

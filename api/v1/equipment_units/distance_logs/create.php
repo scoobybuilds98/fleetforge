@@ -8,7 +8,8 @@ declare(strict_types=1);
  *
  * Body (JSON):
  *   equipment_unit_id  int     required
- *   period_start       string  required  — ISO 8601 or 'Y-m-d H:i:s'
+ *   period_start       string  required  — ISO 8601 or naive datetime (naive = company-local
+ *                                           wall time, same rule as samsara/period_distance); stored UTC
  *   period_end         string  required
  *   distance           string  required  — decimal string (bcmath); editable before save
  *   unit               string  required  — 'km' | 'miles'
@@ -100,12 +101,55 @@ if (!$eu) {
     json_error('NOT_FOUND', 'Equipment unit not found.', 404);
 }
 
-// Normalise datetimes: strip any TZ suffix for DB storage (DATETIME col stores as UTC)
-$normStart  = date('Y-m-d H:i:s', strtotime($periodStart));
-$normEnd    = date('Y-m-d H:i:s', strtotime($periodEnd));
-$normFirstAt = $firstAt ? date('Y-m-d H:i:s', strtotime($firstAt)) : null;
-$normLastAt  = $lastAt  ? date('Y-m-d H:i:s', strtotime($lastAt))  : null;
-$normQueried = $queriedAt ? date('Y-m-d H:i:s', strtotime($queriedAt)) : null;
+// ── Normalise datetimes to UTC 'Y-m-d H:i:s' ────────────────────────
+// S-UTC-STAMPS: every DATETIME here is a UTC instant. The old
+// date('Y-m-d H:i:s', strtotime(...)) stored PHP-local (Pacific) wall time.
+//
+// period_start / period_end MUST be the same instants the distance was
+// queried for, so they use api/v1/samsara/period_distance.php's exact rules
+// (S-GPS-LOCAL-WINDOW): a date-only pair is a business-day window
+// (BusinessDayWindow::toUtc — local midnight → next local midnight); any
+// other naive value (the equipment page's datetime-local input) is company-
+// local wall time; an explicit offset/Z always wins.
+$utcTz  = new DateTimeZone('UTC');
+$dateRe = '/^\d{4}-\d{2}-\d{2}$/';
+try {
+    if (preg_match($dateRe, $periodStart) && preg_match($dateRe, $periodEnd)) {
+        $window    = \FleetForge\GPS\BusinessDayWindow::toUtc($periodStart, $periodEnd);
+        $normStart = $window['start']->setTimezone($utcTz)->format('Y-m-d H:i:s');
+        $normEnd   = $window['end']->setTimezone($utcTz)->format('Y-m-d H:i:s');
+    } else {
+        $bizTz = \FleetForge\GPS\BusinessDayWindow::timezone();
+        // A lone date on the end side still means that whole local day (period_distance twin).
+        $endIn     = preg_match($dateRe, $periodEnd) ? $periodEnd . ' 23:59:59' : $periodEnd;
+        $normStart = (new DateTimeImmutable($periodStart, $bizTz))->setTimezone($utcTz)->format('Y-m-d H:i:s');
+        $normEnd   = (new DateTimeImmutable($endIn, $bizTz))->setTimezone($utcTz)->format('Y-m-d H:i:s');
+    }
+} catch (\Throwable) {
+    json_error('VALIDATION_ERROR', 'period_start / period_end must be valid dates or datetimes.', 422);
+}
+
+/**
+ * Normalise an optional Samsara reading/query timestamp to UTC.
+ * These arrive as ISO-8601 'Z' strings from period_distance; a bare value is
+ * taken as UTC (the API never emits local wall time for them).
+ *
+ * @param  string|null $v raw client value
+ * @return string|null UTC 'Y-m-d H:i:s', or null when absent/unparseable
+ */
+$toUtc = static function (?string $v) use ($utcTz): ?string {
+    if ($v === null || $v === '') {
+        return null;
+    }
+    try {
+        return (new DateTimeImmutable($v, $utcTz))->setTimezone($utcTz)->format('Y-m-d H:i:s');
+    } catch (\Throwable) {
+        return null;
+    }
+};
+$normFirstAt = $toUtc($firstAt);
+$normLastAt  = $toUtc($lastAt);
+$normQueried = $toUtc($queriedAt);
 
 $userId = current_user_id();
 
@@ -123,7 +167,7 @@ $id = db_insert('equipment_distance_logs', [
     'label'             => $label !== '' ? $label : null,
     'queried_at'        => $normQueried,
     'created_by'        => $userId,
-    'created_at'        => date('Y-m-d H:i:s'),
+    'created_at'        => ff_now_utc(), // S-UTC-STAMPS: UTC like the column DEFAULT
 ]);
 
 db_insert('audit_log', [

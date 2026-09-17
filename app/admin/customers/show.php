@@ -164,7 +164,8 @@ require_once FF_ROOT . '/includes/header.php';
                 };
                 $qm_title = $qboMapping['qbo_customer_id'] ? 'qbo#' . $qboMapping['qbo_customer_id'] : '';
                 if (!empty($qboMapping['last_synced_at'])) {
-                    $qm_title .= ($qm_title !== '' ? ' · ' : '') . 'last synced ' . $qboMapping['last_synced_at'];
+                    // S-UTC-STAMPS: last_synced_at is UTC — show company-local time.
+                    $qm_title .= ($qm_title !== '' ? ' · ' : '') . 'last synced ' . format_datetime($qboMapping['last_synced_at'], 'Y-m-d H:i:s T');
                 }
             ?>
             <a href="<?= base_url('quickbooks/customers') ?>?q=<?= e(rawurlencode($customer['company_name'])) ?>"
@@ -1286,12 +1287,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                     <tbody>
                         <template x-for="app in creditApps" :key="app.id">
                             <tr>
-                                <td class="text-sm" x-text="app.sent_at ? formatDate(app.sent_at) : '—'"></td>
+                                <td class="text-sm" x-text="app.sent_at ? formatUtcDate(app.sent_at) : '—'"></td>
                                 <td>
                                     <span :class="app.is_expired ? 'badge badge-danger' : creditAppStatusBadge(app.status)"
                                           x-text="app.is_expired ? 'Expired' : creditAppStatusLabel(app.status)"></span>
                                 </td>
-                                <td class="text-sm" x-text="app.submitted_at ? formatDate(app.submitted_at) : '—'"></td>
+                                <td class="text-sm" x-text="app.submitted_at ? formatUtcDate(app.submitted_at) : '—'"></td>
                                 <td>
                                     <template x-if="app.review_outcome">
                                         <span :class="creditAppOutcomeBadge(app.review_outcome)"
@@ -1299,8 +1300,8 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                     </template>
                                     <template x-if="!app.review_outcome"><span class="text-secondary">—</span></template>
                                 </td>
-                                <td class="text-sm text-secondary" x-text="app.reviewed_at ? formatDate(app.reviewed_at) : '—'"></td>
-                                <td class="text-sm text-secondary" x-text="app.token_expires_at ? formatDate(app.token_expires_at) : '—'"></td>
+                                <td class="text-sm text-secondary" x-text="app.reviewed_at ? formatUtcDate(app.reviewed_at) : '—'"></td>
+                                <td class="text-sm text-secondary" x-text="app.token_expires_at ? formatUtcDate(app.token_expires_at) : '—'"></td>
                                 <td class="text-sm text-secondary" x-text="app.sent_by_name || '—'"></td>
                                 <td style="white-space:nowrap;">
                                     <!-- View: wired S-CCA-3 — links to admin view page for submitted/reviewed apps -->
@@ -2170,12 +2171,21 @@ function FF_CustomerProfile() {
                         void:'badge-neutral', written_off:'badge-danger' };
             return m[status] || 'badge-neutral';
         },
+        // S-UTC-STAMPS: company-local calendar day of a UTC DATETIME (credit
+        // application sent/submitted/reviewed/expires). formatDate() above is
+        // shared with date-only fields and renders in the BROWSER zone, so the
+        // UTC stamps get their own variant rather than changing its semantics.
+        formatUtcDate(dt) {
+            return FF_formatUtc(dt, { hour: undefined, minute: undefined });
+        },
+        // S-UTC-STAMPS: serves DATE fields (lease start/end, due_date, log_date,
+        // expiration_date) AND UTC DATETIMEs (note created_at, uploaded_at).
+        // Appending 'Z' to a bare 'Y-m-d' made it UTC midnight, which a Pacific
+        // browser rendered as the PREVIOUS day. FF_formatUtc anchors a date-only
+        // value at 12:00Z and converts a UTC DATETIME to the company-local day.
         formatDate(dt) {
             if (!dt) return '';
-            try {
-                return new Date(dt.replace(' ', 'T') + 'Z')
-                    .toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
-            } catch (e) { return dt; }
+            return FF_formatUtc(dt, { hour: undefined, minute: undefined });
         },
     };
 }

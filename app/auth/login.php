@@ -180,8 +180,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Determine lockout state before checking password
             $isLocked = false;
             if ($user && $user['locked_until'] !== null) {
+                // locked_until is UTC (S-UTC-STAMPS; db.php pins '+00:00') — parse
+                // with an explicit zone or strtotime() reads it as Pacific.
                 $lockTs = is_string($user['locked_until'])
-                    ? strtotime($user['locked_until'])
+                    ? strtotime($user['locked_until'] . ' UTC')
                     : (int) $user['locked_until'];
                 if ($lockTs > time()) {
                     $isLocked    = true;
@@ -205,7 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $attempts = (int) ($user['login_attempts'] ?? 0) + 1;
 
                         if ($attempts >= 5) {
-                            $lockedUntil = date('Y-m-d H:i:s', time() + 900); // 15 min
+                            $lockedUntil = gmdate('Y-m-d H:i:s', time() + 900); // 15 min, UTC (S-UTC-STAMPS)
                             db_execute(
                                 "UPDATE users
                                  SET login_attempts = ?, locked_until = ?

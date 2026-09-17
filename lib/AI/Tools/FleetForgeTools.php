@@ -3028,7 +3028,12 @@ class FleetForgeTools
             'payload'        => json_encode($payload),
             'affected_count' => count($targets),
             'status'         => 'pending',
-            'expires_at'     => date('Y-m-d H:i:s', time() + 1800), // 30 min
+            // S-UTC-STAMPS: UTC DATETIME (apply-change.php parses it as UTC).
+            // Pacific wall time + a local parse broke across the DST fall-back
+            // hour (a 01:45 PDT proposal "expired" 30 min before it was made).
+            // Epoch arithmetic, not ff_now_utc('+30 minutes'): PHP applies a
+            // relative '+N minutes' on the local wall clock across a DST change.
+            'expires_at'     => gmdate('Y-m-d H:i:s', time() + 1800), // 30 min
         ]);
 
         return [
@@ -3230,7 +3235,7 @@ class FleetForgeTools
             'payload'        => json_encode($payload),
             'affected_count' => 1,
             'status'         => 'pending',
-            'expires_at'     => date('Y-m-d H:i:s', time() + 1800),
+            'expires_at'     => gmdate('Y-m-d H:i:s', time() + 1800), // S-UTC-STAMPS: UTC, exact 30 min (epoch math)
         ]);
 
         return [

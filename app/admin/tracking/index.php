@@ -781,7 +781,10 @@ function FF_FleetTracking() {
         // Online = has lat AND last_connected within 8 hours
         isOnline(unit) {
             if (!unit.samsara_last_location_lat || !unit.samsara_last_connected_at) return false;
-            const ts = new Date(unit.samsara_last_connected_at).getTime();
+            // S-UTC-STAMPS: the stamp is a bare UTC DATETIME — new Date() would read
+            // it in the browser's zone; FF_parseUtc pins it to UTC.
+            const d  = FF_parseUtc(unit.samsara_last_connected_at);
+            const ts = d ? d.getTime() : NaN;
             return !isNaN(ts) && (Date.now() - ts) < (8 * 3600 * 1000);
         },
 
@@ -790,9 +793,13 @@ function FF_FleetTracking() {
             return d.toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         },
 
+        // Only reads samsara_last_connected_at / samsara_last_synced_at — UTC
+        // DATETIMEs (S-UTC-STAMPS): parse with FF_parseUtc, show the fallback
+        // date in the company timezone.
         formatRelative(value) {
             if (!value) return '';
-            const ts = new Date(value).getTime();
+            const d  = FF_parseUtc(value);
+            const ts = d ? d.getTime() : NaN;
             if (isNaN(ts)) return value;
             const diffSec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
             if (diffSec < 60)    return 'just now';
@@ -800,7 +807,7 @@ function FF_FleetTracking() {
             if (diffSec < 86400) return Math.floor(diffSec/3600) + ' hr ago';
             const days = Math.floor(diffSec/86400);
             if (days < 7) return days + 'd ago';
-            return new Date(value).toLocaleDateString();
+            return FF_formatUtc(value, { hour: undefined, minute: undefined });
         },
 
         esc(str) {

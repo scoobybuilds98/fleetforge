@@ -349,12 +349,12 @@ function qboDashboard() {
             return (row.response_status + (row.error_code ? ' · ' + row.error_code : ''));
         },
 
+        // S-UTC-STAMPS: callers pass acc_qbo_sync_log.created_at (UTC DATETIME)
+        // and last_token_refresh_at (ISO UTC). new Date('Y-m-dTH:i:s') read the
+        // bare UTC value as browser-local time (7–8h off); FF_formatUtc parses UTC
+        // and renders in the company timezone.
         formatTs(s) {
-            if (!s) return '—';
-            try {
-                const d = new Date(s.replace(' ', 'T'));
-                return d.toLocaleString();
-            } catch { return s; }
+            return FF_formatUtc(s);
         },
 
         openLogDetail(id) {

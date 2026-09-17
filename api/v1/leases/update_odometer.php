@@ -65,15 +65,18 @@ $fetchedAt = null;
 if ($source === 'gps') {
     if (!empty($body['fetched_at'])) {
         try {
-            $dt = new DateTime((string) $body['fetched_at']);
-            $fetchedAt = $dt->format('Y-m-d H:i:s');
+            // S-UTC-STAMPS: odometer_start_fetched_at is a UTC DATETIME. The client
+            // sends current_odometer's ISO string (offset honoured); a bare value is
+            // taken as UTC. format() alone kept the offset's Pacific wall time.
+            $dt = new DateTime((string) $body['fetched_at'], new DateTimeZone('UTC'));
+            $fetchedAt = $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d H:i:s');
         } catch (\Throwable) {
             $fetchedAt = null;
         }
     }
     if ($fetchedAt === null) {
-        // Stamp server-side so there's always an audit trail
-        $fetchedAt = date('Y-m-d H:i:s');
+        // Stamp server-side so there's always an audit trail (UTC — S-UTC-STAMPS)
+        $fetchedAt = ff_now_utc();
     }
 }
 
