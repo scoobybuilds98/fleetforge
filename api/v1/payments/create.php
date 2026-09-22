@@ -404,8 +404,12 @@ db_transaction(function () use (
             'created_by'              => current_user_id(),
         ]);
 
-        // S-AUDIT-BILLING-ENGINE-1 #20: QBO mirror for the overpayment CN
-        // (the other mint sites enqueue too; queue row commits with the CN).
+        // S-AUDIT-BILLING-ENGINE-1 #20 / S-QBO-GOLIVE-AUDIT (B2): the enqueue
+        // is kept so every mint site stays uniform, but CreditMemoEnqueuer
+        // REFUSES source='overpayment' — QuickBooks holds this excess as the
+        // pushed Payment's unapplied amount, and a CreditMemo on top doubled
+        // the customer's credit there. Applying this CN moves that unapplied
+        // amount instead (CreditApplicationPusher).
         \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue((int) $cnId, 'create');
 
         db_insert('audit_log', [

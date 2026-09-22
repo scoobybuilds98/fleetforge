@@ -163,7 +163,7 @@ class PaymentEnqueuer
             // ────────────────────────────────────────────────────────
             // Gate 4: INSERT queue row.
             // ────────────────────────────────────────────────────────
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'payment',
                 'entity_id'   => $paymentId,
                 'operation'   => $operation,

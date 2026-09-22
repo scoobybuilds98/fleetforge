@@ -89,6 +89,24 @@ function ff_smoke_pi_cleanup(): void
     // FK order: initiations depend on invoices + portal_users; payments depend on
     // customers; map rows depend on payments.
     db_execute("DELETE FROM acc_qbo_payment_initiations WHERE ff_invoice_id BETWEEN 999990 AND 999999");
+    // S-QBO-GOLIVE-AUDIT: payments the webhook path creates take the NEXT
+    // auto-increment id, which is only inside 999990-999999 on a DB where an
+    // earlier smoke pushed the counter there — on a fresh copy of production
+    // one leaked (id 1000003, with its JE). Find them by what they belong to.
+    $leaked = array_map('intval', array_unique(array_merge(
+        array_column(db_select("SELECT payment_id AS id FROM payment_allocations WHERE invoice_id BETWEEN 999990 AND 999999"), 'id'),
+        array_column(db_select("SELECT ff_payment_id AS id FROM acc_qbo_payment_map WHERE qbo_payment_id LIKE 'smoke-%' AND ff_payment_id IS NOT NULL"), 'id'),
+        array_column(db_select("SELECT id FROM payments WHERE notes LIKE 'QuickBooks payment — qbo_payment_id=smoke-%'"), 'id')
+    )));
+    if ($leaked !== []) {
+        $in = implode(',', $leaked);
+        db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id IN ({$in})");
+        db_execute("DELETE FROM credit_notes WHERE source_payment_id IN ({$in})");
+        db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id IN ({$in})");
+        db_execute("DELETE FROM payment_allocations WHERE payment_id IN ({$in})");
+        db_execute("DELETE FROM payments WHERE id IN ({$in})");
+    }
+    db_execute("DELETE FROM acc_qbo_payment_map WHERE qbo_payment_id LIKE 'smoke-%'");
     db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM payment_allocations WHERE payment_id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM payments WHERE id BETWEEN 999990 AND 999999");

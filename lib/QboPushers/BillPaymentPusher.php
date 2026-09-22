@@ -507,6 +507,20 @@ class BillPaymentPusher
      */
     private static function runPreflight(array $ff)
     {
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): single-currency company guard.
+        // See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason($ff['currency'] ?? null, 'Bill payment #' . ($ff['id'] ?? '?'));
+        if ($currencyBlock !== null) {
+            return ['reason' => $currencyBlock, 'status_code' => 'failed_preflight_currency_mismatch'];
+        }
+
+        // Gate 0.5 (S-QBO-GOLIVE-AUDIT): bill payments dated before go-live
+        // (history entered for per-unit costing) are already in QuickBooks.
+        $preGoLive = InvoiceLinker::preGoLiveDateReason('Bill payment ' . ($ff['payment_number'] ?? "#{$ff['id']}"), $ff['payment_date'] ?? null);
+        if ($preGoLive !== null) {
+            return $preGoLive;
+        }
+
         // Gate 1: Vendor mapping.
         $vendorMap = db_row(
             "SELECT qbo_vendor_id, mapping_status FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",

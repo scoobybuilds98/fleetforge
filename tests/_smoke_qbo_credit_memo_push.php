@@ -355,7 +355,9 @@ try {
     if (CreditMemoEnqueuer::enqueue(999991, 'create') === false) { echo "PASS C23 Enqueuer gate-0 rejects missing credit note\n"; $pass++; }
     else { echo "FAIL C23 expected false for missing credit note\n"; $failures[] = 'C23'; }
 
-    db_execute("UPDATE credit_notes SET status='fully_used' WHERE id=999990");
+    // S-QBO-GOLIVE-AUDIT: 'fully_used' is now pushable on purpose (an applied
+    // credit whose first push failed still has to reach QBO) — 'expired' is not.
+    db_execute("UPDATE credit_notes SET status='expired' WHERE id=999990");
     if (CreditMemoEnqueuer::enqueue(999990, 'create') === false) { echo "PASS C24 Enqueuer gate-0 rejects non-active status\n"; $pass++; }
     else { echo "FAIL C24 expected false for non-active status\n"; $failures[] = 'C24'; }
     db_execute("UPDATE credit_notes SET status='active' WHERE id=999990");

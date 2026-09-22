@@ -64,7 +64,7 @@ if ($rawBody === false || $rawBody === '') {
 }
 
 // ── 3. Signature verification ─────────────────────────────────────
-$verifierToken = (string) settings_get('quickbooks.webhook_verifier_token', '');
+$verifierToken = \FleetForge\QuickBooksClient::secret('webhook_verifier_token'); // S-QBO-GOLIVE-AUDIT: encrypted at rest
 $receivedSig   = $_SERVER['HTTP_INTUIT_SIGNATURE'] ?? '';
 
 if (!QboWebhookSignature::verify($rawBody, $verifierToken, (string) $receivedSig)) {
@@ -80,13 +80,27 @@ if (!is_array($payload)) {
     exit;
 }
 
+// ── 4b. Normalize both Intuit envelopes (S-QBO-GOLIVE-AUDIT) ──────
+// Intuit retired the legacy {eventNotifications:[…]} envelope in 2026
+// (US cutover June 30 → July 31, 2026). Deliveries now arrive as a JSON
+// ARRAY of CloudEvents: {id, type:"qbo.payment.created.v1",
+// intuitaccountid:<realm>, intuitentityid:<entity id>, …}. This endpoint
+// only understood the legacy shape, so every current delivery parsed as
+// "no payment event" and QBO-side payments never reached FF. Both shapes
+// reduce to the same list; the handler below is unchanged.
+$events = PaymentWebhookHandler::normalizeEvents($payload);
+
 // ── 5. Webhook event id ───────────────────────────────────────────
-// Intuit's webhook delivery includes intuit-webhook-event-id; if missing
-// (rare; defensive) we synthesize a random id so idempotency still
-// works at the event level (each request becomes a unique event).
+// Legacy deliveries carry intuit-webhook-event-id. CloudEvents carry a
+// per-event `id`; a re-delivery repeats the same ids, so their hash is a
+// stable delivery key. Otherwise (rare; defensive) synthesize a random id
+// so idempotency still works at the event level.
 $webhookEventId = (string) ($_SERVER['HTTP_INTUIT_WEBHOOK_EVENT_ID'] ?? '');
 if ($webhookEventId === '') {
-    $webhookEventId = 'syn-' . bin2hex(random_bytes(16));
+    $ceIds = array_values(array_filter(array_column($events, 'event_id')));
+    $webhookEventId = $ceIds !== []
+        ? 'ce-' . hash('sha256', implode('|', $ceIds))
+        : 'syn-' . bin2hex(random_bytes(16));
 }
 
 // ── 6. Idempotency check on webhook event (outcome-aware) ─────────
@@ -114,16 +128,8 @@ if ($existingEvent !== null) {
 }
 
 // ── 7. Insert webhook event row ───────────────────────────────────
-$realmId = '';
-$eventType = 'unknown';
-foreach ($payload['eventNotifications'] ?? [] as $notif) {
-    $realmId   = (string) ($notif['realmId'] ?? $realmId);
-    $firstEnt  = $notif['dataChangeEvent']['entities'][0] ?? null;
-    if (is_array($firstEnt) && isset($firstEnt['name'])) {
-        $eventType = (string) $firstEnt['name'];
-        break;
-    }
-}
+$realmId   = (string) ($events[0]['realm_id'] ?? '');
+$eventType = (string) ($events[0]['name'] ?? 'unknown');
 
 try {
     // Reprocessing a prior 'error' event reuses its row — only INSERT for a
@@ -161,26 +167,27 @@ if (function_exists('fastcgi_finish_request')) {
 // ── 10. Process each Payment event ────────────────────────────────
 $lastResult = null;
 $lastError  = null;
-foreach ($payload['eventNotifications'] ?? [] as $notif) {
-    $notifRealm = (string) ($notif['realmId'] ?? '');
-    foreach ($notif['dataChangeEvent']['entities'] ?? [] as $entity) {
-        if (($entity['name'] ?? '') !== 'Payment') {
-            continue;  // not a Payment event — skip (other entity webhooks not supported in v1)
-        }
-        $qboPaymentId = (string) ($entity['id'] ?? '');
-        $operation    = (string) ($entity['operation'] ?? '');
-        if ($qboPaymentId === '') {
-            continue;
-        }
+foreach ($events as $ev) {
+    if ($ev['entity_id'] === '') {
+        continue;
+    }
+    // S-QBO-GOLIVE-AUDIT: Invoice / CreditMemo events for documents FF
+    // pushed — a void / delete / edit made in QuickBooks becomes a drift
+    // event instead of an invisible disagreement. Other entities are ignored.
+    $isPayment = strcasecmp($ev['name'], 'Payment') === 0;
+    if (!$isPayment && !\FleetForge\QboPushers\DocumentWebhookHandler::handles($ev['name'])) {
+        continue;
+    }
 
-        try {
-            $res = PaymentWebhookHandler::handle($qboPaymentId, $operation, $notifRealm, $webhookEventId);
-            $lastResult = (string) ($res['result'] ?? 'unknown');
-        } catch (\Throwable $e) {
-            $lastResult = 'error';
-            $lastError  = $e->getMessage();
-            error_log("[qbo_payment_webhook] PaymentWebhookHandler threw: " . $e->getMessage());
-        }
+    try {
+        $res = $isPayment
+            ? PaymentWebhookHandler::handle($ev['entity_id'], $ev['operation'], $ev['realm_id'], $webhookEventId)
+            : \FleetForge\QboPushers\DocumentWebhookHandler::handle($ev['name'], $ev['entity_id'], $ev['operation'], $ev['realm_id']);
+        $lastResult = (string) ($res['result'] ?? 'unknown');
+    } catch (\Throwable $e) {
+        $lastResult = 'error';
+        $lastError  = $e->getMessage();
+        error_log("[qbo_payment_webhook] PaymentWebhookHandler threw: " . $e->getMessage());
     }
 }
 

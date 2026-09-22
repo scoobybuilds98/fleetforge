@@ -12,11 +12,91 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-17 via S-UTC-STAMPS — **F78** added (deploy, then run the one-time local→UTC timestamp repair on prod). Previously 2026-09-17 via S-LOCAL-DAY-TS — **F77** added (deploy: admin "forgot password" links were expired on creation; one-time timestamp side effects). Previously 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
+**Last updated:** 2026-09-23 via S-QBO-GOLIVE-AUDIT — **F80** (prove Canadian GST/PST on a Canadian QBO sandbox before the real company — now with the per-rate invoice tax mode and `scripts/qbo_sandbox_verify.php`), **F81** (QBO go-live checklist — now includes the migration, go-live linking and matching steps), **F82** (Multicurrency decision — irreversible), **F83** (pre-go-live receivables — answered: already in QBO → link them) and **F84** (accountant process rules for the shared file) added. Previously 2026-09-17 via S-UTC-STAMPS — **F78** added (deploy, then run the one-time local→UTC timestamp repair on prod). Previously 2026-09-17 via S-LOCAL-DAY-TS — **F77** added (deploy: admin "forgot password" links were expired on creation; one-time timestamp side effects). Previously 2026-09-17 via S-GPS-LOCAL-WINDOW — **F76** added (deploy the local-day Samsara window fix; decide whether to regenerate 23 prod draft invoices whose trailer mileage was fetched on the UTC window). Previously 2026-09-17 via S-CASHFLOW-TIE — **F74** (deploy the cash-flow / working-trial-balance fix; confirm which accounts count as cash) and **F75** (demo dataset registers fixed assets with no GL cost entry) added. Previously 2026-09-16 via S-TRAINING-VIDEO-BUGFIX — **F71** (deploy + migration + fix two prod drafts that double-bill mileage), **F72** (recompute vendor Total Spent on each deployment) and **F73** (three behaviour changes to confirm) added. Previously 2026-09-12 via S-PICKER-OPEN-LEASE — **F69** (deploy to unlock 6 live leases + 9 void-stuck leases) and **F70** (MTTS485 advance-billed draft) added. Previously 2026-08-18 via S-QBO-ENVELOPE-FIX — **F67** and **F68** both ✅ CLOSED (fixed by the two spawned task sessions; landed in commit `8ee2ee3`, see S-SWEPT-COMMIT-DISCLOSURE in PROGRESS.md for the attribution note). No new operator follow-ups: the QuickBooks envelope fix is client-side only and needs nothing from the operator beyond a deploy. Previous: 2026-08-18 via S-LIST-TOOLBAR / S-TOPBAR-CREATE-ALL.
 
 ---
 
 ## 🔴 BLOCKING — live test cannot proceed without operator action
+
+### F80 — Prove Canadian GST/PST handling on a CANADIAN QuickBooks sandbox before connecting the real company 🔴 BLOCKING (QBO go-live — do NOT enable master sync on the real company until done)
+
+**Surfaced by:** S-QBO-GOLIVE-AUDIT (2026-09-23).
+**Why:** every live QBO verification so far (Invoice #147, Bill #148, …) ran against Intuit's **US** sandbox ("Craig's", home currency USD, single-currency). The real company is Canadian. Invoices, credit memos and bills all use the US tax-override pattern: every line carries the "override" tax code (`quickbooks.tax_override_code_id` — the US `NON` code, which does not exist in QBO Canada) and FF's GST+PST+HST total goes in the header `TxnTaxDetail.TotalTax`. QBO Canada requires a real Canadian tax code on every line (error 6000 "Make sure all your transactions have a GST/HST rate before you save") and computes tax from those line codes; there is strong evidence it does not honour a header-only TotalTax. The likely outcomes are (a) every push rejected, or worse (b) invoices land with **$0 tax** — QBO AR short by the tax, GST/PST liability never booked, and every FF payment then over-applies the QBO invoice. On prod 99/99 overdue and 1,805/1,809 draft invoices carry tax, so this affects essentially every document. Bills have the same issue for input tax credits (`quickbooks.bill.tax_mode='per_rate'` exists for bills only and is also untested on Canada).
+**Operator action:**
+1. Intuit Developer → your app → **Sandbox** → Add a sandbox company, **Country = Canada**. (Enable Multicurrency in it only if you will enable it in the real company — see F82.)
+2. Point DEV at it: `/quickbooks/settings` → Environment = sandbox, sandbox keys, Connect. (If the dev DB still has the US-sandbox mappings, the new realm guard blocks sync and shows **Reset mappings for this company** — use it.)
+3. Map Accounts → Tax Codes → Items → Customers on `/quickbooks/*`. On Tax Codes, note what the override target resolves to.
+4. Push ONE real-shaped invoice with GST + PST (retry button on `/quickbooks/invoices`). In the QBO sandbox compare: invoice **total**, **tax amount**, per-line tax code, and Reports → GST/HST (Sales tax liability). Repeat for a credit memo, an approved bill (both `quickbooks.bill.tax_mode` values), and a payment against the invoice.
+5. Report the result back. If QBO drops/recomputes the tax (expected), a per-rate invoice/credit-memo tax mode (line TaxCodeRef = the mapped Canadian GST/PST code + TaxLine detail, like the bill `per_rate` mode) must be built and re-verified here before go-live.
+   **Update (same session, third pass):** the per-rate invoice mode is built. On the Canadian sandbox: `/quickbooks/tax_codes` → Pull → map every FF tax rate (BC GST+PST, AB GST, …) to its QuickBooks code → **Invoice tax** card: mode **per_rate**, tax-free code = "Exempt" (or "Zero-rated") → Save. Then run, on the dev machine:
+   `php scripts/qbo_sandbox_verify.php --invoice=<an FF invoice with GST+PST> --pay --linker`
+   (The dev data is historical and the first sync switch-on stamps the go-live date, so on this DEV rehearsal set Settings → Business tagging → **Push transactions dated from** = 2020-01-01 first — otherwise every demo invoice is held back as "already in QuickBooks". On the real company leave it empty or set it to the real go-live day.)
+   Every line must be ✓ — especially "QuickBooks total = FleetForge total", "QuickBooks tax = FleetForge tax", the pay link, and the payment → FF → void round trip. Paste the output back. (Credit notes carry no tax in FF, so they push tax-free by design; bills keep `quickbooks.bill.tax_mode`.)
+   **Rehearsed 2026-09-23 (fourth pass) on the Canadian sandbox "Sandbox Company CA 57b7" with a production copy:** per-rate invoice tax ✓ (2 new invoices: QBO total + GST/PST identical to FF; GST-only PST-exempt invoices resolve to the GST code), credit memos ✓, QBO payment → FF paid → void → FF reopened ✓, missed webhook recovered by the catch-up ✓, go-live linking 129/129 ✓. **Still unproven:** the pay link (QuickBooks Payments — Intuit's sandbox supports it for US companies only; check it on the first real invoice at go-live) and the tax-remittance JE below.
+**Also verify on the same sandbox:** a JE to the GST/HST payable account (the tax-remittance JE) — QBO Canada restricts journal entries to its sales-tax accounts; and the portal Pay Online link (needs QuickBooks Payments on the sandbox).
+
+---
+
+### F81 — Go-live checklist for the QBO connection (deploy S-QBO-GOLIVE-AUDIT first) 🔴 BLOCKING (QBO go-live sequence)
+
+**Surfaced by:** S-QBO-GOLIVE-AUDIT (2026-09-23).
+**Operator action (in order):**
+1. Deploy `main` (`sudo /var/www/fleetforge/bin/deploy.sh`) — it applies migration `202609232000_S-QBO-GOLIVE-AUDIT_cutover_link_origin.sql` (adds `origin` / `link_method` / `linked_at` to the invoice, credit-memo and bill maps); all new settings keys are created on first write.
+2. Finish F80 on a Canadian sandbox.
+3. Intuit Developer → **Production** keys; add `https://mainlandrentals.com/fleetforge/oauth/qbo/callback.php` as a production redirect URI.
+4. `/quickbooks/settings`: Environment = **production** (switching environments now clears the old connection and forces sync off — expected), paste the production Client ID / Secret / Webhook verifier token (secrets are now stored encrypted), Connect, approve the REAL company. Prod has no existing mappings, so the realm guard stays quiet; if it ever shows "Sync blocked — different QuickBooks company", use **Reset mappings for this company**.
+5. Map in order: Accounts (incl. the `undeposited_funds`, `ar_clearing`, `sales_revenue`, `ap_clearing`, `tax_receivable`, `tax_payable` categories — F4/F12) → Tax Codes → Items → Customers → Vendors → Bank Accounts.
+6. Webhooks (F1/F2): Intuit now delivers **CloudEvents** (the legacy format was retired July 2026) — FF now accepts both. Subscribe the Payment entity, endpoint `https://mainlandrentals.com/fleetforge/api/v1/webhooks/qbo_payment_notifications.php`.
+7. Decide F82 (multicurrency) with the accountant; agree the F84 process rules.
+7a. **Settings → Business tagging:** Load from QuickBooks, pick the rental business's **Class** and/or **Location**, keep "shared with other businesses" ticked, and set **Push transactions dated from** to the first day FleetForge owns (leave empty = the go-live day). Turn on QuickBooks' *Custom transaction numbers* (the card shows whether it is on) so FF invoice numbers are kept.
+7b. **Customers / Vendors:** Pull, Auto-Match. Only exact names link on their own — work through the "Suggested" rows (**Link suggested**) and the rest (**Link to QBO…**, or **Create in QuickBooks** only when QuickBooks truly has no such customer/vendor). FF never creates a QBO customer/vendor that existed before go-live on its own.
+7c. **Tax Codes:** map every FF tax rate; Invoice tax = **per_rate** (as proven in F80).
+7d. **Go-live linking** (QuickBooks → Invoices, top panel) — see F83. Do this BEFORE step 8's first day of sends.
+7e. Email templates: add `{pay_online_link}` to the invoice email (Settings → Email templates) so customers pay through QuickBooks.
+8. Turn master sync on (Settings → QuickBooks → Master Controls). The first switch-on stamps `quickbooks.cutover_at`; the drift checker treats QBO records created before it as the accountant's history, not drift. Install the four QBO crons (worker every minute, token refresh daily, drift daily, bank CDC daily — F14).
+9. For the first day: watch `/quickbooks/sync_queue` + `/quickbooks/sync_log`; open the first pushed invoice, payment and bill in QBO and compare totals to FF.
+**Operating rule to agree with the accountant:** record each customer payment in ONE place — per the operator, QuickBooks (pay links / portal). FF mirrors every QBO payment on an FF invoice (webhook + "Check QuickBooks for payments") and posts its own books. Entering the same cheque in both creates it twice. See F84.
+
+---
+
+### F82 — Decide QuickBooks Multicurrency BEFORE the first push (irreversible in QBO) 🟡 PARTIAL (only matters once a USD customer exists)
+
+**Surfaced by:** S-QBO-GOLIVE-AUDIT (2026-09-23).
+**Why:** a new QBO company ships single-currency, and turning Multicurrency on can never be undone. FF now **refuses** to push any USD invoice/payment/credit/bill/JE into a single-currency company (it used to post the USD figures as CAD). All 43 prod customers are CAD today, so nothing is blocked yet.
+**Operator action:** with the accountant, decide whether USD customers/vendors will exist. If yes, enable Multicurrency in QBO (Settings → Account and settings → Advanced → Currency) BEFORE connecting, then reconnect so FF re-detects it (CompanyInfoSync). USD records pushed while blocked show as `failed_preflight_currency_mismatch` and can be retried after enabling.
+
+---
+
+### F83 — Decide what happens to pre-go-live receivables (99 overdue invoices on prod) 🟡 PARTIAL (cutover accounting decision)
+
+**Surfaced by:** S-QBO-GOLIVE-AUDIT (2026-09-23).
+**Why:** FF only queues an invoice for QBO at the moment it is sent. The 99 invoices already sent (now `overdue`) were sent while sync was off, so they will not reach QBO on their own, and any FF payment against them fails preflight ("invoice has no QBO mapping"). S-QBO-GOLIVE-AUDIT fixed the gate that made them impossible to push at all (it only accepted `status='sent'`), but there is still no bulk backfill — only per-invoice Retry on `/quickbooks/invoices` once a map row exists.
+**Operator action:** with the accountant decide: (a) these receivables are already in QBO (entered by the accountant) → do NOT push them; payments against them get recorded in QBO directly; or (b) FF should push them → ask for a backfill session (enqueue every post-send invoice with no QBO mapping, dated from a chosen cut-off). Pushing them when the accountant already has them in QBO would duplicate AR.
+**Answered 2026-09-23: (a) — they are in QuickBooks.** Built in the same session: **QuickBooks → Invoices → "Go-live: link documents QuickBooks already has"**.
+1. After customers/vendors are mapped (F81 7b): kind = Invoices, From = the first FF invoice date, Find matches.
+2. **Select exact + amount/date** → **Link selected**. Linking writes nothing to QuickBooks; it brings in the QBO payments on each invoice (FF shows them paid, FF books updated). Review the "check" / "same number, other amount" rows one by one (pick the right QBO invoice in the dropdown; **Link anyway** when the amounts differ on purpose).
+3. Rows with no match: widen the date window; if QuickBooks truly lacks the invoice, **Push as new**.
+4. Repeat for Credit notes and Bills (bills entered in FF for per-unit costing).
+5. Tick **Include drafts** to see the 1,810 FF drafts: link the ones QuickBooks already billed so they can never be pushed as duplicates; void in FF the ones nobody will ever send.
+6. Press **Check QuickBooks for payments** after linking (and any time a payment seems missing).
+Safety net: anything dated before go-live is refused as a NEW push until linked or released, so an un-linked old invoice can't slip into QuickBooks by accident.
+**Rehearsal (2026-09-23) left two decisions:** (1) the **165 September invoices** (dated Sep 1) — were they entered in QuickBooks? If yes, link them like August; if not, set Settings → Business tagging → **Push transactions dated from = 2026-09-01** so FF sends them as new. (2) **30 July invoices** QuickBooks has as paid are still FF **drafts** — mark them sent in FF (their QBO payments then come in) or void them in FF. Also: have the accountant review the 11 accounts and 28 items left unmapped.
+
+---
+
+### F84 — Agree the QuickBooks process rules with the accountant (shared company file) 🟡 PARTIAL (before go-live)
+
+**Surfaced by:** S-QBO-GOLIVE-AUDIT third pass (2026-09-23).
+**Why:** after go-live FleetForge and the accountant both write to the same company file, which also holds the other businesses. FF now protects the file (links instead of duplicating, never rewrites the accountant's documents, never creates pre-go-live customers/vendors, tags its documents with the rental Class/Location), but some rules can only be kept by people.
+**Agree, in writing:**
+1. **Rental invoices and credit notes are created in FleetForge only** from go-live. An invoice edited in FF after it was pushed updates QuickBooks; one LINKED at go-live does not (a drift alert asks for the same change in QuickBooks by hand).
+2. **Customer payments are recorded in QuickBooks only** (pay links / QuickBooks Payments / deposits entered by the accountant). FF mirrors them. Don't also record them in FF. Apply unapplied money / credits in QuickBooks — FF follows.
+3. **Bills:** decide ONE place. If bills are entered in FF (per-unit costing), FF pushes them; the accountant must stop entering those bills in QuickBooks. Bill **payments** made in QuickBooks are NOT mirrored into FF yet — either pay FF-entered bills in FF (FF pushes the bill payment) or accept that FF shows them unpaid.
+4. **Depreciation of the rental fleet:** FF posts it per unit and pushes one journal entry per period from go-live. The accountant must stop booking depreciation for these assets in QuickBooks from the same date, or it is booked twice. (FF never pushes depreciation dated before the push-from date.)
+5. Rental customers stay unique to the rental business where possible; a customer shared with another business is fine (FF only updates name/email/phone/address, never the DisplayName).
+6. Watch **QuickBooks → Drift** weekly for "Changed in QuickBooks — needs attention" / "Update QuickBooks by hand" items.
+
+---
 
 ### F78 — Deploy S-UTC-STAMPS, then run the one-time timestamp repair on prod 🔴 BLOCKING (data correctness — run right after the deploy)
 
@@ -500,6 +580,8 @@ INV-2026-02128 before sending it.
 ---
 
 ### F3 — Intuit Payments API endpoint path needs live-test verification
+
+> **S-QBO-GOLIVE-AUDIT (2026-09-23):** resolved in code — the `POST …/quickbooks/v4/payments/charges` call could never work (that endpoint charges a tokenized card; Intuit has no hosted-payment-page API). `QuickBooksClient::generatePaymentsHostedUrl` now reads `Invoice.InvoiceLink` via `GET invoice/{id}?include=invoiceLink`, and InvoicePusher sets `AllowOnlineCreditCardPayment/ACHPayment` + `BillEmail` when `quickbooks.payments_enabled='1'`. Still needs ONE live check on a sandbox with QuickBooks Payments active (folded into F80). Steps 5–6 below are obsolete.
 
 **Surfaced by:** S-QBO-15 (2026-05-29, commit 96e52af) — D-QBO-15-2
 **Affects:** S-QBO-15

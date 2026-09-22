@@ -57,23 +57,39 @@ class CreditMemoEnqueuer
         try {
             // Gate 0: entity eligibility.
             $cn = db_row(
-                "SELECT id, status, deleted_at FROM credit_notes WHERE id = ?",
+                "SELECT id, status, deleted_at, source, internal_notes FROM credit_notes WHERE id = ?",
                 [$ffCreditNoteId]
             );
             if ($cn === null) {
                 error_log("[CreditMemoEnqueuer] gate-0 reject: credit note id {$ffCreditNoteId} not found");
                 return false;
             }
+            // S-QBO-GOLIVE-AUDIT (B2): an overpayment credit is the payment's
+            // excess, which QuickBooks already holds as that Payment's
+            // UNAPPLIED amount. Pushing it as a CreditMemo too doubled the
+            // customer's credit in QuickBooks. It is never a CreditMemo; its
+            // applications move the unapplied amount (CreditApplicationPusher).
+            if (($cn['source'] ?? '') === 'overpayment') {
+                return false;
+            }
+            // S-QBO-GOLIVE-AUDIT: a rounding settlement (RoundingSettler)
+            // aligns FF to the total QuickBooks already has — never pushed.
+            if (RoundingSettler::isRoundingNote($cn['internal_notes'] ?? null)) {
+                return false;
+            }
             if ($cn['deleted_at'] !== null) {
                 error_log("[CreditMemoEnqueuer] gate-0 reject: credit note id {$ffCreditNoteId} is soft-deleted");
                 return false;
             }
-            // create requires a live credit (status='active'). partially_used/
-            // fully_used credits can still be pushed via S-QBO-26 manual sync,
-            // but the canonical create.php trigger fires on a freshly-active
-            // credit note.
-            if ($operation === 'create' && $cn['status'] !== 'active') {
-                error_log("[CreditMemoEnqueuer] gate-0 reject: credit note id {$ffCreditNoteId} op=create requires status='active', got '{$cn['status']}'");
+            // create requires an issued, un-voided credit. The canonical
+            // create.php trigger fires on a freshly-active note, but
+            // S-QBO-GOLIVE-AUDIT: the gate used to accept ONLY 'active', and
+            // manual sync / the retry button go through this same gate — so a
+            // credit whose first push failed and which was then applied
+            // (partially_used / fully_used) could never reach QBO, leaving QBO
+            // AR overstated by the credit. Applied credits are still credits.
+            if ($operation === 'create' && !in_array($cn['status'], ['active', 'partially_used', 'fully_used'], true)) {
+                error_log("[CreditMemoEnqueuer] gate-0 reject: credit note id {$ffCreditNoteId} op=create requires status in {active,partially_used,fully_used}, got '{$cn['status']}'");
                 return false;
             }
             // 'void' requires the INVERTED status invariant: status='void'
@@ -102,7 +118,7 @@ class CreditMemoEnqueuer
             }
 
             // Gate 4: best-effort INSERT.
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'credit_memo',
                 'entity_id'   => $ffCreditNoteId,
                 'operation'   => $operation,

@@ -198,8 +198,14 @@ require_once FF_ROOT . '/includes/header.php';
                                         <div class="text-sm text-secondary font-mono" x-text="'qbo #' + row.qbo_customer_id"></div>
                                     </div>
                                 </template>
-                                <template x-if="!row.qbo_customer_id">
+                                <template x-if="!row.qbo_customer_id && !row.suggestion">
                                     <span class="text-secondary">—</span>
+                                </template>
+                                <template x-if="!row.qbo_customer_id && row.suggestion">
+                                    <div class="text-sm" title="Not linked automatically: the QuickBooks company is shared, so only exact name matches link on their own. Confirm if this is the same customer.">
+                                        <div class="text-warning">Suggested: <span x-text="row.suggestion.name || '(no name)'"></span></div>
+                                        <div class="text-secondary font-mono" x-text="'qbo #' + row.suggestion.qbo_id + ' · ' + row.suggestion.why"></div>
+                                    </div>
                                 </template>
                             </td>
                             <td>
@@ -212,8 +218,15 @@ require_once FF_ROOT . '/includes/header.php';
                             <td class="text-sm font-mono" x-text="row.last_synced_at ? formatTs(row.last_synced_at) : '—'"></td>
                             <td>
                                 <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                                    <template x-if="row.mapping_status === 'ff_only' && row.suggestion">
+                                        <button class="btn btn-sm btn-primary" @click="acceptSuggestion(row)">Link suggested</button>
+                                    </template>
                                     <template x-if="row.mapping_status === 'ff_only'">
                                         <button class="btn btn-sm btn-secondary" @click="openLinkModal(row, 'pick_qbo')">Link to QBO…</button>
+                                    </template>
+                                    <template x-if="row.mapping_status === 'ff_only' && row.match_confidence !== 'manual'">
+                                        <button class="btn btn-sm btn-outline" @click="createInQbo(row)"
+                                                title="QuickBooks has no such customer: let FleetForge create it there">Create in QuickBooks</button>
                                     </template>
                                     <template x-if="row.mapping_status === 'qbo_only'">
                                         <button class="btn btn-sm btn-secondary" @click="openLinkModal(row, 'pick_ff')">Link to FF…</button>
@@ -384,7 +397,8 @@ function qboCustomerMapping() {
                 if (j.success) {
                     const d = j.data;
                     this.flash = {
-                        message: 'Auto-match: ' + d.matched + ' mapped, ' + d.ff_only + ' ff_only, ' + d.qbo_only + ' qbo_only, ' + d.manual_preserved + ' manual preserved.',
+                        message: 'Auto-match: ' + d.matched + ' mapped, ' + (d.suggested || 0) + ' suggested for review, ' + d.ff_only + ' ff_only, ' + d.qbo_only + ' qbo_only, ' + d.manual_preserved + ' manual preserved.'
+                            + (d.shared_file && d.suggested ? ' Shared QuickBooks file: only exact name matches link on their own — confirm the suggestions.' : ''),
                         type: 'success',
                     };
                     await this.reload();
@@ -461,6 +475,23 @@ function qboCustomerMapping() {
             }
         },
 
+        // S-QBO-GOLIVE-AUDIT: confirm an auto-match suggestion (shared
+        // company file — only exact matches link on their own).
+        async acceptSuggestion(row) {
+            if (!row.suggestion) return;
+            if (!confirm('Link ' + (row.ff_company_name || 'this customer') + ' to QuickBooks ' + (row.suggestion.name || ('#' + row.suggestion.qbo_id)) + '?')) return;
+            await this.callSave({ action: 'link', ff_customer_id: row.ff_customer_id, qbo_customer_id: row.suggestion.qbo_id,
+                                  notes: 'Confirmed auto-match suggestion (' + row.suggestion.why + ')' });
+        },
+
+        // S-QBO-GOLIVE-AUDIT: a person confirms QuickBooks has no such
+        // customer; FleetForge may then create it there (it never creates one
+        // for a pre-go-live customer on its own).
+        async createInQbo(row) {
+            if (!confirm('Create this customer as a NEW QuickBooks customer? Only do this if QuickBooks does not already have it — under any name — or you will get a duplicate.')) return;
+            await this.callSave({ action: 'create_new', ff_customer_id: row.ff_customer_id });
+        },
+
         async unlinkRow(row) {
             if (!confirm('Unlink this mapping?')) return;
             await this.callSave({ action: 'unlink', mapping_id: row.mapping_id });
@@ -478,7 +509,10 @@ function qboCustomerMapping() {
             try {
                 const j = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/customers/save_mapping.php'), body);
                 if (j.success) {
-                    this.flash = { message: 'Mapping updated.', type: 'success' };
+                    const en = j.data ? j.data.enqueued : null;
+                    this.flash = { message: en === true ? 'Saved — queued to create in QuickBooks.'
+                                          : en === false ? 'Saved. It will be created in QuickBooks once sync is switched on (Manual Sync → re-sync, or its next edit).'
+                                          : 'Mapping updated.', type: 'success' };
                     await this.reload();
                 } else {
                     this.flashError(j);

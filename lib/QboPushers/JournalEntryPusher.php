@@ -103,6 +103,14 @@ class JournalEntryPusher
      * bill_payment / refund_receipt) but FF source_type ENUM uses
      * ap_bill / credit_note / ap_payment. ENUM has no bill_payment /
      * refund_receipt values — those don't exist as FF source types.
+     *
+     * S-QBO-GOLIVE-AUDIT: + damage_recovery / damage_repair. These are NOT
+     * new entries — AutoEntryBridge::onDamageRecoveryBilled / onDamageRepair-
+     * Expensed RETAG the recovery invoice's 'invoice' JE / the repair bill's
+     * 'ap_bill' JE (and their fallback JEs book the same document). The
+     * invoice / bill itself is pushed to QBO, so pushing the retagged JE —
+     * or its reversal when the invoice is voided — double-posted it.
+     * (damage_writeoff is a genuine standalone entry and still pushes.)
      */
     private const BRIDGE_DERIVED_SOURCE_TYPES = [
         'invoice',
@@ -110,6 +118,8 @@ class JournalEntryPusher
         'credit_note',
         'ap_bill',
         'ap_payment',
+        'damage_recovery',
+        'damage_repair',
     ];
 
     /**
@@ -452,6 +462,21 @@ class JournalEntryPusher
      */
     private static function runPreflight(array $ff)
     {
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): single-currency company guard.
+        // See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason($ff['currency'] ?? null, "Journal entry {$ff['entry_number']}");
+        if ($currencyBlock !== null) {
+            return ['reason' => $currencyBlock, 'status_code' => 'failed_preflight_currency_mismatch'];
+        }
+
+        // Gate 0.5 (S-QBO-GOLIVE-AUDIT): entries dated before go-live —
+        // notably a depreciation catch-up run over the past year — are
+        // periods whose books the accountant already kept in QuickBooks.
+        $preGoLive = InvoiceLinker::preGoLiveDateReason("Journal entry {$ff['entry_number']}", $ff['entry_date'] ?? null);
+        if ($preGoLive !== null) {
+            return $preGoLive;
+        }
+
         // Gate 1: AccountValidator (tax_receivable + tax_payable per D-QBO-VALIDATOR-3).
         try {
             AccountValidator::assertReadyForJournalEntryPush();
@@ -461,7 +486,7 @@ class JournalEntryPusher
 
         // Gate 2 + 3: Per-line account mapping + at least 2 lines.
         $lines = db_select(
-            "SELECT id, account_id, debit, credit, description, line_number
+            "SELECT id, account_id, debit, credit, description, line_number, customer_id, vendor_id
                FROM acc_journal_entry_lines
               WHERE journal_entry_id = ?
               ORDER BY line_number, id",
@@ -472,11 +497,24 @@ class JournalEntryPusher
         }
         foreach ($lines as $line) {
             $acctMap = db_row(
-                "SELECT qbo_account_id, mapping_status FROM acc_qbo_account_map WHERE ff_account_id = ?",
+                "SELECT qbo_account_id, mapping_status, qbo_account_type FROM acc_qbo_account_map WHERE ff_account_id = ?",
                 [(int) $line['account_id']]
             );
             if ($acctMap === null || empty($acctMap['qbo_account_id']) || $acctMap['mapping_status'] !== 'mapped') {
                 return "JE {$ff['entry_number']} line #{$line['line_number']} uses FF account #{$line['account_id']} which has no QBO mapping. Map via /quickbooks/accounts before pushing (D-QBO-21-3).";
+            }
+            // S-QBO-GOLIVE-AUDIT: QBO rejects a JE line on Accounts
+            // Receivable / Payable without a customer / vendor in the Name
+            // column (6000 "When you use Accounts Receivable, you must
+            // choose a customer…"). Catch it here with an actionable reason
+            // instead of a permanent 400 from QBO.
+            $party = self::requiredLineParty((string) ($acctMap['qbo_account_type'] ?? ''));
+            if ($party !== null && self::lineEntity($line, $party) === null) {
+                $fk = $party === 'Customer' ? 'customer' : 'vendor';
+                return "JE {$ff['entry_number']} line #{$line['line_number']} posts to a QuickBooks Accounts "
+                    . ($party === 'Customer' ? 'Receivable' : 'Payable') . " account, which requires a {$fk}, "
+                    . "but the line has no {$fk} mapped to QuickBooks. Set the line's {$fk} (and map it via "
+                    . "/quickbooks/{$fk}s) before pushing.";
             }
         }
 
@@ -557,7 +595,7 @@ class JournalEntryPusher
 
         // 2. Load lines.
         $lines = db_select(
-            "SELECT id, account_id, debit, credit, description, line_number
+            "SELECT id, account_id, debit, credit, description, line_number, customer_id, vendor_id
                FROM acc_journal_entry_lines
               WHERE journal_entry_id = ?
               ORDER BY line_number, id",
@@ -629,6 +667,14 @@ class JournalEntryPusher
             $description = trim((string) ($line['description'] ?? ''));
             if ($description !== '') {
                 $payloadLine['Description'] = $description;
+            }
+            // S-QBO-GOLIVE-AUDIT: carry the line's customer/vendor as the QBO
+            // "Name" (JournalEntryLineDetail.Entity). Required on A/R and A/P
+            // lines (preflight enforces); on any other line it keeps QBO's
+            // per-customer / per-vendor reports aligned with FF's.
+            $entity = self::lineEntity($line, null);
+            if ($entity !== null) {
+                $payloadLine['JournalEntryLineDetail']['Entity'] = $entity;
             }
             $payloadLines[] = $payloadLine;
         }
@@ -709,7 +755,9 @@ class JournalEntryPusher
             }
         }
 
-        return $payload;
+        // S-QBO-GOLIVE-AUDIT: rental-business Class / Location for the shared
+        // QuickBooks file (no-op until one is chosen in Settings).
+        return QboTagging::applyToJournalEntry($payload);
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -742,6 +790,58 @@ class JournalEntryPusher
      * @decision D-QBO-23-1 (PrivateNote enrichment dispatcher generalizing
      *                       the S-QBO-22 FA-only block)
      */
+    // ────────────────────────────────────────────────────────────────────
+    // Line counterparty (S-QBO-GOLIVE-AUDIT)
+    // ────────────────────────────────────────────────────────────────────
+
+    /**
+     * The QBO party type a line MUST carry for its account: 'Customer' on
+     * Accounts Receivable, 'Vendor' on Accounts Payable, else null. Takes
+     * the QBO AccountType snapshot from acc_qbo_account_map (spaced form,
+     * e.g. "Accounts Receivable"); compared without spaces/case so a
+     * "AccountsReceivable" variant matches too.
+     */
+    public static function requiredLineParty(string $qboAccountType): ?string
+    {
+        $norm = strtolower(str_replace(' ', '', $qboAccountType));
+        return match ($norm) {
+            'accountsreceivable' => 'Customer',
+            'accountspayable'    => 'Vendor',
+            default              => null,
+        };
+    }
+
+    /**
+     * QBO JournalEntryLineDetail.Entity for an FF JE line — the line's
+     * customer (or vendor) resolved through the customer/vendor map — or
+     * null when the line has no party or the party isn't mapped.
+     *
+     * @param array<string, mixed> $line          acc_journal_entry_lines row (customer_id, vendor_id)
+     * @param string|null          $requiredType  'Customer' | 'Vendor' to demand that party; null = either (customer first)
+     * @return array{Type: string, EntityRef: array{value: string}}|null
+     */
+    public static function lineEntity(array $line, ?string $requiredType): ?array
+    {
+        $candidates = [];
+        if ($requiredType !== 'Vendor' && !empty($line['customer_id'])) {
+            $candidates[] = ['Customer', 'acc_qbo_customer_map', 'ff_customer_id', 'qbo_customer_id', (int) $line['customer_id']];
+        }
+        if ($requiredType !== 'Customer' && !empty($line['vendor_id'])) {
+            $candidates[] = ['Vendor', 'acc_qbo_vendor_map', 'ff_vendor_id', 'qbo_vendor_id', (int) $line['vendor_id']];
+        }
+        foreach ($candidates as [$type, $table, $ffCol, $qboCol, $ffId]) {
+            $row = db_row(
+                "SELECT {$qboCol} AS qid FROM {$table}
+                  WHERE {$ffCol} = ? AND mapping_status = 'mapped' AND {$qboCol} IS NOT NULL",
+                [$ffId]
+            );
+            if ($row !== null && (string) $row['qid'] !== '') {
+                return ['Type' => $type, 'EntityRef' => ['value' => (string) $row['qid']]];
+            }
+        }
+        return null;
+    }
+
     public static function buildSourceNoteSection(string $sourceType, int $sourceId): string
     {
         if ($sourceId <= 0) {

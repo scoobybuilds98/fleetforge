@@ -133,6 +133,31 @@ require_once FF_ROOT . '/includes/header.php';
          style="margin-bottom:16px;"
          x-text="flash.message"></div>
 
+    <?php if (($qbo['realm_mismatch'] ?? '0') === '1'): ?>
+    <!-- ── Realm-change guard (S-QBO-GOLIVE-AUDIT) ─────────────────
+         Connected to a different QBO company than the mappings belong
+         to. Every sync call is blocked (QuickBooksClient::realmGuardReason)
+         until the old company's mappings are wiped. -->
+    <div class="alert alert-danger" style="margin-bottom:16px;">
+        <strong>Sync blocked — different QuickBooks company.</strong>
+        FleetForge is connected to realm <code><?= e($qbo['realm_id'] ?? '') ?></code>, but its customer,
+        account, item and tax mappings were built for
+        <?= ($qbo['mapped_realm_id'] ?? '') !== '' ? 'realm <code>' . e($qbo['mapped_realm_id']) . '</code>' : 'another company' ?>.
+        Pushing with them would post to the wrong customers and accounts, so nothing will sync until the
+        old mappings are reset. After resetting, re-run the mapping pages (Accounts → Tax Codes → Items →
+        Customers → Vendors → Bank Accounts) before turning master sync back on.
+        <?php if ($isSuperAdmin): ?>
+            <div style="margin-top:10px;">
+                <button class="btn btn-danger btn-sm" @click="resetMappings()" :disabled="resetting">
+                    <span x-text="resetting ? 'Resetting…' : 'Reset mappings for this company'"></span>
+                </button>
+            </div>
+        <?php else: ?>
+            <div style="margin-top:6px;">Ask a super admin to reset the mappings.</div>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
+
     <!-- ============================================================
          CARD 1 — Connection Status
          ============================================================ -->
@@ -339,6 +364,79 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 
     <!-- ============================================================
+         CARD 2.5 — Business tagging (shared QuickBooks file)
+         S-QBO-GOLIVE-AUDIT: the QuickBooks company holds more than one
+         business — every FF document is stamped with the rental Class /
+         Location (QboTagging) so rental revenue and costs stay separable.
+         ============================================================ -->
+    <div class="card" style="padding:20px;margin-bottom:16px;" x-init="loadTagging(false)">
+        <h3 class="h6" style="margin:0 0 4px;">Business tagging (shared QuickBooks file)</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            Your QuickBooks company holds more than one business. Pick the rental business's Class and/or Location —
+            FleetForge adds it to every invoice, credit memo, refund, bill and journal entry it sends, so rental figures
+            stay separate. Leave both empty only if the businesses are separated by accounts alone.
+        </p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+            <label class="form-group" style="margin:0;">
+                <span class="form-label">Rental Class</span>
+                <select class="form-select" id="qbo-tag-class" x-model="tagging.class_id" <?= $canEditCredentials ? '' : 'disabled' ?>>
+                    <option value="">— none —</option>
+                    <template x-for="c in tagging.classes" :key="c.id">
+                        <option :value="c.id" x-text="c.name"></option>
+                    </template>
+                    <option x-show="tagging.class_id && !tagging.classes.some(c => c.id === tagging.class_id)"
+                            :value="tagging.class_id" x-text="tagging.class_name || ('Class ' + tagging.class_id)"></option>
+                </select>
+            </label>
+            <label class="form-group" style="margin:0;">
+                <span class="form-label">Rental Location</span>
+                <select class="form-select" id="qbo-tag-location" x-model="tagging.location_id" <?= $canEditCredentials ? '' : 'disabled' ?>>
+                    <option value="">— none —</option>
+                    <template x-for="l in tagging.locations" :key="l.id">
+                        <option :value="l.id" x-text="l.name"></option>
+                    </template>
+                    <option x-show="tagging.location_id && !tagging.locations.some(l => l.id === tagging.location_id)"
+                            :value="tagging.location_id" x-text="tagging.location_name || ('Location ' + tagging.location_id)"></option>
+                </select>
+            </label>
+        </div>
+        <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;">
+            <input type="checkbox" id="qbo-tag-shared" x-model="tagging.shared" <?= $canEditCredentials ? '' : 'disabled' ?>>
+            <span class="text-sm">This QuickBooks company is shared with other businesses — the nightly drift check only
+                reports records that belong to FleetForge customers and vendors, and Auto-Match links only exact names
+                (other matches are shown as suggestions to confirm).</span>
+        </label>
+        <label class="form-label" for="qbo-push-from" style="display:block;margin-bottom:12px;">
+            <span class="text-sm">Push transactions dated from</span>
+            <input type="date" class="form-control" id="qbo-push-from" style="max-width:200px;" x-model="tagging.push_from_date"
+                   <?= $canEditCredentials ? '' : 'disabled' ?>>
+            <span class="text-xs text-secondary" style="display:block;margin-top:4px;">
+                Anything FleetForge records with an earlier date (invoices, credit notes, bills, payments, journal entries such as
+                depreciation) is treated as already in QuickBooks and is never pushed as new. Leave empty to use the go-live day
+                (<span x-text="tagging.go_live_day || 'set the first time sync is switched on'"></span>).
+            </span>
+        </label>
+        <dl class="dl-grid text-sm" style="margin:0 0 12px;" x-show="tagging.prefs.synced_at">
+            <dt>Class tracking</dt><dd x-text="{none:'Off', txn:'One class per transaction', line:'Class per line'}[tagging.prefs.class_tracking] || '—'"></dd>
+            <dt>Location tracking</dt><dd x-text="tagging.prefs.track_locations === '1' ? 'On' : (tagging.prefs.track_locations === '0' ? 'Off' : '—')"></dd>
+            <dt>Custom transaction numbers</dt>
+            <dd>
+                <span x-text="tagging.prefs.custom_txn_numbers === '1' ? 'On — FleetForge invoice numbers are kept' : (tagging.prefs.custom_txn_numbers === '0' ? 'Off' : '—')"></span>
+                <span x-show="tagging.prefs.custom_txn_numbers === '0'" class="text-secondary"> — QuickBooks will number FleetForge's invoices itself (the FleetForge number goes in the memo). Turn it on in QuickBooks (Account and settings → Sales → Custom transaction numbers) to keep the numbers your customers see.</span>
+            </dd>
+            <dt>Books closed through</dt><dd x-text="tagging.prefs.book_close_date || 'Not set'"></dd>
+        </dl>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="btn btn-secondary btn-sm" @click="loadTagging(true)" :disabled="taggingLoading">
+                <span x-text="taggingLoading ? 'Loading…' : 'Load from QuickBooks'"></span>
+            </button>
+            <button class="btn btn-primary btn-sm" @click="saveTagging()" :disabled="taggingSaving || !<?= $canEditCredentials ? 'true' : 'false' ?>">
+                <span x-text="taggingSaving ? 'Saving…' : 'Save tagging'"></span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ============================================================
          CARD 3 — Master Controls (super_admin only)
          ============================================================ -->
     <?php if ($isSuperAdmin): ?>
@@ -517,8 +615,8 @@ function qboSettings() {
         // ever sending the full token to the browser.
         placeholders: {
             client_id:              '<?= e(ff_qbo_mask($qbo['client_id'] ?? null)) ?>',
-            client_secret:          '<?= e(ff_qbo_mask($qbo['client_secret'] ?? null)) ?>',
-            webhook_verifier_token: '<?= e(ff_qbo_mask($qbo['webhook_verifier_token'] ?? null)) ?>',
+            client_secret:          '<?= e(ff_qbo_mask(\FleetForge\QuickBooksClient::secret('client_secret'))) ?>', // S-QBO-GOLIVE-AUDIT: decrypt before masking
+            webhook_verifier_token: '<?= e(ff_qbo_mask(\FleetForge\QuickBooksClient::secret('webhook_verifier_token'))) ?>',
         },
 
         masters: {
@@ -582,6 +680,77 @@ function qboSettings() {
                 this.flash = { message: e.message || 'Network error', type: 'error' };
             } finally {
                 this.disconnecting = false;
+            }
+        },
+
+        // S-QBO-GOLIVE-AUDIT — business tagging for the shared QuickBooks file.
+        tagging: { class_id: '', class_name: '', location_id: '', location_name: '', shared: true, push_from_date: '', go_live_day: '', classes: [], locations: [], prefs: {} },
+        taggingLoading: false,
+        taggingSaving: false,
+        async loadTagging(fromQbo) {
+            this.taggingLoading = !!fromQbo;
+            try {
+                const r = await FF_Api.get(FF_Api.url('/api/v1/quickbooks/business_tagging.php' + (fromQbo ? '?load=1' : '')));
+                if (r && r.success) {
+                    const d = r.data;
+                    this.tagging = Object.assign(this.tagging, {
+                        class_id: d.class_id || '', class_name: d.class_name || '',
+                        location_id: d.location_id || '', location_name: d.location_name || '',
+                        shared: d.shared_company_file !== '0',
+                        push_from_date: d.push_from_date || '', go_live_day: d.go_live_day || '',
+                        classes: d.classes || [], locations: d.locations || [], prefs: d.prefs || {},
+                    });
+                    if (d.load_error) {
+                        this.flash = { message: d.load_error, type: 'error' };
+                    }
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.taggingLoading = false;
+            }
+        },
+        async saveTagging() {
+            this.taggingSaving = true;
+            const cls = this.tagging.classes.find(c => c.id === this.tagging.class_id);
+            const loc = this.tagging.locations.find(l => l.id === this.tagging.location_id);
+            try {
+                const r = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/business_tagging.php'), {
+                    class_id: this.tagging.class_id, class_name: cls ? cls.name : this.tagging.class_name,
+                    location_id: this.tagging.location_id, location_name: loc ? loc.name : this.tagging.location_name,
+                    shared_company_file: this.tagging.shared ? '1' : '0',
+                    push_from_date: this.tagging.push_from_date || '',
+                });
+                this.flash = r.success
+                    ? { message: 'Business tagging saved.', type: 'success' }
+                    : { message: (r.error && r.error.message) || 'Save failed.', type: 'error' };
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.taggingSaving = false;
+            }
+        },
+
+        // S-QBO-GOLIVE-AUDIT — wipe the old company's mappings after a realm change.
+        resetting: false,
+        async resetMappings() {
+            const typed = prompt('This permanently deletes every QuickBooks mapping (customers, accounts, items, tax codes, pushed-document links) so FleetForge can be used with the connected company.\n\nType RESET to continue.');
+            if (typed !== 'RESET') {
+                return;
+            }
+            this.resetting = true;
+            try {
+                const r = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/reset_mappings.php'), { confirm: 'RESET' });
+                if (r.success) {
+                    this.flash = { message: 'Mappings reset. Re-run the mapping pages before enabling sync.', type: 'success' };
+                    setTimeout(() => window.location.reload(), 1200);
+                } else {
+                    this.flash = { message: (r.error && r.error.message) || 'Reset failed.', type: 'error' };
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.resetting = false;
             }
         },
 

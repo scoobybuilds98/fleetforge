@@ -166,9 +166,11 @@ if (!class_exists(QuickBooksSync::class)) {
             $c5Errs[] = "missing method: {$m}";
         }
     }
-    // isEnabled should return false because sync_enabled='0' per D-CPA-5
-    if (QuickBooksSync::isEnabled() !== false) {
-        $c5Errs[] = 'isEnabled() should be false while quickbooks.sync_enabled=\'0\'';
+    // isEnabled mirrors quickbooks.sync_enabled (S-QBO-GOLIVE-AUDIT: was a
+    // hard-coded "false" — true on any install that has gone live).
+    $syncSetting = (string) settings_get('quickbooks.sync_enabled', '0') === '1';
+    if (QuickBooksSync::isEnabled() !== $syncSetting) {
+        $c5Errs[] = 'isEnabled() does not mirror quickbooks.sync_enabled';
     }
     // syncMode lookups
     if (QuickBooksSync::syncMode('customer') !== 'sync') {

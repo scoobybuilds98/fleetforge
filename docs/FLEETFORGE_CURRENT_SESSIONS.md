@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-GOLIVE-AUDIT** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + `docs/audits/CLAUDE_2026-09-23_quickbooks.md`). **QuickBooks pre-go-live audit (22 fixes + 3 second-pass criticals), go-live build-out for a shared company file (linker, pre-go-live guard, exact-name matching, Class/Location, per-rate Canadian tax, rounding settlement, pay link), and a full go-live rehearsal on a production copy against a Canadian sandbox (129/129 invoices linked correctly, 60 QBO payments mirrored; 13 more bugs found and fixed). Operator next: F80 (pay link + tax-remittance JE on the real company), F83 (September invoices / July drafts), F84 (process rules with the accountant), then F81 go-live checklist.**
+
 **S-TRAINING-CAPTIONS-DOUBLE** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **Training player no longer shows subtitles twice.**
 
 **S-TRAINING-MODULE** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **In-app Training page with per-user progress + resume, and a super-admin Team Report; videos served from storage (S3 in prod). Operator F79 publishes the videos.**

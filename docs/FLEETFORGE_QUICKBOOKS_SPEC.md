@@ -314,6 +314,7 @@ Intuit's OAuth uses the standard authorization-code grant.
 2. Create a sandbox app:
    - App name: `FleetForge — Mainland (Sandbox)`
    - Scopes: `com.intuit.quickbooks.accounting` (mandatory), `com.intuit.quickbooks.payment` (for QBO Payments)
+     > **S-QBO-GOLIVE-AUDIT:** accounting ONLY. The pay-online link is `Invoice.InvoiceLink` (Accounting API); requesting the payment scope made Intuit force a (US-only) QuickBooks Payments merchant sign-up before connecting a company without Payments.
    - Redirect URI (sandbox): `https://<ngrok-tunnel>.ngrok.io/fleetforge/oauth/qbo/callback.php` during dev
    - Note Client ID and Client Secret.
 3. Create a production app (registered in S-QBO-29):
@@ -410,6 +411,8 @@ Logic:
 **Why the 14-day buffer:** if anything goes wrong with refresh, the operator has 14 days to manually re-authorize before connection dies.
 
 ### 5.4 Realm ID change runbook
+
+> **S-QBO-GOLIVE-AUDIT (2026-09-23) — now enforced.** `RealmGuard::onConnect()` (OAuth callback) compares the new realm with `quickbooks.mapped_realm_id`; on a mismatch it sets `quickbooks.realm_mismatch='1'`, forces `sync_enabled='0'`, and `QuickBooksClient::realmGuardReason()` refuses every API call except CompanyInfo until a super-admin runs **Reset mappings** (`api/v1/quickbooks/reset_mappings.php` → `RealmGuard::resetMappings()`). See docs/runbooks/qbo_realm_change.md.
 
 The realm ID identifies the QBO company file. It changes if the accountant migrates the QBO file (rare).
 
@@ -1507,7 +1510,8 @@ public function shouldPushJe(int $jeId): bool
     
     if ($je['entry_status'] !== 'posted') return false;
     
-    $bridgeSourceTypes = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment'];
+    $bridgeSourceTypes = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment',
+                          'damage_recovery', 'damage_repair']; // S-QBO-GOLIVE-AUDIT: retagged invoice / bill JEs
     if (in_array($je['source_type'], $bridgeSourceTypes, true)) return false;
     
     // Push everything else: depreciation, tax_remittance, year_end_close, recurring, manual, adjustment, reversal
@@ -1645,6 +1649,10 @@ The S-QBO-22 single "Show FA only" chip generalized into a source-type chip grou
 
 ### 9.1 The tax-override pattern (locked D-QBO-CORE-6)
 
+> ⚠️ **S-QBO-GOLIVE-AUDIT (2026-09-23) — unverified for Canada; go-live blocker F80.** The shipped invoice/credit-memo path sends ONLY `TxnTaxCodeRef` + `TotalTax` (no `TaxLine`), with every line on the override code — not the per-rate `TaxLine` block shown below (only bills have it, opt-in `quickbooks.bill.tax_mode='per_rate'`). Every live test ran on Intuit's US sandbox, where a `NON` code exists. QBO Canada has no `NON` code, requires a Canadian GST/HST code on every line (error 6000) and computes tax from those codes, so a header-only override is expected to be rejected or recomputed to $0. Must be proven on a Canadian sandbox before the real company is connected.
+
+> **Per-rate invoice mode (S-QBO-GOLIVE-AUDIT third pass, opt-in `quickbooks.invoice.tax_mode='per_rate'`):** `InvoiceTaxPerRate` resolves the FF `tax_rates` row the invoice used (province + the rates of its non-zero components) → its mapped QBO TaxCode (`acc_qbo_tax_code_map`); taxable lines carry that code, `taxable=0` lines carry `quickbooks.invoice.tax_code_exempt`; `GlobalTaxCalculation='TaxExcluded'`; `TxnTaxDetail.TaxLine` carries FF's exact GST/PST/HST amounts when each non-zero component matches exactly one sales TaxRate of the code (by name), else QBO computes from the codes. Unresolvable → preflight hold naming the fix. Every invoice push (both modes) compares QBO `TotalAmt` with FF `total_amount` and raises drift on a difference. Credit notes carry no tax in FF and stay on the override/exempt code.
+
 FleetForge computes all tax. QBO accepts the computed amounts via `TxnTaxDetail.TotalTax` override with all line items tagged `TaxCodeRef: {"value": "NON"}`.
 
 This is the single most important decision in the entire QBO integration. Without it, every invoice has $0.01-$0.05 of tax-rounding drift, accumulating into hundreds of dollars over a year.
@@ -1779,6 +1787,8 @@ QBO Payments offers two patterns:
 
 ### 11.2 The flow
 
+> **S-QBO-GOLIVE-AUDIT (2026-09-23):** Intuit has no hosted-payment-page API — the original `POST /quickbooks/v4/payments/charges` call could not work. The pay-now URL is now `Invoice.InvoiceLink` from `GET invoice/{id}?include=invoiceLink` (needs QuickBooks Payments active + `AllowOnlineCreditCardPayment/ACHPayment` + `BillEmail`, which InvoicePusher sets when `quickbooks.payments_enabled='1'`). The QBO page does not redirect back; completion is detected by the Payment webhook as before.
+
 1. Customer logs into FF portal at `/portal`.
 2. Customer navigates to outstanding invoice at `/portal/invoices/show.php?id=N`.
 3. FF renders invoice with "Pay Online" button (visible when `invoice.status IN ('sent','partially_paid','overdue')` AND `quickbooks.payments_enabled='1'`).
@@ -1894,6 +1904,8 @@ if (!hash_equals($expectedSignature, $receivedSignature)) {
 Forged or replayed webhooks rejected with 403. Sentry alert surfaces repeat attacks.
 
 ### 12.3 Event handling
+
+> **S-QBO-GOLIVE-AUDIT (2026-09-23):** Intuit retired the `eventNotifications` envelope below in 2026 (US cutover June 30 → July 31, 2026). Deliveries are now a JSON array of CloudEvents (`type: qbo.payment.created.v1`, `intuitaccountid` = realm, `intuitentityid` = Payment.Id, per-event `id`). `PaymentWebhookHandler::normalizeEvents()` accepts both. The handler also skips QBO echoes of FF's own pushes (credit-application map hit, or `ff_payment_id` / `ff_credit_application_id` in PrivateNote) and $0 payments.
 
 Typical Payment.Create webhook payload:
 
@@ -2117,6 +2129,8 @@ Every QBO API call can fail. FF's `QuickBooksClient` categorizes errors:
 | 408 (timeout) | Transient | Yes (with backoff) | Same as 5xx |
 
 ### 13.2 The retry policy
+
+> **S-QBO-GOLIVE-AUDIT (2026-09-23):** the worker now makes ONE attempt per dispatch (plus the silent 401 refresh) and requeues transient failures itself (`QuickBooksClient::lastWorkerFailure()` — Pushers swallow exceptions, so the worker's requeue arm had been unreachable while the client slept up to ~31 min in-process); web requests retry at most twice with ≤3 s sleeps. Every POST carries a QBO `requestid` — deterministic per queue row + write + definitive-4xx epoch in the worker — so a re-dispatch after a lost response replays the original create instead of duplicating it. Stale SyncToken (5010) on update/void re-reads the token and retries once. Transient token-refresh failures no longer flip `connection_status`.
 
 For transient failures (5xx, 429, 408), retry with exponential backoff:
 
@@ -2421,6 +2435,8 @@ Each action logged to `audit_log` and `acc_qbo_drift_events.resolution_note` (si
 ---
 
 ## 16. HISTORICAL BACKFILL (S-QBO-27)
+
+> **S-QBO-GOLIVE-AUDIT (2026-09-23) — go-live LINKING supersedes the historical pull for a shared company file.** The QBO company holds several businesses, so pulling "all history" would import other businesses' records. Instead FF LINKS its own pre-go-live invoices / credit notes / bills to the copies the accountant already entered (`InvoiceLinker`, QuickBooks → Invoices panel, `api/v1/quickbooks/cutover_link.php`): the map row is written with `origin='cutover_link'` and no QBO write; QBO payments on a linked invoice are mirrored into FF (`origin='qbo_other'`). Linked documents are never updated/voided by FF (SKIP + drift). Anything dated before go-live (`quickbooks.cutover_at`, or `quickbooks.push_from_date`) is refused as a NEW push until linked or released ("Push as new"); pre-go-live customers/vendors are never created in QBO unless released ("Create in QuickBooks" = `ff_only` + `match_confidence='manual'`). Do not run the historical pull against a shared file.
 
 > **🟡 MACHINERY SHIPPED 2026-06-01 via S-QBO-27 (Phase QBO-13) — DRY-RUN scaffold; live runs + GL remediation deferred to the seeded sandbox (F29).** The orchestration backbone is built + offline-tested: `lib/QboPushers/HistoricalPuller.php` (ENTITY_ORDER per §16.6, batch-100 + `MAX(pushed_at)` resume per §16.5, dry-run safety gate, reference-pull delegation to the shipped Account/TaxCode/Item/Customer/Vendor pullers, transactional-pull dispatch + idempotency) + `lib/QboPushers/ArDriftRemediator.php` (H5/H6 detection — pure FF queries — + tagged compensating-JE plan + hard-stop-and-report). Migration 84→85 adds `acc_qbo_historical_pull_runs` (run/checkpoint/remediation state) + 2 settings (`historical_pull.dry_run='1'`, `historical_pull.batch_size='100'`). UI = a "Historical Backfill — AR-drift detection" section on `/quickbooks/manual_sync` (D-QBO-27-7) backed by `api/v1/quickbooks/historical_pull/{start,status,remediation_plan}.php`. Smoke `_smoke_qbo_historical_pull` 22/22. 7 D-QBO-27-* locked.
 >
@@ -3312,6 +3328,29 @@ Q-CPA-1 through Q-CPA-7 from the master roadmap §17.2:
 ---
 
 ## 29. CHANGELOG
+
+### v1.0.3 (2026-09-23) — S-QBO-GOLIVE-AUDIT third pass: go-live build-out
+
+- **§16** go-live linking (invoices, credit notes, bills) + QBO payment import/catch-up; pre-go-live push guard for documents, payments, bill payments and JEs; pre-go-live customer/vendor create guard. Migration `202609232000` adds `origin` / `link_method` / `linked_at` to the invoice, credit-memo and bill maps.
+- **§9.1** per-rate invoice tax mode (Canada) + post-push total check.
+- **§8.1 / §8.2** shared-file auto-match: only exact names link; weaker matches stored as suggestions (`match_notes='suggest:{json}'`); updates keep the QBO DisplayName; customer email = invoice → billing → general.
+- **§8.5 / §8.6** overpayment credit notes are never QBO CreditMemos; applying one adds the invoice line to the source QBO Payment (map `qbo_credit_memo_id_ref='payment:{id}'`); webhook Update compares per invoice incl. those applications.
+- **§15** drift in a shared file counts only FF's records (linked customer/vendor or FF Class/Location).
+- Business tagging: `quickbooks.class_id` / `location_id` on every pushed document; `quickbooks.push_from_date`.
+
+### v1.0.2 (2026-09-23) — S-QBO-GOLIVE-AUDIT pre-real-company audit
+
+- **§5.4** realm change now enforced (RealmGuard + Reset mappings).
+- **§8.10** bridge-derived list += `damage_recovery`, `damage_repair` (AutoEntryBridge retags the recovery invoice / repair bill JE; pushing it double-posted). JE lines now carry `JournalEntryLineDetail.Entity` from `acc_journal_entry_lines.customer_id/vendor_id`; A/R and A/P lines without a mapped party fail preflight.
+- **§9.1** flagged unverified for QBO Canada (F80).
+- **§10** single-currency companies: any non-home-currency document is refused at preflight (`CurrencyGuard`) instead of being booked at face value in the home currency.
+- **§11.2** pay-now link via `Invoice.InvoiceLink`.
+- **§12.3** CloudEvents webhook envelope + FF-echo / $0 skips.
+- **§13.2** worker single-attempt + requeue, QBO `requestid` idempotency, 5010 auto-refresh, transient refresh ≠ disconnected; OAuth refresh serialized across processes (`GET_LOCK('ff_qbo_oauth_refresh')`).
+- **§15** live drift layer paginated and limited to QBO records created after `quickbooks.cutover_at` (stamped when master sync is first enabled).
+- **§23** access/refresh tokens, client secret and webhook verifier token encrypted at rest (ENC: AES-256, APP_SECRET-derived — same as Dropbox/MFA secrets).
+- Customer / vendor updates are now SPARSE (a full update blanked every QBO field FF does not own on the accountant's matched records). Minor version declared 75 (Intuit floor since 2025-08-01).
+
 
 ### v1.0.1 (2026-05-21) — S-QBO-5-FIX-1 normalization contract
 

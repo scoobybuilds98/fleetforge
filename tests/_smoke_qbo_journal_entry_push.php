@@ -72,6 +72,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../api/bootstrap.php';
 
+// S-QBO-GOLIVE-AUDIT: independent of the install's go-live state (a dev DB that
+// rehearsed go-live stamps a cutover date the May fixtures predate).
+require_once __DIR__ . '/_qbo_smoke_env.php';
+ff_qbo_smoke_env(['cutover_at' => '', 'push_from_date' => '']);
+ff_qbo_smoke_preserve_tables(['acc_qbo_account_map']);
+
 use FleetForge\QboPushers\JournalEntryPusher;
 use FleetForge\QboPushers\JournalEntryEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;
@@ -764,7 +770,18 @@ try {
     // Temporarily un-tag tax_receivable so AccountValidator throws.
     db_execute("UPDATE acc_qbo_account_map SET is_critical=0, critical_category=NULL WHERE ff_account_id=999992");
     $c27Errors = [];
-    $r27 = JournalEntryPusher::pushCreate(999990);
+    // S-QBO-GOLIVE-AUDIT: on an install whose REAL tax_receivable accounts
+    // are mapped the validator passed and this pushed live — unmap them for
+    // the check (rolled back).
+    $c27Saved = db_select("SELECT id, mapping_status FROM acc_qbo_account_map WHERE critical_category = 'tax_receivable'");
+    db_execute("UPDATE acc_qbo_account_map SET mapping_status = 'ff_only' WHERE critical_category = 'tax_receivable'");
+    try {
+        $r27 = JournalEntryPusher::pushCreate(999990);
+    } finally {
+        foreach ($c27Saved as $s) {
+            db_execute("UPDATE acc_qbo_account_map SET mapping_status = ? WHERE id = ?", [$s['mapping_status'], $s['id']]);
+        }
+    }
     if (($r27['status'] ?? null) !== 'failed_preflight') $c27Errors[] = "status: " . json_encode($r27['status'] ?? null);
     if (strpos((string) ($r27['error'] ?? ''), 'AccountValidator') === false) $c27Errors[] = "error should mention AccountValidator: " . json_encode($r27['error'] ?? null);
     // Restore
@@ -788,8 +805,9 @@ try {
     } elseif ($pConst !== $eConst) {
         $c28Errors[] = "drift: Pusher=" . json_encode($pConst) . " Enqueuer=" . json_encode($eConst);
     } else {
-        // Sanity: must match spec §8.10 verbatim
-        $expected = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment'];
+        // Sanity: must match spec §8.10 verbatim (+ the two damage-claim
+        // retags added in S-QBO-GOLIVE-AUDIT — same invoice/bill JE renamed).
+        $expected = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment', 'damage_recovery', 'damage_repair'];
         if ($pConst !== $expected) {
             $c28Errors[] = "diverges from spec §8.10 canonical: got " . json_encode($pConst);
         }

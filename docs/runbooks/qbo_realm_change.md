@@ -1,7 +1,7 @@
 # QBO Realm ID Change Runbook
 
 **Owner:** super_admin + accountant
-**Last reviewed:** 2026-05-20 (S-QBO-1)
+**Last reviewed:** 2026-09-23 (S-QBO-GOLIVE-AUDIT — Step 2 is now the enforced realm guard + Reset button; was 2026-05-20 S-QBO-1)
 **Spec ref:** FLEETFORGE_QUICKBOOKS_SPEC.md §5.4
 
 ---
@@ -47,48 +47,24 @@ Historical data in QBO is **not migrated automatically** to the new realm — th
    - Forces `quickbooks.sync_enabled = '0'` as a safety belt (so no cron job pushes to a partially-configured realm if the operator pauses mid-procedure).
    - **Does NOT wipe the `acc_qbo_*_map` tables** — that is the explicit next step, which the operator opts into deliberately.
 
-### Step 2 — Wipe all FF↔QBO mapping tables
+### Step 2 — Reset the mappings (enforced since S-QBO-GOLIVE-AUDIT, 2026-09-23)
 
-Run the following SQL against the FF database. This block is the canonical mapping wipe — keep it synchronised with the live schema as new `acc_qbo_*_map` tables come online in future S-QBO-N sessions.
+You no longer run SQL by hand. When the OAuth callback (Step 3) lands on a company whose realm differs from the one the mappings were built for (`quickbooks.mapped_realm_id`), FleetForge:
 
-```sql
-START TRANSACTION;
+- sets `quickbooks.realm_mismatch = '1'` and forces `quickbooks.sync_enabled = '0'`;
+- refuses EVERY QBO API call except CompanyInfo (`QuickBooksClient::realmGuardReason()`), pulls included — a pull would merge the new company's Ids into tables still holding the old company's;
+- makes the worker exit and refuses to re-enable master sync;
+- shows a red **"Sync blocked — different QuickBooks company"** banner on Settings → QuickBooks with a super-admin **Reset mappings for this company** button.
 
-TRUNCATE TABLE acc_qbo_customer_map;
-TRUNCATE TABLE acc_qbo_vendor_map;
-TRUNCATE TABLE acc_qbo_account_map;
-TRUNCATE TABLE acc_qbo_tax_code_map;
-TRUNCATE TABLE acc_qbo_item_map;
-TRUNCATE TABLE acc_qbo_invoice_map;
-TRUNCATE TABLE acc_qbo_payment_map;
-TRUNCATE TABLE acc_qbo_bank_account_map;
--- Add further acc_qbo_*_map tables as they are created in future sessions:
---   acc_qbo_credit_memo_map   (S-QBO-16)
---   acc_qbo_refund_receipt_map (S-QBO-17)
---   acc_qbo_bill_map          (S-QBO-18)
---   acc_qbo_bill_payment_map  (S-QBO-19)
---   acc_qbo_bank_transaction_map (S-QBO-20)
---   acc_qbo_journal_entry_map (S-QBO-21)
---   acc_qbo_fixed_asset_map   (S-QBO-22)
+The button (`api/v1/quickbooks/reset_mappings.php` → `RealmGuard::resetMappings()`, type `RESET` to confirm) deletes every row in `RealmGuard::REALM_SCOPED_TABLES` (all 17 `acc_qbo_*_map` tables — a smoke asserts the list matches the schema), deletes queued/processing sync jobs, drops the old company's OPEN drift events, expires pending portal pay links, clears the QBO-Id settings (`tax_override_code_id`, `refund.deposit_account_id`, `refund.payment_method_id`), adopts the connected realm as `mapped_realm_id`, and writes one `delete / qbo_realm_change` audit row with per-table counts. The sync log, webhook log and historical-pull runs are realm-stamped history and are kept.
 
--- Audit row capturing the wipe — entity_label includes the OLD realm
--- ID so the timeline is reconstructible later.
-INSERT INTO audit_log (user_id, user_name, action, module, entity_type, entity_label, notes, ip_address)
-VALUES (NULL, 'system', 'delete', 'quickbooks', 'qbo_realm_change',
-        'mapping wipe',
-        'Realm-change runbook: all acc_qbo_*_map tables truncated.',
-        '127.0.0.1');
-
-COMMIT;
-```
-
-> **Stop-gate:** before running this block on production, verify the disconnect from Step 1 actually happened (`SELECT value FROM settings WHERE \`key\` = 'quickbooks.connection_status';` should return `'disconnected'`). Truncating mapping tables while still connected to the old realm risks the worker cron racing the wipe and producing inconsistent state.
+Preconditions (refused otherwise): master sync OFF, and connected to the company being adopted — so the order is now **disconnect → connect to the new company → Reset**.
 
 ### Step 3 — Operator re-authorizes against the new realm
 
 1. From **Settings → QuickBooks**, click **Connect to QuickBooks**.
 2. Authorize against the new QBO company file in the Intuit consent screen.
-3. On successful callback, `quickbooks.realm_id` is populated with the **new** ID and `connection_status` flips to `'connected'`.
+3. On successful callback, `quickbooks.realm_id` is populated with the **new** ID and `connection_status` flips to `'connected'`. If mappings from another company exist, the realm guard engages (Step 2) — run **Reset mappings for this company** now.
 
 ### Step 4 — Re-run mapping flows for the new realm
 
@@ -128,7 +104,7 @@ After drift = 0 is confirmed:
 ## What NOT to do
 
 - **Do NOT manually edit `quickbooks.realm_id` in the settings table.** The realm ID must come from a successful OAuth callback so the access + refresh tokens, expiry timestamps, and realm ID stay consistent. Editing the realm ID alone leaves the tokens dangling against the OLD realm — every API call will 401.
-- **Do NOT skip the mapping wipe (Step 2).** Stale rows in `acc_qbo_*_map` will collide with the new realm's entity IDs, producing silent corruption (one FF entity mapped to two different QBO IDs across realms).
+- **Do NOT clear `quickbooks.realm_mismatch` by hand.** Use the Reset button. Stale rows in `acc_qbo_*_map` will collide with the new realm's entity IDs, producing silent corruption (one FF entity mapped to two different QBO IDs across realms).
 - **Do NOT re-enable `sync_enabled` before Step 5 confirms drift = 0.** Pushing against a partially-mapped realm produces partial JEs in QBO that the accountant will then have to clean up by hand.
 - **Do NOT amend `quickbooks.sandbox_redirect_uri` between Step 1 and Step 3** unless the operator is also switching ngrok tunnels. The redirect URI sent during init.php must match the redirect URI sent during callback.php verbatim or Intuit returns `invalid_grant`.
 
@@ -146,7 +122,7 @@ If Step 3 succeeds against the wrong realm:
 If Step 4 has already been started against the wrong realm:
 
 1. Re-run Step 1 (disconnect).
-2. Re-truncate the mapping tables (Step 2 block) — they need to start empty again.
+2. Connect to the correct company, then run **Reset mappings for this company** again (Step 2) — they need to start empty again.
 3. Re-authorize against the correct realm (Step 3).
 4. Re-run Step 4 mapping flows from scratch.
 

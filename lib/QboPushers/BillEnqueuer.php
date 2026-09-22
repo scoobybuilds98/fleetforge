@@ -122,7 +122,7 @@ class BillEnqueuer
             // ────────────────────────────────────────────────────────
             // Gate 4: INSERT queue row.
             // ────────────────────────────────────────────────────────
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'bill',
                 'entity_id'   => $billId,
                 'operation'   => $operation,

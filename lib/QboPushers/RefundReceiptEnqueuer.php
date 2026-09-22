@@ -88,7 +88,7 @@ class RefundReceiptEnqueuer
             }
 
             // Gate 4: best-effort INSERT.
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'refund_receipt',
                 'entity_id'   => $ffLeaseId,
                 'operation'   => $operation,

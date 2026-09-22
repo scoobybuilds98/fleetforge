@@ -214,11 +214,19 @@ class InvoicePusher
         // Short-circuit BEFORE pre-flight so already-pushed invoices don't
         // re-evaluate the gates on every retry — they're done.
         $mapping = db_row(
-            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status, qbo_currency
+            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status, qbo_currency, origin
                FROM acc_qbo_invoice_map
               WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
         );
+        // S-QBO-GOLIVE-AUDIT: an invoice LINKED at go-live is the
+        // accountant's QuickBooks invoice — never overwrite it from FF.
+        if ($operation === 'update' && $mapping !== null && !empty($mapping['qbo_invoice_id'])
+            && ($mapping['origin'] ?? 'ff_push') === 'cutover_link') {
+            InvoiceLinker::recordLinkedChange('invoice', $ffInvoiceId, (string) $mapping['qbo_invoice_id'], (string) $invoice['invoice_number'], 'update');
+            return ['success' => true, 'status' => 'skipped_cutover_link', 'outcome' => 'skipped',
+                    'qbo_id' => (string) $mapping['qbo_invoice_id']] + self::RESULT_BASE;
+        }
         if ($operation === 'create' && $mapping !== null && !empty($mapping['qbo_invoice_id'])) {
             // D-QBO-FIXPACK-10 backport: compare FF invoice currency against
             // qbo_currency snapshot (no HTTP needed — snapshotted at push time by
@@ -352,6 +360,21 @@ class InvoicePusher
         //     applies post-create but pushUpdate intentionally moves it).
         self::recordSuccessfulPush($ffInvoiceId, $invoice, $qboInvoice, $mapping);
 
+        // S-QBO-GOLIVE-AUDIT (F80): QuickBooks computes the final total
+        // itself (tax codes, rounding). If it differs from FF's, the customer
+        // is billed / pay-linked a different amount than FF expects — flag
+        // it loudly rather than discover it at payment time.
+        $qboTotal = bcadd((string) ($qboInvoice['TotalAmt'] ?? '0'), '0', 2);
+        $ffTotal  = bcadd((string) ($invoice['total_amount'] ?? '0'), '0', 2);
+        if (isset($qboInvoice['TotalAmt']) && bccomp($qboTotal, $ffTotal, 2) !== 0) {
+            PaymentWebhookHandler::recordQboSideChange(
+                'invoice', $ffInvoiceId, (string) $qboInvoice['Id'],
+                "Invoice {$invoice['invoice_number']} was pushed, but QuickBooks totals it {$qboTotal} while FleetForge has {$ffTotal} "
+                . '(usually sales-tax codes or rounding — check QuickBooks → Tax Codes / invoice tax mode). Customers paying through '
+                . 'QuickBooks will be charged the QuickBooks figure.'
+            );
+        }
+
         $returnStatus = $operation === 'update' ? 'updated' : 'created';
 
         return [
@@ -374,8 +397,18 @@ class InvoicePusher
      */
     public static function buildQboPayload(array $invoice, array $customer, array $lines, array $customerMap): array
     {
+        // S-QBO-GOLIVE-AUDIT (F80): Canadian per-rate tax (opt-in). Null in
+        // the default override mode.
+        $perRate = null;
+        if (InvoiceTaxPerRate::enabled()) {
+            $perRate = InvoiceTaxPerRate::resolve($invoice);
+            if (!$perRate['ok']) {
+                throw new QuickBooksException((string) $perRate['reason']);
+            }
+        }
+
         $payload = [
-            'Line'         => InvoiceLineBuilder::build($invoice, $customer, $lines),
+            'Line'         => InvoiceLineBuilder::build($invoice, $customer, $lines, $perRate),
             'CustomerRef'  => ['value' => (string) ($customerMap['qbo_customer_id'] ?? '')],
             // D-QBO-DATING-1 (extends D-GL-REVREC-1): a QBO Invoice posts
             // Dr A/R / Cr Income on TxnDate, so TxnDate IS the QBO recognition
@@ -386,9 +419,16 @@ class InvoicePusher
             // current-period invoices this equals invoice_date (guard never fires).
             'TxnDate'      => \FleetForge\Accounting\AccountingService::recognitionDate((string) $invoice['invoice_date']),
             'DocNumber'    => (string) $invoice['invoice_number'],
-            'TxnTaxDetail' => InvoiceTaxOverride::buildTxnTaxDetail($invoice),
+            'TxnTaxDetail' => $perRate === null ? InvoiceTaxOverride::buildTxnTaxDetail($invoice) : ($perRate['txn_tax_detail'] ?? null),
             'PrivateNote'  => self::buildPrivateNoteJson($invoice),
         ];
+        if ($perRate !== null) {
+            // Line codes carry the rates; QuickBooks adds tax on top.
+            $payload['GlobalTaxCalculation'] = 'TaxExcluded';
+            if ($payload['TxnTaxDetail'] === null) {
+                unset($payload['TxnTaxDetail']);   // QuickBooks computes from the codes
+            }
+        }
 
         if (!empty($invoice['due_date'])) {
             $payload['DueDate'] = (string) $invoice['due_date'];
@@ -438,13 +478,63 @@ class InvoicePusher
         // When multi_currency_enabled='0': omit CurrencyRef + ExchangeRate entirely
         // (QBO error 6000 would fire on single-currency companies otherwise).
 
-        // Customer-facing memo. K-22: no invoices.memo column — use
-        // invoices.notes (customer-visible) NOT internal_notes.
-        if (!empty($invoice['notes'])) {
-            $payload['CustomerMemo'] = ['value' => (string) $invoice['notes']];
+        // S-QBO-GOLIVE-AUDIT: QuickBooks only honours a supplied DocNumber
+        // safely when "Custom transaction numbers" is ON. With it OFF, Intuit
+        // advises sending none — QBO numbers the invoice itself, and in a
+        // shared company file FF's series would otherwise leak into the next
+        // number QBO suggests for the OTHER businesses. The FF number then
+        // rides the customer message so both sides can still find it.
+        $customTxnNumbers = (string) settings_get('quickbooks.pref.custom_txn_numbers', '1') !== '0';
+        if (!$customTxnNumbers) {
+            unset($payload['DocNumber']);
         }
 
-        return $payload;
+        // Customer-facing memo. K-22: no invoices.memo column — use
+        // invoices.notes (customer-visible) NOT internal_notes.
+        // S-QBO-GOLIVE-AUDIT: prefixed with the unit + contract (and the FF
+        // invoice number when QBO numbers it). Line descriptions carry only
+        // the period, so a customer renting several trailers could not tell
+        // one QuickBooks invoice from another.
+        $memoHead = array_filter([
+            $customTxnNumbers ? null : 'FleetForge invoice ' . (string) $invoice['invoice_number'],
+            !empty($invoice['unit_number_invoice_snapshot']) ? 'Unit ' . (string) $invoice['unit_number_invoice_snapshot'] : null,
+            !empty($invoice['contract_number_snapshot']) ? 'Contract ' . (string) $invoice['contract_number_snapshot'] : null,
+            !empty($invoice['po_number']) ? 'PO ' . (string) $invoice['po_number'] : null,
+        ]);
+        $memo = implode(' · ', $memoHead);
+        if (!empty($invoice['notes'])) {
+            $memo = $memo === '' ? (string) $invoice['notes'] : $memo . "\n" . (string) $invoice['notes'];
+        }
+        if ($memo !== '') {
+            $payload['CustomerMemo'] = ['value' => substr($memo, 0, QboFieldLimits::INVOICE_CUSTOMER_MEMO_MAX)];
+        }
+
+        // S-QBO-GOLIVE-AUDIT: portal "Pay Online" (S-QBO-15). QBO only issues
+        // an Invoice.InvoiceLink (the pay-now URL QuickBooksClient::
+        // generatePaymentsHostedUrl reads) when the invoice allows online
+        // payment AND has a BillEmail. Setting BillEmail does NOT make QBO
+        // send anything — only its /send endpoint does, and FF never calls it.
+        if ((string) settings_get('quickbooks.payments_enabled', '0') === '1') {
+            $payload['AllowOnlineCreditCardPayment'] = true;
+            $payload['AllowOnlineACHPayment']        = true;
+            foreach ([
+                $invoice['sent_to_email'] ?? null,
+                $invoice['customer_email_snapshot'] ?? null,
+                $customer['invoice_email'] ?? null,
+                $customer['billing_email'] ?? null,
+                $customer['email'] ?? null,
+            ] as $candidate) {
+                $candidate = trim((string) $candidate);
+                if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL) !== false) {
+                    $payload['BillEmail'] = ['Address' => $candidate];
+                    break;
+                }
+            }
+        }
+
+        // S-QBO-GOLIVE-AUDIT: rental-business Class / Location for the shared
+        // QuickBooks file (no-op until one is chosen in Settings).
+        return QboTagging::applyToSalesDoc($payload);
     }
 
     /**
@@ -774,11 +864,20 @@ class InvoicePusher
 
         // 5. Mapping lookup. Void requires an existing QBO entity to void.
         $mapping = db_row(
-            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status
+            "SELECT id, qbo_invoice_id, qbo_sync_token, push_status, origin
                FROM acc_qbo_invoice_map
               WHERE ff_invoice_id = ?",
             [$ffInvoiceId]
         );
+
+        // S-QBO-GOLIVE-AUDIT: never void the accountant's own (go-live
+        // linked) invoice from FF — it may carry payments in QuickBooks.
+        if ($mapping !== null && !empty($mapping['qbo_invoice_id']) && ($mapping['origin'] ?? 'ff_push') === 'cutover_link'
+            && $mapping['push_status'] !== 'voided') {
+            InvoiceLinker::recordLinkedChange('invoice', $ffInvoiceId, (string) $mapping['qbo_invoice_id'], (string) $invoice['invoice_number'], 'void');
+            return ['success' => true, 'status' => 'skipped_cutover_link', 'outcome' => 'skipped',
+                    'qbo_id' => (string) $mapping['qbo_invoice_id']] + self::RESULT_BASE;
+        }
 
         // 5a. No mapping → FF voided before ever pushing (D-QBO-12-5).
         //     No QBO entity to void. Skip silently with status='skipped_unmapped_void'.

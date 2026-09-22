@@ -60,8 +60,8 @@ $mappingId = isset($body['mapping_id']) && (int) $body['mapping_id'] > 0
              : null;
 $notes     = isset($body['notes']) ? (string) $body['notes'] : null;
 
-if (!in_array($action, ['link', 'unlink', 'ignore', 'unignore'], true)) {
-    json_error('VALIDATION_ERROR', 'action must be one of: link, unlink, ignore, unignore', 422);
+if (!in_array($action, ['link', 'unlink', 'ignore', 'unignore', 'create_new'], true)) {
+    json_error('VALIDATION_ERROR', 'action must be one of: link, unlink, ignore, unignore, create_new', 422);
 }
 
 // Per-action input validation up front — easier to reason about than
@@ -76,6 +76,11 @@ switch ($action) {
     case 'unlink':
         if ($mappingId === null && $ffCustId === null && $qboCustId === null) {
             json_error('VALIDATION_ERROR', 'unlink requires mapping_id, ff_customer_id, or qbo_customer_id', 422);
+        }
+        break;
+    case 'create_new':
+        if ($ffCustId === null) {
+            json_error('VALIDATION_ERROR', 'create_new requires ff_customer_id', 422);
         }
         break;
     case 'ignore':
@@ -152,6 +157,35 @@ try {
             }
 
             return ['id' => $id, 'status' => 'mapped'];
+        }
+
+        if ($action === 'create_new') {
+            // S-QBO-GOLIVE-AUDIT: a person confirms QuickBooks has NO such
+            // customer. Recorded as a manual ff_only decision — it releases the
+            // pre-go-live create guard (CustomerPusher) and auto-match keeps it.
+            $row = db_row("SELECT * FROM acc_qbo_customer_map WHERE ff_customer_id = ?", [$ffCustId]);
+            if ($row !== null && $row['qbo_customer_id'] !== null) {
+                throw new \RuntimeException('CONFLICT: This customer is already linked to QuickBooks customer #' . $row['qbo_customer_id'] . '.');
+            }
+            $decision = 'Operator: not in QuickBooks — create it' . ($notes !== null && $notes !== '' ? " ({$notes})" : '');
+            if ($row !== null) {
+                db_execute(
+                    "UPDATE acc_qbo_customer_map
+                        SET mapping_status = 'ff_only', match_confidence = 'manual', match_notes = ?, last_synced_at = ?
+                      WHERE id = ?",
+                    [$decision, $now, (int) $row['id']]
+                );
+                $id = (int) $row['id'];
+            } else {
+                $id = db_insert('acc_qbo_customer_map', [
+                    'ff_customer_id'     => $ffCustId,
+                    'mapping_status'     => 'ff_only',
+                    'match_confidence'   => 'manual',
+                    'match_notes'        => $decision,
+                    'created_by_user_id' => $userId,
+                ]);
+            }
+            return ['id' => $id, 'status' => 'ff_only'];
         }
 
         if ($action === 'unlink') {
@@ -256,9 +290,16 @@ try {
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 
+    // create_new: queue the create now (post-commit, best-effort like every
+    // enqueuer). False while sync is off — it pushes on the next edit then.
+    $enqueued = $action === 'create_new'
+        ? \FleetForge\QboPushers\CustomerEnqueuer::enqueue((int) $ffCustId, 'create')
+        : null;
+
     json_success([
         'mapping_id' => $result['id'],
         'status'     => $result['status'],
+        'enqueued'   => $enqueued,
     ]);
 
 } catch (\RuntimeException $e) {
@@ -268,6 +309,9 @@ try {
     $message = $e->getMessage();
     if (str_starts_with($message, 'NOT_FOUND:')) {
         json_error('NOT_FOUND', trim(substr($message, 10)), 404);
+    }
+    if (str_starts_with($message, 'CONFLICT:')) {
+        json_error('CONFLICT', trim(substr($message, 9)), 409);
     }
     json_error('INTERNAL_ERROR', 'Save mapping failed: ' . $message, 500);
 } catch (\Throwable $e) {

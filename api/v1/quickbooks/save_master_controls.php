@@ -61,9 +61,23 @@ if ($errors !== []) {
     json_validation_error($errors);
 }
 
+// S-QBO-GOLIVE-AUDIT: never re-enable pushing while connected to a QBO
+// company other than the one the mappings were built for.
+if (($applied['sync_enabled'] ?? null) === '1' && ($realmGuard = QuickBooksClient::realmGuardReason()) !== null) {
+    json_error('REALM_MISMATCH', $realmGuard, 409);
+}
+
 db_transaction(function () use (&$applied): void {
     foreach ($applied as $shortKey => $value) {
         QuickBooksClient::settings_write_qbo($shortKey, $value);
+    }
+
+    // S-QBO-GOLIVE-AUDIT: stamp the go-live moment the first time master
+    // sync is switched on. DriftChecker's live layer ignores QBO records
+    // created before it — those are the accountant's pre-FF history, not
+    // drift — instead of flooding the dashboard with them.
+    if (($applied['sync_enabled'] ?? null) === '1' && (string) settings_get('quickbooks.cutover_at', '') === '') {
+        QuickBooksClient::settings_write_qbo('cutover_at', gmdate('c'));
     }
 
     if ($applied !== []) {

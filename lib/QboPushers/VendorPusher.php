@@ -162,7 +162,7 @@ class VendorPusher
         // in vendors table and is included here so buildQboPayload + the
         // idempotency-replay mismatch warning can read per-row currency).
         $ff = db_row(
-            "SELECT id, name, contact_name, email, phone, address, city, state, currency, deleted_at, updated_at
+            "SELECT id, name, contact_name, email, phone, address, city, state, currency, deleted_at, updated_at, created_at
                FROM vendors
               WHERE id = ?",
             [$ffVendorId]
@@ -187,7 +187,7 @@ class VendorPusher
         //    may exist from a prior pull (qbo_only), prior auto-match
         //    (mapped/manual), or a prior push (mapped/manual).
         $mapping = db_row(
-            "SELECT id, qbo_vendor_id, qbo_sync_token, mapping_status
+            "SELECT id, qbo_vendor_id, qbo_sync_token, mapping_status, match_confidence
                FROM acc_qbo_vendor_map
               WHERE ff_vendor_id = ?",
             [$ffVendorId]
@@ -247,6 +247,17 @@ class VendorPusher
             $effectiveOperation = 'create';
         }
 
+        // 5b. S-QBO-GOLIVE-AUDIT: never CREATE a QuickBooks vendor for a
+        //     vendor FF had before go-live unless a person released it —
+        //     suppliers are usually shared by every business in the file.
+        if ($effectiveOperation === 'create') {
+            $block = InvoiceLinker::partyCreateBlockReason('Vendor', $ff['created_at'] ?? null, $mapping);
+            if ($block !== null) {
+                self::recordFailedPreflight($ffVendorId, $block);
+                return ['success' => false, 'status' => 'failed_preflight', 'outcome' => 'failed', 'error' => $block] + self::RESULT_BASE;
+            }
+        }
+
         // 6. Build payload from FF row.
         $qboPayload = self::buildQboPayload($ff);
 
@@ -257,6 +268,10 @@ class VendorPusher
         // Strip it from update payloads here so the HTTP call succeeds.
         if ($effectiveOperation === 'update') {
             unset($qboPayload['CurrencyRef']);
+            // S-QBO-GOLIVE-AUDIT: keep the accountant's DisplayName on a
+            // linked vendor (shared by every business in the file; must be
+            // unique across the names list — a rename can collide, 6240).
+            unset($qboPayload['DisplayName']);
         }
 
         // 7. HTTP call via QuickBooksClient. The client handles auth,
@@ -267,11 +282,16 @@ class VendorPusher
         $client = new QuickBooksClient();
         try {
             if ($effectiveOperation === 'update') {
+                // S-QBO-GOLIVE-AUDIT: SPARSE update — same reasoning as
+                // CustomerPusher: a full update blanked every vendor field FF
+                // doesn't own (terms, 1099/T4A flags, business number, default
+                // expense account, notes) on the accountant's matched records.
                 $response = $client->updateEntity(
                     'vendor',
                     (string) $mapping['qbo_vendor_id'],
                     (string) ($mapping['qbo_sync_token'] ?? '0'),
-                    $qboPayload
+                    $qboPayload,
+                    ['sparse' => true]
                 );
             } else {
                 $response = $client->createEntity('vendor', $qboPayload);

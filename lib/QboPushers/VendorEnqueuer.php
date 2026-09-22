@@ -98,7 +98,7 @@ class VendorEnqueuer
         // future high-urgency). next_retry_at intentionally omitted —
         // column is nullable, worker computes on retry per spec §6.7.
         try {
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'vendor',
                 'entity_id'   => $ffVendorId,
                 'operation'   => $operation,

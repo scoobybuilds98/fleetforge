@@ -342,7 +342,7 @@ class PaymentPusher
         //    voided/refunded/returned) skip pre-flight.
         $ff = db_row(
             "SELECT id, payment_number, customer_id, amount, currency, payment_method,
-                    reference_number, payment_date, status, origin,
+                    reference_number, check_number, payment_date, status, origin,
                     exchange_rate_to_cad, updated_at, deleted_at
                FROM payments
               WHERE id = ?",
@@ -625,6 +625,13 @@ class PaymentPusher
      */
     private static function runPreflight(array $ff)
     {
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): a payment dated before go-live is
+        // already in QuickBooks' hand-kept books — never push it as new.
+        $preGoLive = InvoiceLinker::preGoLiveDateReason('Payment ' . ($ff['payment_number'] ?? "#{$ff['id']}"), $ff['payment_date'] ?? null);
+        if ($preGoLive !== null) {
+            return $preGoLive;
+        }
+
         // Gate 1: Customer mapping.
         $customerMap = db_row(
             "SELECT qbo_customer_id, mapping_status FROM acc_qbo_customer_map WHERE ff_customer_id = ?",
@@ -696,7 +703,7 @@ class PaymentPusher
         // PaymentRefNum is optional but when set must satisfy the 21-char
         // limit (matches Invoice/Bill DocNumber per Intuit docs). Returns
         // typed status code so operator can filter retries in the admin UI.
-        $refNum = trim((string) ($ff['reference_number'] ?? ''));
+        $refNum = self::refNum($ff);
         if ($refNum !== '' && strlen($refNum) > QboFieldLimits::PAYMENT_REF_NUM_MAX) {
             $len = strlen($refNum);
             $max = QboFieldLimits::PAYMENT_REF_NUM_MAX;
@@ -704,6 +711,14 @@ class PaymentPusher
                 'reason'      => "PaymentRefNum '{$refNum}' exceeds QBO Payment.PaymentRefNum limit of {$max} characters (actual: {$len}). Shorten the payment reference_number.",
                 'status_code' => 'failed_preflight_field_too_long',
             ];
+        }
+
+        // Gate 7b (S-QBO-GOLIVE-AUDIT): foreign-currency payment into a
+        // single-currency company would be booked at face value in the home
+        // currency. See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason($ff['currency'] ?? null, "Payment {$ff['payment_number']}");
+        if ($currencyBlock !== null) {
+            return ['reason' => $currencyBlock, 'status_code' => 'failed_preflight_currency_mismatch'];
         }
 
         // Gate 8: Currency-mismatch (D-QBO-14-7, mirrors D-QBO-BILL-GOTCHAS-1
@@ -814,7 +829,7 @@ class PaymentPusher
         ];
 
         // 3. PaymentRefNum per D-QBO-14-6. Optional — only emit when set.
-        $refNum = trim((string) ($ff['reference_number'] ?? ''));
+        $refNum = self::refNum($ff);
         if ($refNum !== '') {
             $payload['PaymentRefNum'] = $refNum;
         }
@@ -880,6 +895,37 @@ class PaymentPusher
                 ],
             ];
         }
+        // 5b. S-QBO-GOLIVE-AUDIT: applications of this payment's own
+        //     overpayment credit live as extra invoice lines on the SAME QBO
+        //     Payment (CreditApplicationPusher). Keep the ones already pushed,
+        //     or an FF-side payment update would silently un-apply them in
+        //     QuickBooks. Not-yet-pushed ones are added by their own push.
+        $overpaymentApps = db_select(
+            "SELECT m.qbo_invoice_id_ref AS qbo_invoice_id, cna.amount_applied
+               FROM credit_note_applications cna
+               JOIN credit_notes cn ON cn.id = cna.credit_note_id
+               JOIN acc_qbo_credit_application_map m ON m.ff_credit_application_id = cna.id
+              WHERE cn.source = 'overpayment' AND cn.source_payment_id = ?
+                AND cna.status = 'applied' AND m.push_status = 'pushed' AND m.qbo_invoice_id_ref IS NOT NULL",
+            [(int) $ff['id']]
+        );
+        foreach ($overpaymentApps as $oa) {
+            $merged = false;
+            foreach ($payloadLines as &$pl) {
+                if ((string) $pl['LinkedTxn'][0]['TxnId'] === (string) $oa['qbo_invoice_id']) {
+                    $pl['Amount'] = (float) bcadd((string) $pl['Amount'], (string) $oa['amount_applied'], 2);
+                    $merged = true;
+                    break;
+                }
+            }
+            unset($pl);
+            if (!$merged) {
+                $payloadLines[] = [
+                    'Amount'    => (float) $oa['amount_applied'],
+                    'LinkedTxn' => [['TxnId' => (string) $oa['qbo_invoice_id'], 'TxnType' => 'Invoice']],
+                ];
+            }
+        }
         $payload['Line'] = $payloadLines;
 
         // 6. PrivateNote — JSON audit trail for QBO-side review per
@@ -887,6 +933,18 @@ class PaymentPusher
         $payload['PrivateNote'] = self::buildPrivateNoteJson($ff);
 
         return $payload;
+    }
+
+    /**
+     * The payment's reference for QBO PaymentRefNum: reference_number, else
+     * the cheque number (S-QBO-GOLIVE-AUDIT — a cheque recorded with only
+     * its number reached QuickBooks with no reference at all, which is what
+     * the accountant matches deposits and customer remittances by).
+     */
+    public static function refNum(array $ff): string
+    {
+        $ref = trim((string) ($ff['reference_number'] ?? ''));
+        return $ref !== '' ? $ref : trim((string) ($ff['check_number'] ?? ''));
     }
 
     /**

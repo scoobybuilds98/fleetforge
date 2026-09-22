@@ -38,6 +38,7 @@ require_once FF_ROOT . '/includes/auth.php';
 use FleetForge\QuickBooksClient;
 use FleetForge\OAuth\StateManager;
 use FleetForge\QboPushers\CompanyInfoSync;
+use FleetForge\QboPushers\RealmGuard;
 
 /**
  * ff_qbo_redirect_to_settings — emit a Location header to the
@@ -124,7 +125,7 @@ if ($environment === 'production') {
 }
 
 $clientId     = (string) settings_get('quickbooks.client_id', '');
-$clientSecret = (string) settings_get('quickbooks.client_secret', '');
+$clientSecret = QuickBooksClient::secret('client_secret'); // S-QBO-GOLIVE-AUDIT: encrypted at rest
 
 // ── Exchange the auth code for tokens ──────────────────────────
 $ch = curl_init('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer');
@@ -198,6 +199,13 @@ QuickBooksClient::settings_write_qbo('last_connected_at',        gmdate('c', $no
 QuickBooksClient::settings_write_qbo('connection_status',        'connected');
 QuickBooksClient::settings_write_qbo('connection_error',         '');
 
+// ── Realm-change guard (S-QBO-GOLIVE-AUDIT) ────────────────────
+// If FF's mappings were built against a different QBO company (the
+// sandbox, at go-live), block all sync until an admin resets them —
+// otherwise pushes would reference the old company's Ids. Tokens + realm
+// are still stored above so the reset can run without a second OAuth.
+$realmVerdict = RealmGuard::onConnect($realmId);
+
 // user_id/user_name resolved from acc_oauth_states (D-QBO-OAUTH-FIX-4);
 // callback runs without an active session so current_user_*() is unusable.
 db_insert('audit_log', [
@@ -207,7 +215,11 @@ db_insert('audit_log', [
     'module'       => 'quickbooks',
     'entity_type'  => 'qbo_oauth_connection',
     'entity_label' => 'Realm ' . $realmId,
-    'notes'        => 'OAuth connection established for environment=' . $environment,
+    'notes'        => 'OAuth connection established for environment=' . $environment
+        . ($realmVerdict['mismatch']
+            ? '. REALM CHANGE: mappings belong to realm ' . ($realmVerdict['mapped_realm'] !== '' ? $realmVerdict['mapped_realm'] : 'unknown')
+              . ' — sync blocked + sync_enabled forced to 0 until Reset Mappings.'
+            : ''),
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
 ]);
 
@@ -223,4 +235,11 @@ try {
     error_log('S-QBO-FIXPACK-3: CompanyInfo sync failed at connect: ' . $companyInfoErr->getMessage());
 }
 
+if ($realmVerdict['mismatch']) {
+    ff_qbo_redirect_to_settings(
+        'error',
+        'Connected to QuickBooks (realm ' . $realmId . '), but FleetForge\'s mappings belong to a different company. '
+        . 'Syncing is blocked until an admin uses Reset Mappings on this page.'
+    );
+}
 ff_qbo_redirect_to_settings('success', 'Connected to QuickBooks (realm ' . $realmId . ').');

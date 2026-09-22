@@ -72,9 +72,10 @@ class InvoicePreflightGate
             ];
         }
 
-        // 2. Tax override target
+        // 2. Tax override target (override mode only — per-rate mode resolves
+        //    real QuickBooks codes per invoice at gate 4.1 below).
         $overrideCodeId = (string) settings_get('quickbooks.tax_override_code_id', '');
-        if ($overrideCodeId === '') {
+        if ($overrideCodeId === '' && !InvoiceTaxPerRate::enabled()) {
             return [
                 'ok'     => false,
                 'reason' => "Tax override code not configured (settings.quickbooks.tax_override_code_id empty). Run /quickbooks/tax_codes → Pull from QuickBooks first to identify the NON code.",
@@ -111,6 +112,24 @@ class InvoicePreflightGate
             ];
         }
 
+        // 4.0 Pre-go-live guard (S-QBO-GOLIVE-AUDIT). An invoice dated or
+        // sent before QuickBooks go-live is almost certainly already in
+        // QuickBooks (the first year was invoiced there) — pushing it would
+        // duplicate it. It must be linked, or released with "Push as new".
+        $cutoverBlock = InvoiceLinker::cutoverBlockReason('invoice', $invoice);
+        if ($cutoverBlock !== null) {
+            return ['ok' => false, 'reason' => $cutoverBlock];
+        }
+
+        // 4.1 Per-rate tax resolution (S-QBO-GOLIVE-AUDIT, F80) — a missing
+        // tax-code mapping is an operator fix, not a failed HTTP call.
+        if (InvoiceTaxPerRate::enabled()) {
+            $tax = InvoiceTaxPerRate::resolve($invoice);
+            if (!$tax['ok']) {
+                return ['ok' => false, 'reason' => (string) $tax['reason']];
+            }
+        }
+
         $customerMap = db_row(
             "SELECT qbo_customer_id, mapping_status
                FROM acc_qbo_customer_map
@@ -143,6 +162,20 @@ class InvoicePreflightGate
         //
         // FALLTHROUGH: Transient QBO API errors are swallowed — never block a
         // push on a read-only pre-flight probe connectivity issue.
+        // S-QBO-GOLIVE-AUDIT: single-currency company + foreign-currency
+        // invoice → QBO would book USD amounts as CAD. See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason(
+            $invoice['currency'] ?? null,
+            'Invoice ' . ($invoice['invoice_number'] ?? "#{$ffInvoiceId}")
+        );
+        if ($currencyBlock !== null) {
+            return [
+                'ok'          => false,
+                'reason'      => $currencyBlock,
+                'status_code' => 'failed_preflight_currency_mismatch',
+            ];
+        }
+
         if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
             try {
                 $client = new QuickBooksClient();

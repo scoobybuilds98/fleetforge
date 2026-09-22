@@ -31,7 +31,11 @@ $perPage = min(100, max(10, (int) ($_GET['per_page'] ?? 25)));
 $offset = ($page - 1) * $perPage;
 
 // Status filter — whitelist against actual ENUM values.
-$validStatuses = ['pending','pushed','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight'];
+// S-QBO-GOLIVE-AUDIT: + the typed preflight statuses and 'voided' — the page
+// offers them as filters, and array_intersect silently dropped them (so ticking
+// one showed ALL rows).
+$validStatuses = ['pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted',
+                  'failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch'];
 $statusFilter = isset($_GET['status']) && $_GET['status'] !== ''
     ? array_values(array_intersect(explode(',', (string) $_GET['status']), $validStatuses))
     : [];
@@ -62,6 +66,8 @@ try {
     foreach ($kpiRows as $k) {
         $kpis[$k['push_status']] = (int) $k['c'];
     }
+    // S-QBO-GOLIVE-AUDIT: how many of the "pushed" rows are go-live links.
+    $kpis['linked'] = (int) db_count("SELECT COUNT(*) FROM acc_qbo_invoice_map WHERE origin = 'cutover_link'");
 
     $total = (int) db_count(
         "SELECT COUNT(*) FROM acc_qbo_invoice_map m WHERE {$where}",
@@ -73,7 +79,8 @@ try {
                 m.qbo_total_amt, m.qbo_balance, m.qbo_status, m.qbo_currency,
                 m.qbo_exchange_rate, m.ff_invoice_snapshot_total, m.ff_engine_version,
                 m.push_status, m.push_error, m.pushed_at, m.last_synced_at,
-                i.invoice_number, i.customer_id, i.invoice_date, i.due_date,
+                m.origin, m.link_method, m.linked_at,
+                i.invoice_number, i.customer_id, i.invoice_date, i.due_date, i.balance_due,
                 i.total_amount, i.currency AS ff_currency, i.status AS ff_status,
                 i.company_name_snapshot, i.customer_name_snapshot
            FROM acc_qbo_invoice_map m

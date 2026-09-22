@@ -73,6 +73,24 @@ db_transaction(function () use (
     // string is a legitimate value (clearing the override). Persist
     // verbatim whenever the key was present in the payload.
     if ($environment !== null) {
+        // S-QBO-GOLIVE-AUDIT: a sandbox token set is meaningless against the
+        // production API host (and vice versa). Switching environments while
+        // connected used to leave the old tokens + realm in place, so the next
+        // call hit production with a sandbox token → 401 → refresh with the
+        // other environment's keys → invalid_grant. Treat the switch as a
+        // disconnect (same fields disconnect.php clears); the operator then
+        // connects to the new environment's company. The mappings are kept —
+        // RealmGuard decides at that connect whether they still apply.
+        $previousEnv = (string) settings_get('quickbooks.environment', 'sandbox');
+        if ($previousEnv !== $environment) {
+            foreach (['access_token', 'refresh_token', 'realm_id', 'access_token_expires_at', 'refresh_token_expires_at'] as $k) {
+                QuickBooksClient::settings_write_qbo($k, '');
+            }
+            QuickBooksClient::settings_write_qbo('connection_status', 'disconnected');
+            QuickBooksClient::settings_write_qbo('connection_error',  '');
+            QuickBooksClient::settings_write_qbo('sync_enabled',      '0');
+            $changed[] = "environment switch {$previousEnv}→{$environment} (connection cleared, sync_enabled=0)";
+        }
         QuickBooksClient::settings_write_qbo('environment', $environment);
         $changed[] = 'environment';
     }

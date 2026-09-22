@@ -55,7 +55,9 @@ echo "[1/2] database/migrations/ : " . (is_dir($deprecatedDir) ? "EXISTS ✗" : 
 
 // ── (ii) scan every *.sql for schema DDL outside the two sanctioned homes ──
 // Directories that never hold project SQL — skip for speed/noise.
-$skipDirs = ['/.git/', '/node_modules/', '/vendor/'];
+// .claude/worktrees/ holds other agent sessions' git worktrees (gitignored
+// full checkouts): their db_migrations/ copies are not strays in THIS tree.
+$skipDirs = ['/.git/', '/node_modules/', '/vendor/', '/.claude/worktrees/'];
 
 $rii = new RecursiveIteratorIterator(
     new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)

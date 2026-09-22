@@ -170,6 +170,10 @@ try {
         $params
     );
 
+    // S-QBO-GOLIVE-AUDIT: auto-match suggestions (shared company file —
+    // only exact matches link automatically) ride on match_notes.
+    $rows = \FleetForge\QboPushers\PartyAutoMatch::decorateSuggestions('customer', $rows);
+
     $totalPages = $total > 0 ? (int) ceil($total / $pageSize) : 1;
 
     json_success([

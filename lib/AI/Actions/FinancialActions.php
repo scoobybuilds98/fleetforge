@@ -405,7 +405,7 @@ class FinancialActions
      * @throws ActionException  NOT_FOUND / VALIDATION_ERROR / PERIOD_CLOSED
      * @return array{id:int, payment_number:string, reverted_statuses:array}
      */
-    public static function voidPayment(int $id, ?string $reason, int $userId, string $userName, ?string $ip): array
+    public static function voidPayment(int $id, ?string $reason, ?int $userId, string $userName, ?string $ip): array
     {
         $reason = $reason !== null ? trim($reason) : '';
         if ($reason === '') {

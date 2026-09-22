@@ -62,6 +62,7 @@ function ff_smoke_pw_cleanup(): void
     db_execute("DELETE FROM acc_qbo_webhook_events WHERE webhook_event_id LIKE 'smoke-pw-%'");
     db_execute("DELETE FROM acc_qbo_payment_map WHERE qbo_payment_id LIKE 'smoke-pw-%'");
     db_execute("DELETE FROM payment_allocations WHERE payment_id BETWEEN 999990 AND 999999");
+    db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id BETWEEN 999990 AND 999999"); // S-QBO-GOLIVE-AUDIT: the payment's JE too
     db_execute("DELETE FROM payments WHERE id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM invoices WHERE id BETWEEN 999990 AND 999999");
@@ -316,6 +317,7 @@ try {
     }
     // Cleanup C11
     db_execute("DELETE FROM acc_qbo_payment_map WHERE qbo_payment_id = 'smoke-pw-existing'");
+    db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = 999998"); // S-QBO-GOLIVE-AUDIT: the payment's JE too
     db_execute("DELETE FROM payments WHERE id = 999998");
     db_execute("DELETE FROM acc_qbo_invoice_map WHERE ff_invoice_id = 999998");
     db_execute("DELETE FROM invoices WHERE id = 999998");
@@ -364,6 +366,7 @@ try {
     // Reset for next checks (delete the C12 payment first to avoid FK issues)
     db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id = ?", [$ffPayId12]);
     db_execute("DELETE FROM payment_allocations WHERE payment_id = ?", [$ffPayId12]);
+    db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = ?", [$ffPayId12]); // S-QBO-GOLIVE-AUDIT: the payment's JE too
     db_execute("DELETE FROM payments WHERE id = ?", [$ffPayId12]);
     // Reset invoice state
     db_execute("UPDATE invoices SET amount_paid='0.00', balance_due='500.00', status='sent' WHERE id = ?", [$fx['invoice_id']]);
@@ -422,6 +425,7 @@ try {
     // Cleanup C15
     db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id = ?", [$ffPayId15]);
     db_execute("DELETE FROM payment_allocations WHERE payment_id = ?", [$ffPayId15]);
+    db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = ?", [$ffPayId15]); // S-QBO-GOLIVE-AUDIT: the payment's JE too
     db_execute("DELETE FROM payments WHERE id = ?", [$ffPayId15]);
     db_execute("UPDATE invoices SET amount_paid='0.00', balance_due='500.00', status='sent' WHERE id = ?", [$fx['invoice_id']]);
     db_execute("UPDATE customers SET outstanding_balance='500.00' WHERE id = ?", [$fx['customer_id']]);
@@ -441,6 +445,7 @@ try {
     }
     db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id = ?", [$ffPayId16]);
     db_execute("DELETE FROM payment_allocations WHERE payment_id = ?", [$ffPayId16]);
+    db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = ?", [$ffPayId16]); // S-QBO-GOLIVE-AUDIT: the payment's JE too
     db_execute("DELETE FROM payments WHERE id = ?", [$ffPayId16]);
     db_execute("UPDATE invoices SET amount_paid='0.00', balance_due='500.00', status='sent' WHERE id = ?", [$fx['invoice_id']]);
     db_execute("UPDATE customers SET outstanding_balance='500.00' WHERE id = ?", [$fx['customer_id']]);
@@ -463,6 +468,7 @@ try {
     }
     db_execute("DELETE FROM acc_qbo_payment_map WHERE ff_payment_id = ?", [$ffPayId17]);
     db_execute("DELETE FROM payment_allocations WHERE payment_id = ?", [$ffPayId17]);
+    db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = ?", [$ffPayId17]); // S-QBO-GOLIVE-AUDIT: the payment's JE too
     db_execute("DELETE FROM payments WHERE id = ?", [$ffPayId17]);
     db_execute("UPDATE invoices SET amount_paid='0.00', balance_due='500.00', status='sent' WHERE id = ?", [$fx['invoice_id']]);
     db_execute("UPDATE customers SET outstanding_balance='500.00' WHERE id = ?", [$fx['customer_id']]);

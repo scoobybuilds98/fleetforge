@@ -427,10 +427,37 @@ class DriftChecker
     {
         $qboEntity = self::qboEntityName($entityType);
         $client = new QuickBooksClient();
-        $resp = $client->query("SELECT * FROM {$qboEntity} MAXRESULTS 1000");
-        $list = $resp['QueryResponse'][$qboEntity] ?? [];
-        if (!is_array($list)) {
-            return;
+
+        // S-QBO-GOLIVE-AUDIT: (1) was a single "MAXRESULTS 1000" read, so on a
+        // company with more than 1000 records everything past the first page
+        // was never checked; now paginated. (2) Every QBO record created
+        // BEFORE FleetForge went live (the accountant's own history) has no
+        // FF map row by definition and was reported as missing_in_ff — a
+        // real company would open thousands of noise events on day one.
+        // Only records created at/after quickbooks.cutover_at (stamped the
+        // first time master sync is enabled) are drift.
+        $where   = '';
+        $cutover = (string) settings_get('quickbooks.cutover_at', '');
+        $cutTs   = $cutover !== '' ? strtotime($cutover) : false;
+        if ($cutTs !== false) {
+            $where = " WHERE MetaData.CreateTime >= '" . gmdate('Y-m-d\TH:i:s', $cutTs) . "+00:00'";
+        }
+        $pageSize = 1000;
+        $maxPages = 50; // 50k records per entity per run — far above FF volume; bounds a runaway loop
+        $list     = [];
+        for ($page = 0; $page < $maxPages; $page++) {
+            $resp  = $client->query(sprintf(
+                'SELECT * FROM %s%s STARTPOSITION %d MAXRESULTS %d',
+                $qboEntity, $where, 1 + $page * $pageSize, $pageSize
+            ));
+            $batch = $resp['QueryResponse'][$qboEntity] ?? [];
+            if (!is_array($batch) || $batch === []) {
+                break;
+            }
+            array_push($list, ...$batch);
+            if (count($batch) < $pageSize) {
+                break;
+            }
         }
 
         // Build the set of QBO ids FF knows about (any map row, pushed or not).
@@ -439,9 +466,20 @@ class DriftChecker
             $mapped[(string) $m['qid']] = true;
         }
 
+        // S-QBO-GOLIVE-AUDIT: in a SHARED company file most unmapped QBO
+        // records belong to the other businesses — only one that is
+        // recognisably FleetForge's (its customer/vendor is linked to FF, or
+        // it carries FF's Class / Location) is drift.
+        $shared  = PartyAutoMatch::sharedFile();
+        $parties = $shared ? self::linkedParties() : null;
+
         foreach ($list as $qbo) {
             $qboId = (string) ($qbo['Id'] ?? '');
             if ($qboId === '') {
+                continue;
+            }
+            if (!isset($mapped[$qboId]) && $shared && !self::belongsToFleetForge($entityType, $qbo, $parties)) {
+                $stats['other_business_skipped'] = ($stats['other_business_skipped'] ?? 0) + 1;
                 continue;
             }
             if (!isset($mapped[$qboId])) {
@@ -458,6 +496,84 @@ class DriftChecker
                 $stats['missing_in_ff']++;
             }
         }
+    }
+
+    /**
+     * QBO ids of the customers and vendors linked to FF records.
+     *
+     * @return array{customer: array<string,true>, vendor: array<string,true>}
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function linkedParties(): array
+    {
+        $out = ['customer' => [], 'vendor' => []];
+        foreach (db_select("SELECT qbo_customer_id AS q FROM acc_qbo_customer_map WHERE mapping_status = 'mapped' AND qbo_customer_id IS NOT NULL") as $r) {
+            $out['customer'][(string) $r['q']] = true;
+        }
+        foreach (db_select("SELECT qbo_vendor_id AS q FROM acc_qbo_vendor_map WHERE mapping_status = 'mapped' AND qbo_vendor_id IS NOT NULL") as $r) {
+            $out['vendor'][(string) $r['q']] = true;
+        }
+        return $out;
+    }
+
+    /**
+     * Shared company file: is this UNMAPPED QuickBooks record FleetForge's
+     * business at all? (S-QBO-GOLIVE-AUDIT)
+     *   - customers / vendors: never — a new name in a shared file is as
+     *     likely another business's; linking them is the Customers /
+     *     Vendors pages' job, not drift;
+     *   - anything carrying FF's Class / Location (QboTagging) is FF's;
+     *   - sales documents + payments: their customer is linked to FF
+     *     (rental customers are the rental business's own);
+     *   - bills / bill payments: vendors are shared across businesses, so
+     *     only the Class / Location tag counts once one is configured; with
+     *     no tag configured, a linked vendor is the best signal there is;
+     *   - journal entries: only the tag.
+     *
+     * @param array{customer: array<string,true>, vendor: array<string,true>} $parties
+     */
+    public static function belongsToFleetForge(string $entityType, array $qbo, array $parties): bool
+    {
+        if (in_array($entityType, ['customer', 'vendor'], true)) {
+            return false;
+        }
+        $classId = QboTagging::classId() !== '' ? QboTagging::classId() : null;
+        $locId   = QboTagging::locationId() !== '' ? QboTagging::locationId() : null;
+        if (($classId !== null || $locId !== null) && self::carriesTag($qbo, $classId, $locId)) {
+            return true;
+        }
+        $customerRef = (string) ($qbo['CustomerRef']['value'] ?? '');
+        $vendorRef   = (string) ($qbo['VendorRef']['value'] ?? '');
+        return match ($entityType) {
+            'invoice', 'credit_memo', 'payment', 'refund_receipt'
+                => $customerRef !== '' && isset($parties['customer'][$customerRef]),
+            'bill', 'bill_payment'
+                => $classId === null && $locId === null && $vendorRef !== '' && isset($parties['vendor'][$vendorRef]),
+            default => false,
+        };
+    }
+
+    /** True when the record's header or any line carries FF's Class / Location. */
+    private static function carriesTag(array $qbo, ?string $classId, ?string $locId): bool
+    {
+        if ($locId !== null && (string) ($qbo['DepartmentRef']['value'] ?? '') === $locId) {
+            return true;
+        }
+        if ($classId === null) {
+            return false;
+        }
+        if ((string) ($qbo['ClassRef']['value'] ?? '') === $classId) {
+            return true;
+        }
+        foreach ($qbo['Line'] ?? [] as $line) {
+            foreach ($line as $key => $detail) {
+                if (is_array($detail) && str_ends_with((string) $key, 'Detail')
+                    && (string) ($detail['ClassRef']['value'] ?? '') === $classId) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     // ════════════════════════════════════════════════════════════════════

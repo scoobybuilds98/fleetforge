@@ -138,6 +138,9 @@ $payIds = [];
 $cleanup = static function () use (&$invIds, &$payIds, $BANK_GL, $BANK, $VEND, $BILL1, $BILL2, $PID) {
     foreach ($payIds as $pid) {
         db_execute("DELETE FROM payment_allocations WHERE payment_id = ?", [$pid]);
+        // S-QBO-GOLIVE-AUDIT: allocate.php posts the allocation's GL entry —
+        // remove it with the payment (it leaked into the dev ledger).
+        db_execute("DELETE FROM acc_journal_entries WHERE source_type = 'payment' AND source_id = ?", [$pid]);
         db_execute("DELETE FROM payments WHERE id = ?", [$pid]);
     }
     foreach ($invIds as $iid) {

@@ -78,14 +78,17 @@ $state = StateManager::generate(
 );
 
 // ── Build the authorize URL ────────────────────────────────────
-// Scopes per spec §5.1: accounting (mandatory) + payment (for the
-// QBO Payments embed in S-QBO-15). The payment scope is harmless if
-// QBO Payments isn't enabled on the realm — Intuit just hides the
-// payment-related entities.
+// Scope: accounting only (S-QBO-GOLIVE-AUDIT). The payment scope was
+// requested for the S-QBO-15 Payments-API embed, which never worked and
+// is gone — the pay-online link is Invoice.InvoiceLink from the
+// Accounting API. Requesting it was NOT harmless: Intuit sends the user
+// into a QuickBooks Payments merchant sign-up before it will connect a
+// company without Payments (and that sign-up is US-only on a Canadian
+// sandbox), blocking the connection.
 $authorizeUrl = 'https://appcenter.intuit.com/connect/oauth2?' . http_build_query([
     'client_id'     => $clientId,
     'response_type' => 'code',
-    'scope'         => 'com.intuit.quickbooks.accounting com.intuit.quickbooks.payment',
+    'scope'         => 'com.intuit.quickbooks.accounting',
     'redirect_uri'  => $redirectUri,
     'state'         => $state,
 ]);

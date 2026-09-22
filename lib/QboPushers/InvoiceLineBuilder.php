@@ -41,10 +41,11 @@ class InvoiceLineBuilder
      * @param  array<string, mixed> $invoice  FF invoices row
      * @param  array<string, mixed> $customer FF customers row (for gps_revenue_presentation)
      * @param  array<int, array<string, mixed>> $lines  FF invoice_line_items rows, ordered by sort_order ASC, id ASC
+     * @param  array|null $perRate InvoiceTaxPerRate::resolve() result in per-rate mode; null = override mode
      * @return array<int, array<string, mixed>> QBO Line entries
      * @throws QuickBooksException on data integrity violation or unmapped item_type
      */
-    public static function build(array $invoice, array $customer, array $lines): array
+    public static function build(array $invoice, array $customer, array $lines, ?array $perRate = null): array
     {
         $qboLines = [];
         $lineNum = 1;
@@ -99,26 +100,78 @@ class InvoiceLineBuilder
             // Unit price defaults to amount if absent (e.g. single-unit lines).
             $amount = (string) ($line['amount'] ?? '0');
             $unitPrice = (string) ($line['unit_price'] ?? $amount);
-            $qty = (float) ($line['quantity'] ?? 1);
+            $qtyStr = (string) ($line['quantity'] ?? '1');
+
+            // S-QBO-GOLIVE-AUDIT: K-16 convention — FF stores a credit line as a
+            // POSITIVE amount + is_credit=1 and every FF total subtracts it
+            // (mileage true-up credits, base-rental reconciliation credits…).
+            // This builder used to send the positive amount, so QBO CHARGED the
+            // customer for every credit: the invoice came out 2× the credit too
+            // high (20 such lines on prod). QBO takes a negative line amount on
+            // an invoice as long as the invoice total stays ≥ 0.
+            if (!empty($line['is_credit'])) {
+                // bccomp guard: older bcmath renders -1 × 0 as "-0.00".
+                $amount    = bccomp($amount, '0', 2) === 0 ? '0.00' : bcmul($amount, '-1', 2);
+                $unitPrice = bccomp($unitPrice, '0', 2) === 0 ? '0.00' : bcmul($unitPrice, '-1', 2);
+            }
+
+            $detail = [
+                'ItemRef'    => [
+                    'value' => (string) $itemMap['qbo_item_id'],
+                    'name'  => (string) $itemMap['qbo_name'],
+                ],
+                // S-QBO-GOLIVE-AUDIT (F80): per-rate mode — a taxable line
+                // carries the QBO code mapped to the invoice's FF tax rate, a
+                // non-taxable one the tax-free code. Override mode: the one
+                // no-rate code on every line (D-QBO-11-2).
+                'TaxCodeRef' => $perRate === null
+                    ? InvoiceTaxOverride::lineLevelTaxCodeRef()
+                    : ['value' => (!empty($line['taxable']) && ($perRate['taxable_code'] ?? null) !== null)
+                        ? (string) $perRate['taxable_code']
+                        : (string) $perRate['exempt_code']],
+            ];
+            // S-QBO-GOLIVE-AUDIT: QBO rejects the WHOLE invoice when a line's
+            // Amount ≠ Qty × UnitPrice. FF stores quantity at 4dp and
+            // unit_price at 2dp while amount is the engine's exact figure
+            // (prorated days, km at a converted rate, etc.), so the product
+            // often misses by a cent. Send Qty/UnitPrice only when they
+            // reconcile exactly; otherwise Amount alone — QBO accepts that,
+            // and the FF description still carries the quantity detail.
+            if (self::qtyPriceReconciles($qtyStr, $unitPrice, $amount)) {
+                $detail['Qty']       = (float) $qtyStr;
+                $detail['UnitPrice'] = $unitPrice;
+            }
+            // S-QBO-GOLIVE-AUDIT: the billing-period start as QBO's per-line
+            // Service Date (shown on the invoice and in sales-by-date reports).
+            $serviceDate = (string) ($line['period_start'] ?? '');
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $serviceDate) === 1) {
+                $detail['ServiceDate'] = $serviceDate;
+            }
 
             $qboLines[] = [
                 'LineNum'             => $lineNum++,
                 'DetailType'          => 'SalesItemLineDetail',
                 'Amount'              => $amount,
                 'Description'         => (string) ($line['description'] ?? ''),
-                'SalesItemLineDetail' => [
-                    'ItemRef'    => [
-                        'value' => (string) $itemMap['qbo_item_id'],
-                        'name'  => (string) $itemMap['qbo_name'],
-                    ],
-                    'Qty'        => $qty,
-                    'UnitPrice'  => $unitPrice,
-                    'TaxCodeRef' => InvoiceTaxOverride::lineLevelTaxCodeRef(),
-                ],
+                'SalesItemLineDetail' => $detail,
             ];
         }
 
         return $qboLines;
+    }
+
+    /**
+     * True when round(qty × unit_price, 2) == amount exactly — the check QBO
+     * applies to a SalesItemLineDetail line. bcmath throughout (D16).
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function qtyPriceReconciles(string $qty, string $unitPrice, string $amount): bool
+    {
+        if (!is_numeric($qty) || !is_numeric($unitPrice) || !is_numeric($amount)) {
+            return false;
+        }
+        return bccomp(bcround(bcmul($qty, $unitPrice, 6), 2), bcround($amount, 2), 2) === 0;
     }
 
     /**

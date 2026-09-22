@@ -117,6 +117,10 @@ class CustomerMatcher
         // names cap out trivially within distance 3 (false positives);
         // one long + one short is fine as long as the long side is real.
         if ($ffName !== '') {
+            // S-QBO-GOLIVE-AUDIT: the CLOSEST name, not the first within
+            // distance 3 ("AC Transport" took "Maen Transport" — the
+            // accountant's typo of "Maven Transport" — because it came first).
+            $best = null;
             foreach ($qboCustomers as $qbo) {
                 if (isset($claimedQboIds[(string) $qbo['qbo_id']])) { continue; }
                 $qboCandidate = $qbo['display_name'] !== '' ? $qbo['display_name'] : $qbo['company_name'];
@@ -124,10 +128,16 @@ class CustomerMatcher
                 if ($qboName === '') {
                     continue;
                 }
-                if (max(strlen($ffName), strlen($qboName)) >= self::LEVENSHTEIN_MIN_LENGTH &&
-                    levenshtein($ffName, $qboName) <= self::LEVENSHTEIN_MAX_DISTANCE) {
-                    return ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'high'];
+                if (max(strlen($ffName), strlen($qboName)) < self::LEVENSHTEIN_MIN_LENGTH) {
+                    continue;
                 }
+                $dist = levenshtein($ffName, $qboName);
+                if ($dist <= self::LEVENSHTEIN_MAX_DISTANCE && ($best === null || $dist < $best['distance'])) {
+                    $best = ['qbo_id' => (string) $qbo['qbo_id'], 'confidence' => 'high', 'distance' => $dist];
+                }
+            }
+            if ($best !== null) {
+                return $best;
             }
         }
 
@@ -191,6 +201,43 @@ class CustomerMatcher
         // See AccountMatcher::rescueHalfStateRows for the full rationale.
         // Customer rescue matches on qbo_display_name then qbo_company_name.
         $matchedQboIds = self::rescueHalfStateRows($matchedQboIds);
+
+        // S-QBO-GOLIVE-AUDIT: claim in order of match strength (exact, then
+
+        // the closest similar names, then email, phone) so a weak match of one
+
+        // record cannot take the QuickBooks record another matches better.
+
+        $rank = static function (?array $m): float {
+
+            if ($m === null) { return 9.0; }
+
+            return match ($m['confidence']) {
+
+                'exact'  => 0.0,
+
+                'high'   => 1.0 + ((int) ($m['distance'] ?? 3)) / 10,
+
+                'medium' => 2.0,
+
+                default  => 3.0,
+
+            };
+
+        };
+
+        $ranked = [];
+
+        foreach ($ffCustomers as $i => $ff) {
+
+            $ranked[] = [$rank(self::findBestMatch($ff, $qboCustomers, $matchedQboIds)), $i, $ff];
+
+        }
+
+        usort($ranked, static fn($a, $b) => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+
+        $ffCustomers = array_column($ranked, 2);
+
 
         foreach ($ffCustomers as $ff) {
             // Pass $matchedQboIds so claimed QBO ids are skipped in

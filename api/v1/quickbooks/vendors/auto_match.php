@@ -40,6 +40,7 @@ require_auth_api();
 require_permission('quickbooks', 'view');
 
 use FleetForge\QboPushers\VendorMatcher;
+use FleetForge\QboPushers\PartyAutoMatch;
 
 try {
     // ── Build the QBO vendor list from existing snapshot data ──
@@ -81,81 +82,19 @@ try {
     // to skip ones for FF vendors under manual lock.
     $decisions = VendorMatcher::matchAll($qboVendors);
 
-    $matchedCount = 0;
-    $ffOnlyCount  = 0;
-    $qboOnlyCount = 0;
-    $userId       = current_user_id();
-    $now          = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
-
-    foreach ($decisions as $d) {
-        // Skip auto-match for FF vendors operator already locked.
-        if ($d['ff_vendor_id'] !== null && isset($manualLockedFfIds[(int) $d['ff_vendor_id']])) {
-            continue;
-        }
-
-        if ($d['mapping_status'] === 'mapped') {
-            // The qbo_only row for this qbo_vendor_id likely already
-            // exists (from pull.php). UPDATE it to link the FF side
-            // + set confidence. UNIQUE(ff_vendor_id) guarantees one
-            // FF row per mapping. Drop any pre-existing ff_only row
-            // for this FF vendor first to avoid the collision.
-            db_execute(
-                "DELETE FROM acc_qbo_vendor_map
-                  WHERE ff_vendor_id = ?
-                    AND qbo_vendor_id IS NULL",
-                [(int) $d['ff_vendor_id']]
-            );
-
-            $rowsUpdated = db_execute(
-                "UPDATE acc_qbo_vendor_map SET
-                    ff_vendor_id     = ?,
-                    mapping_status   = 'mapped',
-                    match_confidence = ?,
-                    last_synced_at   = ?
-                  WHERE qbo_vendor_id = ?",
-                [
-                    (int) $d['ff_vendor_id'],
-                    (string) $d['match_confidence'],
-                    $now,
-                    (string) $d['qbo_vendor_id'],
-                ]
-            );
-
-            if ($rowsUpdated > 0) {
-                $matchedCount++;
-            }
-            continue;
-        }
-
-        if ($d['mapping_status'] === 'ff_only') {
-            // Ensure an ff_only row exists. INSERT … ON DUPLICATE KEY
-            // UPDATE handles the case where the row already exists
-            // (e.g., set by a prior auto_match run). Preserves any
-            // manual-confidence row from being demoted.
-            db_execute(
-                "INSERT INTO acc_qbo_vendor_map
-                    (ff_vendor_id, mapping_status, created_by_user_id)
-                 VALUES (?, 'ff_only', ?)
-                 ON DUPLICATE KEY UPDATE
-                    mapping_status   = IF(match_confidence='manual', mapping_status, 'ff_only'),
-                    match_confidence = IF(match_confidence='manual', match_confidence, NULL)",
-                [(int) $d['ff_vendor_id'], $userId]
-            );
-            $ffOnlyCount++;
-            continue;
-        }
-
-        if ($d['mapping_status'] === 'qbo_only') {
-            // pull.php already inserted the qbo_only row. No-op.
-            $qboOnlyCount++;
-        }
-    }
+    // S-QBO-GOLIVE-AUDIT: the write half lives in PartyAutoMatch (shared
+    // with customers) — now atomic, with the stale-link detach the customer
+    // copy already had. In a shared company file only EXACT name matches
+    // link; weaker ones are stored as suggestions for a person to confirm.
+    $counts = PartyAutoMatch::apply('vendor', $decisions, $manualLockedFfIds, current_user_id());
 
     json_success([
-        'matched'          => $matchedCount,
-        'ff_only'          => $ffOnlyCount,
-        'qbo_only'         => $qboOnlyCount,
+        'matched'          => $counts['matched'],
+        'suggested'        => $counts['suggested'],
+        'ff_only'          => $counts['ff_only'],
+        'qbo_only'         => $counts['qbo_only'],
         'manual_preserved' => $manualPreserved,
+        'shared_file'      => PartyAutoMatch::sharedFile(),
     ]);
 
 } catch (\Throwable $e) {

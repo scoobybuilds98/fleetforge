@@ -103,6 +103,43 @@ class QuickBooksSync
     }
 
     /**
+     * insertQueueRow — the single write path every Enqueuer uses to add an
+     * acc_qbo_sync_queue row. Skips the insert when an equivalent job is
+     * already pending (S-QBO-GOLIVE-AUDIT):
+     *   - create / void / delete: an identical row 'queued' OR 'processing'
+     *     — the pending job will do the same work; a second copy only races
+     *     it. The dangerous case: a create whose response was lost is
+     *     requeued with backoff; an operator Retry used to add a SECOND row
+     *     with a different requestid, which could run first and create a
+     *     duplicate invoice/payment in QBO.
+     *   - update: only an identical 'queued' row (not yet picked up). A row
+     *     already 'processing' may have read the FF state before this
+     *     change, so the new update must still get its own push.
+     * Pushers re-read FF state at dispatch time, so collapsing duplicates
+     * never loses data. Best-effort by design (no unique key) — two truly
+     * simultaneous enqueues may both insert; Pusher idempotency covers that.
+     *
+     * @param array<string, mixed> $row acc_qbo_sync_queue columns (entity_type, entity_id, operation, …)
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function insertQueueRow(array $row): void
+    {
+        $op       = (string) ($row['operation'] ?? '');
+        $statuses = $op === 'update' ? ['queued'] : ['queued', 'processing'];
+        $in       = implode(',', array_fill(0, count($statuses), '?'));
+        $pending  = db_row(
+            "SELECT id FROM acc_qbo_sync_queue
+              WHERE entity_type = ? AND entity_id = ? AND operation = ? AND status IN ({$in})
+              LIMIT 1",
+            array_merge([(string) ($row['entity_type'] ?? ''), (int) ($row['entity_id'] ?? 0), $op], $statuses)
+        );
+        if ($pending !== null) {
+            return;
+        }
+        db_insert('acc_qbo_sync_queue', $row);
+    }
+
+    /**
      * Direct synchronous dispatch — bypasses sync_mode lookup. Used by
      * the sync-mode branch of enqueue() above + by callers (rare) that
      * explicitly want sync regardless of setting (e.g. a sync_log

@@ -166,6 +166,9 @@ try {
         $params
     );
 
+    // S-QBO-GOLIVE-AUDIT: non-exact auto-match results are suggestions.
+    $rows = \FleetForge\QboPushers\PartyAutoMatch::decorateSuggestions('account', $rows);
+
     $totalPages = $total > 0 ? (int) ceil($total / $pageSize) : 1;
 
     json_success([

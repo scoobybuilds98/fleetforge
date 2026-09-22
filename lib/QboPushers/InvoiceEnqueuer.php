@@ -43,6 +43,12 @@ namespace FleetForge\QboPushers;
 class InvoiceEnqueuer
 {
     /**
+     * Invoice statuses that exist as an open-or-settled receivable after
+     * send — eligible for create/update pushes (S-QBO-GOLIVE-AUDIT).
+     */
+    public const POST_SEND_STATUSES = ['sent', 'partially_paid', 'paid', 'overdue'];
+
+    /**
      * Enqueue an invoice sync job. No-op (returns false) if any gate
      * refuses; never throws.
      *
@@ -81,23 +87,32 @@ class InvoiceEnqueuer
             return false;
         }
         // Per-operation status eligibility. Canonical push lifecycle:
-        //   create → invoice must be 'sent' (per D12 immutability — QBO
-        //            never sees drafts; canonical send.php trigger).
-        //   update → invoice must be sent/paid/partially_paid (any state
-        //            where QBO already has a copy that may need updating;
-        //            S-QBO-12 will exercise this).
+        //   create → invoice must be post-send (POST_SEND_STATUSES — QBO
+        //            never sees drafts; canonical trigger is the send).
+        //   update → same post-send set (any state where QBO already has
+        //            a copy that may need updating; S-QBO-12).
         //   void   → invoice must be 'void' (mirror of create's
         //            send-then-push pattern; S-QBO-12 scope).
         //   other  → fall through to gate 3 allowlist for rejection.
-        $createValid = ($operation === 'create' && $invoice['status'] === 'sent');
-        $updateValid = ($operation === 'update' && in_array($invoice['status'], ['sent', 'paid', 'partially_paid'], true));
+        // S-QBO-GOLIVE-AUDIT: 'create' used to require status='sent' EXACTLY.
+        // An invoice leaves 'sent' within days (overdue cron, a payment, a
+        // credit), so any invoice whose first push failed — unmapped
+        // customer, sync paused, QBO outage past the retry budget — could
+        // never be pushed again: retry.php, manual_sync and drift_resolve
+        // all go through this gate and were silently refused. Prod had 99
+        // 'overdue' invoices that could not reach QBO at go-live. Every
+        // post-send, non-void state is a real receivable QBO must hold.
+        // (Draft never; void has its own op; written_off stays out — it is
+        // not a receivable to open in QBO.)
+        $createValid = ($operation === 'create' && in_array($invoice['status'], self::POST_SEND_STATUSES, true));
+        $updateValid = ($operation === 'update' && in_array($invoice['status'], self::POST_SEND_STATUSES, true));
         $voidValid   = ($operation === 'void'   && $invoice['status'] === 'void');
         if ($operation === 'create' && !$createValid) {
-            error_log("[InvoiceEnqueuer] gate-0 reject: invoice id {$ffInvoiceId} op=create requires status='sent', got '{$invoice['status']}'");
+            error_log("[InvoiceEnqueuer] gate-0 reject: invoice id {$ffInvoiceId} op=create requires status in {" . implode(',', self::POST_SEND_STATUSES) . "}, got '{$invoice['status']}'");
             return false;
         }
         if ($operation === 'update' && !$updateValid) {
-            error_log("[InvoiceEnqueuer] gate-0 reject: invoice id {$ffInvoiceId} op=update requires status in {sent,paid,partially_paid}, got '{$invoice['status']}'");
+            error_log("[InvoiceEnqueuer] gate-0 reject: invoice id {$ffInvoiceId} op=update requires status in {" . implode(',', self::POST_SEND_STATUSES) . "}, got '{$invoice['status']}'");
             return false;
         }
         if ($operation === 'void' && !$voidValid) {
@@ -136,7 +151,7 @@ class InvoiceEnqueuer
         // to 'queued' per S-QBO-3 schema; priority=100 = normal (lower
         // numbers fire first; leaves room for high-urgency).
         try {
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'invoice',
                 'entity_id'   => $ffInvoiceId,
                 'operation'   => $operation,

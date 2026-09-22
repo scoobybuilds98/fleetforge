@@ -39,10 +39,14 @@ declare(strict_types=1);
  *     │    no  → mark 'failed' with error_code='pusher_not_implemented';
  *     │          do NOT notify (expected pre-S-QBO-5); continue
  *     ├─ If dry_run_mode='1':
- *     │    log only, mark 'completed' with error_message='[DRY RUN]'; continue
+ *     │    log only, mark 'skipped' error_code='dry_run' (re-queueable); continue
+ *     ├─ If connection_status≠'connected' (and not fixture mode):
+ *     │    release this + remaining rows back to 'queued'; stop the batch
  *     ├─ Try QboPusherDispatcher::dispatch(...):
  *     │    success                    → mark 'completed'
- *     │    QuickBooksTransientException → if retry budget remains, requeue
+ *     │    QuickBooksTransientException, OR outcome='failed' whose
+ *     │    QuickBooksClient::lastWorkerFailure() is transient
+ *     │                                 → if retry budget remains, requeue
  *     │                                   with next_retry_at = NOW() + 2^retry minutes;
  *     │                                   else mark 'failed' + notify + drift event
  *     │    QuickBooksException (other) → mark 'failed' + notify + drift event
@@ -99,6 +103,16 @@ try {
     $masterEnabled = (string) settings_get('quickbooks.sync_enabled', '0') === '1';
     if (!$masterEnabled) {
         echo "[{$startedAt}] QBO sync disabled (quickbooks.sync_enabled='0'); exiting.\n";
+        exit(0); // finally{} block releases lock
+    }
+
+    // ── Realm guard (S-QBO-GOLIVE-AUDIT) ──────────────────────
+    // Connected to a different QBO company than the mappings were built
+    // for — every push would reference the old company's Ids. Leave the
+    // queue untouched; the settings page carries the Reset Mappings action.
+    $realmGuard = QuickBooksClient::realmGuardReason();
+    if ($realmGuard !== null) {
+        echo "[{$startedAt}] QBO sync paused: {$realmGuard}\n";
         exit(0); // finally{} block releases lock
     }
 
@@ -177,7 +191,7 @@ try {
     // holding row locks across that latency would block the
     // queue. Each row is independent now — the 'processing'
     // status stamp acts as a logical lock.
-    foreach ($picked as $row) {
+    foreach ($picked as $idx => $row) {
         $processed++;
         $qid           = (int) $row['id'];
         $entityType    = (string) $row['entity_type'];
@@ -227,18 +241,43 @@ try {
         }
 
         // ── Dry-run short-circuit ─────────────────────────────
+        // S-QBO-GOLIVE-AUDIT: was status='completed', which told the admin
+        // queue the entity had been pushed and left nothing to re-queue once
+        // dry-run was switched off — every job queued during a dry-run trial
+        // silently never reached QBO. 'skipped' + error_code='dry_run' is
+        // honest and is retryable from the Sync Queue page.
         if ($dryRun) {
             db_execute(
                 "UPDATE acc_qbo_sync_queue
-                    SET status='completed', completed_at=NOW(),
-                        error_message='[DRY RUN] would push'
+                    SET status='skipped', completed_at=NOW(),
+                        error_code='dry_run',
+                        error_message='[DRY RUN] would push — re-queue from Sync Queue after turning dry-run off'
                   WHERE id=?",
                 [$qid]
             );
-            $completed++;
+            $skipped++;
             echo "[{$startedAt}] DRY  queue#{$qid} {$entityType}#{$entityId} {$operation}\n";
             continue;
         }
+
+        // ── Connection gate (S-QBO-GOLIVE-AUDIT) ──────────────
+        // An expired/errored connection used to fail EVERY queued row (each
+        // Pusher's preflight rejects status≠connected) and fire a critical
+        // notification per row; after re-authorizing, the operator had to
+        // retry each one by hand. Instead: hand this row and the rest of the
+        // batch back to the queue untouched and stop. The token-refresh cron
+        // already notifies on a failed rotation, and the queue drains on its
+        // own once Settings → QuickBooks is reconnected.
+        if (!qbo_worker_connection_ok()) {
+            $released = qbo_worker_release(array_slice($picked, $idx));
+            $processed--;
+            qbo_worker_notify_paused($notifyUserIds);
+            echo "[{$startedAt}] PAUSE QBO connection_status='"
+                . (string) settings_get('quickbooks.connection_status', '')
+                . "' — released {$released} row(s) back to the queue.\n";
+            break;
+        }
+        qbo_worker_clear_paused();
 
         // ── Real dispatch ─────────────────────────────────────
         try {
@@ -320,6 +359,32 @@ try {
                 $skipped++;
 
                 echo "[{$startedAt}] SKIP queue#{$qid} {$entityType}#{$entityId} {$operation} ({$typedCode})\n";
+            } elseif (($lastErr = QuickBooksClient::lastWorkerFailure()) instanceof QuickBooksTransientException
+                && !qbo_worker_is_preflight_status((string) ($result['status'] ?? ''))) {
+                // ── Transient failure the Pusher swallowed (S-QBO-GOLIVE-AUDIT) ──
+                // Every Pusher catches QuickBooksException and returns
+                // outcome='failed', so the transient-requeue arm below was
+                // unreachable and a single 503/timeout became a permanent
+                // failure + critical notification. Route it through the same
+                // backoff the catch arm uses. The Pusher already recorded the
+                // map row as 'failed'; the next attempt overwrites it.
+                $verdict = qbo_worker_defer_or_fail($row, $lastErr, $notifyUserIds, $realmId, $environment);
+                if ($verdict === 'deferred') {
+                    $deferred++;
+                    echo "[{$startedAt}] DEFER queue#{$qid} {$entityType}#{$entityId} {$operation} — transient (pusher-reported)\n";
+                } else {
+                    $failed++;
+                    echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — transient exhausted (pusher-reported)\n";
+                }
+            } elseif (!qbo_worker_connection_ok()) {
+                // ── Connection died mid-row (auth expired / refresh failed) ──
+                // Same reasoning as the pre-dispatch connection gate: requeue
+                // this row + the rest of the batch and stop, rather than
+                // burning the queue while disconnected.
+                $released = qbo_worker_release(array_slice($picked, $idx));
+                qbo_worker_notify_paused($notifyUserIds);
+                echo "[{$startedAt}] PAUSE queue#{$qid} — QBO connection lost mid-batch; released {$released} row(s).\n";
+                break;
             } else {
                 // ── Pusher returned outcome='failed' (or implicit failure) ──
                 // D-QBO-FIXPACK-14 (Bug B): Pusher returned success=false without
@@ -360,50 +425,13 @@ try {
             echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — pusher_not_implemented (race; suppressed)\n";
         } catch (QuickBooksTransientException $e) {
             // Retryable — back off and requeue if budget remains.
-            $newRetry = $retryCount + 1;
-            if ($newRetry > $maxRetries) {
-                // Budget exhausted — mark failed + notify + drift.
-                db_execute(
-                    "UPDATE acc_qbo_sync_queue
-                        SET status='failed', completed_at=NOW(),
-                            retry_count=?,
-                            error_code=?,
-                            error_message=?
-                      WHERE id=?",
-                    [
-                        $newRetry,
-                        qbo_safe_error_code($e->errorCode ?? 'transient_exhausted'),
-                        substr($e->getMessage(), 0, 500),
-                        $qid,
-                    ]
-                );
-                $failed++;
-                dispatchFailureNotification($row, $e, $notifyUserIds);
-                insertDriftEvent($row, 'push_failed', $e, $realmId, $environment);
-                echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — transient exhausted ({$newRetry}/{$maxRetries})\n";
-            } else {
-                // Backoff: 2^n minutes (n=newRetry → 2, 4, 8, 16, 32 mins).
-                $backoffMinutes = (int) pow(2, $newRetry);
-                db_execute(
-                    "UPDATE acc_qbo_sync_queue
-                        SET status='queued',
-                            retry_count=?,
-                            next_retry_at=DATE_ADD(NOW(), INTERVAL ? MINUTE),
-                            error_code=?,
-                            error_message=?,
-                            picked_up_at=NULL,
-                            worker_id=NULL
-                      WHERE id=?",
-                    [
-                        $newRetry,
-                        $backoffMinutes,
-                        qbo_safe_error_code($e->errorCode ?? 'transient'),
-                        substr($e->getMessage(), 0, 500),
-                        $qid,
-                    ]
-                );
+            $verdict = qbo_worker_defer_or_fail($row, $e, $notifyUserIds, $realmId, $environment);
+            if ($verdict === 'deferred') {
                 $deferred++;
-                echo "[{$startedAt}] DEFER queue#{$qid} {$entityType}#{$entityId} {$operation} — retry {$newRetry}/{$maxRetries} in {$backoffMinutes}m\n";
+                echo "[{$startedAt}] DEFER queue#{$qid} {$entityType}#{$entityId} {$operation} — retry " . ($retryCount + 1) . "/{$maxRetries}\n";
+            } else {
+                $failed++;
+                echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — transient exhausted (" . ($retryCount + 1) . "/{$maxRetries})\n";
             }
         } catch (QuickBooksException $e) {
             // Permanent QBO failure (validation, stale_object,
@@ -426,6 +454,17 @@ try {
             insertDriftEvent($row, 'push_failed', $e, $realmId, $environment);
             echo "[{$startedAt}] FAIL queue#{$qid} {$entityType}#{$entityId} {$operation} — " . ($e->errorCode ?? 'permanent') . "\n";
         } catch (\Throwable $e) {
+            // S-QBO-GOLIVE-AUDIT: a lost connection surfaces here as a plain
+            // RuntimeException from QuickBooksClient::ensureValidToken /
+            // refreshAccessToken (not a QuickBooksException). Don't fail the
+            // row for it — release it and the rest of the batch, and stop.
+            if (!qbo_worker_connection_ok()) {
+                $released = qbo_worker_release(array_slice($picked, $idx));
+                qbo_worker_notify_paused($notifyUserIds);
+                echo "[{$startedAt}] PAUSE queue#{$qid} — QBO connection lost ("
+                    . substr($e->getMessage(), 0, 100) . "); released {$released} row(s).\n";
+                break;
+            }
             // Unexpected — treat as permanent, capture to Sentry,
             // notify operators. Should be rare.
             db_execute(
@@ -520,6 +559,157 @@ echo sprintf(
 function qbo_safe_error_code(?string $code): string
 {
     return substr((string) ($code ?? 'unknown'), 0, 50);
+}
+
+/**
+ * qbo_worker_is_preflight_status — true for Pusher outcomes decided BEFORE
+ * any QBO write (preflight gates, payload build). Those are data problems,
+ * never transient, even if an earlier advisory GET in the same row blipped.
+ * (S-QBO-GOLIVE-AUDIT)
+ */
+function qbo_worker_is_preflight_status(string $status): bool
+{
+    return str_starts_with($status, 'failed_preflight') || $status === 'payload_build_failed';
+}
+
+/**
+ * qbo_worker_connection_ok — true when a real dispatch can reach QBO: the
+ * OAuth connection is healthy, or the offline fixture layer is answering
+ * (fixture mode needs no connection). Read fresh per row — a failed token
+ * refresh inside this process flips connection_status and flushes the
+ * settings cache, so the next row sees it.
+ * (S-QBO-GOLIVE-AUDIT)
+ */
+function qbo_worker_connection_ok(): bool
+{
+    if (QuickBooksClient::fixtureMode()) {
+        return true;
+    }
+    return (string) settings_get('quickbooks.connection_status', '') === 'connected';
+}
+
+/**
+ * qbo_worker_notify_paused — tell super_admin + accountant ONCE per outage
+ * that sync is paused on the connection (the queue is held, not failed, so
+ * without this the stall would be silent). Deduped on the connection status
+ * that caused it via quickbooks.pause_notified_status; cleared by
+ * qbo_worker_clear_paused() on the first healthy dispatch.
+ * (S-QBO-GOLIVE-AUDIT)
+ */
+function qbo_worker_notify_paused(array $userIds): void
+{
+    $status = (string) settings_get('quickbooks.connection_status', '');
+    if ($status === (string) settings_get('quickbooks.pause_notified_status', '')) {
+        return;
+    }
+    QuickBooksClient::settings_write_qbo('pause_notified_status', $status);
+    if ($userIds === []) {
+        error_log("cron/qbo_sync_worker: sync paused (connection_status='{$status}') — no notification audience.");
+        return;
+    }
+    try {
+        NotificationService::notify(
+            'quickbooks.sync_paused',
+            'QuickBooks sync paused',
+            "The QuickBooks connection is '{$status}'. Queued items are being held (not failed) and will sync "
+                . 'automatically once the connection is healthy. Check Settings → QuickBooks.',
+            'qbo_oauth_connection',
+            null,
+            base_url('quickbooks/settings'),
+            $userIds,
+            'critical'
+        );
+    } catch (\Throwable $e) {
+        error_log('cron/qbo_sync_worker: pause notification failed — ' . $e->getMessage());
+    }
+}
+
+/** Reset the pause-notification dedupe once dispatching is healthy again. */
+function qbo_worker_clear_paused(): void
+{
+    if ((string) settings_get('quickbooks.pause_notified_status', '') !== '') {
+        QuickBooksClient::settings_write_qbo('pause_notified_status', '');
+    }
+}
+
+/**
+ * qbo_worker_release — hand claimed rows back to the queue untouched
+ * (retry_count NOT incremented: nothing was attempted against QBO, or the
+ * attempt died on the connection rather than on the row's own data).
+ * Only rows still in 'processing' are touched, so a row whose outcome was
+ * already written is never reopened.
+ * (S-QBO-GOLIVE-AUDIT)
+ *
+ * @param array<int, array<string, mixed>> $rows picked queue rows
+ * @return int rows released
+ */
+function qbo_worker_release(array $rows): int
+{
+    $ids = array_map(static fn($r) => (int) $r['id'], $rows);
+    if ($ids === []) {
+        return 0;
+    }
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    return (int) db_execute(
+        "UPDATE acc_qbo_sync_queue
+            SET status='queued', picked_up_at=NULL, worker_id=NULL
+          WHERE status='processing' AND id IN ({$in})",
+        $ids
+    );
+}
+
+/**
+ * qbo_worker_defer_or_fail — shared transient-failure policy. Requeues the
+ * row with 2^n-minute backoff (n = new retry count → 2, 4, 8 … minutes,
+ * stretched to honour a 429 Retry-After) while budget remains; otherwise
+ * marks it failed and raises the notification + drift event. Used by both
+ * the QuickBooksTransientException catch arm and the pusher-swallowed
+ * transient path (QuickBooksClient::lastWorkerFailure()).
+ * (S-QBO-GOLIVE-AUDIT — extracted from the catch arm, behaviour unchanged)
+ *
+ * @return string 'deferred' | 'failed'
+ */
+function qbo_worker_defer_or_fail(array $row, \Throwable $e, array $notifyUserIds, string $realmId, string $environment): string
+{
+    $qid        = (int) $row['id'];
+    $newRetry   = (int) $row['retry_count'] + 1;
+    $maxRetries = (int) $row['max_retries'];
+    $code       = ($e instanceof QuickBooksException) ? $e->errorCode : null;
+
+    if ($newRetry > $maxRetries) {
+        db_execute(
+            "UPDATE acc_qbo_sync_queue
+                SET status='failed', completed_at=NOW(),
+                    retry_count=?,
+                    error_code=?,
+                    error_message=?
+              WHERE id=?",
+            [$newRetry, qbo_safe_error_code($code ?? 'transient_exhausted'), substr($e->getMessage(), 0, 500), $qid]
+        );
+        dispatchFailureNotification($row, $e, $notifyUserIds);
+        insertDriftEvent($row, 'push_failed', $e, $realmId, $environment);
+        return 'failed';
+    }
+
+    $backoffMinutes = (int) pow(2, $newRetry);
+    $rateLimited = $e->getPrevious();
+    if ($rateLimited instanceof \FleetForge\Exceptions\QuickBooksRateLimitException
+        && $rateLimited->retryAfterSeconds !== null) {
+        $backoffMinutes = max($backoffMinutes, (int) ceil($rateLimited->retryAfterSeconds / 60));
+    }
+    db_execute(
+        "UPDATE acc_qbo_sync_queue
+            SET status='queued',
+                retry_count=?,
+                next_retry_at=DATE_ADD(NOW(), INTERVAL ? MINUTE),
+                error_code=?,
+                error_message=?,
+                picked_up_at=NULL,
+                worker_id=NULL
+          WHERE id=?",
+        [$newRetry, $backoffMinutes, qbo_safe_error_code($code ?? 'transient'), substr($e->getMessage(), 0, 500), $qid]
+    );
+    return 'deferred';
 }
 
 /**

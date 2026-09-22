@@ -62,6 +62,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
 
+// S-QBO-GOLIVE-AUDIT: independent of the install's go-live state (a dev DB that
+// rehearsed go-live stamps a cutover date the May fixtures predate).
+require_once __DIR__ . '/_qbo_smoke_env.php';
+ff_qbo_smoke_env(['cutover_at' => '', 'push_from_date' => '', 'invoice.tax_mode' => 'override']);
+ff_qbo_smoke_preserve_tables(['acc_qbo_account_map']);
+
 use FleetForge\QboPushers\InvoicePusher;
 use FleetForge\QboPushers\InvoiceEnqueuer;
 use FleetForge\QboPushers\InvoiceLineBuilder;
@@ -571,8 +577,18 @@ $setSetting('quickbooks.tax_override_code_id', 'NON');
 // gate will currently REJECT at step 3 (account validator). We test
 // against the validator-error path here and check pass-path in C17.
 $c16Errors = [];
+// S-QBO-GOLIVE-AUDIT: the comment above assumed an unmapped chart; on an
+// install that has mapped it the gate passed. Unmap AR + sales for the check.
+$c16Saved = db_select("SELECT id, mapping_status FROM acc_qbo_account_map WHERE critical_category IN ('ar_clearing', 'sales_revenue')");
 try {
-    $result = InvoicePreflightGate::check(999990);
+    db_execute("UPDATE acc_qbo_account_map SET mapping_status = 'ff_only' WHERE critical_category IN ('ar_clearing', 'sales_revenue')");
+    try {
+        $result = InvoicePreflightGate::check(999990);
+    } finally {
+        foreach ($c16Saved as $s) {
+            db_execute("UPDATE acc_qbo_account_map SET mapping_status = ? WHERE id = ?", [$s['mapping_status'], $s['id']]);
+        }
+    }
     if (!isset($result['ok'], $result['reason'])) {
         $c16Errors[] = 'check() did not return [ok, reason] keys';
     }

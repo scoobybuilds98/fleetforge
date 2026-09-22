@@ -100,7 +100,7 @@ class CustomerEnqueuer
         // sorts ASC, so lower numbers fire first — 100 leaves room
         // for future high-urgency operations to use priority<100).
         try {
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type'  => 'customer',
                 'entity_id'    => $ffCustomerId,
                 'operation'    => $operation,

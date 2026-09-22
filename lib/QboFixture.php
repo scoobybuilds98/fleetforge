@@ -204,6 +204,21 @@ class QboFixture
         // Endpoint like 'account/123' — pull the id off the back of the path.
         $parts = explode('/', $endpoint, 2);
         $id    = isset($parts[1]) ? urldecode($parts[1]) : '0';
+
+        // S-QBO-GOLIVE-AUDIT: portal Pay Online reads the pay-now URL from
+        // GET invoice/{id}?include=invoiceLink (QuickBooksClient::
+        // generatePaymentsHostedUrl). Answer with a realistic InvoiceLink.
+        if ($entityType === 'payment_initiation') {
+            return ['status' => 200, 'body' => (string) json_encode([
+                'Invoice' => [
+                    'Id'          => $id,
+                    'SyncToken'   => '0',
+                    'InvoiceLink' => 'https://connect.intuit.com/portal/app/CommerceNetwork/view/scs-fixture-' . rawurlencode($id),
+                ],
+                'time' => self::nowIso(),
+            ])];
+        }
+
         $pascal = self::pascalEntity($entityType);
         $entity = self::echoFields(self::echoableDefaults($entityType, $id), $id, '0');
         return ['status' => 200, 'body' => (string) json_encode([

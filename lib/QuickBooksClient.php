@@ -97,11 +97,43 @@ class QuickBooksClient
     private static ?int $workerEntityId = null;
 
     /**
+     * S-QBO-GOLIVE-AUDIT: count of POST writes issued for the CURRENT queue
+     * row. Part of the deterministic requestid (see buildRequestId) so two
+     * distinct writes inside one row (e.g. a stale-token re-try) never share
+     * an idempotency key. Reset by setWorkerContext() between rows.
+     */
+    private static int $workerWriteSeq = 0;
+
+    /**
+     * S-QBO-GOLIVE-AUDIT: the last QuickBooksException thrown while a worker
+     * context was active. Pushers catch QuickBooksException and return
+     * outcome='failed' (they never rethrow), so without this the worker could
+     * not tell a transient 503/timeout (should requeue with backoff) from a
+     * permanent validation error (should fail). Cleared by setWorkerContext().
+     */
+    private static ?\Throwable $lastWorkerFailure = null;
+
+    /**
      * QBO Online minorversion. Locked as D-QBO-2-2 (see PROGRESS.md
      * DECISIONS). Bumping requires verifying the entity payload
      * shapes against Intuit's minorversion changelog.
+     *
+     * S-QBO-GOLIVE-AUDIT: 70 → 75. Intuit retired minor versions 1-74 on
+     * 2025-08-01 and silently serves anything lower as 75, so every live
+     * call (including the 2026 sandbox verifications) already ran on 75.
+     * Declaring it makes the sync log tell the truth.
      */
-    private const QBO_MINORVERSION = '70';
+    private const QBO_MINORVERSION = '75';
+
+    /**
+     * S-QBO-GOLIVE-AUDIT: in-process retry caps for a WEB request (php-fpm).
+     * The settings-driven policy (5 retries, 60s base → 60+120+240+480+960s)
+     * is sized for CLI; inside a browser request it outlived nginx's 60s
+     * fastcgi timeout, so the operator saw a 504 while the FPM worker kept
+     * sleeping and re-POSTing for ~31 minutes.
+     */
+    private const WEB_MAX_RETRIES       = 2;
+    private const WEB_MAX_SLEEP_SECONDS = 3;
 
     /** Maximum bytes persisted into acc_qbo_sync_log.response_payload (truncate beyond). */
     private const SYNC_LOG_PAYLOAD_LIMIT_BYTES = 65536; // 64 KB
@@ -164,9 +196,51 @@ class QuickBooksClient
      */
     public static function setWorkerContext(?int $queueId, ?string $entityType, ?int $entityId): void
     {
-        self::$workerQueueId    = $queueId;
-        self::$workerEntityType = $entityType;
-        self::$workerEntityId   = $entityId;
+        self::$workerQueueId     = $queueId;
+        self::$workerEntityType  = $entityType;
+        self::$workerEntityId    = $entityId;
+        self::$workerWriteSeq    = 0;
+        self::$lastWorkerFailure = null;
+    }
+
+    /**
+     * The last QuickBooksException thrown during the current queue row, or
+     * null. The worker reads this when a Pusher returns outcome='failed' to
+     * decide requeue-with-backoff (transient / rate-limited) versus fail
+     * (everything else). See $lastWorkerFailure.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function lastWorkerFailure(): ?\Throwable
+    {
+        return self::$lastWorkerFailure;
+    }
+
+    /**
+     * realmGuardReason — non-null when the connected QBO company is NOT the
+     * company FF's acc_qbo_*_map rows were built against.
+     *
+     * Every map table stores bare QBO Ids (Customer "58", Account "35", …)
+     * and QBO Ids are small per-company integers, so the same Id usually
+     * EXISTS in a different company and points at a different record.
+     * Pushing with a stale map would not fail loudly — it would post real
+     * invoices against the wrong customers and accounts. The OAuth callback
+     * sets quickbooks.realm_mismatch='1' when it detects this; the only way
+     * to clear it is the Reset Mappings action (api/v1/quickbooks/
+     * reset_mappings.php), which wipes the old company's mappings.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function realmGuardReason(): ?string
+    {
+        if ((string) settings_get('quickbooks.realm_mismatch', '0') !== '1') {
+            return null;
+        }
+        $mapped = (string) settings_get('quickbooks.mapped_realm_id', '');
+        $now    = (string) settings_get('quickbooks.realm_id', '');
+        return "Connected QuickBooks company (realm {$now}) is not the company FleetForge's mappings were built for"
+            . ($mapped !== '' ? " (realm {$mapped})" : '')
+            . ". Sync is blocked until an admin runs Reset Mappings on Settings → QuickBooks.";
     }
 
     /**
@@ -242,7 +316,7 @@ class QuickBooksClient
      */
     public function ensureValidToken(): void
     {
-        $accessToken = (string) settings_get('quickbooks.access_token', '');
+        $accessToken = self::secret('access_token');
         $expiresAt   = (string) settings_get('quickbooks.access_token_expires_at', '');
 
         // No token at all — connection has never been established.
@@ -258,11 +332,20 @@ class QuickBooksClient
         if ($expiresTs === false) {
             // Malformed timestamp — be safe and force a refresh.
             $this->refreshAccessToken();
-            $accessToken = (string) settings_get('quickbooks.access_token', '');
+            $accessToken = self::secret('access_token');
         } elseif (($expiresTs - time()) <= self::ACCESS_TOKEN_REFRESH_WINDOW_SECONDS) {
             // Inside the 5-minute window — refresh proactively.
-            $this->refreshAccessToken();
-            $accessToken = (string) settings_get('quickbooks.access_token', '');
+            try {
+                $this->refreshAccessToken();
+            } catch (QuickBooksTransientException $e) {
+                // S-QBO-GOLIVE-AUDIT: a transient refresh failure must not
+                // block a call the CURRENT token can still make. Only give
+                // up once it has actually (nearly) expired.
+                if (($expiresTs - time()) <= 30) {
+                    throw $e;
+                }
+            }
+            $accessToken = self::secret('access_token');
         }
 
         $this->accessToken = $accessToken;
@@ -279,9 +362,44 @@ class QuickBooksClient
      */
     public function refreshAccessToken(): void
     {
-        $refreshToken = (string) settings_get('quickbooks.refresh_token', '');
+        // S-QBO-GOLIVE-AUDIT: serialize refreshes across processes. The
+        // worker, web requests, the webhook receiver and the refresh cron
+        // can all refresh at once. Intuit rotates the refresh token, so the
+        // loser of a race presented a refresh token that was already spent,
+        // got invalid_grant, and flipped connection_status='expired' — while
+        // the winner held perfectly good tokens. Every Pusher preflight then
+        // refused to call QBO, so nothing ever refreshed again: sync stayed
+        // dead until someone re-authorized by hand.
+        $lockRow = db_row("SELECT GET_LOCK('ff_qbo_oauth_refresh', 20) AS ok", []);
+        $locked  = $lockRow !== null && (int) $lockRow['ok'] === 1;
+        try {
+            // Re-read from the DB, not this process's settings cache: another
+            // process may have rotated the tokens while we waited on the lock.
+            settings_cache_flush();
+            $lastRefresh = strtotime((string) settings_get('quickbooks.last_token_refresh_at', ''));
+            $freshToken  = self::secret('access_token');
+            if ($lastRefresh !== false && (time() - $lastRefresh) < 60 && $freshToken !== '') {
+                // Someone refreshed within the last minute — use their result.
+                $this->accessToken = $freshToken;
+                return;
+            }
+            $this->refreshAccessTokenLocked();
+        } finally {
+            if ($locked) {
+                db_row("SELECT RELEASE_LOCK('ff_qbo_oauth_refresh') AS ok", []);
+            }
+        }
+    }
+
+    /**
+     * The token-endpoint exchange itself. Only called by refreshAccessToken()
+     * while holding the ff_qbo_oauth_refresh lock.
+     */
+    private function refreshAccessTokenLocked(): void
+    {
+        $refreshToken = self::secret('refresh_token');
         $clientId     = (string) settings_get('quickbooks.client_id', '');
-        $clientSecret = (string) settings_get('quickbooks.client_secret', '');
+        $clientSecret = self::secret('client_secret');
 
         if ($refreshToken === '' || $clientId === '' || $clientSecret === '') {
             $msg = 'QBO refresh failed — missing refresh_token, client_id, or client_secret in settings.';
@@ -313,6 +431,23 @@ class QuickBooksClient
 
         if ($body === false || $httpCode >= 400) {
             $errSummary = $curlErr !== '' ? $curlErr : (string) $body;
+
+            // S-QBO-GOLIVE-AUDIT: a TRANSIENT failure (no response, 5xx, 429)
+            // says nothing about the tokens. It used to flip
+            // connection_status='error', and nothing ever flipped it back —
+            // every preflight refuses to call QBO unless 'connected', so no
+            // later refresh could run and sync stalled until someone clicked
+            // Refresh by hand. Leave the status alone, note the error, and
+            // throw a retryable exception (worker requeues with backoff).
+            if ($body === false || $httpCode === 0 || $httpCode === 429 || $httpCode >= 500) {
+                self::settings_write_qbo('connection_error', self::truncateError("QBO token refresh transient failure (HTTP {$httpCode}): {$errSummary} — will retry."));
+                throw new QuickBooksTransientException(
+                    "QBO token refresh failed transiently (HTTP {$httpCode}): {$errSummary}",
+                    'TOKEN_REFRESH_TRANSIENT',
+                    $httpCode > 0 ? $httpCode : null
+                );
+            }
+
             // Intuit returns HTTP 400 with body {"error":"invalid_grant"}
             // once a refresh token is past its expiry — flip status to
             // 'expired' so the UI shows the "re-authorize required"
@@ -510,64 +645,42 @@ class QuickBooksClient
      */
     public function generatePaymentsHostedUrl(string $qboInvoiceId, string $successUrl, string $cancelUrl): array
     {
-        $env = (string) settings_get('quickbooks.environment', 'sandbox');
-        $paymentsBase = $env === 'production'
-            ? 'https://api.intuit.com/quickbooks/v4/payments'
-            : 'https://sandbox.api.intuit.com/quickbooks/v4/payments';
+        // S-QBO-GOLIVE-AUDIT: the original implementation POSTed
+        // {invoiceId, returnUrl, cancelUrl, mode:'hosted'} to the Payments
+        // API's /quickbooks/v4/payments/charges. That endpoint charges a
+        // tokenized card — Intuit has no hosted-payment-page API — so the
+        // call could never succeed against a real company. The supported
+        // way to get a customer "pay online" link is the Accounting API's
+        // Invoice.InvoiceLink, returned by GET invoice/{id}?include=invoiceLink.
+        // Intuit only issues it when QuickBooks Payments is active on the
+        // company, the invoice allows online card/ACH payment, and the
+        // invoice carries a BillEmail — InvoicePusher sets the last two when
+        // quickbooks.payments_enabled='1'.
+        //
+        // $successUrl / $cancelUrl are kept in the signature for the caller's
+        // contract but are unused: the QBO-hosted page does not redirect back.
+        // Completion is detected by the Payment webhook (PaymentInitiator::
+        // matchByQboInvoice), which never depended on the redirect.
+        $response = $this->get(
+            'invoice/' . urlencode($qboInvoiceId),
+            ['include' => 'invoiceLink'],
+            ['entity_type' => 'payment_initiation', 'operation' => 'get', 'entity_id' => null]
+        );
 
-        // Save current Accounting baseUrl + swap to Payments for this call.
-        $savedBaseUrl = $this->baseUrl;
-        $this->baseUrl = $paymentsBase;
-
-        try {
-            $payload = [
-                'invoiceId'   => $qboInvoiceId,
-                'returnUrl'   => $successUrl,
-                'cancelUrl'   => $cancelUrl,
-                // Intuit-typical: hosted page captures card + processes;
-                // no card data passes through FF (PCI scope avoided per §11.4).
-                'mode'        => 'hosted',
-            ];
-
-            $opts = [
-                'entity_type' => 'payment_initiation',
-                'operation'   => 'generate_url',
-            ];
-
-            // Note: hosted-page endpoint differs from /charges/{id} endpoint;
-            // operator may need to verify the exact path at live test.
-            $response = $this->post('charges', $payload, $opts);
-
-            // Defensive extraction — Intuit responses for this endpoint
-            // historically wrap the URL under several possible keys.
-            $url = (string) ($response['hostedPaymentUrl']
-                ?? $response['paymentUrl']
-                ?? $response['url']
-                ?? '');
-            $sessionId = (string) ($response['id']
-                ?? $response['sessionId']
-                ?? $response['chargeId']
-                ?? '');
-            $expiresIn = (int) ($response['expiresInSeconds']
-                ?? $response['ttlSeconds']
-                ?? 1800);  // 30 min default (D-QBO-15-5 idempotency window)
-
-            if ($url === '') {
-                throw new QuickBooksException(
-                    'Intuit Payments API returned no hosted URL. Response keys: '
-                    . implode(',', array_keys($response))
-                );
-            }
-
-            return [
-                'url'                => $url,
-                'intuit_session_id'  => $sessionId,
-                'expires_in_seconds' => $expiresIn,
-            ];
-        } finally {
-            // Restore Accounting baseUrl so subsequent calls work normally.
-            $this->baseUrl = $savedBaseUrl;
+        $url = (string) ($response['Invoice']['InvoiceLink'] ?? '');
+        if ($url === '') {
+            throw new QuickBooksException(
+                "QuickBooks returned no payment link for invoice {$qboInvoiceId}. QBO only issues one when "
+                . "QuickBooks Payments is active on the company, the invoice allows online card/bank payment, "
+                . "and the invoice has a billing email. Re-push the invoice after enabling Payments."
+            );
         }
+
+        return [
+            'url'                => $url,
+            'intuit_session_id'  => '',
+            'expires_in_seconds' => 1800,  // FF-side re-issue window (D-QBO-15-5); the QBO link itself is durable
+        ];
     }
 
     /**
@@ -594,7 +707,47 @@ class QuickBooksClient
         $opts['operation']   = $opts['operation']   ?? 'update';
 
         // QBO update endpoint pattern: POST /v3/company/{realmId}/{type}?operation=update
-        return $this->dispatch('POST', strtolower($type) . '?operation=update', ['json' => $merged] + $opts);
+        try {
+            return $this->dispatch('POST', strtolower($type) . '?operation=update', ['json' => $merged] + $opts);
+        } catch (QuickBooksStaleObjectException $e) {
+            // S-QBO-GOLIVE-AUDIT: the SyncToken on the map row goes stale
+            // whenever anything touches the entity QBO-side — the accountant
+            // emails the invoice, a Payment is applied to it, a note is added.
+            // That used to fail the push permanently (5010 is non-retryable).
+            // Re-read the current token and try exactly once more; FF is
+            // canonical for the fields it sends (D-QBO-CORE-1).
+            $merged['SyncToken'] = $this->currentSyncToken($type, $id, $e);
+            return $this->dispatch('POST', strtolower($type) . '?operation=update', ['json' => $merged] + $opts);
+        }
+    }
+
+    /**
+     * Fetch the entity's CURRENT SyncToken for a stale-object (5010) retry.
+     * Rethrows the original stale exception when the read yields no token,
+     * so the caller still sees the real failure rather than a vaguer one.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    private function currentSyncToken(string $type, string $id, QuickBooksStaleObjectException $original): string
+    {
+        $pascal  = ucfirst(strtolower($type));
+        $current = $this->getEntity($type, $id);
+        // Intuit keys the body by the PascalCase entity name; 'billpayment'
+        // etc. come back as 'BillPayment', so scan for the first entity block.
+        $entity = $current[$pascal] ?? null;
+        if (!is_array($entity)) {
+            foreach ($current as $k => $v) {
+                if (is_array($v) && isset($v['SyncToken']) && strcasecmp((string) $k, $type) === 0) {
+                    $entity = $v;
+                    break;
+                }
+            }
+        }
+        $token = is_array($entity) ? (string) ($entity['SyncToken'] ?? '') : '';
+        if ($token === '') {
+            throw $original;
+        }
+        return $token;
     }
 
     /**
@@ -616,8 +769,27 @@ class QuickBooksClient
      * @throws QuickBooksException on HTTP error, auth failure, or stale SyncToken
      * @session S-QBO-11-POSTVERIFY-FIXES
      */
+    /**
+     * Entities Intuit voids with an UPDATE carrying include=void —
+     * `?operation=void` is refused for them ("Operation void is not
+     * supported" / for a Payment it is the QuickBooks-Payments CARD void,
+     * which fails on any non-card payment). Verified on the sandbox
+     * 2026-09-22 (S-QBO-GOLIVE-AUDIT rehearsal).
+     */
+    private const VOID_VIA_UPDATE = ['payment', 'billpayment'];
+
     public function voidEntity(string $type, string $id, string $syncToken): array
     {
+        $type = strtolower($type);
+        // CreditMemo has no void at all in the Accounting API (neither form
+        // is accepted). The equivalent of QuickBooks' own "void" — keep the
+        // document, zero it, say why — is done as an update.
+        if ($type === 'creditmemo' && (string) settings_get('quickbooks.fixture_mode', '0') !== '1') {
+            return $this->voidCreditMemoByZeroing($id);
+        }
+        $endpoint = in_array($type, self::VOID_VIA_UPDATE, true)
+            ? "{$type}?operation=update&include=void"
+            : "{$type}?operation=void";
         $payload = [
             'Id'        => $id,
             'SyncToken' => $syncToken,
@@ -628,8 +800,52 @@ class QuickBooksClient
         $opts['entity_id']   = ctype_digit($id) ? (int) $id : null;
         $opts['operation']   = 'void';
 
-        // QBO void endpoint pattern: POST /v3/company/{realmId}/{type}?operation=void
-        return $this->dispatch('POST', strtolower($type) . '?operation=void', ['json' => $payload] + $opts);
+        try {
+            return $this->dispatch('POST', $endpoint, ['json' => $payload] + $opts);
+        } catch (QuickBooksStaleObjectException $e) {
+            // S-QBO-GOLIVE-AUDIT: same stale-token recovery as updateEntity.
+            // Voiding is intent-idempotent, so re-reading the token is safe.
+            $payload['SyncToken'] = $this->currentSyncToken($type, $id, $e);
+            return $this->dispatch('POST', $endpoint, ['json' => $payload] + $opts);
+        }
+    }
+
+    /**
+     * "Void" a CreditMemo: every item line to $0 (description marked), a
+     * PrivateNote recording who voided it and the original total. Mirrors
+     * what QuickBooks' own UI void does, and keeps the document for the
+     * accountant's audit trail rather than deleting it.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    private function voidCreditMemoByZeroing(string $id): array
+    {
+        $current = $this->getEntity('creditmemo', $id, ['operation' => 'void'])['CreditMemo'] ?? null;
+        if (!is_array($current) || empty($current['Id'])) {
+            throw new QuickBooksException("QBO CreditMemo {$id} not found for void.");
+        }
+        $lines = [];
+        foreach ($current['Line'] ?? [] as $l) {
+            if (($l['DetailType'] ?? '') !== 'SalesItemLineDetail') {
+                continue;
+            }
+            $detail = $l['SalesItemLineDetail'] ?? [];
+            unset($detail['Qty'], $detail['UnitPrice']);
+            $lines[] = array_filter([
+                'Id'                  => $l['Id'] ?? null,
+                'DetailType'          => 'SalesItemLineDetail',
+                'Amount'              => 0,
+                'Description'         => trim(((string) ($l['Description'] ?? '')) . ' (voided)'),
+                'SalesItemLineDetail' => $detail,
+            ], static fn($v) => $v !== null);
+        }
+        $note = trim((string) ($current['PrivateNote'] ?? '') . ' | Voided in FleetForge ' . ff_today()
+            . ' (was ' . ($current['TotalAmt'] ?? '?') . ')', ' |');
+        return $this->updateEntity('creditmemo', $id, (string) ($current['SyncToken'] ?? '0'), [
+            'CustomerRef' => $current['CustomerRef'],
+            'Line'        => $lines,
+            'PrivateNote' => mb_substr($note, 0, 4000),
+        ], ['sparse' => true, 'entity_type' => 'credit_memo', 'operation' => 'void']);
     }
 
     /**
@@ -673,10 +889,105 @@ class QuickBooksClient
      */
     private function dispatch(string $method, string $endpoint, array $opts = []): array
     {
-        if (!empty($opts['no_retry'])) {
-            return $this->executeRequest($method, $endpoint, $opts);
+        // S-QBO-GOLIVE-AUDIT: realm guard — refuse every call except the
+        // CompanyInfo reads (connect-time sync + Test Connection) while the
+        // connected company differs from the one the mappings belong to.
+        // Covers pushes AND pulls: a pull would merge the new company's
+        // records into map tables still holding the old company's Ids.
+        $guard = self::realmGuardReason();
+        if ($guard !== null && ($opts['entity_type'] ?? '') !== 'companyinfo') {
+            throw new QuickBooksException($guard, 'realm_mismatch');
+        }
+
+        // S-QBO-GOLIVE-AUDIT: idempotency key for every write. QBO replays
+        // the ORIGINAL response for a repeated requestid instead of creating
+        // the entity again, which is the only protection against duplicate
+        // invoices/payments when a create's response is lost (cURL timeout,
+        // 5xx after commit, worker crash before the map row is written).
+        // Computed ONCE here so every in-process retry of this call reuses it.
+        if ($method === 'POST' && empty($opts['request_id'])) {
+            $opts['request_id'] = $this->buildRequestId($method, $endpoint);
+        }
+
+        // Retry policy by context (S-QBO-GOLIVE-AUDIT). Previously nothing
+        // passed no_retry, so the worker slept in-process for up to ~31 min
+        // on a QBO outage while holding the queue lock.
+        //   worker / no_retry → single attempt (+ the silent 401 refresh);
+        //                       the worker requeues transient failures itself
+        //                       via next_retry_at (lastWorkerFailure()).
+        //   web request       → at most WEB_MAX_RETRIES short sleeps.
+        //   other CLI         → settings-driven policy (unchanged).
+        if (!empty($opts['no_retry']) || self::$workerQueueId !== null) {
+            $opts['_max_attempts'] = 0;
+        } elseif (PHP_SAPI !== 'cli') {
+            $opts['_max_attempts'] = min(
+                (int) settings_get('quickbooks.retry.max_attempts', '5'),
+                self::WEB_MAX_RETRIES
+            );
+            $opts['_max_sleep'] = self::WEB_MAX_SLEEP_SECONDS;
         }
         return $this->executeWithRetry($method, $endpoint, $opts);
+    }
+
+    /**
+     * buildRequestId — the QBO `requestid` (≤50 chars, unique per company)
+     * for one logical write.
+     *
+     * Worker context: DETERMINISTIC per (realm, queue row, epoch, write #,
+     * method, endpoint). A re-dispatch of the same row after an UNKNOWN
+     * outcome — transient requeue, stale-processing reaper after a crash —
+     * sends the same id, so QBO replays the first create's response instead
+     * of making a duplicate. The epoch is the number of DEFINITIVE rejections
+     * (4xx other than 401/408/429) already logged for this row: once QBO has
+     * said "no", the operator's fix-and-retry (sync_queue_retry resets the
+     * SAME row) must get a fresh id, or QBO could replay the old rejection.
+     *
+     * Outside the worker: random per logical call — protects the in-process
+     * retry loop, which is the only place such a call can repeat.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    private function buildRequestId(string $method, string $endpoint): string
+    {
+        if (self::$workerQueueId === null) {
+            return 'ff-' . bin2hex(random_bytes(16));
+        }
+        self::$workerWriteSeq++;
+
+        $epoch = 0;
+        try {
+            $epoch = (int) db_count(
+                "SELECT COUNT(*) FROM acc_qbo_sync_log
+                  WHERE queue_id = ?
+                    AND response_status BETWEEN 400 AND 499
+                    AND response_status NOT IN (401, 408, 429)",
+                [self::$workerQueueId]
+            );
+        } catch (Throwable $e) {
+            // No log table → no prior rejections to account for.
+            error_log('[QuickBooksClient.buildRequestId] epoch lookup failed: ' . $e->getMessage());
+        }
+
+        $basis = implode('|', [
+            $this->realmId,
+            'q' . self::$workerQueueId,
+            'e' . $epoch,
+            'w' . self::$workerWriteSeq,
+            $method,
+            $endpoint,
+        ]);
+        return 'ffq-' . substr(hash('sha256', $basis), 0, 40);
+    }
+
+    /**
+     * Remember the failure for the worker (see lastWorkerFailure()). No-op
+     * outside a worker context.
+     */
+    private function noteFailure(Throwable $e): void
+    {
+        if (self::$workerQueueId !== null) {
+            self::$lastWorkerFailure = $e;
+        }
     }
 
     /**
@@ -692,8 +1003,13 @@ class QuickBooksClient
      */
     private function executeWithRetry(string $method, string $endpoint, array $opts = []): array
     {
-        $maxAttempts = (int) settings_get('quickbooks.retry.max_attempts', '5');
+        $maxAttempts = isset($opts['_max_attempts'])
+            ? max(0, (int) $opts['_max_attempts'])
+            : (int) settings_get('quickbooks.retry.max_attempts', '5');
         $backoffBase = (int) settings_get('quickbooks.retry.backoff_base_seconds', '60');
+        // Per-sleep ceiling (web requests only; see dispatch()).
+        $maxSleep    = isset($opts['_max_sleep']) ? max(0, (int) $opts['_max_sleep']) : null;
+        $capSleep    = static fn(int $s): int => $maxSleep === null ? max(0, $s) : min(max(0, $s), $maxSleep);
 
         // Reset the auth-retry flag per logical operation.
         $this->authRetryDone = false;
@@ -704,12 +1020,21 @@ class QuickBooksClient
 
         while ($attempt < $totalAttempts) {
             try {
-                return $this->executeRequest($method, $endpoint, $opts);
+                $result = $this->executeRequest($method, $endpoint, $opts);
+                // S-QBO-GOLIVE-AUDIT: lastWorkerFailure describes the MOST
+                // RECENT call — a later success (e.g. the 5010 re-try, or a
+                // create after a swallowed preflight GET blip) clears it so
+                // the worker never requeues on a failure that was recovered.
+                if (self::$workerQueueId !== null) {
+                    self::$lastWorkerFailure = null;
+                }
+                return $result;
             } catch (QuickBooksAuthExpiredException $e) {
                 if ($this->authRetryDone) {
                     // Already refreshed once this op and still 401 —
                     // surface to caller so they can re-prompt OAuth.
                     $this->captureSentry($e, $opts, $attempt);
+                    $this->noteFailure($e);
                     throw $e;
                 }
                 // Silent refresh + immediate retry. Does NOT count
@@ -718,6 +1043,14 @@ class QuickBooksClient
                 $this->authRetryDone = true;
                 try {
                     $this->refreshAccessToken();
+                } catch (QuickBooksTransientException $refreshErr) {
+                    // S-QBO-GOLIVE-AUDIT: the refresh endpoint was merely
+                    // unreachable — surface it as transient so the retry
+                    // policy (and the worker's requeue) apply, instead of an
+                    // auth failure that looks like the connection is dead.
+                    $this->captureSentry($refreshErr, $opts, $attempt);
+                    $this->noteFailure($refreshErr);
+                    throw $refreshErr;
                 } catch (Throwable $refreshErr) {
                     // Refresh itself blew up — bubble the original
                     // 401 with the refresh error chained so the
@@ -730,6 +1063,7 @@ class QuickBooksClient
                         $refreshErr
                     );
                     $this->captureSentry($wrapped, $opts, $attempt);
+                    $this->noteFailure($wrapped);
                     throw $wrapped;
                 }
                 continue; // retry with fresh token, no budget increment
@@ -739,7 +1073,7 @@ class QuickBooksClient
                 $lastTransient = $e;
                 if ($attempt < $maxAttempts) {
                     $sleep = $e->retryAfterSeconds ?? ($backoffBase * (2 ** $attempt));
-                    sleep(max(0, $sleep));
+                    sleep($capSleep((int) $sleep));
                     $attempt++;
                     continue;
                 }
@@ -751,6 +1085,7 @@ class QuickBooksClient
                     $e
                 );
                 $this->captureSentry($transient, $opts, $attempt);
+                $this->noteFailure($transient);
                 throw $transient;
             } catch (QuickBooksTransientException $e) {
                 $lastTransient = $e;
@@ -760,17 +1095,19 @@ class QuickBooksClient
                     // failures don't carry the header).
                     $sleep = $this->retryAfter ?? ($backoffBase * (2 ** $attempt));
                     $this->retryAfter = null;
-                    sleep(max(0, $sleep));
+                    sleep($capSleep((int) $sleep));
                     $attempt++;
                     continue;
                 }
                 $this->captureSentry($e, $opts, $attempt);
+                $this->noteFailure($e);
                 throw $e;
             } catch (QuickBooksException $e) {
                 // Non-retryable category (validation, stale_object,
                 // duplicate_name, forbidden, not_found, etc.) — fail
                 // fast and let the caller decide what to do.
                 $this->captureSentry($e, $opts, $attempt);
+                $this->noteFailure($e);
                 throw $e;
             }
         }
@@ -779,6 +1116,7 @@ class QuickBooksClient
         // surface the last transient so the caller sees something.
         $err = $lastTransient ?? new QuickBooksException('Retry loop terminated without success or final throw.');
         $this->captureSentry($err, $opts, $attempt);
+        $this->noteFailure($err);
         throw $err;
     }
 
@@ -825,6 +1163,10 @@ class QuickBooksClient
         $queryParams = $opts['query'] ?? [];
         if (!isset($queryParams['minorversion'])) {
             $queryParams['minorversion'] = self::QBO_MINORVERSION;
+        }
+        // S-QBO-GOLIVE-AUDIT: idempotency key (see buildRequestId).
+        if (!empty($opts['request_id']) && !isset($queryParams['requestid'])) {
+            $queryParams['requestid'] = (string) $opts['request_id'];
         }
         if (!empty($queryParams)) {
             $url .= (str_contains($url, '?') ? '&' : '?') . http_build_query($queryParams);
@@ -911,7 +1253,7 @@ class QuickBooksClient
             'endpoint'         => $endpoint,
             'request_payload'  => $this->scrubRequestForLog($bodyJson, $queryParams),
             'response_status'  => $httpStatus,
-            'response_payload' => $this->truncateForLog($body, self::SYNC_LOG_PAYLOAD_LIMIT_BYTES),
+            'response_payload' => $this->jsonForLog($body, self::SYNC_LOG_PAYLOAD_LIMIT_BYTES),
             'duration_ms'      => $durationMs,
             'queue_id'         => $opts['queue_id'] ?? null,
         ];
@@ -920,7 +1262,7 @@ class QuickBooksClient
         if ($httpStatus < 200 || $httpStatus >= 300) {
             $classified = $this->classifyError($httpStatus, $decoded, $parsedHdrs);
             $logRow['error_code']    = $classified['code'] ?? (string) $classified['category'];
-            $logRow['error_message'] = $classified['message'];
+            $logRow['error_message'] = self::faultText($classified);
             $this->writeSyncLog($logRow);
             throw $this->buildException($classified, $httpStatus, $decoded);
         }
@@ -962,6 +1304,9 @@ class QuickBooksClient
         if (!isset($queryParams['minorversion'])) {
             $queryParams['minorversion'] = self::QBO_MINORVERSION;
         }
+        if (!empty($opts['request_id']) && !isset($queryParams['requestid'])) {
+            $queryParams['requestid'] = (string) $opts['request_id'];
+        }
         $bodyJson = null;
         if (isset($opts['json'])) {
             $bodyJson = json_encode($opts['json']);
@@ -988,7 +1333,7 @@ class QuickBooksClient
             'endpoint'         => $endpoint,
             'request_payload'  => $this->scrubRequestForLog($bodyJson, $queryParams),
             'response_status'  => $httpStatus,
-            'response_payload' => $this->truncateForLog($body, self::SYNC_LOG_PAYLOAD_LIMIT_BYTES),
+            'response_payload' => $this->jsonForLog($body, self::SYNC_LOG_PAYLOAD_LIMIT_BYTES),
             'duration_ms'      => $durationMs,
             'queue_id'         => $opts['queue_id'] ?? null,
         ];
@@ -996,7 +1341,7 @@ class QuickBooksClient
         if ($httpStatus < 200 || $httpStatus >= 300) {
             $classified = $this->classifyError($httpStatus, $decoded, []);
             $logRow['error_code']    = $classified['code'] ?? (string) $classified['category'];
-            $logRow['error_message'] = $classified['message'];
+            $logRow['error_message'] = self::faultText($classified);
             $this->writeSyncLog($logRow);
             throw $this->buildException($classified, $httpStatus, $decoded);
         }
@@ -1136,7 +1481,8 @@ class QuickBooksClient
      */
     private function buildException(array $classified, int $httpStatus, array $faultResponse): QuickBooksException
     {
-        $msg     = $classified['message'];
+        // S-QBO-GOLIVE-AUDIT: Message + Detail (see faultText()).
+        $msg     = self::faultText($classified);
         $code    = $classified['code'];
         $fault   = $classified['fault_block'];
 
@@ -1409,7 +1755,7 @@ class QuickBooksClient
             $payload['body'] = $this->redactAuthKeys($payload['body']);
         }
 
-        return $this->truncateForLog((string) json_encode($payload), self::SYNC_LOG_PAYLOAD_LIMIT_BYTES);
+        return $this->jsonForLog((string) json_encode($payload), self::SYNC_LOG_PAYLOAD_LIMIT_BYTES);
     }
 
     /**
@@ -1452,6 +1798,53 @@ class QuickBooksClient
      * Clip a string to $maxBytes, appending a "...[truncated]" marker
      * so the next reader doesn't mistake it for the full payload.
      */
+    /**
+     * Value for a JSON column of acc_qbo_sync_log (request/response payload).
+     * truncateForLog() cut large bodies mid-string — invalid JSON, so MySQL
+     * rejected the whole log row (a 1000-row query response lost its log
+     * entry); a non-JSON body (a gateway's HTML error page) was rejected the
+     * same way. Valid JSON within the limit is stored as-is; anything else
+     * is wrapped as a JSON object holding the (cut) raw text.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    private function jsonForLog(string $s, int $maxBytes): ?string
+    {
+        if ($s === '') {
+            return null;
+        }
+        if (strlen($s) <= $maxBytes) {
+            json_decode($s);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                return $s;
+            }
+        }
+        return (string) json_encode([
+            '_truncated' => strlen($s) > $maxBytes,
+            '_bytes'     => strlen($s),
+            '_raw'       => mb_strcut($s, 0, max(0, $maxBytes - 256), 'UTF-8'),
+        ], JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+    }
+
+    /**
+     * Human text for a QBO fault: Message plus Detail. Intuit's Message is
+     * often generic ("A business validation error has occurred while
+     * processing your request"); the Detail says what is actually wrong
+     * ("… Amount must be greater than 0") — without it an operator reading a
+     * failed push has nothing to act on.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function faultText(array $classified): string
+    {
+        $msg    = trim((string) ($classified['message'] ?? ''));
+        $detail = trim((string) ($classified['detail'] ?? ''));
+        if ($detail === '' || str_contains($msg, $detail)) {
+            return $msg;
+        }
+        return $msg === '' ? $detail : "{$msg} — {$detail}";
+    }
+
     private function truncateForLog(string $s, int $maxBytes): string
     {
         if (strlen($s) <= $maxBytes) {
@@ -1490,6 +1883,10 @@ class QuickBooksClient
      */
     public static function settings_write_qbo(string $shortKey, string $value): void
     {
+        // S-QBO-GOLIVE-AUDIT: secrets are encrypted at rest (see secret()).
+        if ($value !== '' && in_array($shortKey, self::ENCRYPTED_SETTING_KEYS, true)) {
+            $value = self::encryptSecret($value);
+        }
         $key = 'quickbooks.' . $shortKey;
         db_execute(
             "INSERT INTO `settings` (`key`, `value`, `value_type`, `group_name`, `updated_at`)
@@ -1499,6 +1896,49 @@ class QuickBooksClient
                 `updated_at` = NOW()",
             [$key, $value]
         );
+    }
+
+    /**
+     * quickbooks.* keys stored encrypted (S-QBO-GOLIVE-AUDIT). The refresh
+     * token + client secret together are standing read/write access to the
+     * company's books for ~100 days, and the settings table is copied into
+     * every DB backup (lib/Backup → Dropbox). Same ENC:/AES-256 format and
+     * APP_SECRET-derived key as the Dropbox + MFA secrets.
+     */
+    private const ENCRYPTED_SETTING_KEYS = ['access_token', 'refresh_token', 'client_secret', 'webhook_verifier_token'];
+
+    /**
+     * Read a quickbooks.* secret as plain text. Transparent for legacy
+     * PLAINTEXT rows (values written before encryption shipped, or seeded by
+     * smokes) — they are returned as-is and get encrypted on their next
+     * write. Returns '' when an ENC: value cannot be decrypted (APP_SECRET
+     * changed): the caller then sees "not configured"/"not connected", which
+     * is the honest state and is fixed by re-entering / reconnecting.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function secret(string $shortKey): string
+    {
+        $raw = (string) settings_get('quickbooks.' . $shortKey, '');
+        if (!str_starts_with($raw, 'ENC:')) {
+            return $raw;
+        }
+        $plain = \FleetForge\Backup\DropboxClient::decrypt($raw);
+        if ($plain === null) {
+            error_log("[QuickBooksClient.secret] quickbooks.{$shortKey} could not be decrypted (APP_SECRET changed?) — treating as unset.");
+            return '';
+        }
+        return $plain;
+    }
+
+    /** Encrypt for storage; falls back to plaintext only when no APP_SECRET is configured. */
+    private static function encryptSecret(string $plain): string
+    {
+        if (!defined('APP_SECRET') || APP_SECRET === '') {
+            error_log('[QuickBooksClient] APP_SECRET not set — storing QBO secret unencrypted.');
+            return $plain;
+        }
+        return \FleetForge\Backup\DropboxClient::encrypt($plain);
     }
 
     /**

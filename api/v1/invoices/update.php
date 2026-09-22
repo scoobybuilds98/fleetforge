@@ -211,8 +211,10 @@ db_transaction(function () use ($id, $invoice, $updateData) {
 // email) must mirror to QBO or the downstream copy drifts (D-QBO-CORE-1).
 // Best-effort AFTER commit per D-ENQUEUER-CONTRACT; gate-0 restricts to
 // sent/paid/partially_paid and the pusher demotes unmapped invoices.
+// S-QBO-GOLIVE-AUDIT: the enqueuer's own post-send list — this copy lacked
+// 'overdue', so a PO fix on an overdue invoice never reached QuickBooks.
 if (array_intersect(array_keys($updateData), ['po_number', 'sent_to_email'])
-    && in_array($invoice['status'], ['sent', 'paid', 'partially_paid'], true)
+    && in_array($invoice['status'], \FleetForge\QboPushers\InvoiceEnqueuer::POST_SEND_STATUSES, true)
 ) {
     \FleetForge\QboPushers\InvoiceEnqueuer::enqueue($id, 'update');
 }

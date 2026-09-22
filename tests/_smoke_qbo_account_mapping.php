@@ -129,6 +129,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
 
+// S-QBO-GOLIVE-AUDIT: this smoke links / unlinks / re-maps REAL account-map
+// rows and "reverts" them to ff_only — on an install whose chart is mapped
+// it silently unmapped the 7 required accounts. Restore the table exactly.
+require_once __DIR__ . '/_qbo_smoke_env.php';
+ff_qbo_smoke_preserve_tables(['acc_qbo_account_map']);
+
 use FleetForge\QboPushers\AccountPuller;
 use FleetForge\QboPushers\AccountMatcher;
 use FleetForge\QboPushers\AccountValidator;
@@ -512,8 +518,13 @@ if (empty($c12Errors)) {
 // '{code} {name}' format — AR '1030' is the stable check), and D3
 // (plural inflection '2 required categories').
 $c13Errors = [];
+// S-QBO-GOLIVE-AUDIT: exercise the UNMAPPED state explicitly (rolled back) —
+// the check used to assume the install had never mapped its chart of accounts.
+$c13Pdo = db_pdo();
+$c13Pdo->beginTransaction();
 try {
     AccountValidator::markCriticalAccounts(); // ensure critical rows exist
+    db_execute("UPDATE acc_qbo_account_map SET mapping_status = 'ff_only' WHERE critical_category IN ('ar_clearing', 'sales_revenue')");
     try {
         AccountValidator::assertReadyForInvoicePush();
         $c13Errors[] = 'expected exception, none thrown';
@@ -546,6 +557,10 @@ try {
     }
 } catch (Throwable $e) {
     $c13Errors[] = 'C13 threw unexpected: ' . get_class($e) . ' ' . $e->getMessage();
+} finally {
+    if ($c13Pdo->inTransaction()) {
+        $c13Pdo->rollBack();
+    }
 }
 if (empty($c13Errors)) {
     echo "PASS C13 assertReadyForInvoicePush throws naming ar_clearing + sales_revenue + FF '1030' + plural inflection (D-QBO-VALIDATOR-5 D1+D2+D3)\n";

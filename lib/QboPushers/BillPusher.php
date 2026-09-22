@@ -147,7 +147,7 @@ class BillPusher
             "SELECT id, bill_number, vendor_bill_number, vendor_id, bill_date, due_date,
                     status, currency, exchange_rate_to_cad, subtotal,
                     tax_gst_amount, tax_pst_amount, tax_hst_amount, tax_total, total_amount,
-                    balance_due, notes, updated_at
+                    balance_due, notes, updated_at, equipment_unit_id
                FROM acc_bills
               WHERE id = ?",
             [$ffBillId]
@@ -164,7 +164,7 @@ class BillPusher
         // 3. Look up existing mapping. May be NULL (first push), or may
         //    exist from a prior push.
         $mapping = db_row(
-            "SELECT id, qbo_bill_id, qbo_sync_token, qbo_currency, push_status
+            "SELECT id, qbo_bill_id, qbo_sync_token, qbo_currency, push_status, origin
                FROM acc_qbo_bill_map
               WHERE ff_bill_id = ?",
             [$ffBillId]
@@ -223,6 +223,15 @@ class BillPusher
                 'outcome' => 'created',
                 'qbo_id'  => (string) $mapping['qbo_bill_id'],
             ] + self::RESULT_BASE;
+        }
+
+        // 5a. S-QBO-GOLIVE-AUDIT: a bill LINKED at go-live is the
+        //     accountant's own QuickBooks bill — never overwrite it from FF.
+        if ($operation === 'update' && $mapping !== null && !empty($mapping['qbo_bill_id'])
+            && ($mapping['origin'] ?? 'ff_push') === 'cutover_link') {
+            InvoiceLinker::recordLinkedChange('bill', $ffBillId, (string) $mapping['qbo_bill_id'], (string) $ff['bill_number'], 'update');
+            return ['success' => true, 'status' => 'skipped_cutover_link', 'outcome' => 'skipped',
+                    'qbo_id' => (string) $mapping['qbo_bill_id']] + self::RESULT_BASE;
         }
 
         // 5b. Update demotion (D-PUSHER-DEMOTION-RULE, mirrors InvoicePusher
@@ -395,6 +404,22 @@ class BillPusher
      */
     private static function runPreflight(array $ff)
     {
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): foreign-currency bill into a
+        // single-currency company would be booked at face value in the home
+        // currency. See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason($ff['currency'] ?? null, "Bill {$ff['bill_number']}");
+        if ($currencyBlock !== null) {
+            return ['reason' => $currencyBlock, 'status_code' => 'failed_preflight_currency_mismatch'];
+        }
+
+        // Gate 0.5 (S-QBO-GOLIVE-AUDIT): a bill dated before QuickBooks
+        // go-live is almost certainly already in QuickBooks (the accountant
+        // entered it) — link it, or release it with "Push as new".
+        $cutoverBlock = InvoiceLinker::cutoverBlockReason('bill', $ff);
+        if ($cutoverBlock !== null) {
+            return $cutoverBlock;
+        }
+
         // Gate 1: Vendor mapping.
         $vendorMap = db_row(
             "SELECT qbo_vendor_id, mapping_status FROM acc_qbo_vendor_map WHERE ff_vendor_id = ?",
@@ -613,13 +638,23 @@ class BillPusher
         //    Tax-override per D-QBO-18-2: each line TaxCodeRef='NON'.
         $overrideId = (string) settings_get('quickbooks.tax_override_code_id', '');
 
+        // S-QBO-GOLIVE-AUDIT: the unit / asset each cost belongs to is FF's
+        // per-equipment costing — carry it into the QBO line description so
+        // the accountant sees it too (QBO has no unit field). The line's
+        // asset's unit wins over the bill's unit.
         $lines = db_select(
-            "SELECT id, account_id, description, amount
-               FROM acc_bill_lines
-              WHERE bill_id = ?
-              ORDER BY sort_order, id",
+            "SELECT bl.id, bl.account_id, bl.description, bl.amount,
+                    fa.asset_number, eu_line.unit_number AS line_unit
+               FROM acc_bill_lines bl
+               LEFT JOIN acc_fixed_assets fa ON fa.id = bl.asset_id
+               LEFT JOIN equipment_units eu_line ON eu_line.id = fa.equipment_unit_id
+              WHERE bl.bill_id = ?
+              ORDER BY bl.sort_order, bl.id",
             [(int) $ff['id']]
         );
+        $billUnit = !empty($ff['equipment_unit_id'])
+            ? (string) (db_row("SELECT unit_number FROM equipment_units WHERE id = ?", [(int) $ff['equipment_unit_id']])['unit_number'] ?? '')
+            : '';
 
         if (empty($lines)) {
             throw new QuickBooksException(
@@ -639,7 +674,7 @@ class BillPusher
                 );
             }
             $payloadLines[] = [
-                'Description' => (string) $line['description'],
+                'Description' => self::lineDescription($line, $billUnit),
                 'Amount'      => (float) $line['amount'],
                 'DetailType'  => 'AccountBasedExpenseLineDetail',
                 'AccountBasedExpenseLineDetail' => [
@@ -661,7 +696,32 @@ class BillPusher
         //    bill_number + tax breakdown for accountant drill-down.
         $payload['PrivateNote'] = self::buildPrivateNoteJson($ff);
 
-        return $payload;
+        // S-QBO-GOLIVE-AUDIT: rental-business Class / Location for the shared
+        // QuickBooks file (no-op until one is chosen in Settings).
+        return QboTagging::applyToBill($payload);
+    }
+
+    /**
+     * QBO line description: FF's text plus the unit / asset reference
+     * ("Brake job — Unit 4417 · Asset FA-00123"). Capped at QBO's 4000.
+     *
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function lineDescription(array $line, string $billUnit): string
+    {
+        $unit = trim((string) ($line['line_unit'] ?? '')) ?: $billUnit;
+        $refs = [];
+        if ($unit !== '') {
+            $refs[] = 'Unit ' . $unit;
+        }
+        if (!empty($line['asset_number'])) {
+            $refs[] = 'Asset ' . $line['asset_number'];
+        }
+        $desc = trim((string) ($line['description'] ?? ''));
+        if ($refs !== []) {
+            $desc = ($desc !== '' ? $desc . ' — ' : '') . implode(' · ', $refs);
+        }
+        return mb_substr($desc, 0, QboFieldLimits::INVOICE_LINE_DESCRIPTION_MAX);
     }
 
     /**

@@ -54,11 +54,17 @@ class CreditApplicationEnqueuer
             //   create → application must be live ('applied')
             //   void   → application must be 'reversed' (un-applied via unapply.php)
             $app = db_row(
-                "SELECT id, status FROM credit_note_applications WHERE id = ?",
+                "SELECT a.id, a.status, cn.internal_notes
+                   FROM credit_note_applications a JOIN credit_notes cn ON cn.id = a.credit_note_id
+                  WHERE a.id = ?",
                 [$ffApplicationId]
             );
             if ($app === null) {
                 error_log("[CreditApplicationEnqueuer] gate-0 reject: application id {$ffApplicationId} not found");
+                return false;
+            }
+            // S-QBO-GOLIVE-AUDIT: a rounding settlement stays in FF only.
+            if (RoundingSettler::isRoundingNote($app['internal_notes'] ?? null)) {
                 return false;
             }
             if ($operation === 'create' && ($app['status'] ?? 'applied') !== 'applied') {
@@ -87,7 +93,7 @@ class CreditApplicationEnqueuer
             }
 
             // Gate 4: best-effort INSERT.
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'credit_application',
                 'entity_id'   => $ffApplicationId,
                 'operation'   => $operation,

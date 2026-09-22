@@ -213,8 +213,14 @@ require_once FF_ROOT . '/includes/header.php';
                                         </div>
                                     </div>
                                 </template>
-                                <template x-if="!row.qbo_account_id">
+                                <template x-if="!row.qbo_account_id && !row.suggestion">
                                     <span class="text-secondary">—</span>
+                                </template>
+                                <template x-if="!row.qbo_account_id && row.suggestion">
+                                    <div class="text-sm" title="Not linked automatically — only exact code / name matches link on their own. Confirm if this is the right QuickBooks account.">
+                                        <div class="text-warning">Suggested: <span x-text="row.suggestion.name || '(no name)'"></span></div>
+                                        <div class="text-secondary font-mono" x-text="'qbo #' + row.suggestion.qbo_id + ' · ' + row.suggestion.why"></div>
+                                    </div>
                                 </template>
                             </td>
                             <td>
@@ -233,6 +239,9 @@ require_once FF_ROOT . '/includes/header.php';
                             </td>
                             <td>
                                 <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                                    <template x-if="row.mapping_status === 'ff_only' && row.suggestion">
+                                        <button class="btn btn-sm btn-primary" @click="acceptSuggestion(row)">Link suggested</button>
+                                    </template>
                                     <template x-if="row.mapping_status === 'ff_only'">
                                         <button class="btn btn-sm btn-secondary" @click="openLinkModal(row, 'pick_qbo')">Link to QBO…</button>
                                     </template>
@@ -414,7 +423,7 @@ function qboAccountMapping() {
                 if (j.success) {
                     const d = j.data;
                     this.flash = {
-                        message: 'Auto-match: ' + d.matched + ' mapped, ' + d.ff_only + ' ff_only, ' + d.qbo_only + ' qbo_only, ' + d.manual_preserved + ' manual preserved.',
+                        message: 'Auto-match: ' + d.matched + ' mapped (exact), ' + (d.suggested || 0) + ' suggested for review, ' + d.ff_only + ' ff_only, ' + d.qbo_only + ' qbo_only, ' + d.manual_preserved + ' manual preserved.',
                         type: 'success',
                     };
                     await this.reload();
@@ -485,6 +494,14 @@ function qboAccountMapping() {
             } finally {
                 this.linkModal.saving = false;
             }
+        },
+
+        // S-QBO-GOLIVE-AUDIT: confirm an auto-match suggestion.
+        async acceptSuggestion(row) {
+            if (!row.suggestion) return;
+            if (!confirm('Link ' + (row.ff_code ? row.ff_code + ' ' : '') + (row.ff_name || 'this account') + ' to QuickBooks "' + (row.suggestion.name || ('#' + row.suggestion.qbo_id)) + '"?')) return;
+            await this.callSave({ action: 'link', ff_account_id: row.ff_account_id, qbo_account_id: row.suggestion.qbo_id,
+                                  notes: 'Confirmed auto-match suggestion (' + row.suggestion.why + ')' });
         },
 
         async unlinkRow(row)   { if (!confirm('Unlink this mapping?')) return; await this.callSave({ action: 'unlink', mapping_id: row.mapping_id }); },

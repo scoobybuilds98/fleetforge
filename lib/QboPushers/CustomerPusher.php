@@ -142,7 +142,7 @@ class CustomerPusher
         //    (added S-QBO-FIXPACK-2: needed for CurrencyRef emission
         //    per D-QBO-FIXPACK-6/-7).
         $ff = db_row(
-            "SELECT id, company_name, email, phone, address, city, province, postal_code, country, currency, deleted_at, updated_at
+            "SELECT id, company_name, email, invoice_email, billing_email, phone, address, city, province, postal_code, country, currency, deleted_at, updated_at, created_at
                FROM customers
               WHERE id = ?",
             [$ffCustomerId]
@@ -167,7 +167,7 @@ class CustomerPusher
         //    may exist from a prior pull (qbo_only), prior auto-match
         //    (mapped/manual), or a prior push (mapped/manual).
         $mapping = db_row(
-            "SELECT id, qbo_customer_id, qbo_sync_token, mapping_status
+            "SELECT id, qbo_customer_id, qbo_sync_token, mapping_status, match_confidence
                FROM acc_qbo_customer_map
               WHERE ff_customer_id = ?",
             [$ffCustomerId]
@@ -228,6 +228,17 @@ class CustomerPusher
             $effectiveOperation = 'create';
         }
 
+        // 5b. S-QBO-GOLIVE-AUDIT: never CREATE a QuickBooks customer for a
+        //     customer FF had before go-live unless a person released it —
+        //     the shared company file most likely has it already.
+        if ($effectiveOperation === 'create') {
+            $block = InvoiceLinker::partyCreateBlockReason('Customer', $ff['created_at'] ?? null, $mapping);
+            if ($block !== null) {
+                self::recordFailedPreflight($ffCustomerId, $block);
+                return ['success' => false, 'status' => 'failed_preflight', 'outcome' => 'failed', 'error' => $block] + self::RESULT_BASE;
+            }
+        }
+
         // 6. Build payload from FF row.
         $qboPayload = self::buildQboPayload($ff);
 
@@ -238,6 +249,12 @@ class CustomerPusher
         // Strip it from update payloads here so the HTTP call succeeds.
         if ($effectiveOperation === 'update') {
             unset($qboPayload['CurrencyRef']);
+            // S-QBO-GOLIVE-AUDIT: keep the accountant's DisplayName on a
+            // linked customer — it is the name the whole (shared) company
+            // file knows them by, may differ from FF's on purpose, and must
+            // be unique across every customer/vendor/employee (a rename can
+            // collide, error 6240). CompanyName still follows FF.
+            unset($qboPayload['DisplayName']);
         }
 
         // 7. HTTP call via QuickBooksClient. The client handles auth,
@@ -246,11 +263,19 @@ class CustomerPusher
         $client = new QuickBooksClient();
         try {
             if ($effectiveOperation === 'update') {
+                // S-QBO-GOLIVE-AUDIT: SPARSE update. FF only owns name /
+                // email / phone / billing address; a full (sparse=false)
+                // update made QBO blank every field FF doesn't send — terms,
+                // default tax code, business number, notes, ship-to, payment
+                // method, and the parent link of a sub-customer. On the real
+                // company most customers are MATCHED to the accountant's
+                // existing records, so every FF edit would have wiped them.
                 $response = $client->updateEntity(
                     'customer',
                     (string) $mapping['qbo_customer_id'],
                     (string) ($mapping['qbo_sync_token'] ?? '0'),
-                    $qboPayload
+                    $qboPayload,
+                    ['sparse' => true]
                 );
             } else {
                 $response = $client->createEntity('customer', $qboPayload);
@@ -362,8 +387,15 @@ class CustomerPusher
         }
         // When multi_currency_enabled='0': omit CurrencyRef (QBO error 6000 otherwise).
 
-        if (!empty($ff['email'])) {
-            $payload['PrimaryEmailAddr'] = ['Address' => (string) $ff['email']];
+        // S-QBO-GOLIVE-AUDIT: the address invoices go to, not the general
+        // contact — QuickBooks uses PrimaryEmailAddr for invoice / payment-
+        // link / receipt emails. First valid of invoice → billing → email.
+        foreach (['invoice_email', 'billing_email', 'email'] as $col) {
+            $addr = trim((string) ($ff[$col] ?? ''));
+            if ($addr !== '' && filter_var($addr, FILTER_VALIDATE_EMAIL) !== false) {
+                $payload['PrimaryEmailAddr'] = ['Address' => $addr];
+                break;
+            }
         }
         if (!empty($ff['phone'])) {
             $payload['PrimaryPhone'] = ['FreeFormNumber' => (string) $ff['phone']];

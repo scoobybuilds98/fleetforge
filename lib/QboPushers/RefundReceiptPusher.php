@@ -229,6 +229,17 @@ class RefundReceiptPusher
      */
     public static function runPreflight(int $ffLeaseId, array $lease): array
     {
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): single-currency company guard. The
+        // refund_receipt map ENUM has no typed currency state, so this
+        // records as the generic failed_preflight. See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason(
+            $lease['currency'] ?? null,
+            'Refund for lease ' . ($lease['contract_number'] ?? "#{$ffLeaseId}")
+        );
+        if ($currencyBlock !== null) {
+            return ['ok' => false, 'status_code' => 'failed_preflight', 'reason' => $currencyBlock];
+        }
+
         // Gate 1: customer mapping.
         $customerId = (int) ($lease['customer_id'] ?? 0);
         if ($customerId === 0) {
@@ -374,7 +385,9 @@ class RefundReceiptPusher
             $payload['ExchangeRate'] = '1.0';
         }
 
-        return $payload;
+        // S-QBO-GOLIVE-AUDIT: rental-business Class / Location for the shared
+        // QuickBooks file (no-op until one is chosen in Settings).
+        return QboTagging::applyToSalesDoc(QboTagging::applyDocNumberPolicy($payload, 'refund'));
     }
 
     /**

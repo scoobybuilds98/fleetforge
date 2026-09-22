@@ -96,6 +96,15 @@ try {
         }
 
         echo "QBO token refresh: rotation OK.\n";
+    } catch (\FleetForge\Exceptions\QuickBooksTransientException $e) {
+        // S-QBO-GOLIVE-AUDIT: Intuit's token endpoint was unreachable / 5xx.
+        // That says nothing about the refresh token, so do NOT flip the
+        // connection to 'expired' (the branch below used to, for ANY error —
+        // one 2am network blip inside the 14-day window stopped all sync
+        // until someone re-authorized). Tomorrow's tick retries; the worker
+        // also refreshes on demand.
+        \FleetForge\Observability\Sentry::captureException($e);
+        fwrite(STDERR, "QBO token refresh transient failure (will retry next tick): " . $e->getMessage() . "\n");
     } catch (\Throwable $e) {
         // Failure branch — refreshAccessToken already wrote
         // connection_status='error'/'expired' + connection_error.

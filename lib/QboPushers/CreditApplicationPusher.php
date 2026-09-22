@@ -10,8 +10,10 @@ declare(strict_types=1);
  *
  * QBO does NOT model "apply a credit to an invoice" as a CreditMemo update.
  * Instead, applying a credit is a ZERO-DOLLAR Payment entity carrying TWO
- * LinkedTxns on a single Line: the source CreditMemo + the target Invoice.
- * The line Amount equals the amount_applied; the header TotalAmt is 0.
+ * Lines, one LinkedTxn each: the target Invoice + the source CreditMemo.
+ * Both line Amounts equal amount_applied; the header TotalAmt is 0.
+ * (S-QBO-GOLIVE-AUDIT: was one Line with both LinkedTxns — not Intuit's
+ * documented form, and only ever exercised by the offline fixture.)
  *
  * Method-per-operation contract (D-QBO-3-2 + D-PUSHER-CONTRACT):
  *   create → pushCreate(int $ffApplicationId): array
@@ -42,7 +44,7 @@ declare(strict_types=1);
  *            (D-QBO-CREDIT-MEMO-APPLY-3): NOT runtime-probed; matches
  *            tax_override / sync_enabled pre-flight-as-doc pattern.
  *   5. Build zero-dollar Payment payload (TotalAmt=0, CustomerRef,
- *      single Line with Amount=amount_applied + 2 LinkedTxns).
+ *      2 Lines × 1 LinkedTxn, each Amount=amount_applied).
  *   6. HTTP createEntity('payment', payload).
  *   7. Persist mapping with success state.
  *
@@ -108,6 +110,13 @@ class CreditApplicationPusher
         $mode = (string) settings_get('quickbooks.sync_mode.credit_application', 'sync');
         if ($mode === 'qbo_to_ff' || $mode === 'disabled') {
             return ['success' => true, 'status' => 'skipped_by_mode', 'outcome' => 'skipped', 'mode' => $mode] + self::RESULT_BASE;
+        }
+
+        // 1b. S-QBO-GOLIVE-AUDIT: an overpayment application lives as a line
+        //     on the source QBO Payment — take the line back off.
+        $appRow = db_row("SELECT * FROM credit_note_applications WHERE id = ?", [$ffApplicationId]);
+        if ($appRow !== null && ($parentCn = self::overpaymentParent($appRow)) !== null) {
+            return self::voidOverpaymentApply($ffApplicationId, $appRow, $parentCn);
         }
 
         // 2. Mapping lookup.
@@ -202,6 +211,15 @@ class CreditApplicationPusher
                 'outcome' => 'failed',
                 'error'   => "FF credit application {$ffApplicationId} not found",
             ] + self::RESULT_BASE;
+        }
+
+        // 2b. S-QBO-GOLIVE-AUDIT: an OVERPAYMENT credit is not a QuickBooks
+        //     credit memo — QuickBooks holds that money as the source
+        //     payment's unapplied amount. Applying it = linking that
+        //     unapplied amount to the invoice on the same QBO Payment.
+        $parentCn = self::overpaymentParent($app);
+        if ($parentCn !== null) {
+            return self::pushOverpaymentApply($ffApplicationId, $app, $parentCn);
         }
 
         // 3. Idempotency on CREATE.
@@ -324,6 +342,18 @@ class CreditApplicationPusher
                 'reason' => "FF credit application {$ffApplicationId} has invalid credit_note_id or invoice_id."];
         }
 
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): single-currency company guard, on the
+        // parent credit's currency (apply.php D18 = invoice currency). The
+        // application map ENUM has no typed currency state → failed_preflight.
+        $parentCn = db_row("SELECT currency, credit_note_number FROM credit_notes WHERE id = ?", [$creditNoteId]);
+        $currencyBlock = CurrencyGuard::blockReason(
+            $parentCn['currency'] ?? null,
+            'Credit application of ' . ($parentCn['credit_note_number'] ?? "credit note #{$creditNoteId}")
+        );
+        if ($currencyBlock !== null) {
+            return ['ok' => false, 'status_code' => 'failed_preflight', 'reason' => $currencyBlock];
+        }
+
         // Gate 1: parent credit memo mapped (must be pushed FIRST).
         $cmMap = db_row(
             "SELECT qbo_credit_memo_id FROM acc_qbo_credit_memo_map WHERE ff_credit_note_id = ?",
@@ -382,9 +412,9 @@ class CreditApplicationPusher
      *   PrivateNote     (audit JSON)
      *   Line: [
      *     { Amount: <amount_applied>,
-     *       LinkedTxn: [
-     *         { TxnId: <qbo_credit_memo_id>, TxnType: 'CreditMemo' },
-     *         { TxnId: <qbo_invoice_id>,     TxnType: 'Invoice'   } ] } ]
+     *       LinkedTxn: [ { TxnId: <qbo_invoice_id>,     TxnType: 'Invoice'    } ] },
+     *     { Amount: <amount_applied>,
+     *       LinkedTxn: [ { TxnId: <qbo_credit_memo_id>, TxnType: 'CreditMemo' } ] } ]
      *
      * CurrencyRef + ExchangeRate gated on multi_currency setting per
      * D-QBO-FIXPACK-12. Currency itself is read off the parent credit
@@ -417,17 +447,23 @@ class CreditApplicationPusher
 
         $txnDate = self::txnDateFor($app);
 
+        // S-QBO-GOLIVE-AUDIT: Intuit's documented shape for applying a credit
+        // memo to an invoice is a $0 Payment with TWO lines — one LinkedTxn
+        // each, both carrying the applied amount. The single line with two
+        // LinkedTxns shipped here was only ever exercised by the offline
+        // fixture (which echoes any payload) and is not the documented form.
         $payload = [
             'CustomerRef' => ['value' => $qboCustomerId],
-            'TotalAmt'    => 0.0,
+            'TotalAmt'    => 0,
             'TxnDate'     => $txnDate,
             'Line'        => [
                 [
-                    'Amount'    => (float) $amountApplied,
-                    'LinkedTxn' => [
-                        ['TxnId' => $qboCreditMemoId, 'TxnType' => 'CreditMemo'],
-                        ['TxnId' => $qboInvoiceId,    'TxnType' => 'Invoice'],
-                    ],
+                    'Amount'    => $amountApplied,
+                    'LinkedTxn' => [['TxnId' => $qboInvoiceId, 'TxnType' => 'Invoice']],
+                ],
+                [
+                    'Amount'    => $amountApplied,
+                    'LinkedTxn' => [['TxnId' => $qboCreditMemoId, 'TxnType' => 'CreditMemo']],
                 ],
             ],
             'PrivateNote' => self::buildPrivateNoteJson($app),
@@ -436,15 +472,29 @@ class CreditApplicationPusher
         // Multi-currency: read the parent credit note's currency
         // (apply.php D18 guarantees parent credit + invoice match).
         if ((string) settings_get('quickbooks.multi_currency_enabled', '0') === '1') {
-            $cn = db_row("SELECT currency FROM credit_notes WHERE id = ?", [(int) $app['credit_note_id']]);
+            $cn = db_row("SELECT currency, exchange_rate_to_cad FROM credit_notes WHERE id = ?", [(int) $app['credit_note_id']]);
             $currency = strtoupper((string) ($cn['currency'] ?? 'CAD'));
             if ($currency === '') {
                 $currency = 'CAD';
             }
             $payload['CurrencyRef'] = ['value' => $currency];
-            // Apply rows have no FX column; CAD=1.0; non-CAD=1.0 best-effort
-            // (FX revaluation of credit-application mirror rows deferred — see F15).
-            $payload['ExchangeRate'] = '1.0';
+            if ($currency === 'CAD') {
+                $payload['ExchangeRate'] = '1.0';
+            } else {
+                // S-QBO-GOLIVE-AUDIT: was a hard-coded '1.0' for every
+                // currency, which made QBO value a USD application at par
+                // and book a phantom FX gain/loss against the invoice. Use
+                // the credit note's frozen rate (S-AUDIT-BILLING-ENGINE-1
+                // #21 — copied from the source invoice), the same rule every
+                // other Pusher follows: no rate → refuse rather than guess.
+                $rate = (string) ($cn['exchange_rate_to_cad'] ?? '');
+                if ($rate === '' || bccomp($rate, '0', 6) <= 0) {
+                    throw new QuickBooksException(
+                        "CreditApplication payload: {$currency} credit note {$app['credit_note_id']} has no exchange_rate_to_cad; cannot value the application in QBO."
+                    );
+                }
+                $payload['ExchangeRate'] = $rate;
+            }
         }
 
         return $payload;
@@ -489,6 +539,201 @@ class CreditApplicationPusher
     // All helpers FK-guard via early-return when the FF application no
     // longer exists. Smokes use sentinel IDs (999990–999999) for ghost rows.
     // ────────────────────────────────────────────────────────────────────
+
+    // ────────────────────────────────────────────────────────────────
+    //  Overpayment credits (S-QBO-GOLIVE-AUDIT)
+    //
+    //  An overpayment's excess never becomes a QuickBooks CreditMemo
+    //  (CreditMemoEnqueuer refuses source='overpayment'): QuickBooks
+    //  already holds it as the source Payment's UNAPPLIED amount. Pushing a
+    //  CreditMemo as well doubled the customer's credit in QuickBooks.
+    //  So applying such a credit to an invoice = adding (or growing) that
+    //  invoice's line on the source Payment; un-applying takes it back off.
+    //  The map row carries qbo_payment_id NULL (the Payment is not "owned"
+    //  by the application) and qbo_credit_memo_id_ref = 'payment:{id}'.
+    // ────────────────────────────────────────────────────────────────
+
+    /** Parent overpayment credit note of an application, or null. */
+    private static function overpaymentParent(array $app): ?array
+    {
+        $cn = db_row(
+            "SELECT id, credit_note_number, customer_id, currency, source, source_payment_id
+               FROM credit_notes WHERE id = ?",
+            [(int) ($app['credit_note_id'] ?? 0)]
+        );
+        return ($cn !== null && $cn['source'] === 'overpayment' && !empty($cn['source_payment_id'])) ? $cn : null;
+    }
+
+    /** Unapplied cash on a QBO Payment: TotalAmt − (Σ invoice lines − Σ credit-memo lines). */
+    public static function qboUnapplied(array $qboPay): string
+    {
+        $inv = '0.00';
+        $cm  = '0.00';
+        foreach ($qboPay['Line'] ?? [] as $line) {
+            $type = (string) ($line['LinkedTxn'][0]['TxnType'] ?? '');
+            $amt  = bcadd((string) ($line['Amount'] ?? '0'), '0', 2);
+            if ($type === 'Invoice') {
+                $inv = bcadd($inv, $amt, 2);
+            } elseif ($type === 'CreditMemo') {
+                $cm = bcadd($cm, $amt, 2);
+            }
+        }
+        return bcsub(bcadd((string) ($qboPay['TotalAmt'] ?? '0'), '0', 2), bcsub($inv, $cm, 2), 2);
+    }
+
+    /**
+     * QBO Payment lines with $delta added to (or, negative, taken off) the
+     * line linking $qboInvoiceId. Lines are reduced to Amount + LinkedTxn —
+     * the shape QBO accepts back on update.
+     */
+    public static function linesWithInvoiceDelta(array $qboPay, string $qboInvoiceId, string $delta): array
+    {
+        $out = [];
+        $done = false;
+        foreach ($qboPay['Line'] ?? [] as $line) {
+            $amt = bcadd((string) ($line['Amount'] ?? '0'), '0', 2);
+            $linked = $line['LinkedTxn'] ?? [];
+            $isTarget = !$done && ($linked[0]['TxnType'] ?? '') === 'Invoice' && (string) ($linked[0]['TxnId'] ?? '') === $qboInvoiceId;
+            if ($isTarget) {
+                $amt  = bcadd($amt, $delta, 2);
+                $done = true;
+                if (bccomp($amt, '0', 2) <= 0) {
+                    continue;
+                }
+            }
+            $out[] = ['Amount' => (float) $amt, 'LinkedTxn' => $linked];
+        }
+        if (!$done && bccomp($delta, '0', 2) > 0) {
+            $out[] = ['Amount' => (float) $delta, 'LinkedTxn' => [['TxnId' => $qboInvoiceId, 'TxnType' => 'Invoice']]];
+        }
+        return $out;
+    }
+
+    private static function pushOverpaymentApply(int $appId, array $app, array $cn): array
+    {
+        $map = db_row("SELECT push_status FROM acc_qbo_credit_application_map WHERE ff_credit_application_id = ?", [$appId]);
+        if ($map !== null && $map['push_status'] === 'pushed') {
+            return ['success' => true, 'status' => 'already_mapped', 'outcome' => 'created'] + self::RESULT_BASE;
+        }
+        if (($app['status'] ?? 'applied') !== 'applied') {
+            return ['success' => true, 'status' => 'skipped_reversed', 'outcome' => 'skipped'] + self::RESULT_BASE;
+        }
+        $fail = function (string $reason) use ($appId, $app): array {
+            self::recordFailedPreflight($appId, $app, $reason, 'failed_preflight');
+            return ['success' => false, 'status' => 'failed_preflight', 'outcome' => 'failed', 'error' => $reason] + self::RESULT_BASE;
+        };
+        $currencyBlock = CurrencyGuard::blockReason($cn['currency'] ?? null, 'Credit application of ' . $cn['credit_note_number']);
+        if ($currencyBlock !== null) {
+            return $fail($currencyBlock);
+        }
+        $payMap = db_row(
+            "SELECT id, qbo_payment_id FROM acc_qbo_payment_map WHERE ff_payment_id = ? AND qbo_payment_id IS NOT NULL",
+            [(int) $cn['source_payment_id']]
+        );
+        if ($payMap === null) {
+            return $fail("Overpayment credit {$cn['credit_note_number']} comes from FF payment #{$cn['source_payment_id']}, which is not in QuickBooks yet — it must push (or be mirrored from QuickBooks) first.");
+        }
+        $invMap = db_row("SELECT qbo_invoice_id FROM acc_qbo_invoice_map WHERE ff_invoice_id = ? AND qbo_invoice_id IS NOT NULL", [(int) $app['invoice_id']]);
+        if ($invMap === null) {
+            return $fail("Target invoice {$app['invoice_id']} is not in QuickBooks yet — it must be pushed or linked first.");
+        }
+        $qboPayId = (string) $payMap['qbo_payment_id'];
+        $qboInvId = (string) $invMap['qbo_invoice_id'];
+        $applied  = bcadd((string) $app['amount_applied'], '0', 2);
+
+        $client = new QuickBooksClient();
+        try {
+            $qboPay = $client->getEntity('payment', $qboPayId)['Payment'] ?? null;
+            if (!is_array($qboPay) || empty($qboPay['Id'])) {
+                return $fail("QuickBooks payment {$qboPayId} not found.");
+            }
+            $unapplied = self::qboUnapplied($qboPay);
+            if (bccomp($unapplied, $applied, 2) < 0) {
+                return $fail("QuickBooks shows only {$unapplied} unapplied on payment {$qboPayId}; FleetForge is applying {$applied}. Check the payment in QuickBooks.");
+            }
+            $resp = $client->updateEntity('payment', $qboPayId, (string) ($qboPay['SyncToken'] ?? '0'), [
+                'CustomerRef' => $qboPay['CustomerRef'],
+                'TotalAmt'    => $qboPay['TotalAmt'],
+                'Line'        => self::linesWithInvoiceDelta($qboPay, $qboInvId, $applied),
+            ], ['sparse' => true, 'entity_type' => 'credit_application', 'entity_id' => $appId]);
+        } catch (QuickBooksException $e) {
+            self::recordPushFailure($appId, $app, $e->getMessage(), $e->httpStatus ?? 0);
+            return ['success' => false, 'status' => 'qbo_error', 'outcome' => 'failed', 'error' => $e->getMessage()] + self::RESULT_BASE;
+        }
+        $updated = $resp['Payment'] ?? null;
+        if (!is_array($updated) || empty($updated['Id'])) {
+            self::recordPushFailure($appId, $app, 'QBO response missing Payment.Id', 0);
+            return ['success' => false, 'status' => 'qbo_malformed_response', 'outcome' => 'failed', 'error' => 'QBO response missing Payment.Id'] + self::RESULT_BASE;
+        }
+        $now = ff_now_utc();
+        self::upsertMappingRow($appId, [
+            'ff_credit_note_id_snapshot' => (int) $app['credit_note_id'],
+            'ff_invoice_id_snapshot'     => (int) $app['invoice_id'],
+            'qbo_payment_id'             => null,
+            'qbo_sync_token'             => (string) ($updated['SyncToken'] ?? '0'),
+            'qbo_credit_memo_id_ref'     => 'payment:' . $qboPayId,
+            'qbo_invoice_id_ref'         => $qboInvId,
+            'qbo_total_amt'              => $applied,
+            'qbo_currency'               => isset($updated['CurrencyRef']['value']) ? (string) $updated['CurrencyRef']['value'] : null,
+            'qbo_txn_date'               => self::txnDateFor($app),
+            'amount_applied_snapshot'    => $applied,
+            'push_status'                => 'pushed',
+            'push_error'                 => null,
+            'pushed_at'                  => $now,
+            'last_synced_at'             => $now,
+        ]);
+        db_execute("UPDATE acc_qbo_payment_map SET qbo_sync_token = ?, last_synced_at = ? WHERE id = ?",
+            [(string) ($updated['SyncToken'] ?? '0'), $now, (int) $payMap['id']]);
+        self::writeSyncLog($appId, 'create', 'pushed', "Overpayment credit applied: QBO payment {$qboPayId} now applies {$applied} more to invoice {$qboInvId}");
+        return ['success' => true, 'status' => 'created', 'outcome' => 'created', 'qbo_id' => $qboPayId,
+                'sync_token' => (string) ($updated['SyncToken'] ?? '0')] + self::RESULT_BASE;
+    }
+
+    private static function voidOverpaymentApply(int $appId, array $app, array $cn): array
+    {
+        $map = db_row(
+            "SELECT push_status, qbo_credit_memo_id_ref, qbo_invoice_id_ref, amount_applied_snapshot
+               FROM acc_qbo_credit_application_map WHERE ff_credit_application_id = ?",
+            [$appId]
+        );
+        if ($map === null || !in_array($map['push_status'], ['pushed', 'voided'], true)) {
+            return ['success' => true, 'status' => 'skipped_unmapped_void', 'outcome' => 'skipped'] + self::RESULT_BASE;
+        }
+        if ($map['push_status'] === 'voided') {
+            return ['success' => true, 'status' => 'already_voided', 'outcome' => 'voided'] + self::RESULT_BASE;
+        }
+        $ref = (string) $map['qbo_credit_memo_id_ref'];
+        if (!str_starts_with($ref, 'payment:')) {
+            return ['success' => false, 'status' => 'failed', 'outcome' => 'failed', 'error' => "Unexpected map reference '{$ref}'"] + self::RESULT_BASE;
+        }
+        $qboPayId = substr($ref, 8);
+        $amount   = bcadd((string) ($map['amount_applied_snapshot'] ?? $app['amount_applied']), '0', 2);
+        $client = new QuickBooksClient();
+        try {
+            $qboPay = $client->getEntity('payment', $qboPayId)['Payment'] ?? null;
+            if (!is_array($qboPay) || empty($qboPay['Id'])) {
+                throw new QuickBooksException("QuickBooks payment {$qboPayId} not found.");
+            }
+            $resp = $client->updateEntity('payment', $qboPayId, (string) ($qboPay['SyncToken'] ?? '0'), [
+                'CustomerRef' => $qboPay['CustomerRef'],
+                'TotalAmt'    => $qboPay['TotalAmt'],
+                'Line'        => self::linesWithInvoiceDelta($qboPay, (string) $map['qbo_invoice_id_ref'], bcmul($amount, '-1', 2)),
+            ], ['sparse' => true, 'entity_type' => 'credit_application', 'entity_id' => $appId, 'operation' => 'void']);
+        } catch (QuickBooksException $e) {
+            self::recordPushFailure($appId, $app, 'Un-apply failed: ' . $e->getMessage(), $e->httpStatus ?? 0);
+            return ['success' => false, 'status' => 'qbo_error', 'outcome' => 'failed', 'error' => 'Un-apply failed: ' . $e->getMessage()] + self::RESULT_BASE;
+        }
+        $updated = $resp['Payment'] ?? [];
+        self::upsertMappingRow($appId, [
+            'qbo_sync_token' => (string) ($updated['SyncToken'] ?? '0'),
+            'push_status'    => 'voided',
+            'push_error'     => null,
+            'last_synced_at' => ff_now_utc(),
+        ]);
+        self::writeSyncLog($appId, 'void', 'voided', "Overpayment credit un-applied: {$amount} taken back off invoice {$map['qbo_invoice_id_ref']} on QBO payment {$qboPayId}");
+        return ['success' => true, 'status' => 'voided', 'outcome' => 'voided', 'qbo_id' => $qboPayId,
+                'sync_token' => (string) ($updated['SyncToken'] ?? '0')] + self::RESULT_BASE;
+    }
 
     private static function ffApplicationExists(int $id): bool
     {

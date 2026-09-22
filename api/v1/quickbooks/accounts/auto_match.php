@@ -27,6 +27,7 @@ require_permission('quickbooks', 'view');
 
 use FleetForge\QboPushers\AccountMatcher;
 use FleetForge\QboPushers\AccountValidator;
+use FleetForge\QboPushers\PartyAutoMatch;
 
 try {
     // Build QBO list from pull snapshot.
@@ -90,6 +91,35 @@ try {
             continue;
         }
 
+        // S-QBO-GOLIVE-AUDIT: only an exact code / exact name match links
+        // on its own. The weaker tiers guessed from type + a shared word —
+        // on the rehearsal company they mapped PST Payable → Note Payable,
+        // Bad Debt Expense → "BC Ministry of Finance Expense", Income Tax
+        // Payable → an A/P account: real money into the accountant's wrong
+        // accounts. Those become suggestions a person confirms.
+        if ($d['mapping_status'] === 'mapped' && !in_array((string) $d['match_confidence'], ['exact_code', 'exact_name'], true)) {
+            $current = db_row("SELECT qbo_account_id FROM acc_qbo_account_map WHERE ff_account_id = ?", [(int) $d['ff_account_id']]);
+            if ($current !== null && $current['qbo_account_id'] !== null) {
+                continue; // already linked — a suggestion never overrides a link
+            }
+            $qboRow = db_row("SELECT qbo_name FROM acc_qbo_account_map WHERE qbo_account_id = ?", [(string) $d['qbo_account_id']]);
+            $note = PartyAutoMatch::SUGGEST_PREFIX . json_encode([
+                'qbo_id'     => (string) $d['qbo_account_id'],
+                'name'       => (string) ($qboRow['qbo_name'] ?? ''),
+                'confidence' => (string) $d['match_confidence'],
+                'why'        => PartyAutoMatch::ACCOUNT_WHY[(string) $d['match_confidence']] ?? (string) $d['match_confidence'],
+            ], JSON_UNESCAPED_UNICODE);
+            db_execute(
+                "INSERT INTO acc_qbo_account_map (ff_account_id, mapping_status, match_notes, created_by_user_id)
+                 VALUES (?, 'ff_only', ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    match_notes = IF(match_confidence = 'manual' OR qbo_account_id IS NOT NULL, match_notes, VALUES(match_notes))",
+                [(int) $d['ff_account_id'], $note, $userId]
+            );
+            $suggestedCount = ($suggestedCount ?? 0) + 1;
+            continue;
+        }
+
         if ($d['mapping_status'] === 'mapped') {
             // Promote qbo_only row to mapped by attaching ff_account_id.
             // First drop any pre-existing ff_only row to avoid the
@@ -147,6 +177,7 @@ try {
 
     json_success([
         'matched'          => $matchedCount,
+        'suggested'        => $suggestedCount ?? 0,
         'ff_only'          => $ffOnlyCount,
         'qbo_only'         => $qboOnlyCount,
         'manual_preserved' => $manualPreserved,

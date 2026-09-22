@@ -122,6 +122,20 @@ class CompanyInfoSync
         // settings_write_qbo() uses ON DUPLICATE KEY UPDATE so existing
         // rows are updated atomically. The short keys map to the
         // 'quickbooks.X' full key automatically.
+        // S-QBO-GOLIVE-AUDIT: the company's PREFERENCES are the authoritative
+        // source for multicurrency + home currency (Preferences.CurrencyPrefs)
+        // — CompanyInfo does not carry them, so the variants tried above
+        // normally never matched and multicurrency always read OFF. The same
+        // call also yields class / location tracking, "Custom transaction
+        // numbers" and the books closing date, which the pushers need.
+        $prefs = self::syncPreferences($client);
+        if (isset($prefs['multi_currency_enabled'])) {
+            $multiCurrencyEnabled = $prefs['multi_currency_enabled'];
+        }
+        if (!empty($prefs['home_currency'])) {
+            $homeCurrency = $prefs['home_currency'];
+        }
+
         QuickBooksClient::settings_write_qbo(
             'multi_currency_enabled',
             $multiCurrencyEnabled ? '1' : '0'
@@ -140,6 +154,64 @@ class CompanyInfoSync
             'home_currency'          => $homeCurrency,
             'company_country'        => $country,
         ];
+    }
+
+    /**
+     * Read the company's Preferences and cache what FleetForge acts on:
+     *
+     *   quickbooks.multi_currency_enabled   CurrencyPrefs.MultiCurrencyEnabled
+     *   quickbooks.home_currency            CurrencyPrefs.HomeCurrency
+     *   quickbooks.pref.class_tracking      'none' | 'txn' | 'line' — where a
+     *                                       ClassRef goes (header vs line)
+     *   quickbooks.pref.track_locations     '1' when Location (Department)
+     *                                       tracking is on
+     *   quickbooks.pref.custom_txn_numbers  '1' | '0' — FF sends its own
+     *                                       DocNumber only when '1'
+     *   quickbooks.pref.book_close_date     books closing date ('' if none) —
+     *                                       pushes dated before it are refused
+     *
+     * Best-effort: any failure leaves the previous values and returns [].
+     *
+     * @return array{multi_currency_enabled?: bool, home_currency?: string}
+     * @session S-QBO-GOLIVE-AUDIT
+     */
+    public static function syncPreferences(QuickBooksClient $client): array
+    {
+        try {
+            $resp = $client->get('preferences', [], ['entity_type' => 'companyinfo', 'operation' => 'get']);
+        } catch (\Throwable $e) {
+            error_log('CompanyInfoSync::syncPreferences: ' . $e->getMessage());
+            return [];
+        }
+        $p = $resp['Preferences'] ?? null;
+        if (!is_array($p)) {
+            return [];
+        }
+        $bool = static fn($v): bool => $v === true || $v === 'true' || $v === 1 || $v === '1';
+        $out  = [];
+
+        $cur = $p['CurrencyPrefs'] ?? [];
+        if (array_key_exists('MultiCurrencyEnabled', $cur)) {
+            $out['multi_currency_enabled'] = $bool($cur['MultiCurrencyEnabled']);
+        }
+        $home = strtoupper(trim((string) ($cur['HomeCurrency']['value'] ?? '')));
+        if ($home !== '') {
+            $out['home_currency'] = $home;
+        }
+
+        $acct    = $p['AccountingInfoPrefs'] ?? [];
+        $perTxn  = $bool($acct['ClassTrackingPerTxn'] ?? false);
+        $perLine = $bool($acct['ClassTrackingPerTxnLine'] ?? false);
+        QuickBooksClient::settings_write_qbo('pref.class_tracking', $perLine ? 'line' : ($perTxn ? 'txn' : 'none'));
+        QuickBooksClient::settings_write_qbo('pref.track_locations', $bool($acct['TrackDepartments'] ?? false) ? '1' : '0');
+        QuickBooksClient::settings_write_qbo('pref.book_close_date', substr((string) ($acct['BookCloseDate'] ?? ''), 0, 10));
+
+        $sales = $p['SalesFormsPrefs'] ?? [];
+        if (array_key_exists('CustomTxnNumbers', $sales)) {
+            QuickBooksClient::settings_write_qbo('pref.custom_txn_numbers', $bool($sales['CustomTxnNumbers']) ? '1' : '0');
+        }
+        QuickBooksClient::settings_write_qbo('pref.synced_at', gmdate('c'));
+        return $out;
     }
 
     /**

@@ -457,6 +457,10 @@ class EmailService
                 $vars['due_date']       = $row['due_date'] ? format_date($row['due_date']) : '';
                 $vars['amount']         = format_currency($row['total_amount']);
                 $vars['amount_due']     = format_currency($row['balance_due']);
+                // S-QBO-GOLIVE-AUDIT: customers pay through QuickBooks Payments.
+                // A stable FleetForge link that opens the invoice's QuickBooks
+                // pay page on click ('' while QuickBooks Payments is off).
+                $vars['pay_online_link'] = \FleetForge\QboPushers\PayLink::url((int) $row['id']);
                 $today = new \DateTime('today');
                 if ($row['due_date']) {
                     $due = new \DateTime($row['due_date']);

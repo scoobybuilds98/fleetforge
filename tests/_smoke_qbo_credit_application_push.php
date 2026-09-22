@@ -21,8 +21,8 @@ declare(strict_types=1);
  *     C4  acc_qbo_sync_queue.entity_type ENUM includes 'credit_application'
  *
  *   Module B — buildQboPayload (happy + multi-currency + throws)
- *     C5  happy: TotalAmt=0, single Line with Amount=amount_applied + 2
- *         LinkedTxns (CreditMemo + Invoice) + CustomerRef + PrivateNote
+ *     C5  happy: TotalAmt=0, 2 Lines × 1 LinkedTxn (Invoice + CreditMemo),
+ *         each Amount=amount_applied + CustomerRef + PrivateNote
  *     C6  multi_currency='1' → CurrencyRef + ExchangeRate emitted
  *     C7  throws on empty qbo_customer_id
  *     C8  throws on empty qbo_credit_memo_id
@@ -202,18 +202,22 @@ try {
     $payload = CreditApplicationPusher::buildQboPayload(
         $app, 'QBO-CUST-9990', 'QBO-CM-999991', 'QBO-INV-999992'
     );
+    // S-QBO-GOLIVE-AUDIT: Intuit's documented credit-memo apply shape is TWO
+    // lines, one LinkedTxn each, both carrying the applied amount.
     $c5 = [];
-    if (($payload['TotalAmt'] ?? null) !== 0.0) $c5[] = 'TotalAmt should be 0.0';
+    if ((string) ($payload['TotalAmt'] ?? 'x') !== '0') $c5[] = 'TotalAmt should be 0';
     if (($payload['CustomerRef']['value'] ?? '') !== 'QBO-CUST-9990') $c5[] = 'CustomerRef wrong';
-    if (count($payload['Line'] ?? []) !== 1) $c5[] = 'expected exactly 1 Line';
-    if (($payload['Line'][0]['Amount'] ?? null) !== 50.0) $c5[] = 'Line.Amount should equal amount_applied (50.0)';
-    $linked = $payload['Line'][0]['LinkedTxn'] ?? [];
-    if (count($linked) !== 2) $c5[] = 'expected exactly 2 LinkedTxns';
-    $types = array_column($linked, 'TxnType');
+    if (count($payload['Line'] ?? []) !== 2) $c5[] = 'expected exactly 2 Lines (Invoice + CreditMemo)';
+    $types = [];
+    foreach ($payload['Line'] ?? [] as $i => $ln) {
+        if ((string) ($ln['Amount'] ?? '') !== '50.00') $c5[] = "Line[{$i}].Amount should equal amount_applied (50.00)";
+        if (count($ln['LinkedTxn'] ?? []) !== 1) $c5[] = "Line[{$i}] should carry exactly 1 LinkedTxn";
+        $types[] = $ln['LinkedTxn'][0]['TxnType'] ?? '';
+    }
     if (!in_array('CreditMemo', $types, true)) $c5[] = 'missing CreditMemo LinkedTxn';
     if (!in_array('Invoice', $types, true))    $c5[] = 'missing Invoice LinkedTxn';
     if (empty($payload['PrivateNote']))        $c5[] = 'missing PrivateNote';
-    if (empty($c5)) { echo "PASS C5 buildQboPayload happy (TotalAmt=0 + 2 LinkedTxns + Amount=amount_applied)\n"; $pass++; }
+    if (empty($c5)) { echo "PASS C5 buildQboPayload happy (TotalAmt=0 + 2 Lines × 1 LinkedTxn + Amount=amount_applied)\n"; $pass++; }
     else { echo "FAIL C5 " . implode('; ', $c5) . "\n"; $failures[] = 'C5'; }
 
     // C6 — multi_currency='1' → CurrencyRef + ExchangeRate

@@ -9,7 +9,8 @@ declare(strict_types=1);
  * Match" button on the Customers Sync page — typically clicked
  * AFTER a fresh pull.
  *
- * Decision policy:
+ * Decision policy (S-QBO-GOLIVE-AUDIT: writes via PartyAutoMatch — in a
+ * shared company file only EXACT matches link, the rest become suggestions):
  *   - Reads QBO snapshot data from acc_qbo_customer_map (no live HTTP
  *     to QBO — auto_match operates on what pull.php last fetched).
  *   - Calls CustomerMatcher::matchAll($qboCustomers) which compares
@@ -45,6 +46,7 @@ require_auth_api();
 require_permission('quickbooks', 'view');
 
 use FleetForge\QboPushers\CustomerMatcher;
+use FleetForge\QboPushers\PartyAutoMatch;
 
 try {
     // ── Build the QBO customer list from existing snapshot data ──
@@ -86,107 +88,18 @@ try {
     // decisions to skip ones for FF customers under manual lock.
     $decisions = CustomerMatcher::matchAll($qboCustomers);
 
-    $userId = current_user_id();
-    $now    = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
-
-    // Apply ALL mapping decisions atomically. Previously the loop ran in
-    // autocommit, so a uq_ff_customer collision midway (when an FF customer was
-    // already mapped to a DIFFERENT QBO id) committed the prior decisions and
-    // surfaced only as a blanket 500 — leaving partial, non-atomic rewrites.
-    // Wrapping in a transaction makes the run all-or-nothing; the per-decision
-    // detach below removes the collision at its source.
-    $counts = db_transaction(function () use ($decisions, $manualLockedFfIds, $userId, $now) {
-        $matchedCount = 0;
-        $ffOnlyCount  = 0;
-        $qboOnlyCount = 0;
-
-        foreach ($decisions as $d) {
-            // Skip auto-match for FF customers operator already locked.
-            if ($d['ff_customer_id'] !== null && isset($manualLockedFfIds[(int) $d['ff_customer_id']])) {
-                continue;
-            }
-
-            if ($d['mapping_status'] === 'mapped') {
-                $ffId  = (int) $d['ff_customer_id'];
-                $qboId = (string) $d['qbo_customer_id'];
-
-                // Detach this FF customer from ANY row it is currently linked to
-                // except the target qbo row, so setting ff_customer_id on the
-                // target cannot collide on uq_ff_customer. Manual-locked FF ids
-                // never reach here (skipped above), so detaching is always safe.
-                //  - stale ff_only row (qbo_customer_id IS NULL): remove it.
-                db_execute(
-                    "DELETE FROM acc_qbo_customer_map
-                      WHERE ff_customer_id = ?
-                        AND qbo_customer_id IS NULL",
-                    [$ffId]
-                );
-                //  - stale mapped row pointing at a DIFFERENT qbo id: demote it
-                //    back to qbo_only and free the FF link.
-                db_execute(
-                    "UPDATE acc_qbo_customer_map
-                        SET ff_customer_id   = NULL,
-                            mapping_status   = 'qbo_only',
-                            match_confidence = NULL
-                      WHERE ff_customer_id = ?
-                        AND qbo_customer_id IS NOT NULL
-                        AND qbo_customer_id <> ?",
-                    [$ffId, $qboId]
-                );
-
-                $rowsUpdated = db_execute(
-                    "UPDATE acc_qbo_customer_map SET
-                        ff_customer_id   = ?,
-                        mapping_status   = 'mapped',
-                        match_confidence = ?,
-                        last_synced_at   = ?
-                      WHERE qbo_customer_id = ?",
-                    [$ffId, (string) $d['match_confidence'], $now, $qboId]
-                );
-
-                if ($rowsUpdated > 0) {
-                    $matchedCount++;
-                }
-                continue;
-            }
-
-            if ($d['mapping_status'] === 'ff_only') {
-                // Ensure an ff_only row exists. Use INSERT … ON DUPLICATE
-                // KEY UPDATE to handle the case where the row already
-                // exists (e.g., set by a prior auto_match run).
-                db_execute(
-                    "INSERT INTO acc_qbo_customer_map
-                        (ff_customer_id, mapping_status, created_by_user_id)
-                     VALUES (?, 'ff_only', ?)
-                     ON DUPLICATE KEY UPDATE
-                        mapping_status   = IF(match_confidence='manual', mapping_status, 'ff_only'),
-                        match_confidence = IF(match_confidence='manual', match_confidence, NULL)",
-                    [(int) $d['ff_customer_id'], $userId]
-                );
-                $ffOnlyCount++;
-                continue;
-            }
-
-            if ($d['mapping_status'] === 'qbo_only') {
-                // pull.php already inserted the qbo_only row. Confirm by
-                // ensuring no FF link snuck in via a partial earlier match.
-                // (No-op in the common case.)
-                $qboOnlyCount++;
-            }
-        }
-
-        return [
-            'matched'  => $matchedCount,
-            'ff_only'  => $ffOnlyCount,
-            'qbo_only' => $qboOnlyCount,
-        ];
-    });
+    // S-QBO-GOLIVE-AUDIT: the write half lives in PartyAutoMatch (shared
+    // with vendors). In a shared company file only EXACT name matches link;
+    // weaker ones are stored as suggestions for a person to confirm.
+    $counts = PartyAutoMatch::apply('customer', $decisions, $manualLockedFfIds, current_user_id());
 
     json_success([
         'matched'          => $counts['matched'],
+        'suggested'        => $counts['suggested'],
         'ff_only'          => $counts['ff_only'],
         'qbo_only'         => $counts['qbo_only'],
         'manual_preserved' => $manualPreserved,
+        'shared_file'      => PartyAutoMatch::sharedFile(),
     ]);
 
 } catch (\PDOException $e) {

@@ -74,11 +74,17 @@ try {
 
     if (!$enqueued) {
         // Gate refused — surface why. Most common: sync_enabled='0'.
+        // S-QBO-GOLIVE-AUDIT: the fallback used to blame sync_mode for every
+        // refusal, including the (far likelier) entity-state gate-0 reject.
         $syncEnabled = (string) settings_get('quickbooks.sync_enabled', '0');
         $syncMode = (string) settings_get('quickbooks.sync_mode.invoice', 'sync');
-        $reason = $syncEnabled !== '1'
-            ? "sync_enabled='{$syncEnabled}' — flip to '1' to allow QBO writes"
-            : "sync_mode.invoice='{$syncMode}' rejects push direction";
+        if ($syncEnabled !== '1') {
+            $reason = "sync_enabled='{$syncEnabled}' — flip to '1' to allow QBO writes";
+        } elseif ($syncMode === 'qbo_to_ff' || $syncMode === 'disabled') {
+            $reason = "sync_mode.invoice='{$syncMode}' rejects push direction";
+        } else {
+            $reason = "invoice status='{$invStatus}' is not pushable (draft, written-off or deleted invoices never go to QBO)";
+        }
 
         json_success([
             'action' => 'skipped',

@@ -247,6 +247,15 @@ try {
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? null,
     ]);
 
+    // S-QBO-GOLIVE-AUDIT: a link replaces the FF-side ff_only row, which
+    // carried the required-category flag (ar_clearing / sales_revenue …);
+    // re-mark now, or the page reported it unmapped until the next Pull.
+    try {
+        \FleetForge\QboPushers\AccountValidator::markCriticalAccounts();
+    } catch (\Throwable $e) {
+        error_log('[accounts/save_mapping] markCriticalAccounts failed: ' . $e->getMessage());
+    }
+
     json_success([
         'mapping_id' => $result['id'],
         'status'     => $result['status'],

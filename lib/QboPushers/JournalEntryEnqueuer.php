@@ -58,6 +58,8 @@ class JournalEntryEnqueuer
      * Bridge-derived source_type filter per D-QBO-21-1 + spec §8.10.
      * Mirror of JournalEntryPusher::BRIDGE_DERIVED_SOURCE_TYPES — kept
      * in sync via smoke test (C28 verifies the two constants align).
+     * S-QBO-GOLIVE-AUDIT: + damage_recovery / damage_repair (retagged
+     * invoice / bill JEs — see JournalEntryPusher).
      */
     private const BRIDGE_DERIVED_SOURCE_TYPES = [
         'invoice',
@@ -65,6 +67,8 @@ class JournalEntryEnqueuer
         'credit_note',
         'ap_bill',
         'ap_payment',
+        'damage_recovery',
+        'damage_repair',
     ];
 
     /**
@@ -135,7 +139,7 @@ class JournalEntryEnqueuer
             }
 
             // Gate 4: INSERT.
-            db_insert('acc_qbo_sync_queue', [
+            \FleetForge\QuickBooksSync::insertQueueRow([ // S-QBO-GOLIVE-AUDIT: dedupes pending jobs
                 'entity_type' => 'journal_entry',
                 'entity_id'   => $jeId,
                 'operation'   => $operation,

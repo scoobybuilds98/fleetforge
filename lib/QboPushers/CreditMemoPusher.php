@@ -206,11 +206,20 @@ class CreditMemoPusher
 
         // 4. Mapping lookup.
         $mapping = db_row(
-            "SELECT id, qbo_credit_memo_id, qbo_sync_token, push_status
+            "SELECT id, qbo_credit_memo_id, qbo_sync_token, push_status, origin
                FROM acc_qbo_credit_memo_map
               WHERE ff_credit_note_id = ?",
             [$ffCreditNoteId]
         );
+
+        // S-QBO-GOLIVE-AUDIT: never void the accountant's own (go-live
+        // linked) credit memo from FF — flag it for a person instead.
+        if ($mapping !== null && !empty($mapping['qbo_credit_memo_id']) && ($mapping['origin'] ?? 'ff_push') === 'cutover_link'
+            && $mapping['push_status'] !== 'voided') {
+            InvoiceLinker::recordLinkedChange('credit_memo', $ffCreditNoteId, (string) $mapping['qbo_credit_memo_id'], (string) $cn['credit_note_number'], 'void');
+            return ['success' => true, 'status' => 'skipped_cutover_link', 'outcome' => 'skipped',
+                    'qbo_id' => (string) $mapping['qbo_credit_memo_id']] + self::RESULT_BASE;
+        }
 
         // 4a. No mapping → voided before ever pushing → skipped_unmapped_void.
         if ($mapping === null || empty($mapping['qbo_credit_memo_id'])) {
@@ -311,6 +320,17 @@ class CreditMemoPusher
             ] + self::RESULT_BASE;
         }
 
+        // 2b. S-QBO-GOLIVE-AUDIT (B2): overpayment credits are never
+        //     QuickBooks CreditMemos (QuickBooks holds that money as the
+        //     source Payment's unapplied amount) — defence in depth behind
+        //     CreditMemoEnqueuer for rows queued before the gate existed.
+        if (($cn['source'] ?? '') === 'overpayment') {
+            return ['success' => true, 'status' => 'skipped_overpayment', 'outcome' => 'skipped'] + self::RESULT_BASE;
+        }
+        if (RoundingSettler::isRoundingNote($cn['internal_notes'] ?? null)) {
+            return ['success' => true, 'status' => 'skipped_rounding', 'outcome' => 'skipped'] + self::RESULT_BASE;
+        }
+
         // 3. Voided check. credit_notes.status ENUM includes 'void'.
         if ($cn['status'] === 'void') {
             self::recordSkipped($ffCreditNoteId, $cn, 'skipped_voided', $operation);
@@ -329,11 +349,19 @@ class CreditMemoPusher
         //    in step 9, not short-circuit here. qbo_sync_token is selected for
         //    the update round-trip.
         $mapping = db_row(
-            "SELECT id, qbo_credit_memo_id, qbo_sync_token, qbo_currency
+            "SELECT id, qbo_credit_memo_id, qbo_sync_token, qbo_currency, origin
                FROM acc_qbo_credit_memo_map
               WHERE ff_credit_note_id = ?",
             [$ffCreditNoteId]
         );
+        // S-QBO-GOLIVE-AUDIT: a credit memo LINKED at go-live is the
+        // accountant's own — never overwrite it from FF.
+        if ($operation === 'update' && $mapping !== null && !empty($mapping['qbo_credit_memo_id'])
+            && ($mapping['origin'] ?? 'ff_push') === 'cutover_link') {
+            InvoiceLinker::recordLinkedChange('credit_memo', $ffCreditNoteId, (string) $mapping['qbo_credit_memo_id'], (string) $cn['credit_note_number'], 'update');
+            return ['success' => true, 'status' => 'skipped_cutover_link', 'outcome' => 'skipped',
+                    'qbo_id' => (string) $mapping['qbo_credit_memo_id']] + self::RESULT_BASE;
+        }
         if ($operation === 'create' && $mapping !== null && !empty($mapping['qbo_credit_memo_id'])) {
             return [
                 'success' => true,
@@ -471,6 +499,24 @@ class CreditMemoPusher
      */
     public static function runPreflight(int $ffCreditNoteId, array $cn): array
     {
+        // Gate 0 (S-QBO-GOLIVE-AUDIT): single-currency company guard.
+        // See CurrencyGuard.
+        $currencyBlock = CurrencyGuard::blockReason(
+            $cn['currency'] ?? null,
+            'Credit note ' . ($cn['credit_note_number'] ?? "#{$ffCreditNoteId}")
+        );
+        if ($currencyBlock !== null) {
+            return ['ok' => false, 'status_code' => 'failed_preflight_currency_mismatch', 'reason' => $currencyBlock];
+        }
+
+        // Gate 0.5 (S-QBO-GOLIVE-AUDIT): a credit note issued before
+        // QuickBooks go-live is probably already in QuickBooks — link it, or
+        // release it with "Push as new" (InvoiceLinker).
+        $cutoverBlock = InvoiceLinker::cutoverBlockReason('credit_memo', $cn);
+        if ($cutoverBlock !== null) {
+            return ['ok' => false, 'status_code' => 'failed_preflight', 'reason' => $cutoverBlock];
+        }
+
         // Gate 1: tax override.
         if ((string) settings_get('quickbooks.tax_override_code_id', '') === '') {
             return ['ok' => false, 'status_code' => 'failed_preflight',
@@ -602,12 +648,25 @@ class CreditMemoPusher
                 $currency = 'CAD';
             }
             $payload['CurrencyRef'] = ['value' => $currency];
-            // Credit notes have no exchange_rate column; CAD=1.0, non-CAD=1.0
-            // best-effort (FX revaluation of mirror rows deferred — see F15).
-            $payload['ExchangeRate'] = '1.0';
+            if ($currency === 'CAD') {
+                $payload['ExchangeRate'] = '1.0';
+            } else {
+                // S-QBO-GOLIVE-AUDIT: was '1.0' for every currency ("credit
+                // notes have no exchange_rate column") — stale since
+                // S-AUDIT-BILLING-ENGINE-1 #21 added credit_notes.exchange_rate_to_cad
+                // (frozen from the source invoice / payment). At par, QBO valued a
+                // USD credit at CAD face value and booked phantom FX on apply.
+                $rate = (string) ($cn['exchange_rate_to_cad'] ?? '');
+                if ($rate === '' || bccomp($rate, '0', 6) <= 0) {
+                    throw new QuickBooksException("CreditMemo payload: {$currency} credit note {$cn['id']} has no exchange_rate_to_cad; cannot value it in QBO.");
+                }
+                $payload['ExchangeRate'] = $rate;
+            }
         }
 
-        return $payload;
+        // S-QBO-GOLIVE-AUDIT: rental-business Class / Location for the shared
+        // QuickBooks file (no-op until one is chosen in Settings).
+        return QboTagging::applyToSalesDoc(QboTagging::applyDocNumberPolicy($payload, 'credit note'));
     }
 
     /**

@@ -54,6 +54,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../api/bootstrap.php';
 
+// S-QBO-GOLIVE-AUDIT: independent of the install's go-live state (a dev DB that
+// rehearsed go-live stamps a cutover date the May fixtures predate).
+require_once __DIR__ . '/_qbo_smoke_env.php';
+ff_qbo_smoke_env(['cutover_at' => '', 'push_from_date' => '']);
+
 use FleetForge\QboPushers\BillPusher;
 use FleetForge\QboPushers\BillEnqueuer;
 use FleetForge\Exceptions\QuickBooksException;

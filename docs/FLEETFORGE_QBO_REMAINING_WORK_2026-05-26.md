@@ -30,6 +30,8 @@
 - **Phase QBO-10 progress**: ✅ **COMPLETE (1/1)** — S-QBO-21 JournalEntryPusher catch-all surface
 - QBO live verification: **2nd real FF→QBO push on record** — Bill #148 (LIVETEST-BILL-20260527-162957 / FF#999992, $262.50 CAD) pushed to sandbox realm 9341457119548719 during S-QBO-18 live test 2026-05-27 16:29:59. 1st was Invoice #147 from S-QBO-LIVE-VERIFY-RERUN-2026-05-26.
 
+
+**Progress marker 2026-09-23 — S-QBO-GOLIVE-AUDIT:** ✅ pre-go-live audit (22 fixes + second-pass criticals) + go-live build-out for a shared company file + full rehearsal on a production copy against a **Canadian** sandbox (first non-US live verification: per-rate GST/PST invoices pushed with QBO totals identical to FF's; 129/129 pre-go-live invoices linked; QBO payments mirrored). Migration count +1 (`202609232000`). Remaining work is operator/accountant-gated — see OPERATOR_FOLLOWUPS F80/F81/F83/F84 and QUICKBOOKS_PROGRESS §10. Still not built: QBO-side bill-payment mirroring; customer billing address / terms on push.
 ---
 
 ## 0. Top 5 recommended next sessions (read this first)

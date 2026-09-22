@@ -647,4 +647,89 @@ function qboTaxRateMapping() {
 }
 </script>
 
+<?php
+// ── S-QBO-GOLIVE-AUDIT (F80): invoice tax mode ──────────────────────────────
+// Canadian companies need per-rate: each invoice line carries the real
+// QuickBooks tax code mapped (above) to the FF tax rate the invoice used.
+$invoiceTaxMode   = (string) settings_get('quickbooks.invoice.tax_mode', 'override');
+$invoiceExemptId  = (string) settings_get('quickbooks.invoice.tax_code_exempt', '');
+$qboCodeOptions   = db_select(
+    "SELECT qbo_tax_code_id AS id, qbo_name AS name FROM acc_qbo_tax_code_map
+      WHERE qbo_tax_code_id IS NOT NULL AND COALESCE(qbo_active, 1) = 1 ORDER BY qbo_name"
+);
+$unmappedFfRates  = db_select(
+    "SELECT t.name, t.province FROM tax_rates t
+      LEFT JOIN acc_qbo_tax_code_map m ON m.ff_tax_rate_id = t.id AND m.mapping_status = 'mapped' AND m.qbo_tax_code_id IS NOT NULL
+      WHERE t.is_active = 1 AND m.id IS NULL ORDER BY t.province"
+);
+?>
+<div x-data="qboInvoiceTaxMode()" style="margin-top:32px;max-width:880px;">
+    <div class="page-header">
+        <h2 class="h5" style="margin:0;">Invoice tax (sales)</h2>
+        <div class="text-secondary text-sm" style="margin-top:4px;">
+            <strong>Per-rate</strong> sends every invoice line with the QuickBooks tax code mapped above to the FleetForge tax
+            rate the invoice used (e.g. BC GST + PST → "GST/PST BC"), and FleetForge's exact GST / PST / HST amounts — so
+            QuickBooks books the tax to the right agency and its GST/PST returns are correct. Use it for a Canadian
+            QuickBooks company. <strong>Override</strong> (the original US-style mode) puts every line on one no-rate code
+            and adds the tax as a header total. After every push FleetForge compares QuickBooks' invoice total with its own
+            and raises a drift alert on any difference.
+        </div>
+    </div>
+    <div x-show="flash.message" x-cloak :class="flash.type==='success'?'alert alert-success':'alert alert-danger'"
+         style="margin:14px 0;" x-text="flash.message"></div>
+    <div class="card" style="padding:18px 20px;">
+        <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
+            <label class="form-label" style="margin:0;">Invoice tax mode
+                <select class="form-control" style="max-width:260px;" x-model="mode" :disabled="!canEdit">
+                    <option value="override">override (one no-rate code + header tax)</option>
+                    <option value="per_rate">per_rate (real tax codes — Canada)</option>
+                </select>
+            </label>
+            <label class="form-label" style="margin:0;">Code for tax-free lines
+                <select class="form-control" style="max-width:260px;" x-model="exemptId" :disabled="!canEdit">
+                    <option value="">— choose —</option>
+<?php foreach ($qboCodeOptions as $o): ?>
+                    <option value="<?= e((string) $o['id']) ?>"><?= e((string) ($o['name'] ?? $o['id'])) ?></option>
+<?php endforeach; ?>
+                </select>
+            </label>
+            <template x-if="canEdit">
+                <button class="btn btn-primary btn-sm" @click="save()" :disabled="saving">
+                    <span x-show="!saving">Save invoice tax</span><span x-show="saving" x-cloak>Saving…</span>
+                </button>
+            </template>
+        </div>
+<?php if ($unmappedFfRates !== []): ?>
+        <div class="text-sm text-warning" style="margin-top:12px;">
+            Not mapped to a QuickBooks code yet (per-rate invoices using these will be held back):
+            <?= e(implode(', ', array_map(static fn($r) => $r['name'] . ($r['province'] ? " ({$r['province']})" : ''), $unmappedFfRates))) ?>
+        </div>
+<?php endif; ?>
+    </div>
+</div>
+<script>
+function qboInvoiceTaxMode() {
+    return {
+        canEdit: <?= $canEditTaxRate ? 'true' : 'false' ?>,
+        saving: false,
+        flash: { message: '', type: 'success' },
+        mode: '<?= e($invoiceTaxMode) ?>',
+        exemptId: '<?= e($invoiceExemptId) ?>',
+        async save() {
+            this.saving = true; this.flash = { message: '', type: 'success' };
+            try {
+                const r = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/save_tax_rate_map.php'),
+                    { invoice_tax_mode: this.mode, invoice_exempt_code_id: this.exemptId });
+                if (r.success) { this.flash = { message: 'Invoice tax saved (mode: ' + ((r.data && r.data.invoice_tax_mode) || this.mode) + ').', type: 'success' }; }
+                else {
+                    const f = (r.error && r.error.fields) || {};
+                    this.flash = { message: Object.values(f).join(' ') || (r.error && r.error.message) || 'Save failed.', type: 'error' };
+                }
+            } catch (e) { this.flash = { message: e.message || 'Network error', type: 'error' }; }
+            finally { this.saving = false; }
+        },
+    };
+}
+</script>
+
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

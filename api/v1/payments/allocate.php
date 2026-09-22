@@ -62,13 +62,24 @@ if ($fields) {
 
 // --- Load payment ---
 $payment = db_row(
-    "SELECT id, payment_number, customer_id, amount, currency, status
+    "SELECT id, payment_number, customer_id, amount, currency, status, origin
      FROM payments WHERE id = ? AND deleted_at IS NULL",
     [$paymentId]
 );
 if (!$payment) {
     json_error('NOT_FOUND', 'Payment not found.', 404,
         ['fields' => ['payment_id' => 'Payment not found.']]);
+}
+
+// S-QBO-GOLIVE-AUDIT: a payment mirrored FROM QuickBooks (Payments webhook /
+// go-live import) is QuickBooks' record — FleetForge follows it. Allocating
+// it here would diverge silently (QuickBooks still shows the money
+// unapplied) and the next QuickBooks update would re-mirror the payment over
+// this allocation. Apply it in QuickBooks; FleetForge updates itself.
+if (in_array($payment['origin'] ?? 'ff_native', ['qbo_payments_webhook', 'qbo_other'], true)) {
+    json_error('QBO_OWNED_PAYMENT',
+        'This payment came from QuickBooks — apply it to the invoice in QuickBooks and FleetForge will follow.', 422,
+        ['fields' => ['payment_id' => 'This payment is managed in QuickBooks.']]);
 }
 
 if ($payment['status'] === 'void' || $payment['status'] === 'refunded') {
@@ -299,5 +310,10 @@ db_transaction(function () use ($paymentId, $invoiceId, $amountRaw, $payment, &$
 // S-AUDIT-BILLING-ENGINE-1 #24: AR tiles read from the dashboard cache —
 // void paths invalidate it, the money-moving paths didn't.
 invalidate_dashboard_cache();
+
+// S-QBO-GOLIVE-AUDIT: a pushed FF payment's QuickBooks copy still shows this
+// money unapplied — re-push it so its lines include the new allocation.
+// Post-commit best-effort like every enqueuer (gates: sync on, ff_native).
+\FleetForge\QboPushers\PaymentEnqueuer::enqueue($paymentId, 'update');
 
 json_success($result, 201);
