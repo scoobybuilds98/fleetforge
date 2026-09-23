@@ -122,7 +122,10 @@ foreach ($chartsToFetch as $chartKey) {
 // are gated on payments:view; operational charts (fleet_status, utilization)
 // stay visible to all staff. Per-chart cache is role-blind, so withhold on the
 // way out rather than caching pre-redacted.
-$moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast'];
+// S-DASH-CHART-REDACT: top_customers (YTD revenue per customer) and
+// weekly_heatmap (daily revenue totals) are dollar datasets too — a new chart
+// whose builder SUMs invoice amounts belongs in this list.
+$moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast', 'top_customers', 'weekly_heatmap'];
 if (!can_view_financials()) {
     if ($requestedChart !== null && in_array($requestedChart, $moneyCharts, true)) {
         json_error('FORBIDDEN', 'You do not have permission to view financial charts.', 403);

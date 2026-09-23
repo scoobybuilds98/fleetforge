@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-DASH-CHART-REDACT** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Two dashboard charts showed dollar amounts to users who aren't allowed to see money (e.g. Dispatcher): "Top Customers — YTD" (each customer's revenue this year) and "Daily Revenue — Last 12 Weeks". The server now withholds both from those users, like the other four revenue/AR charts; every role that can see payments (Super Admin, Manager, Accountant, Read-only) still sees them. The operational charts (fleet status, utilization, occupancy, lease counts, days to pay) are unchanged for everyone. Operator: nothing to do beyond deploying.**
+
 **S-PAYOFF-SMOKE-DATA-INDEPENDENT** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **The payoff design smoke's two equipment-page failures (2/4) were the test pointing at units 6 and 7, which were deleted in the dev database on 2026-06-25, so the page redirected and drew nothing. The page itself is fine and unchanged. The smoke now picks a live unit that has a fixed asset and one that doesn't, the same way the page looks them up, and skips with a message if the database has none: 4/4.**
 
 **S-SELECT-FIX** — SHIPPED 2026-09-24 (commit `de1b5a86`; entry backfilled by S-PAYOFF-SMOKE-DATA-INDEPENDENT — see PROGRESS.md SESSION LOG row). **Dropdowns no longer lose their text or fill with repeated arrows after you pick a value (light theme), list toolbars no longer squeeze dropdowns down to just an arrow, the ~50 accounting dropdowns that had no arrow now show one, and QuickBooks → Tax Codes' invoice tax-mode dropdown is wide enough to read. Operator: deploy (CSS + one page, no migration).**

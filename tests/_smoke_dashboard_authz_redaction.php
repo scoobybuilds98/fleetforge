@@ -28,9 +28,22 @@ declare(strict_types=1);
  *            assertion FAILS (this is the Gate A repro).
  * POST-FIX : dispatcher money/audit stripped; super_admin still sees them.
  *
+ * S-DASH-CHART-REDACT: top_customers (YTD revenue per customer) and
+ * weekly_heatmap (daily revenue totals) are dollar datasets that were missing
+ * from charts.php's $moneyCharts. The chart section now covers EVERY money
+ * chart, for REAL users logged in through the app's own auth_login() (so
+ * config/permissions.php is exercised, not a hand-built permission map):
+ *   - dispatcher   combined payload omits all 6 money charts, keeps the 6
+ *                  operational ones; ?chart=top_customers / weekly_heatmap → 403
+ *   - accountant   combined payload carries all 12; both single charts → 200
+ *   - super_admin  same as accountant
+ * super_admin runs FIRST against a cleared cache so the dispatcher is served
+ * from the cache it warmed — proves the redaction is serve-time, not a
+ * side-effect of a per-role rebuild.
+ *
  * Run:  php tests/_smoke_dashboard_authz_redaction.php   Exit 0/1 (2 setup).
  *
- * @session WAVE-5-DASHBOARD-AUTHZ
+ * @session WAVE-5-DASHBOARD-AUTHZ, S-DASH-CHART-REDACT
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -66,6 +79,38 @@ $get = static function (string $endpoint, string $qs, array $sess) use ($harness
     $s = strpos($out, '{"'); if ($s !== false) $out = substr($out, $s);
     $j = json_decode(trim($out), true);
     return is_array($j) ? $j : ['_raw' => substr((string) $out, 0, 200)];
+};
+
+// ── Real-login GET harness (S-DASH-CHART-REDACT) ────────────────────────────
+// Logs a REAL user in via auth_login() (role perms + DB overrides load exactly
+// as at login; no DB writes without remember-me), then drives the endpoint.
+// The first output line reports can_view_financials() so the caller asserts
+// the role precondition before trusting any redaction result. Does NOT clear
+// report_cache — the caller controls cache warmth on purpose.
+$loginHarnessFile = sys_get_temp_dir() . '/_ff_dash_authz_login_' . $PID . '.php';
+file_put_contents($loginHarnessFile, <<<PHP
+<?php
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit('cli only'); }
+error_reporting(E_ERROR | E_PARSE);
+\$endpoint=\$argv[1]??''; \$qs=\$argv[2]??''; \$uid=(int)(\$argv[3]??0);
+parse_str(\$qs, \$_GET);
+\$_SERVER['REQUEST_METHOD']='GET'; \$_SERVER['REMOTE_ADDR']='127.0.0.1'; \$_SERVER['HTTP_HOST']='localhost';
+require '{$ROOT}/config/app.php';
+require_once FF_ROOT . '/includes/auth.php';
+@session_start();
+\$u = db_row("SELECT u.*, r.slug AS role_slug FROM users u JOIN user_roles r ON r.id = u.role_id WHERE u.id = ?", [\$uid]);
+if (!\$u) { echo "FFSMOKE-FIN=missing-user\n"; exit; }
+@auth_login(\$u);
+echo 'FFSMOKE-FIN=' . (can_view_financials() ? '1' : '0') . "\n";
+require '{$ROOT}/' . \$endpoint;
+PHP);
+$getAs = static function (string $endpoint, string $qs, int $uid) use ($loginHarnessFile): array {
+    $out = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($loginHarnessFile) . ' ' . escapeshellarg($endpoint)
+        . ' ' . escapeshellarg($qs) . ' ' . escapeshellarg((string) $uid) . ' 2>/dev/null');
+    $fin = preg_match('/^FFSMOKE-FIN=(\S+)/m', $out, $m) ? $m[1] : 'none';
+    $s = strpos($out, '{"');
+    $j = $s !== false ? json_decode(trim(substr($out, $s)), true) : null;
+    return ['fin' => $fin, 'resp' => is_array($j) ? $j : ['_raw' => substr($out, 0, 200)]];
 };
 
 try {
@@ -150,8 +195,88 @@ try {
             . " super=" . ($superHasChart ? 'present' : 'NONE') . " (pre-fix: dispatcher leaks revenue chart)");
     }
 
+    // ── CHARTS, every money chart, real logins (S-DASH-CHART-REDACT) ────────
+    // Mirrors charts.php's $moneyCharts; the operational list is the rest of
+    // its $allowedCharts. top_customers / weekly_heatmap are the two added.
+    $moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast', 'top_customers', 'weekly_heatmap'];
+    $opsCharts   = ['fleet_status', 'leases_trend', 'utilization_trend', 'lease_expiry_calendar', 'occupancy_by_type', 'payment_speed'];
+    $newCharts   = ['top_customers', 'weekly_heatmap'];
+
+    // Prefer the dedicated test fixture per role (test-dispatcher, not the
+    // override-grant dispatcher); the FIN precondition catches a mis-pick.
+    $roleUser = static function (string $slug, string $email): ?int {
+        $r = db_row("SELECT u.id FROM users u JOIN user_roles r ON r.id = u.role_id
+                      WHERE r.slug = ? AND u.deleted_at IS NULL AND u.status = 'active'
+                      ORDER BY (u.email = ?) DESC, u.id LIMIT 1", [$slug, $email]);
+        return $r ? (int) $r['id'] : null;
+    };
+    // super_admin FIRST: it warms the role-blind cache the dispatcher then reads.
+    $roles = [
+        'super_admin' => ['uid' => $roleUser('super_admin', 'test-superadmin@fleetforge.test'), 'fin' => '1'],
+        'dispatcher'  => ['uid' => $roleUser('dispatcher',  'test-dispatcher@fleetforge.test'), 'fin' => '0'],
+        'accountant'  => ['uid' => $roleUser('accountant',  'test-accountant@fleetforge.test'), 'fin' => '1'],
+    ];
+    foreach ($roles as $slug => $r) {
+        if ($r['uid'] === null) { echo "SETUP FAIL no active {$slug} user\n"; exit(2); }
+    }
+
+    db_execute("DELETE FROM report_cache WHERE report_type LIKE 'dashboard_chart_%'");
+
+    foreach ($roles as $slug => $r) {
+        $uid = $r['uid'];
+        $all = $getAs('api/v1/dashboard/charts.php', '', $uid);
+        if ($all['fin'] !== $r['fin']) {
+            $fail("charts[{$slug} #{$uid}] — precondition: can_view_financials()={$all['fin']}, expected {$r['fin']}; redaction result untrustworthy");
+            continue;
+        }
+        $keys = array_keys(is_array($all['resp']['data'] ?? null) ? $all['resp']['data'] : []);
+
+        if ($r['fin'] === '0') {
+            // Combined payload: every money chart gone, operational charts intact (still 200).
+            $leaked  = array_values(array_intersect($moneyCharts, $keys));
+            $lostOps = array_values(array_diff($opsCharts, $keys));
+            if (($all['resp']['success'] ?? false) === true && !$leaked && !$lostOps) {
+                $pass("charts[{$slug}] combined — all 6 money charts omitted (incl. top_customers, weekly_heatmap), 6 operational charts served");
+            } else {
+                $fail("charts[{$slug}] combined — leaked=[" . implode(',', $leaked) . "] missing_ops=[" . implode(',', $lostOps) . "]"
+                    . " success=" . var_export($all['resp']['success'] ?? null, true));
+            }
+            // Single-chart request: 403 FORBIDDEN, no dataset in the body.
+            foreach ($newCharts as $ck) {
+                $one  = $getAs('api/v1/dashboard/charts.php', 'chart=' . $ck, $uid)['resp'];
+                $code = $one['error']['code'] ?? null;
+                if (($one['success'] ?? null) === false && $code === 'FORBIDDEN' && !isset($one['data'])) {
+                    $pass("charts[{$slug}] ?chart={$ck} — 403 FORBIDDEN, no dataset");
+                } else {
+                    $fail("charts[{$slug}] ?chart={$ck} — expected 403 FORBIDDEN, got success=" . var_export($one['success'] ?? null, true)
+                        . " code=" . var_export($code, true) . (isset($one['data']) ? ' WITH dataset (leak)' : ''));
+                }
+            }
+        } else {
+            $missing = array_values(array_diff(array_merge($moneyCharts, $opsCharts), $keys));
+            if (($all['resp']['success'] ?? false) === true && !$missing) {
+                $d = $all['resp']['data'];
+                $pass("charts[{$slug}] combined — all 12 charts served (top_customers " . count($d['top_customers']['labels'] ?? [])
+                    . " customers, weekly_heatmap " . count($d['weekly_heatmap']['series'] ?? []) . " weeks)");
+            } else {
+                $fail("charts[{$slug}] combined — missing=[" . implode(',', $missing) . "] success="
+                    . var_export($all['resp']['success'] ?? null, true));
+            }
+            foreach ($newCharts as $ck) {
+                $one = $getAs('api/v1/dashboard/charts.php', 'chart=' . $ck, $uid)['resp'];
+                if (($one['success'] ?? null) === true && is_array($one['data']['series'] ?? null)) {
+                    $pass("charts[{$slug}] ?chart={$ck} — 200 with dataset");
+                } else {
+                    $fail("charts[{$slug}] ?chart={$ck} — expected 200 dataset, got success=" . var_export($one['success'] ?? null, true)
+                        . " code=" . var_export($one['error']['code'] ?? null, true));
+                }
+            }
+        }
+    }
+
 } finally {
     if (file_exists($harnessFile)) @unlink($harnessFile);
+    if (file_exists($loginHarnessFile)) @unlink($loginHarnessFile);
 }
 
 echo "\n" . str_repeat('─', 72) . "\n";
