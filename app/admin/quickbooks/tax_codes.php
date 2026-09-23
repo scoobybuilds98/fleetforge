@@ -680,7 +680,7 @@ $unmappedFfRates  = db_select(
     <div class="card" style="padding:18px 20px;">
         <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
             <label class="form-label" style="margin:0;">Invoice tax mode
-                <select class="form-control" style="max-width:260px;" x-model="mode" :disabled="!canEdit">
+                <select class="form-control" style="max-width:340px;" x-model="mode" :disabled="!canEdit">
                     <option value="override">override (one no-rate code + header tax)</option>
                     <option value="per_rate">per_rate (real tax codes — Canada)</option>
                 </select>

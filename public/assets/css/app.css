@@ -3130,14 +3130,19 @@ body[data-density="spacious"] .page-content .form-control { padding: 11px 14px; 
 .form-control:hover:not(:focus):not(:disabled),
 .form-input:hover:not(:focus):not(:disabled),
 .form-select:hover:not(:focus):not(:disabled) {
-    background: color-mix(in srgb, var(--input-bg-focus) 60%, var(--input-bg));
+    /* background-COLOR, never the `background` shorthand: the shorthand also
+       resets background-image/repeat/size/position, which wipes the select
+       chevron on hover — and in light theme the later
+       [data-theme="light"] .form-select rule re-applies the image with
+       repeat/size already reset, tiling giant chevrons across the field. */
+    background-color: color-mix(in srgb, var(--input-bg-focus) 60%, var(--input-bg));
 }
 
 .form-control:focus,
 .form-input:focus,
 .form-select:focus {
     outline: none;
-    background: var(--input-bg-focus);
+    background-color: var(--input-bg-focus); /* not the shorthand — see hover note */
     box-shadow: 0 0 0 2px var(--color-primary);
 }
 
@@ -3186,6 +3191,23 @@ select.form-control:not([multiple]) {
 [data-theme="light"] .form-select,
 [data-theme="light"] select.form-control:not([multiple]) {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%238A857A'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+}
+
+/* select.form-input (the accounting module's alias) — same chevron. ~40 of
+   these carry an inline `background: var(--bg-input)` shorthand, which zeroes
+   background-image at inline specificity, so .form-input's appearance:none
+   left them with NO dropdown arrow at all. !important is the only way past an
+   inline style without touching every page; it is scoped to the four
+   chevron-painting properties + the right padding the arrow sits in. */
+select.form-input:not([multiple]) {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%23736D61'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 10px center !important;
+    background-size: 16px !important;
+    padding-right: 34px !important;
+}
+[data-theme="light"] select.form-input:not([multiple]) {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='1.5' stroke='%238A857A'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E") !important;
 }
 
 /* Textarea — S-LUX-2.5: min-height 80px, pill radius parity, vertical resize only */
@@ -3563,17 +3585,32 @@ textarea.form-input {
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: nowrap; /* keep filters on one row */
+    /* Wrap rather than squeeze: with nowrap, a crowded row shrank the
+       selects below their own option text ("All Risk Levels" → a bare
+       chevron). Rows that fit still sit on one line. */
+    flex-wrap: wrap;
     flex: 1;
     min-width: 0;
 }
 
-/* Prevent any single filter control from dominating the row */
+/* Text/search inputs absorb the free space and may shrink… */
 .table-toolbar-left .form-control,
-.table-toolbar-left .form-select {
-    flex: 1;
+.table-toolbar-left .form-input {
+    flex: 1 1 180px;
     min-width: 0;
     width: auto;
+}
+/* …but a native <select> never shrinks below its widest option — a
+   shrunken select crops the chosen label, which reads as a broken picker.
+   Placed after the input rule: select.form-control (0,2,1) must win for
+   selects that carry both classes. */
+.table-toolbar-left .form-select,
+.table-toolbar-left select.form-control,
+.table-toolbar-right .form-select,
+.table-toolbar-right select.form-control {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 100%;
 }
 
 /* S-LIST-TOOLBAR: dense filter sets (5+ controls, e.g. Audit, Compliance,
@@ -3581,8 +3618,7 @@ textarea.form-input {
    below its readable width. The default stays nowrap — most lists carry
    three filters and read better on one row. */
 .table-toolbar-left--wrap { flex-wrap: wrap; }
-.table-toolbar-left--wrap .form-control,
-.table-toolbar-left--wrap .form-select {
+.table-toolbar-left--wrap .form-control {
     flex: 0 1 auto;
 }
 
@@ -6640,7 +6676,7 @@ dl.detail-grid dd {
     box-sizing: border-box;
 }
 .portal-form-input:focus {
-    background: var(--input-bg-focus);
+    background-color: var(--input-bg-focus); /* shorthand would wipe .portal-form-select's chevron */
     box-shadow: 0 0 0 2px var(--color-primary);
 }
 .portal-form-input::placeholder {
