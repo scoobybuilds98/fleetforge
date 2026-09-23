@@ -150,6 +150,11 @@ try {
                 $row['ff_item_type_variant']
             );
             $row['ff_category'] = self_category_for($row['ff_item_type']);
+            // S-QBO-ITEM-ACCOUNT-CHECK: does QuickBooks post this item where
+            // FleetForge books the revenue? (mapped rows only)
+            $row['account_check'] = ($row['mapping_status'] === 'mapped' && $row['qbo_item_id'] !== null)
+                ? \FleetForge\QboPushers\ItemAccountCheck::checkRow($row)
+                : null;
         } else {
             $row['ff_display_name'] = null;
             $row['ff_category']     = 'QBO Only';
@@ -159,8 +164,12 @@ try {
 
     $totalPages = $total > 0 ? (int) ceil($total / $pageSize) : 1;
 
+    // S-QBO-ITEM-ACCOUNT-CHECK: counts across ALL mapped items (not just this page).
+    $accountCheck = \FleetForge\QboPushers\ItemAccountCheck::checkAll();
+
     json_success([
         'kpis'                  => $kpis,
+        'account_check'         => ['counts' => $accountCheck['counts'], 'fallback' => $accountCheck['fallback']],
         'last_pulled_at'        => $lastPulledAt,
         'ui_categories'         => ItemMatcher::UI_CATEGORIES,
         'rows'                  => $rows,

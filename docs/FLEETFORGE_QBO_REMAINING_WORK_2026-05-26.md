@@ -638,3 +638,5 @@ QUICKBOOKS_PROGRESS.md §2 SESSION LOG ends at S-QBO-MATCHER-GREEDY-FIX (2026-05
 **Progress marker 2026-09-24 — S-QBO-HISTPULL-SHARED:** ✅ historical pull (S-QBO-27 machinery) refused for a shared company file — live gate + transactional pull, even in dry-run; reference pulls unaffected. No migration. `_smoke_qbo_historical_pull.php` 24/24.
 
 **Progress marker 2026-09-24 — S-QBO-MONEY-JSON:** ✅ outgoing QuickBooks money via `QboMoney` + exact `encodeBody()` (18 float casts removed). No migration. `_smoke_qbo_money_json.php` 4/4.
+
+**Progress marker 2026-09-24 — S-QBO-ITEM-ACCOUNT-CHECK:** ✅ QuickBooks → Items reports each item's income account vs FF's revenue account (audit B8). All pre-go-live audit code items are now closed; remaining work is operator/accountant (F80–F85). `_smoke_qbo_item_account_check.php` 8/8.

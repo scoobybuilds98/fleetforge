@@ -75,6 +75,18 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         </div>
     </template>
 
+    <!-- S-QBO-ITEM-ACCOUNT-CHECK: QuickBooks item accounts vs FleetForge's revenue accounts -->
+    <template x-if="accountCheck && (accountCheck.counts.different + accountCheck.counts.ff_account_unmapped + accountCheck.counts.no_ff_account + accountCheck.fallback) > 0">
+        <div class="alert alert-warning" style="margin-bottom:14px;">
+            <strong>Income accounts don't line up with FleetForge's books yet.</strong>
+            A pushed invoice line lands on its QuickBooks item's income account; FleetForge books the same line to its own revenue account.
+            <span x-show="accountCheck.counts.different > 0"><span x-text="accountCheck.counts.different"></span> item(s) post to a different account than FleetForge.</span>
+            <span x-show="accountCheck.counts.ff_account_unmapped > 0"><span x-text="accountCheck.counts.ff_account_unmapped"></span> use a FleetForge revenue account that isn't linked to QuickBooks (QuickBooks → Accounts).</span>
+            <span x-show="accountCheck.fallback > 0"><span x-text="accountCheck.fallback"></span> line type(s) have no revenue account of their own in FleetForge and fall back to its "other" account (Accounting → Settings → Revenue Mapping).</span>
+            Which side changes is the accountant's call — the note under each item's income account says what differs.
+        </div>
+    </template>
+
     <!-- ── Action bar ──────────────────────────────────────────── -->
     <div class="card" style="padding:14px 18px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;">
         <div class="text-sm text-secondary">
@@ -224,6 +236,11 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
                                                 </div>
                                             </template>
                                             <template x-if="!row.qbo_income_account_name"><span class="text-secondary">—</span></template>
+                                            <template x-if="row.account_check">
+                                                <div class="text-xs" style="margin-top:4px;max-width:360px;white-space:normal;"
+                                                     :class="row.account_check.status === 'ok' && !row.account_check.fallback ? 'text-success' : 'text-warning'"
+                                                     x-text="row.account_check.message + (row.account_check.note ? ' ' + row.account_check.note : '')"></div>
+                                            </template>
                                         </td>
                                         <td>
                                             <span class="badge" :class="statusBadgeClass(row.mapping_status)" x-text="row.mapping_status"></span>
@@ -382,6 +399,7 @@ function qboItemMapping(canEditCredentials) {
         page: 1,
         pageSize: 200,
         kpis: null,
+        accountCheck: null,   // S-QBO-ITEM-ACCOUNT-CHECK
         lastPulledAt: null,
         uiCategories: {},
         groupedRows: {},
@@ -430,6 +448,7 @@ function qboItemMapping(canEditCredentials) {
                     this.total        = d.pagination.total;
                     this.totalPages   = d.pagination.total_pages;
                     this.kpis         = d.kpis;
+                    this.accountCheck = d.account_check || null;   // S-QBO-ITEM-ACCOUNT-CHECK
                     this.lastPulledAt = d.last_pulled_at;
                     this.uiCategories = d.ui_categories;
                     this.groupedRows  = this.computeGrouped(d.rows);

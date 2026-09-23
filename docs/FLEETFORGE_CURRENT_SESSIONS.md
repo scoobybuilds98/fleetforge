@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-ITEM-ACCOUNT-CHECK** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-ITEM-ACCOUNT-CHECK-1). **QuickBooks → Items now says, for every item, whether QuickBooks posts it to the same account FleetForge books that revenue to. On the production copy none line up yet, and it surfaced an FF finding: all rental revenue posts to 4110 Other Revenue because FF's revenue map has only per-category rental keys. Operator + accountant: decide the account plan (see OPERATOR_FOLLOWUPS F85).**
+
 **S-QBO-MONEY-JSON** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Every amount FleetForge sends to QuickBooks is now rounded to cents in exact decimal math and printed exactly, independent of server settings (production was already safe; this removes the dependency).**
 
 **S-QBO-HISTPULL-SHARED** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-HISTPULL-SHARED-1). **The historical QuickBooks import is switched off for a company file shared with other businesses (it would pull their history into FleetForge); QuickBooks → Manual Sync says so. Go-live history is linked instead.**

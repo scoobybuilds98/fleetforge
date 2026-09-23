@@ -1115,6 +1115,17 @@ class AutoEntryBridge
         return $ctx;
     }
 
+    /**
+     * Public read of the revenue account a line type books to — the same
+     * rule every invoice JE uses (map entry, else the 'other' fallback).
+     * Used by QuickBooks → Items to compare with each QuickBooks item's
+     * income account (S-QBO-ITEM-ACCOUNT-CHECK).
+     */
+    public static function revenueAccountForLineType(string $lineType): ?int
+    {
+        return self::resolveRevenueAccount($lineType);
+    }
+
     private static function resolveRevenueAccount(string $lineType): ?int
     {
         static $mapCache = null;
