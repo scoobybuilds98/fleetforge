@@ -1,0 +1,35 @@
+<svg class="dg dg--accounting-cycle" viewBox="0 0 560 440" role="img" aria-label="The accounting month is a cycle around the general ledger: documents, automatic entries, the accountant's own entries, reconciliation, reports, and closing the period, then the next month." xmlns="http://www.w3.org/2000/svg">
+  <title>The accounting month</title>
+  <circle class="dg-orbit" cx="280" cy="220" r="158"/>
+  <circle class="dg-packet" r="5"><animateMotion dur="9s" repeatCount="indefinite" path="M280,62 A158,158 0 1,1 279.9,62"/></circle>
+
+  <circle class="dg-core" cx="280" cy="220" r="72"/>
+  <text class="dg-t-lg" x="280" y="216">General ledger</text>
+  <text class="dg-t-sm" x="280" y="238">all in CAD</text>
+
+  <rect class="dg-panel dg-panel--ff" x="205" y="35" width="150" height="54" rx="12"/>
+  <text class="dg-t" x="280" y="58">1 · Documents</text>
+  <text class="dg-t-sm" x="280" y="76">invoices · payments · bills</text>
+
+  <rect class="dg-panel dg-panel--info" x="342" y="114" width="150" height="54" rx="12"/>
+  <text class="dg-t" x="417" y="137">2 · Auto entries</text>
+  <text class="dg-t-sm" x="417" y="155">post themselves</text>
+
+  <rect class="dg-panel dg-panel--info" x="342" y="272" width="150" height="54" rx="12"/>
+  <text class="dg-t" x="417" y="295">3 · Your entries</text>
+  <text class="dg-t-sm" x="417" y="313">JEs · assets · GST</text>
+
+  <rect class="dg-panel dg-panel--qbo" x="205" y="351" width="150" height="54" rx="12"/>
+  <text class="dg-t" x="280" y="374">4 · Reconcile</text>
+  <text class="dg-t-sm" x="280" y="392">bank · AR · AP</text>
+
+  <rect class="dg-panel dg-panel--qbo" x="68" y="272" width="150" height="54" rx="12"/>
+  <text class="dg-t" x="143" y="295">5 · Report</text>
+  <text class="dg-t-sm" x="143" y="313">trial balance · P&amp;L</text>
+
+  <rect class="dg-panel dg-panel--warn" x="68" y="114" width="150" height="54" rx="12"/>
+  <text class="dg-t" x="143" y="137">6 · Close</text>
+  <text class="dg-t-sm" x="143" y="155">Periods → Close Period</text>
+
+  <text class="dg-t-xs" x="132" y="72">NEXT MONTH ↻</text>
+</svg>

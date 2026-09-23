@@ -1,0 +1,58 @@
+<svg class="dg dg--invoice-lifecycle" viewBox="0 0 760 290" role="img" aria-label="An invoice starts as a Draft, which changes nothing. Send posts revenue, adds to the customer balance and queues QuickBooks. Payments make it partially paid, then paid. A draft or sent invoice can be voided; a sent invoice is corrected with a credit note; an unpaid one from a damage claim can be written off." xmlns="http://www.w3.org/2000/svg">
+  <title>An invoice's life</title>
+  <!-- main row -->
+  <path class="dg-flow" d="M168,86 H198"/>
+  <path class="dg-head dg-head--ff" d="M204,86 l-9,-5 v10 z"/>
+  <text class="dg-t-xs" x="186" y="74">SEND</text>
+  <path class="dg-flow dg-flow--qbo" d="M378,86 H408"/>
+  <path class="dg-head dg-head--qbo" d="M414,86 l-9,-5 v10 z"/>
+  <text class="dg-t-xs dg-t-xs--qbo" x="396" y="74">PAY</text>
+  <path class="dg-flow dg-flow--qbo" d="M568,86 H598"/>
+  <path class="dg-head dg-head--qbo" d="M604,86 l-9,-5 v10 z"/>
+  <text class="dg-t-xs dg-t-xs--qbo" x="586" y="74">PAY</text>
+
+  <!-- branches -->
+  <path class="dg-edge dg-edge--muted" d="M91,138 V188"/>
+  <path class="dg-head dg-head--muted" d="M91,194 l-5,-9 h10 z"/>
+  <path class="dg-edge dg-edge--muted" d="M236,138 L160,190"/>
+  <path class="dg-edge dg-edge--muted" d="M291,138 V188"/>
+  <path class="dg-head dg-head--muted" d="M291,194 l-5,-9 h10 z"/>
+  <path class="dg-edge dg-edge--muted" d="M491,138 V188"/>
+  <path class="dg-head dg-head--muted" d="M491,194 l-5,-9 h10 z"/>
+
+  <rect class="dg-panel dg-panel--muted" x="16" y="36" width="150" height="100" rx="14"/>
+  <text class="dg-t" x="91" y="66">Draft</text>
+  <text class="dg-t-sm" x="91" y="92">changes nothing</text>
+  <text class="dg-t-sm" x="91" y="110">edit or regenerate</text>
+
+  <rect class="dg-panel dg-panel--ff dg-panel--glow" x="206" y="36" width="170" height="100" rx="14"/>
+  <text class="dg-t" x="291" y="66">Sent</text>
+  <text class="dg-t-sm" x="291" y="88">revenue posted</text>
+  <text class="dg-t-sm" x="291" y="106">customer balance up</text>
+  <text class="dg-t-sm" x="291" y="124">queued for QuickBooks</text>
+
+  <rect class="dg-panel dg-panel--info" x="416" y="36" width="150" height="100" rx="14"/>
+  <text class="dg-t" x="491" y="66">Partially paid</text>
+  <text class="dg-t-sm" x="491" y="92">payment applied</text>
+  <text class="dg-t-sm" x="491" y="110">overdue after 30 days</text>
+
+  <rect class="dg-panel dg-panel--qbo" x="606" y="36" width="138" height="100" rx="14"/>
+  <text class="dg-t" x="675" y="66">Paid</text>
+  <text class="dg-t-sm" x="675" y="92">balance zero</text>
+  <text class="dg-t-sm" x="675" y="110">done</text>
+
+  <rect class="dg-panel dg-panel--danger-soft" x="16" y="196" width="150" height="72" rx="12"/>
+  <text class="dg-t" x="91" y="222">Void</text>
+  <text class="dg-t-sm" x="91" y="242">draft or sent only</text>
+  <text class="dg-t-sm" x="91" y="258">month billable again</text>
+
+  <rect class="dg-panel dg-panel--warn" x="206" y="196" width="170" height="72" rx="12"/>
+  <text class="dg-t" x="291" y="222">Credit note</text>
+  <text class="dg-t-sm" x="291" y="242">corrects a sent invoice</text>
+  <text class="dg-t-sm" x="291" y="258">applied to its balance</text>
+
+  <rect class="dg-panel dg-panel--danger-soft" x="416" y="196" width="150" height="72" rx="12"/>
+  <text class="dg-t" x="491" y="222">Written off</text>
+  <text class="dg-t-sm" x="491" y="242">damage-claim route</text>
+  <text class="dg-t-sm" x="491" y="258">bad debt · closed</text>
+</svg>

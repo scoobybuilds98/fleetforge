@@ -215,6 +215,14 @@ if (str_starts_with($localPath, '/api/') || $localPath === '/api') {
     $routeLocal       = strlen($localPath) > 5 ? substr($localPath, 5) : '/';
     $helpSlugFallback = true;
 
+} elseif (str_starts_with($localPath, '/sop') && (strlen($localPath) === 4 || $localPath[4] === '/')) {
+    // S-SOP-MODULE — in-app SOP. Chapters have no file each: /sop/{slug}
+    // falls back to _chapter.php, which renders docs/sop/NN-{slug}.md and
+    // answers 404 itself for an unknown slug. /sop and /sop/print are files.
+    $routeRoot       = FF_ROOT . '/app/admin/sop';
+    $routeLocal      = strlen($localPath) > 4 ? substr($localPath, 4) : '/';
+    $sopSlugFallback = true;
+
 } else {
     // Everything else → admin
     $routeRoot  = FF_ROOT . '/app/admin';
@@ -231,6 +239,14 @@ if ($resolvedFile === null && isset($helpSlugFallback) && $routeLocal !== '/') {
     $helpFallbackFile = FF_ROOT . '/app/admin/help/_guide.php';
     if (is_file($helpFallbackFile)) {
         $resolvedFile = realpath($helpFallbackFile);
+    }
+}
+
+// SOP: /sop/{slug} → the chapter reader.
+if ($resolvedFile === null && isset($sopSlugFallback) && $routeLocal !== '/') {
+    $sopChapterFile = FF_ROOT . '/app/admin/sop/_chapter.php';
+    if (is_file($sopChapterFile)) {
+        $resolvedFile = realpath($sopChapterFile);
     }
 }
 

@@ -221,6 +221,13 @@ return [
         'badge'  => null,
     ],
     [
+        'label'  => 'SOP',
+        'icon'   => 'clipboard-document-check',
+        'url'    => '/sop',
+        'module' => null,   // S-SOP-MODULE: every staff user; the live month-end checklist is gated in-page (can view payments)
+        'badge'  => null,
+    ],
+    [
         'label'  => 'Training',
         'icon'   => 'academic-cap',
         'url'    => '/training',

@@ -1,0 +1,47 @@
+<svg class="dg dg--lease-lifecycle" viewBox="0 0 760 250" role="img" aria-label="A lease goes Create (pending, unit reserved), Activate (on lease, draft invoice), During (monthly invoices, readings), Close (final invoice, over-billing credited). A closed lease can be reopened to fix a reading and closed again." xmlns="http://www.w3.org/2000/svg">
+  <title>A lease from reservation to return</title>
+  <path class="dg-flow" d="M176,86 H202"/>
+  <path class="dg-head dg-head--ff" d="M208,86 l-9,-5 v10 z"/>
+  <path class="dg-flow" d="M370,86 H396"/>
+  <path class="dg-head dg-head--ff" d="M402,86 l-9,-5 v10 z"/>
+  <path class="dg-flow" d="M564,86 H590"/>
+  <path class="dg-head dg-head--ff" d="M596,86 l-9,-5 v10 z"/>
+
+  <!-- reopen loop -->
+  <path class="dg-edge dg-edge--warn" d="M677,144 C677,214 483,214 483,152"/>
+  <path class="dg-head dg-head--warn" d="M483,145 l-5,9 h10 z"/>
+  <text class="dg-t-sm dg-t-warn" x="580" y="236">Reopen → fix the reading → close again</text>
+
+  <g>
+    <rect class="dg-panel dg-panel--muted" x="16" y="30" width="158" height="112" rx="14"/>
+    <circle class="dg-num" cx="40" cy="56" r="12"/><text class="dg-num-t" x="40" y="60">1</text>
+    <text class="dg-t dg-t-start" x="60" y="61">Create</text>
+    <text class="dg-t-sm dg-t-start" x="32" y="92">Pending</text>
+    <text class="dg-t-sm dg-t-start" x="32" y="110">unit Reserved</text>
+    <text class="dg-t-sm dg-t-start" x="32" y="128">rates &amp; mileage set</text>
+  </g>
+  <g>
+    <rect class="dg-panel dg-panel--ff" x="210" y="30" width="158" height="112" rx="14"/>
+    <circle class="dg-num" cx="234" cy="56" r="12"/><text class="dg-num-t" x="234" y="60">2</text>
+    <text class="dg-t dg-t-start" x="254" y="61">Activate</text>
+    <text class="dg-t-sm dg-t-start" x="226" y="92">unit leaves the yard</text>
+    <text class="dg-t-sm dg-t-start" x="226" y="110">On lease</text>
+    <text class="dg-t-sm dg-t-start" x="226" y="128">draft for rest of month</text>
+  </g>
+  <g>
+    <rect class="dg-panel dg-panel--info" x="404" y="30" width="158" height="112" rx="14"/>
+    <circle class="dg-num" cx="428" cy="56" r="12"/><text class="dg-num-t" x="428" y="60">3</text>
+    <text class="dg-t dg-t-start" x="448" y="61">During</text>
+    <text class="dg-t-sm dg-t-start" x="420" y="92">monthly invoices</text>
+    <text class="dg-t-sm dg-t-start" x="420" y="110">readings · amendments</text>
+    <text class="dg-t-sm dg-t-start" x="420" y="128">Billed Thru tracks it</text>
+  </g>
+  <g>
+    <rect class="dg-panel dg-panel--qbo" x="598" y="30" width="158" height="112" rx="14"/>
+    <circle class="dg-num" cx="622" cy="56" r="12"/><text class="dg-num-t" x="622" y="60">4</text>
+    <text class="dg-t dg-t-start" x="642" y="61">Close</text>
+    <text class="dg-t-sm dg-t-start" x="614" y="92">unit physically back</text>
+    <text class="dg-t-sm dg-t-start" x="614" y="110">final invoice</text>
+    <text class="dg-t-sm dg-t-start" x="614" y="128">over-billing credited</text>
+  </g>
+</svg>

@@ -35,6 +35,16 @@ $guides = \FleetForge\Help\HelpRenderer::listGuides();
     under the hood.
 </p>
 
+<?php // S-SOP-MODULE: accounting + QuickBooks have no Help guide — the SOP is the written guide for them. ?>
+<a href="<?= e(base_url('sop')) ?>" class="card" style="display:flex;align-items:center;gap:16px;padding:16px 20px;margin-bottom:20px;text-decoration:none;max-width:860px;">
+    <span style="display:inline-flex;width:44px;height:44px;flex:0 0 44px;align-items:center;justify-content:center;border-radius:var(--radius-lg);color:var(--color-primary);background:color-mix(in srgb, var(--color-primary) 14%, transparent);"><?= heroicon('clipboard-document-check', 'nav-icon') ?></span>
+    <span style="flex:1;min-width:0;">
+        <span style="display:block;font-weight:650;color:var(--text-primary);">Standard Operating Procedures (SOP)</span>
+        <span style="display:block;font-size:13px;color:var(--text-secondary);">How we run the whole system — daily operations, billing, accounting, QuickBooks and the shared month-end checklist.</span>
+    </span>
+    <span class="help-guide-link">Open the SOP →</span>
+</a>
+
 <?php if (empty($guides)): ?>
 <div class="card" style="max-width:560px;">
     <div class="card-body">

@@ -1,0 +1,25 @@
+<svg class="dg dg--pricing-ladder" viewBox="0 0 760 270" role="img" aria-label="Rate ladder. Up to 7 days: the cheaper of days times daily or the weekly rate. From 8 days: full weeks plus extra days, capped at the monthly rate. One calendar month or less at the monthly tier: the flat monthly rate. Longer: full months at the monthly rate, part months pro-rated over 30 days." xmlns="http://www.w3.org/2000/svg">
+  <title>The rate ladder</title>
+  <text class="dg-t-xs dg-t-start" x="16" y="22">LONGER LEASE → LOWER EFFECTIVE DAY RATE</text>
+  <line class="dg-axis" x1="16" y1="250" x2="744" y2="250"/>
+
+  <rect class="dg-bar dg-bar--1" x="16" y="194" width="158" height="56" rx="10"/>
+  <text class="dg-t" x="95" y="228">1 – 7 days</text>
+  <text class="dg-t-sm" x="95" y="164">the cheaper of</text>
+  <text class="dg-t-sm" x="95" y="182">days × daily or weekly</text>
+
+  <rect class="dg-bar dg-bar--2" x="206" y="158" width="158" height="92" rx="10"/>
+  <text class="dg-t" x="285" y="192">8 days +</text>
+  <text class="dg-t-sm" x="285" y="128">full weeks + extra days</text>
+  <text class="dg-t-sm" x="285" y="146">capped at monthly</text>
+
+  <rect class="dg-bar dg-bar--3" x="396" y="122" width="158" height="128" rx="10"/>
+  <text class="dg-t" x="475" y="156">≤ 1 calendar month</text>
+  <text class="dg-t-sm" x="475" y="92">the flat monthly rate</text>
+  <text class="dg-t-sm" x="475" y="110">even across a month end</text>
+
+  <rect class="dg-bar dg-bar--4" x="586" y="86" width="158" height="164" rx="10"/>
+  <text class="dg-t" x="665" y="120">Longer</text>
+  <text class="dg-t-sm" x="665" y="56">full months × monthly</text>
+  <text class="dg-t-sm" x="665" y="74">part months ÷ 30</text>
+</svg>

@@ -1,0 +1,50 @@
+<svg class="dg dg--two-systems" viewBox="0 0 640 330" role="img" aria-label="FleetForge sends invoices, credit notes, bills and journal entries to QuickBooks; QuickBooks sends customer payments and bill payments back to FleetForge." xmlns="http://www.w3.org/2000/svg">
+  <title>Two systems, one home per record</title>
+  <!-- lanes (drawn first so the panels sit on top of the packets' ends) -->
+  <path class="dg-flow" d="M234,118 H400"/>
+  <path class="dg-head dg-head--ff" d="M406,118 l-9,-5 v10 z"/>
+  <path class="dg-flow" d="M234,162 H400"/>
+  <path class="dg-head dg-head--ff" d="M406,162 l-9,-5 v10 z"/>
+  <path class="dg-flow dg-flow--qbo dg-flow--back" d="M240,218 H406"/>
+  <path class="dg-head dg-head--qbo" d="M234,218 l9,-5 v10 z"/>
+  <path class="dg-flow dg-flow--qbo dg-flow--back" d="M240,262 H406"/>
+  <path class="dg-head dg-head--qbo" d="M234,262 l9,-5 v10 z"/>
+  <text class="dg-t-lane" x="320" y="108">invoices · credit notes</text>
+  <text class="dg-t-lane" x="320" y="152">bills · journal entries</text>
+  <text class="dg-t-lane dg-t-lane--qbo" x="320" y="208">customer payments</text>
+  <text class="dg-t-lane dg-t-lane--qbo" x="320" y="252">bill payments</text>
+  <circle class="dg-packet" r="4"><animateMotion dur="2.4s" repeatCount="indefinite" path="M234,118 H400"/></circle>
+  <circle class="dg-packet" r="4"><animateMotion dur="2.4s" begin="-1.2s" repeatCount="indefinite" path="M234,162 H400"/></circle>
+  <circle class="dg-packet dg-packet--qbo" r="4"><animateMotion dur="2.6s" begin="-0.6s" repeatCount="indefinite" path="M406,218 H240"/></circle>
+  <circle class="dg-packet dg-packet--qbo" r="4"><animateMotion dur="2.6s" begin="-1.8s" repeatCount="indefinite" path="M406,262 H240"/></circle>
+
+  <!-- FleetForge -->
+  <rect class="dg-panel dg-panel--ff" x="16" y="16" width="210" height="298" rx="18"/>
+  <text class="dg-t-lg" x="121" y="50">FleetForge</text>
+  <text class="dg-t-sm" x="121" y="70">rentals · billing · per-unit books</text>
+  <rect class="dg-chip" x="34" y="92" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="121" y="115">Units &amp; leases</text>
+  <rect class="dg-chip" x="34" y="136" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="121" y="159">Invoices &amp; credit notes</text>
+  <rect class="dg-chip" x="34" y="180" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="121" y="203">Bills &amp; depreciation</text>
+  <rect class="dg-chip" x="34" y="224" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="121" y="247">General ledger (CAD)</text>
+  <text class="dg-t-xs" x="121" y="292">OWNS EVERY RENTAL DOCUMENT</text>
+
+  <!-- QuickBooks -->
+  <rect class="dg-panel dg-panel--qbo" x="414" y="16" width="210" height="298" rx="18"/>
+  <text class="dg-t-lg" x="519" y="50">QuickBooks</text>
+  <text class="dg-t-sm" x="519" y="70">company books · shared file</text>
+  <rect class="dg-chip" x="432" y="92" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="519" y="115">Customer payments</text>
+  <rect class="dg-chip" x="432" y="136" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="519" y="159">Chart of accounts &amp; tax</text>
+  <rect class="dg-chip" x="432" y="180" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="519" y="203">Items &amp; payment terms</text>
+  <rect class="dg-chip" x="432" y="224" width="174" height="36" rx="10"/>
+  <text class="dg-t-chip" x="519" y="247">Other businesses</text>
+  <text class="dg-t-xs" x="519" y="292">OWNS PAYMENTS &amp; THE CHART</text>
+
+  <text class="dg-t-xs" x="320" y="300">ONE RECORD · ONE HOME</text>
+</svg>

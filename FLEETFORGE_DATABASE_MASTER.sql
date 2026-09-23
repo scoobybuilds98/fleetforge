@@ -4058,6 +4058,29 @@ CREATE TABLE `settings` (
   KEY `updated_by` (`updated_by`),
   CONSTRAINT `settings_ibfk_1` FOREIGN KEY (`updated_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `sop_chapter_reads` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` int unsigned NOT NULL,
+  `chapter_slug` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `content_hash` char(16) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `read_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_sop_read_user_chapter` (`user_id`,`chapter_slug`),
+  KEY `idx_sop_read_chapter` (`chapter_slug`),
+  CONSTRAINT `fk_sop_read_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `sop_checklist_ticks` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `checklist_key` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `period` char(7) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `item_key` varchar(60) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `checked_by` int unsigned NOT NULL,
+  `checked_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_sop_tick` (`checklist_key`,`period`,`item_key`),
+  KEY `idx_sop_tick_user` (`checked_by`),
+  CONSTRAINT `fk_sop_tick_user` FOREIGN KEY (`checked_by`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `tax_rates` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,

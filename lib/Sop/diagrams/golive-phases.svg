@@ -1,0 +1,31 @@
+<svg class="dg dg--golive-phases" viewBox="0 0 760 150" role="img" aria-label="Go-live in six phases: before the day (steps 1 to 3), connect (4 to 6), map (7), link history (8 and 9), switch on (10 to 12), prove it (13). Sync stays off for the first four phases." xmlns="http://www.w3.org/2000/svg">
+  <title>Go-live day in six phases</title>
+  <polygon class="dg-chev dg-chev--1" points="10,20 122,20 134,60 122,100 10,100"/>
+  <text class="dg-t" x="68" y="56">Before the day</text>
+  <text class="dg-t-sm" x="68" y="76">steps 1 – 3</text>
+
+  <polygon class="dg-chev dg-chev--2" points="134,20 246,20 258,60 246,100 134,100 146,60"/>
+  <text class="dg-t" x="198" y="56">Connect</text>
+  <text class="dg-t-sm" x="198" y="76">steps 4 – 6</text>
+
+  <polygon class="dg-chev dg-chev--3" points="258,20 370,20 382,60 370,100 258,100 270,60"/>
+  <text class="dg-t" x="322" y="56">Map</text>
+  <text class="dg-t-sm" x="322" y="76">step 7 · six pages</text>
+
+  <polygon class="dg-chev dg-chev--4" points="382,20 494,20 506,60 494,100 382,100 394,60"/>
+  <text class="dg-t" x="446" y="56">Link history</text>
+  <text class="dg-t-sm" x="446" y="76">steps 8 – 9</text>
+
+  <polygon class="dg-chev dg-chev--5" points="506,20 618,20 630,60 618,100 506,100 518,60"/>
+  <text class="dg-t" x="570" y="56">Switch on</text>
+  <text class="dg-t-sm" x="570" y="76">steps 10 – 12</text>
+
+  <polygon class="dg-chev dg-chev--6" points="630,20 750,20 750,100 630,100 642,60"/>
+  <text class="dg-t" x="694" y="56">Prove it</text>
+  <text class="dg-t-sm" x="694" y="76">step 13</text>
+
+  <line class="dg-rail dg-rail--off" x1="12" y1="122" x2="504" y2="122"/>
+  <line class="dg-rail dg-rail--on" x1="508" y1="122" x2="748" y2="122"/>
+  <text class="dg-t-xs" x="258" y="142">SYNC OFF — NOTHING REACHES QUICKBOOKS</text>
+  <text class="dg-t-xs dg-t-xs--qbo" x="628" y="142">SYNC ON</text>
+</svg>

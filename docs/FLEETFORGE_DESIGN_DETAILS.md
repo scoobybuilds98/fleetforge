@@ -1264,6 +1264,7 @@ with one-line descriptions. Source-of-truth values stay in `app.css`.
 | MSGR-1 (portal) | Customer Messenger portal | ~8183-8516 | Portal-side messenger UI (mirror of admin, simplified for customers) |
 | FF_RecordPicker | Reusable record selector | ~8517-9004 | Search-as-you-type entity picker (Customer / Lease / Equipment / Invoice / etc.), used by email compose + chat attach + portal request flows |
 | S-LEASE-UNITS | Segmented control | ~9005+ | Apple iOS pill toggle — see §1.6 above |
+| S-SOP-MODULE | SOP module (own file `public/assets/css/sop.css`, loaded by /sop pages only) | whole file | `.sop-hero` (blueprint-grid hero), `.sop-chapter-card` (per-chapter `--acc` accent via `.sop-acc--*`), `.sop-content` typography + numbered step rail (`counter(sopstep)`), `.sop-path` screen chips, `.sop-callout--*`, `.sop-cards`, `.sop-entries` (DR/CR cards), `.sop-cl*` month-end checklist, `.sop-signal--*` live-check pills, and the `dg-*` classes that colour the SVG diagrams in `lib/Sop/diagrams/` from tokens (no fills in the SVGs). Motion: stroke-dashoffset + animateMotion, all off under reduced motion |
 
 Sections added since 2026-05-13 (rolling 30-day window): `00. Self-hosted Fonts` (S-PROD-3, 2026-05-14), display-settings density rules in section 06 (PERM-1 2026-05-14 / S-DISPLAY-REVAMP 2026-05-14 collapsed-sidebar nav-badge fix at app.css:927), the `.dashboard-grid` family in section 20 (S-DASHBOARD-CHART-POLISH, 2026-05-17), and the `.topbar-company-name` block in section 06 (S-DESIGN-LOGO-TOPBAR, 2026-05-17).
 

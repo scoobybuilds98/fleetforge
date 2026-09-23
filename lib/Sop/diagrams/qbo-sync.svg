@@ -1,0 +1,58 @@
+<svg class="dg dg--qbo-sync" viewBox="0 0 760 340" role="img" aria-label="FleetForge adds each change to the Sync Queue; a worker sends it to QuickBooks every minute. QuickBooks sends payments back through a webhook. Edits made in QuickBooks raise drift alerts in FleetForge." xmlns="http://www.w3.org/2000/svg">
+  <title>How FleetForge and QuickBooks talk</title>
+  <!-- row 1: FleetForge → queue → worker → QuickBooks -->
+  <path class="dg-flow" d="M186,98 H568"/>
+  <path class="dg-head dg-head--ff" d="M574,98 l-9,-5 v10 z"/>
+  <circle class="dg-packet" r="4.5"><animateMotion dur="3s" repeatCount="indefinite" path="M186,98 H568"/></circle>
+  <circle class="dg-packet" r="4.5"><animateMotion dur="3s" begin="-1.5s" repeatCount="indefinite" path="M186,98 H568"/></circle>
+
+  <!-- row 2: QuickBooks → webhook → FleetForge -->
+  <path class="dg-flow dg-flow--qbo dg-flow--back" d="M192,208 H574"/>
+  <path class="dg-head dg-head--qbo" d="M186,208 l9,-5 v10 z"/>
+  <circle class="dg-packet dg-packet--qbo" r="4.5"><animateMotion dur="3.2s" begin="-0.8s" repeatCount="indefinite" path="M574,208 H192"/></circle>
+
+  <!-- row 3: drift, dashed -->
+  <path class="dg-edge dg-edge--warn" d="M660,252 V296 H450"/>
+  <path class="dg-head dg-head--warn" d="M444,296 l9,-5 v10 z"/>
+  <path class="dg-edge dg-edge--warn" d="M312,296 H100 V260"/>
+  <path class="dg-head dg-head--warn" d="M100,254 l-5,9 h10 z"/>
+  <text class="dg-t-xs" x="556" y="286">EDITS · VOIDS IN QUICKBOOKS</text>
+
+  <!-- FleetForge -->
+  <rect class="dg-panel dg-panel--ff" x="16" y="40" width="168" height="212" rx="16"/>
+  <text class="dg-t-lg" x="100" y="72">FleetForge</text>
+  <text class="dg-t-sm dg-t-start" x="34" y="104">• customers · vendors</text>
+  <text class="dg-t-sm dg-t-start" x="34" y="126">• invoices · credit notes</text>
+  <text class="dg-t-sm dg-t-start" x="34" y="148">• bills · bill payments</text>
+  <text class="dg-t-sm dg-t-start" x="34" y="170">• journal entries</text>
+  <text class="dg-t-sm dg-t-start" x="34" y="192">• write-offs</text>
+  <text class="dg-t-xs" x="100" y="234">SENDS WHAT IT OWNS</text>
+
+  <!-- queue + worker -->
+  <rect class="dg-panel" x="224" y="66" width="132" height="64" rx="12"/>
+  <text class="dg-t" x="290" y="94">Sync Queue</text>
+  <text class="dg-t-sm" x="290" y="114">every change waits</text>
+  <rect class="dg-panel" x="396" y="66" width="132" height="64" rx="12"/>
+  <text class="dg-t" x="462" y="94">Worker</text>
+  <text class="dg-t-sm" x="462" y="114">every minute · retries</text>
+
+  <!-- webhook + drift -->
+  <rect class="dg-panel dg-panel--qbo-soft" x="312" y="176" width="132" height="64" rx="12"/>
+  <text class="dg-t" x="378" y="204">Webhook</text>
+  <text class="dg-t-sm" x="378" y="224">payments come back</text>
+  <rect class="dg-panel dg-panel--warn" x="312" y="268" width="132" height="56" rx="12"/>
+  <text class="dg-t" x="378" y="292">Drift alerts</text>
+  <text class="dg-t-sm" x="378" y="310">differences to review</text>
+
+  <!-- QuickBooks -->
+  <rect class="dg-panel dg-panel--qbo" x="576" y="40" width="168" height="212" rx="16"/>
+  <text class="dg-t-lg" x="660" y="72">QuickBooks</text>
+  <text class="dg-t-sm dg-t-start" x="594" y="104">• shared company file</text>
+  <text class="dg-t-sm dg-t-start" x="594" y="126">• tagged Class/Location</text>
+  <text class="dg-t-sm dg-t-start" x="594" y="148">• customer payments</text>
+  <text class="dg-t-sm dg-t-start" x="594" y="170">• bill payments</text>
+  <text class="dg-t-xs" x="660" y="234">SENDS BACK PAYMENTS</text>
+
+  <text class="dg-t-xs" x="380" y="40">FLEETFORGE → QUICKBOOKS</text>
+  <text class="dg-t-xs dg-t-xs--qbo" x="252" y="166">QUICKBOOKS → FLEETFORGE</text>
+</svg>

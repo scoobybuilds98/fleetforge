@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-SOP-MODULE** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-SOP-MODULE-1/2). **New sidebar item "SOP": the whole Standard Operating Procedure inside FleetForge — 13 chapters with diagrams, screen paths that open the real screen, instant search, Mark as read, a print/PDF view, and a live month-end checklist the team ticks together (with checks of the books beside each step). Operator: deploy (one migration), then have the accountant read Accounting + Month-end and confirm the GST ITC clearing entry (see OPERATOR_FOLLOWUPS F86).**
+
 **S-QBO-ITEM-ACCOUNT-CHECK** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-ITEM-ACCOUNT-CHECK-1). **QuickBooks → Items now says, for every item, whether QuickBooks posts it to the same account FleetForge books that revenue to. On the production copy none line up yet, and it surfaced an FF finding: all rental revenue posts to 4110 Other Revenue because FF's revenue map has only per-category rental keys. Operator + accountant: decide the account plan (see OPERATOR_FOLLOWUPS F85).**
 
 **S-QBO-MONEY-JSON** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Every amount FleetForge sends to QuickBooks is now rounded to cents in exact decimal math and printed exactly, independent of server settings (production was already safe; this removes the dependency).**
