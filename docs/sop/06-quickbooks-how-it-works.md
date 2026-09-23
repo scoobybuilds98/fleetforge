@@ -23,7 +23,20 @@ Sending an invoice, approving a bill or saving a credit note adds a job to {{Qui
 
 When a customer pays through the QuickBooks pay link or portal, or the accountant records a deposit against a FleetForge invoice, QuickBooks notifies FleetForge. FleetForge records the payment, marks the invoice paid and posts its own books. Bill payments the accountant makes against FleetForge bills come back the same way.
 
-If a notification is missed, **Check QuickBooks for payments** ({{QuickBooks › Invoices @/quickbooks/invoices}}) catches up.
+If a notification is missed, FleetForge notices by itself: every 10 minutes it asks QuickBooks for payment changes and brings in any it hasn't seen. **Check QuickBooks for payments** ({{QuickBooks › Invoices @/quickbooks/invoices}}) does the same for every open invoice at once, on demand.
+
+## What a QuickBooks invoice carries
+
+Every invoice FleetForge sends fills in:
+
+- the customer (linked or created), the invoice number, invoice date and **due date**;
+- the **payment term** matching the due date (Net 15, Net 30… — QuickBooks needs a term with that many days, otherwise the invoice goes without one and the due date still applies);
+- the customer's **billing email** (QuickBooks never emails it — FleetForge does);
+- the **Bill To** address when the invoice has one (otherwise QuickBooks uses the customer's);
+- the **PO number** in QuickBooks' own P.O. field when the accountant has a sales-form custom field named like "P.O. Number"; it is also in the message;
+- a customer message with the unit, contract, PO and invoice notes;
+- every line with its item, description, quantity, rate, service date and tax code;
+- the rental business's Class / Location, and the online-payment switches when QuickBooks Payments is on.
 
 ## Linked vs pushed
 

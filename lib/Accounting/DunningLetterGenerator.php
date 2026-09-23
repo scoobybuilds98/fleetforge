@@ -268,6 +268,14 @@ class DunningLetterGenerator
         $fmt     = fn(string $val) => $currencySymbol . number_format((float)$val, 2);
         $fmtDate = fn(string $d) => date('M j, Y', strtotime($d));
 
+        // S-QBO-INVOICE-PAYNOW: a Pay-now link per overdue invoice while
+        // QuickBooks Payments is on (PayLink); no column at all otherwise.
+        $payUrls = [];
+        foreach ($invoices as $inv) {
+            $payUrls[(int) $inv['id']] = \FleetForge\QboPushers\PayLink::payableUrl((int) $inv['id']);
+        }
+        $hasPay = array_filter($payUrls) !== [];
+
         $html = '
 <style>
     body { font-family: DejaVu Sans, sans-serif; font-size: 10pt; color: #222; line-height: 1.6; }
@@ -318,30 +326,35 @@ class DunningLetterGenerator
     <th>Invoice Date</th>
     <th>Due Date</th>
     <th>Days Overdue</th>
-    <th class="amt">Amount Due</th>
+    <th class="amt">Amount Due</th>' . ($hasPay ? '
+    <th>Pay online</th>' : '') . '
 </tr>
 </thead>
 <tbody>';
 
         foreach ($invoices as $inv) {
             $daysOverdue = (int)((new \DateTime())->diff(new \DateTime($inv['due_date']))->days);
+            $payUrl      = $payUrls[(int) $inv['id']] ?? '';
             $html .= '
 <tr>
     <td>' . \e($inv['invoice_number']) . '</td>
     <td>' . \e($fmtDate($inv['invoice_date'])) . '</td>
     <td>' . \e($fmtDate($inv['due_date'])) . '</td>
     <td>' . $daysOverdue . ' days</td>
-    <td class="amt">' . \e($fmt((string)$inv['balance_due'])) . '</td>
+    <td class="amt">' . \e($fmt((string)$inv['balance_due'])) . '</td>' . ($hasPay ? '
+    <td>' . ($payUrl !== '' ? '<a href="' . \e($payUrl) . '" style="color:#c2410c;font-weight:bold;">Pay now</a>' : '') . '</td>' : '') . '
 </tr>';
         }
 
         $html .= '
 <tr class="total-row">
     <td colspan="4">Total Overdue</td>
-    <td class="amt">' . \e($fmt($totalOverdue)) . '</td>
+    <td class="amt">' . \e($fmt($totalOverdue)) . '</td>' . ($hasPay ? '
+    <td></td>' : '') . '
 </tr>
 </tbody>
-</table>
+</table>' . ($hasPay ? '
+<p style="font-size:9pt;color:#555;">Pay any invoice above online with its <strong>Pay now</strong> link — secure payment through QuickBooks, recorded on your account automatically.</p>' : '') . '
 
 <p>' . \e($content['closing']) . '</p>
 

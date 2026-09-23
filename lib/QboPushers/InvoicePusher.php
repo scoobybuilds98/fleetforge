@@ -302,7 +302,12 @@ class InvoicePusher
 
         // 8. Build QBO payload.
         try {
-            $qboPayload = self::buildQboPayload($invoice, $customer ?: [], $lines, $customerMap ?: []);
+            // S-QBO-INVOICE-PAYNOW: the QuickBooks term is looked up HERE (it
+            // may read QuickBooks' Term list) so buildQboPayload stays offline.
+            $termDays   = self::termDays($invoice);
+            $qboTermId  = $termDays === null ? null
+                : TermResolver::qboTermIdForInvoice($termDays, ($customer ?: [])['payment_terms'] ?? null);
+            $qboPayload = self::buildQboPayload($invoice, $customer ?: [], $lines, $customerMap ?: [], $qboTermId);
         } catch (QuickBooksException $e) {
             self::recordPushFailure($ffInvoiceId, $invoice, "Payload build failed: " . $e->getMessage(), 0);
             return [
@@ -395,7 +400,7 @@ class InvoicePusher
      *
      * @throws QuickBooksException via InvoiceTaxOverride if tax_override_code_id unset, OR via InvoiceLineBuilder on item-mapping / engine-version violations
      */
-    public static function buildQboPayload(array $invoice, array $customer, array $lines, array $customerMap): array
+    public static function buildQboPayload(array $invoice, array $customer, array $lines, array $customerMap, ?string $qboTermId = null): array
     {
         // S-QBO-GOLIVE-AUDIT (F80): Canadian per-rate tax (opt-in). Null in
         // the default override mode.
@@ -509,32 +514,112 @@ class InvoicePusher
             $payload['CustomerMemo'] = ['value' => substr($memo, 0, QboFieldLimits::INVOICE_CUSTOMER_MEMO_MAX)];
         }
 
-        // S-QBO-GOLIVE-AUDIT: portal "Pay Online" (S-QBO-15). QBO only issues
-        // an Invoice.InvoiceLink (the pay-now URL QuickBooksClient::
-        // generatePaymentsHostedUrl reads) when the invoice allows online
-        // payment AND has a BillEmail. Setting BillEmail does NOT make QBO
-        // send anything — only its /send endpoint does, and FF never calls it.
+        // S-QBO-INVOICE-PAYNOW: the customer's billing email rides on EVERY
+        // pushed invoice (it used to only when QuickBooks Payments was on), so
+        // the accountant sees who the invoice went to. Setting BillEmail does
+        // NOT make QBO send anything — only its /send endpoint does, and FF
+        // never calls it.
+        $billEmail = self::billEmail($invoice, $customer);
+        if ($billEmail !== null) {
+            $payload['BillEmail'] = ['Address' => $billEmail];
+        }
+
+        // S-QBO-GOLIVE-AUDIT: pay-now (S-QBO-15 portal + the email/PDF Pay Now
+        // button). QBO only issues an Invoice.InvoiceLink (the pay-now URL
+        // QuickBooksClient::generatePaymentsHostedUrl reads) when the invoice
+        // allows online payment AND has a BillEmail.
         if ((string) settings_get('quickbooks.payments_enabled', '0') === '1') {
             $payload['AllowOnlineCreditCardPayment'] = true;
             $payload['AllowOnlineACHPayment']        = true;
-            foreach ([
-                $invoice['sent_to_email'] ?? null,
-                $invoice['customer_email_snapshot'] ?? null,
-                $customer['invoice_email'] ?? null,
-                $customer['billing_email'] ?? null,
-                $customer['email'] ?? null,
-            ] as $candidate) {
-                $candidate = trim((string) $candidate);
-                if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL) !== false) {
-                    $payload['BillEmail'] = ['Address' => $candidate];
-                    break;
-                }
-            }
+        }
+
+        // S-QBO-INVOICE-PAYNOW: payment terms — the QuickBooks term matching
+        // THIS invoice's days (due − invoice date), preferring the customer's
+        // named term, resolved by the caller (TermResolver::qboTermIdForInvoice)
+        // so QuickBooks' term and DueDate agree. None → no SalesTermRef (the
+        // explicit DueDate above still rules).
+        if ($qboTermId !== null && $qboTermId !== '') {
+            $payload['SalesTermRef'] = ['value' => $qboTermId];
+        }
+
+        // S-QBO-INVOICE-PAYNOW: the invoice's own Bill To, as printed on the
+        // FF PDF. Only when the invoice has one — otherwise QuickBooks fills
+        // it from the QuickBooks customer (never blanked).
+        $billAddr = self::billAddr((string) ($invoice['billing_address_snapshot'] ?? ''));
+        if ($billAddr !== null) {
+            $payload['BillAddr'] = $billAddr;
+        }
+
+        // S-QBO-INVOICE-PAYNOW: the PO number into QuickBooks' own P.O. field
+        // when the company has a sales-form custom field named like "P.O.
+        // Number" (CompanyInfoSync::syncPreferences). It stays in the memo too.
+        $poFieldId = (string) settings_get('quickbooks.pref.po_custom_field_id', '');
+        if ($poFieldId !== '' && trim((string) ($invoice['po_number'] ?? '')) !== '') {
+            $payload['CustomField'] = [[
+                'DefinitionId' => $poFieldId,
+                'Name'         => (string) settings_get('quickbooks.pref.po_custom_field_name', 'P.O. Number'),
+                'Type'         => 'StringType',
+                'StringValue'  => mb_substr(trim((string) $invoice['po_number']), 0, QboFieldLimits::CUSTOM_FIELD_STRING_MAX),
+            ]];
         }
 
         // S-QBO-GOLIVE-AUDIT: rental-business Class / Location for the shared
         // QuickBooks file (no-op until one is chosen in Settings).
         return QboTagging::applyToSalesDoc($payload);
+    }
+
+    /**
+     * The address QuickBooks should show as the invoice's email: the one it
+     * was actually sent to, then the invoice's snapshot, then the customer's
+     * invoice / billing / main email. Null when none is a valid address.
+     */
+    public static function billEmail(array $invoice, array $customer): ?string
+    {
+        foreach ([
+            $invoice['sent_to_email'] ?? null,
+            $invoice['customer_email_snapshot'] ?? null,
+            $customer['invoice_email'] ?? null,
+            $customer['billing_email'] ?? null,
+            $customer['email'] ?? null,
+        ] as $candidate) {
+            $candidate = trim((string) $candidate);
+            if ($candidate !== '' && strlen($candidate) <= QboFieldLimits::EMAIL_ADDRESS_MAX
+                && filter_var($candidate, FILTER_VALIDATE_EMAIL) !== false) {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+
+    /** Days from invoice date to due date, or null when either is missing / reversed. */
+    public static function termDays(array $invoice): ?int
+    {
+        $from = (string) ($invoice['invoice_date'] ?? '');
+        $to   = (string) ($invoice['due_date'] ?? '');
+        if ($from === '' || $to === '') {
+            return null;
+        }
+        $diff = (new \DateTimeImmutable($from))->diff(new \DateTimeImmutable($to));
+        return $diff->invert ? null : (int) $diff->days;
+    }
+
+    /**
+     * QuickBooks BillAddr from the invoice's free-text Bill To snapshot
+     * (one address line per text line, up to QuickBooks' five), or null.
+     *
+     * @return array<string,string>|null
+     */
+    public static function billAddr(string $snapshot): ?array
+    {
+        $lines = array_values(array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', $snapshot) ?: []), 'strlen'));
+        if ($lines === []) {
+            return null;
+        }
+        $addr = [];
+        foreach (array_slice($lines, 0, 5) as $i => $line) {
+            $addr['Line' . ($i + 1)] = mb_substr($line, 0, QboFieldLimits::ADDRESS_LINE_MAX);
+        }
+        return $addr;
     }
 
     /**

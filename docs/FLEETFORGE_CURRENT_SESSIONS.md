@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-INVOICE-PAYNOW** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-INVOICE-PAYNOW-1..4). **QuickBooks invoices now carry the customer's email, payment terms, bill-to and PO. Due dates follow each customer's Payment Terms. Every invoice email, reminder, dunning letter and PDF gets a "Pay now" button (PDF also a QR code) once QBO Payments is switched on, and QuickBooks payments are caught up every 10 minutes even if the webhook is missed. Operator: see OPERATOR_FOLLOWUPS F87 (review customers' terms; add matching QuickBooks terms).**
+
 **S-SOP-MODULE** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-SOP-MODULE-1/2). **New sidebar item "SOP": the whole Standard Operating Procedure inside FleetForge — 13 chapters with diagrams, screen paths that open the real screen, instant search, Mark as read, a print/PDF view, and a live month-end checklist the team ticks together (with checks of the books beside each step). Operator: deploy (one migration), then have the accountant read Accounting + Month-end and confirm the GST ITC clearing entry (see OPERATOR_FOLLOWUPS F86).**
 
 **S-QBO-ITEM-ACCOUNT-CHECK** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-ITEM-ACCOUNT-CHECK-1). **QuickBooks → Items now says, for every item, whether QuickBooks posts it to the same account FleetForge books that revenue to. On the production copy none line up yet, and it surfaced an FF finding: all rental revenue posts to 4110 Other Revenue because FF's revenue map has only per-category rental keys. Operator + accountant: decide the account plan (see OPERATOR_FOLLOWUPS F85).**

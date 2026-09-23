@@ -249,7 +249,7 @@ function FF_EmailTemplates() {
         },
         availableVariables: [
             'customer_name','company_name','contact_name',
-            'invoice_number','invoice_date','due_date','amount','amount_due','days_overdue','pay_online_link',
+            'invoice_number','invoice_date','due_date','amount','amount_due','days_overdue','pay_online_link','pay_now_button',
             'contract_number','unit_number','lease_start','lease_end',
             'payment_amount','payment_date',
             'document_type','expiry_date',

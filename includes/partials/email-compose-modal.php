@@ -157,6 +157,12 @@ declare(strict_types=1);
                 </div>
             </div>
 
+            <!-- S-QBO-INVOICE-PAYNOW: send appends the invoice's Pay now button -->
+            <div class="alert alert-success" x-show="payNow" x-cloak style="display:flex;gap:8px;align-items:center;margin-bottom:12px;font-size:13px;">
+                <?= heroicon('credit-card', 'email-attachment-icon') ?>
+                <span>A <strong>Pay now</strong> button for <strong x-text="payNow ? payNow.amount : ''"></strong> is added to this email automatically, just above your sign-off — the customer pays through QuickBooks and it is recorded here.</span>
+            </div>
+
             <!-- ── Attachments ─────────────────────────────────── -->
             <div class="form-group">
                 <label class="form-label">Attachments</label>

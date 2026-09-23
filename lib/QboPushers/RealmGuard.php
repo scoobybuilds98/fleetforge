@@ -85,7 +85,11 @@ class RealmGuard
         'pref.track_locations',
         'pref.book_close_date',
         'pref.custom_txn_numbers',
+        'pref.po_custom_field_id',     // S-QBO-INVOICE-PAYNOW: slot numbers belong to the old company
+        'pref.po_custom_field_name',
         'pref.synced_at',
+        'payments.backstop_since',     // S-QBO-INVOICE-PAYNOW: the old company's change-feed position
+        'payments.backstop_last_run',
         'cutover_at',
         'push_from_date',
     ];

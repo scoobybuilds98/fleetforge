@@ -28,7 +28,7 @@ Connection token, queue clean-up, and the [month-end close](sop:month-end-close)
    - **Master Sync** (must be ON).
 2. {{Sync Queue @/quickbooks/sync_queue}} (the filter opens on *Queued*; switch it to *Failed*). A failed row shows its reason on hover. Fix the cause ([Problems & fixes](sop:quickbooks-problems)), then press **Retry** on the row, or tick several and press **Retry Selected**.
 3. Open {{Invoices @/quickbooks/invoices}}, {{Bills @/quickbooks/bills}}, {{Credit Memos @/quickbooks/credit_memos}}, {{Payments @/quickbooks/payments}} and {{Bill Payments @/quickbooks/bill_payments}}. Look at the **Failed** and **Pre-flight Block** tiles. Each blocked row names what is missing. Fix it, then press the row's **Retry**.
-4. If a customer says they paid and FleetForge still shows the invoice open, press **Check QuickBooks for payments** on **Invoices**. It checks every open invoice and bill against QuickBooks.
+4. Payments arrive by themselves (webhook, plus a catch-up every 10 minutes). If a customer says they paid and FleetForge still shows the invoice open after 10 minutes, press **Check QuickBooks for payments** on **Invoices**. It checks every open invoice and bill against QuickBooks.
 
 ## Weekly
 

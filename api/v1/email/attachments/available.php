@@ -37,8 +37,18 @@ $documents = EmailService::getAvailableAttachments($customerId, $entityType, $en
 $invoices  = $customerId > 0 ? EmailService::getCustomerInvoices($customerId) : [];
 $contacts  = $customerId > 0 ? EmailService::getCustomerContacts($customerId) : [];
 
+// S-QBO-INVOICE-PAYNOW: tell the compose modal whether send will add the
+// invoice's "Pay now" button (EmailService::withPayNow), so the operator
+// knows before sending — the button is not in the editable body.
+$payNow = null;
+if ($entityType === 'invoice' && $entityId > 0 && \FleetForge\QboPushers\PayLink::payableUrl($entityId) !== '') {
+    $inv    = db_row("SELECT balance_due, currency FROM invoices WHERE id = ?", [$entityId]);
+    $payNow = ['amount' => format_currency($inv['balance_due'] ?? '0') . ' ' . ($inv['currency'] ?? '')];
+}
+
 json_success([
     'documents' => $documents,
     'invoices'  => $invoices,
     'contacts'  => $contacts,
+    'pay_now'   => $payNow,
 ]);

@@ -210,8 +210,46 @@ class CompanyInfoSync
         if (array_key_exists('CustomTxnNumbers', $sales)) {
             QuickBooksClient::settings_write_qbo('pref.custom_txn_numbers', $bool($sales['CustomTxnNumbers']) ? '1' : '0');
         }
+        // S-QBO-INVOICE-PAYNOW: a sales-form custom field the accountant named
+        // like "P.O. Number" receives FF's PO number (InvoicePusher).
+        $po = self::poCustomField($sales);
+        QuickBooksClient::settings_write_qbo('pref.po_custom_field_id', $po['id'] ?? '');
+        QuickBooksClient::settings_write_qbo('pref.po_custom_field_name', $po['name'] ?? '');
         QuickBooksClient::settings_write_qbo('pref.synced_at', gmdate('c'));
         return $out;
+    }
+
+    /**
+     * The enabled sales-form custom field meant for PO numbers, if any.
+     *
+     * QuickBooks' (legacy) sales-form custom fields are three numbered slots
+     * reported in Preferences.SalesFormsPrefs.CustomField as groups of
+     * name/value pairs: "SalesFormsPrefs.UseSalesCustomN" (on/off) and
+     * "SalesFormsPrefs.SalesCustomNameN" (the label). An invoice sets slot N
+     * with CustomField[{DefinitionId: N, ...}]. A slot counts when it is on and
+     * its label reads as a PO ("P.O. Number", "PO #", "Purchase Order"…).
+     *
+     * @return array{id:string, name:string}|null
+     */
+    public static function poCustomField(array $salesFormsPrefs): ?array
+    {
+        $kv = [];
+        foreach ((array) ($salesFormsPrefs['CustomField'] ?? []) as $group) {
+            foreach ((array) ($group['CustomField'] ?? []) as $f) {
+                if (!empty($f['Name'])) {
+                    $kv[(string) $f['Name']] = $f['StringValue'] ?? $f['BooleanValue'] ?? null;
+                }
+            }
+        }
+        for ($n = 1; $n <= 3; $n++) {
+            $on   = $kv["SalesFormsPrefs.UseSalesCustom{$n}"] ?? false;
+            $name = trim((string) ($kv["SalesFormsPrefs.SalesCustomName{$n}"] ?? ''));
+            if (($on === true || $on === 'true') && $name !== ''
+                && preg_match('/^(?:p\.?\s*o\.?(?:\s*(?:#|no\.?|num(?:ber)?))?|purchase\s*order(?:\s*(?:#|no\.?|num(?:ber)?))?)$/i', $name)) {
+                return ['id' => (string) $n, 'name' => $name];
+            }
+        }
+        return null;
     }
 
     /**

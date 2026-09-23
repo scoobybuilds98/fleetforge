@@ -19,11 +19,16 @@ declare(strict_types=1);
  * No confident match → no SalesTermRef (QuickBooks applies its default)
  * and a log line — never a guessed term.
  *
- * Only used when FleetForge CREATES the customer (operator decision
- * 2026-09-23): customers linked to the accountant's records keep the
+ * Customers: only when FleetForge CREATES the customer (operator decision
+ * 2026-09-23) — customers linked to the accountant's records keep the
  * accountant's terms.
  *
- * @session S-QBO-CUSTOMER-TERMS-ADDR
+ * Invoices (S-QBO-INVOICE-PAYNOW): every pushed invoice carries the term
+ * matching ITS OWN days (due date − invoice date), preferring the customer's
+ * named term — so the term and DueDate QuickBooks shows always agree, even
+ * on an invoice generated before due dates followed terms.
+ *
+ * @session S-QBO-CUSTOMER-TERMS-ADDR, S-QBO-INVOICE-PAYNOW
  */
 
 namespace FleetForge\QboPushers;
@@ -45,25 +50,11 @@ final class TermResolver
         if ($ffTerms === '') {
             return null;
         }
-        if (self::$terms === null) {
-            try {
-                $client ??= new QuickBooksClient();
-                $resp = $client->query('SELECT * FROM Term WHERE Active = true MAXRESULTS 1000', ['entity_type' => 'term']);
-            } catch (\Throwable $e) {
-                error_log('[TermResolver] could not read QuickBooks terms: ' . $e->getMessage());
-                return null;   // not cached — the next customer retries
-            }
-            self::$terms = [];
-            foreach ($resp['QueryResponse']['Term'] ?? [] as $t) {
-                if (empty($t['Id'])) {
-                    continue;
-                }
-                // Date-driven terms ("15th of next month") have no DueDays.
-                $days = isset($t['DueDays']) && ($t['Type'] ?? 'STANDARD') === 'STANDARD' ? (int) $t['DueDays'] : null;
-                self::$terms[] = ['id' => (string) $t['Id'], 'name' => (string) ($t['Name'] ?? ''), 'days' => $days];
-            }
+        $terms = self::terms($client);
+        if ($terms === null) {
+            return null;
         }
-        $id = self::match($ffTerms, self::$terms);
+        $id = self::match($ffTerms, $terms);
         if ($id === null) {
             error_log("[TermResolver] no QuickBooks term matches FF payment terms '{$ffTerms}' — customer created without terms (add the term in QuickBooks, or fix the FF value)");
         }
@@ -99,14 +90,87 @@ final class TermResolver
      */
     public static function dueDays(string $ffTerms): ?int
     {
-        $t = strtolower(trim($ffTerms));
-        if (preg_match('/^(?:due\s+(?:on|upon)\s+receipt|on\s+receipt|cod|c\.o\.d\.?|immediate(?:ly)?)$/', $t)) {
-            return 0;
+        // One parser for both the due date FleetForge sets and the term it
+        // sends (S-QBO-INVOICE-PAYNOW) — they can never read "Net 15" apart.
+        return \FleetForge\Billing\PaymentTerms::parseDays($ffTerms);
+    }
+
+    /**
+     * QuickBooks Term id for an INVOICE due $days after its date, or null
+     * (no SalesTermRef — the explicit DueDate still rules).
+     */
+    public static function qboTermIdForInvoice(int $days, ?string $customerTerms, ?QuickBooksClient $client = null): ?string
+    {
+        $terms = self::terms($client);
+        if ($terms === null) {
+            return null;
         }
-        if (preg_match('/^(?:net\s*|n)?(\d{1,3})(?:\s*days?)?$/', $t, $m)) {
-            return (int) $m[1];
+        $id = self::matchDays($days, $customerTerms, $terms);
+        if ($id === null) {
+            error_log("[TermResolver] no QuickBooks term for an invoice due in {$days} day(s) — pushed without a term (add a \"Net {$days}\" term in QuickBooks)");
         }
-        return null;
+        return $id;
+    }
+
+    /**
+     * Pure matcher for invoices: the customer's named term when its days
+     * equal the invoice's; otherwise the ONLY active standard term with
+     * those days; otherwise null.
+     *
+     * @param list<array{id:string, name:string, days:?int}> $qboTerms
+     */
+    public static function matchDays(int $days, ?string $customerTerms, array $qboTerms): ?string
+    {
+        $want = self::norm((string) $customerTerms);
+        if ($want !== '') {
+            foreach ($qboTerms as $t) {
+                if (self::norm($t['name']) === $want && ($t['days'] === $days || $t['days'] === null && self::dueDays($t['name']) === $days)) {
+                    return $t['id'];
+                }
+            }
+        }
+        $hits = array_values(array_filter($qboTerms, static fn($t) => $t['days'] === $days));
+        return count($hits) === 1 ? $hits[0]['id'] : null;
+    }
+
+    /**
+     * The company's active terms (cached per process), or null when they
+     * can't be read — not cached, so the next caller retries.
+     *
+     * @return list<array{id:string, name:string, days:?int}>|null
+     */
+    private static function terms(?QuickBooksClient $client): ?array
+    {
+        if (self::$terms !== null) {
+            return self::$terms;
+        }
+        try {
+            $client ??= new QuickBooksClient();
+            $resp = $client->query('SELECT * FROM Term WHERE Active = true MAXRESULTS 1000', ['entity_type' => 'term']);
+        } catch (\Throwable $e) {
+            error_log('[TermResolver] could not read QuickBooks terms: ' . $e->getMessage());
+            return null;
+        }
+        $terms = [];
+        foreach ($resp['QueryResponse']['Term'] ?? [] as $t) {
+            if (empty($t['Id'])) {
+                continue;
+            }
+            // Date-driven terms ("15th of next month") have no DueDays.
+            $days = isset($t['DueDays']) && ($t['Type'] ?? 'STANDARD') === 'STANDARD' ? (int) $t['DueDays'] : null;
+            $terms[] = ['id' => (string) $t['Id'], 'name' => (string) ($t['Name'] ?? ''), 'days' => $days];
+        }
+        return self::$terms = $terms;
+    }
+
+    /**
+     * Test hook: use this list instead of reading QuickBooks.
+     *
+     * @param list<array{id:string, name:string, days:?int}> $terms
+     */
+    public static function setTermsForTesting(array $terms): void
+    {
+        self::$terms = $terms;
     }
 
     /** Test hook: forget the cached QuickBooks terms. */

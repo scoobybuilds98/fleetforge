@@ -18,7 +18,8 @@ A Super Admin runs these steps in order, with the accountant available for the m
 2. In the Intuit Developer site, get the **Production** keys. Add `https://mainlandrentals.com/fleetforge/oauth/qbo/callback.php` as a redirect URI.
 3. In QuickBooks itself (the accountant):
    - turn on **Custom transaction numbers**;
-   - make sure a payment term exists for each FleetForge value in use (today "Net 30");
+   - make sure a payment term exists for every Payment Terms value customers use ("Net 15", "Net 30"…) — each pushed invoice carries it;
+   - optional: add a sales-form custom field named **P.O. Number** so PO numbers land in their own field;
    - set **Automatically apply credits** to OFF;
    - decide multicurrency (F82) — it cannot be undone.
 
@@ -67,7 +68,7 @@ On {{QuickBooks › Invoices @/quickbooks/invoices}}, top panel "Go-live: link d
 
 10. {{QuickBooks › Settings › Master Controls @/quickbooks/settings}} (Super Admin only): tick **Master Sync Kill-Switch** and press **Save Master Controls**. Ticked means sync is ON, despite the name. Leave **Dry Run Mode** off. The first switch-on stamps the go-live moment.
 11. In the Intuit Developer site, subscribe the webhook to **Payment, BillPayment, Invoice and CreditMemo**, sent to `…/fleetforge/api/v1/webhooks/qbo_payment_notifications.php`.
-12. Add `{pay_online_link}` to the invoice email under {{Settings › Email templates @/settings/email_templates}}, so customers pay through QuickBooks.
+12. Once QuickBooks Payments is set up on the QuickBooks company, tick **QBO Payments** in {{QuickBooks › Settings › Master Controls @/quickbooks/settings}}. From then on every invoice email, reminder, dunning letter and PDF carries a **Pay now** button — no template change needed.
 
 :::callout warning The switch is named backwards
 **Master Sync Kill-Switch** ticked = sync **ON**. Untick it to stop everything.

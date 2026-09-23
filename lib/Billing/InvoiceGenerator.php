@@ -138,6 +138,7 @@ class InvoiceGenerator
             // record is NOT modified; only the invoice snapshots are demoted.
             $lease = db_row(
                 "SELECT l.*, c.province, c.billing_address, c.email AS customer_email,
+                        c.payment_terms AS customer_payment_terms,
                         c.gst_exempt_expiry  AS customer_gst_exempt_expiry,
                         c.pst_exempt_expiry  AS customer_pst_exempt_expiry,
                         c.tax_exempt_expiry  AS customer_tax_exempt_expiry,
@@ -2078,16 +2079,16 @@ class InvoiceGenerator
             // billing period, NOT the generation timestamp. Advance-billing
             // cadence (lease.next_billing_date = period start; cron bills
             // [Y-m-01, Y-m-t] at period start) → issue_date = billing_period_start.
-            // due_date = issue_date + payment-terms net days
-            // (settings.invoice.due_days_default; customers.payment_terms is a
-            // free-text field and intentionally NOT used here). created_at (DB
-            // CURRENT_TIMESTAMP) stays the real generation time. This makes each
-            // fanned-out segment carry its own period-appropriate dates, and the
-            // GL/AR posting follows the period via D-GL-REVREC-1 (AutoEntryBridge).
-            $dueDays     = (int)(settings_get('invoice.due_days_default', '30') ?? 30);
+            // due_date = issue_date + the customer's payment-terms days
+            // (S-QBO-INVOICE-PAYNOW / D-QBO-INVOICE-PAYNOW-1: "Net 15" → 15;
+            // unreadable or blank terms → settings.invoice.due_days_default).
+            // The same days pick the QuickBooks term on push, so both systems
+            // show the same due date. created_at (DB CURRENT_TIMESTAMP) stays
+            // the real generation time. Each fanned-out segment carries its own
+            // period-appropriate dates, and the GL/AR posting follows the
+            // period via D-GL-REVREC-1 (AutoEntryBridge).
             $invoiceDate = $periodStart;
-            $dueDate     = (new \DateTimeImmutable($periodStart))
-                               ->modify("+{$dueDays} days")->format('Y-m-d');
+            $dueDate     = PaymentTerms::dueDate($periodStart, $lease['customer_payment_terms'] ?? null);
 
             // Exchange rate for USD invoices — exchange_rates has no is_active/effective_date
             // columns, just from_currency/to_currency/rate/rate_date. Pull the latest rate by
@@ -3067,8 +3068,10 @@ class InvoiceGenerator
             $subtotal    = $feeResult['fee_amount'];
             $totalAmount = bcadd($subtotal, $tax['total'], 2);
             $today       = $todayLocal; // S-AUDIT-BILLING-ENGINE-1 #18: business tz for invoice_date/due/late_fee_date (was server tz)
-            $dueDays     = (int)(settings_get('invoice.due_days_default', '30') ?? 30);
-            $dueDate     = date('Y-m-d', strtotime("+{$dueDays} days"));
+            // S-QBO-INVOICE-PAYNOW: due per the customer's payment terms,
+            // counted from the late-fee invoice's own date (business timezone).
+            $lfTerms     = db_row("SELECT payment_terms FROM customers WHERE id = ?", [(int) $orig['customer_id']]);
+            $dueDate     = PaymentTerms::dueDate($today, $lfTerms['payment_terms'] ?? null);
 
             // Gap-free invoice number (D15, D20 — called inside this transaction)
             $invoiceNumber = $this->generateInvoiceNumber();

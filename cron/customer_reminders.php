@@ -292,6 +292,9 @@ function cr_run_invoice_due_soon(array $cfg, string $today, string $appUrl, stri
             'amount'          => cr_money($row['balance_due'], (string) $row['currency']),
             'days_until_text' => $phrase,
             'portal_url'      => $appUrl . '/portal/invoices',
+            // S-QBO-INVOICE-PAYNOW: straight to the QuickBooks pay page (no
+            // portal login) when QuickBooks Payments is on; '' otherwise.
+            'pay_url'         => \FleetForge\QboPushers\PayLink::payableUrl($invId),
         ]);
         $subject = cr_subject($cfg, 'Invoice ' . $row['invoice_number'] . ' is due ' . $phrase);
         $status = cr_dispatch(
@@ -352,6 +355,7 @@ function cr_run_invoice_overdue(array $cfg, string $today, string $appUrl, strin
             'amount'         => cr_money($row['balance_due'], (string) $row['currency']),
             'days_overdue'   => $daysOverdue,
             'portal_url'     => $appUrl . '/portal/invoices',
+            'pay_url'        => \FleetForge\QboPushers\PayLink::payableUrl($invId),   // S-QBO-INVOICE-PAYNOW
         ]);
         $subject = cr_subject($cfg, 'Payment reminder: invoice ' . $row['invoice_number'] . ' is overdue');
         $status = cr_dispatch(

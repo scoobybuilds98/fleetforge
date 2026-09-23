@@ -132,6 +132,11 @@ class EmailService
         // Template bodies are HTML and pass through untouched.
         $bodyHtml = self::bodyToHtml($bodyHtml);
 
+        // S-QBO-INVOICE-PAYNOW: an email about a payable invoice gets the
+        // "Pay now" button (and a text-part line) — every path that emails an
+        // invoice through here (Email Invoice, batch Send & Email) gets it.
+        [$bodyHtml, $bodyText] = self::withPayNow($bodyHtml, $bodyText, $entityType, $entityId);
+
         // Wrap raw body in the company shell (logo + footer)
         // WHY: separating the shell from the template body lets the
         // user-edited message stay focused on its own content while
@@ -264,6 +269,61 @@ class EmailService
             'log_id'  => $logId,
             'error'   => $errorMsg ?: 'Could not deliver email. Check SMTP settings or error log.',
         ];
+    }
+
+    // =========================================================
+    // withPayNow() — add the invoice "Pay now" button (S-QBO-INVOICE-PAYNOW)
+    //
+    // For an email about an invoice (entity_type 'invoice') that can be paid
+    // online right now, append the Pay-now block to the HTML body and a pay
+    // line to the text part. Skipped when the body already carries the pay
+    // link or the button (a template that placed {pay_online_link} /
+    // {pay_now_button} itself), when QuickBooks Payments is off, and when
+    // the invoice is draft / paid / void — so nothing changes before go-live.
+    //
+    // @return array{0:string,1:string} [html, text]
+    // =========================================================
+    public static function withPayNow(string $bodyHtml, string $bodyText, ?string $entityType, ?int $entityId): array
+    {
+        if ($entityType !== 'invoice' || !$entityId) {
+            return [$bodyHtml, $bodyText];
+        }
+        $url = \FleetForge\QboPushers\PayLink::payableUrl($entityId);
+        if ($url === '') {
+            return [$bodyHtml, $bodyText];
+        }
+        $escUrl = htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+        if (!str_contains($bodyHtml, 'data-ff-pay-now') && !str_contains($bodyHtml, $url) && !str_contains($bodyHtml, $escUrl)) {
+            $btn = \FleetForge\QboPushers\PayLink::buttonHtml($entityId);
+            $at  = self::signOffOffset($bodyHtml);
+            $bodyHtml = $at === null ? $bodyHtml . $btn : substr($bodyHtml, 0, $at) . $btn . substr($bodyHtml, $at);
+        }
+        if (!str_contains($bodyText, $url)) {
+            $line = \FleetForge\QboPushers\PayLink::buttonText($entityId);
+            if ($line !== '') {
+                $bodyText = rtrim($bodyText) . "\n\n" . $line . "\n";
+            }
+        }
+        return [$bodyHtml, $bodyText];
+    }
+
+    /**
+     * Where the sign-off starts ("Sincerely," / "Thanks," / "Regards" …) so
+     * the Pay-now button sits above the signature, not under it; null when
+     * there is none (the button is appended). Only a sign-off in the second
+     * half of the body counts, and the word must end the phrase ("Thank you
+     * for your business." near the top is not a sign-off).
+     */
+    private static function signOffOffset(string $html): ?int
+    {
+        $re = '/(?:<p\b[^>]*>|<br\s*\/?>\s*<br\s*\/?>)\s*(?:<(?:strong|b)>)?\s*'
+            . '(?:sincerely|kind regards|best regards|warm regards|regards|many thanks|thanks|thank you|cheers|best)'
+            . '\s*(?:,|!|\.|<br|<\/p>|<\/(?:strong|b)>)/i';
+        if (!preg_match_all($re, $html, $m, PREG_OFFSET_CAPTURE)) {
+            return null;
+        }
+        $last = end($m[0]);
+        return $last[1] >= (int) (strlen($html) * 0.4) ? (int) $last[1] : null;
     }
 
     // =========================================================
@@ -461,6 +521,9 @@ class EmailService
                 // A stable FleetForge link that opens the invoice's QuickBooks
                 // pay page on click ('' while QuickBooks Payments is off).
                 $vars['pay_online_link'] = \FleetForge\QboPushers\PayLink::url((int) $row['id']);
+                // S-QBO-INVOICE-PAYNOW: the button, for a template that wants
+                // it somewhere specific (otherwise send() appends it).
+                $vars['pay_now_button'] = \FleetForge\QboPushers\PayLink::buttonHtml((int) $row['id']);
                 $today = new \DateTime('today');
                 if ($row['due_date']) {
                     $due = new \DateTime($row['due_date']);

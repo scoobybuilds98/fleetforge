@@ -467,7 +467,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <input type="checkbox" x-model="masters.payments_enabled" style="margin-top:3px;">
                 <span>
                     <strong>QBO Payments</strong>
-                    <p class="text-secondary text-sm" style="margin:2px 0 0;">Enables the "Pay Online" button in the customer portal once QBO Payments hosted page is configured (S-QBO-15).</p>
+                    <p class="text-secondary text-sm" style="margin:2px 0 0;">Customers pay invoices online through QuickBooks Payments: a <strong>Pay now</strong> button is added to every invoice email, due-soon and overdue reminder, dunning letter and invoice PDF (with a QR code), plus "Pay Online" in the customer portal. Payments come back to FleetForge on their own. Turn on only once QuickBooks Payments is set up on the QuickBooks company.</p>
                 </span>
             </label>
         </div>

@@ -34,6 +34,12 @@ class QboFieldLimits
     public const INVOICE_CUSTOMER_MEMO_MAX    = 1000;
     // Line Description: QBO API spec 4000 chars
     public const INVOICE_LINE_DESCRIPTION_MAX = 4000;
+    // S-QBO-INVOICE-PAYNOW — QBO API spec: EmailAddress.Address 100 chars;
+    // PhysicalAddress.Line1..5 500 chars; a (legacy) sales-form custom
+    // field's StringValue 31 chars.
+    public const EMAIL_ADDRESS_MAX        = 100;
+    public const ADDRESS_LINE_MAX         = 500;
+    public const CUSTOM_FIELD_STRING_MAX  = 31;
 
     // ── Payment entity ────────────────────────────────────────────────────
     // PaymentRefNum: QBO API spec 21 chars (matches Invoice/Bill DocNumber per Intuit docs)

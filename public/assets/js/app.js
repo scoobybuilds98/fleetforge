@@ -4794,6 +4794,7 @@ window.FF_EmailCompose = function () {
         contacts: [],
         availableDocs: [],
         invoices: [],
+        payNow: null,
         availableVariables: [],
         attachments: [],
         defaultReplyTo: '',
@@ -4904,6 +4905,8 @@ window.FF_EmailCompose = function () {
                     this.availableDocs = r.data.documents || [];
                     this.invoices      = r.data.invoices  || [];
                     this.contacts      = r.data.contacts  || [];
+                    // S-QBO-INVOICE-PAYNOW: send adds a Pay now button for a payable invoice.
+                    this.payNow        = r.data.pay_now   || null;
 
                     // Auto-pick the first contact email if none was supplied
                     if (!this.toEmail && this.contacts.length > 0) {
@@ -5100,6 +5103,7 @@ window.FF_EmailCompose = function () {
             this.contacts = [];
             this.availableDocs = [];
             this.invoices = [];
+            this.payNow = null;
             this.availableVariables = [];
             this.showPreview = false;
             this.showVariables = false;

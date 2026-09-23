@@ -36,7 +36,7 @@ Dispatcher and manager, every morning:
 5. **Credit application**: customer → **Credit Application** tab → **+ Send Application**. When it comes back, {{Credit Applications @/credit_applications}} → **View** → set an Outcome in **Review**. Tick "Apply credit limit to customer record" if it should change the customer, then **Save Review**.
 
 :::callout warning Customer rules that surprise people
-- **Payment Terms does not set the due date.** Every invoice is due 30 days after its period start (Settings default). Payment Terms goes to QuickBooks as the customer's term when FleetForge creates the customer there.
+- **Payment Terms sets the due date.** "Net 15" makes each new invoice due 15 days after its invoice date; "Due on receipt" the same day. Blank or unusual terms ("2% 10 Net 30") fall back to 30 days (Settings default). The matching term goes to QuickBooks on every invoice, so type terms as "Net 15", "Net 30"…
 - **There is no billing-address field on the customer forms.** The invoice PDF's "Bill To" and the QuickBooks billing address come from a stored billing address. Only imported customers have one today ([Known issues](sop:known-issues)).
 - **Credit Limit and Credit Hold block nothing.** Batch invoicing still bills Credit Hold customers. Suspended or Inactive customers lose portal login.
 - **Delete** appears only when the customer has no active leases. It never deletes the QuickBooks customer.

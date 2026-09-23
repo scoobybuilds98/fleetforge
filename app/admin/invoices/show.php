@@ -1436,6 +1436,20 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
         </button>
         <?php endif; ?>
 
+        <?php
+        // S-QBO-INVOICE-PAYNOW: the same Pay-now link the email and PDF carry,
+        // for staff to text or paste — only while QuickBooks Payments is on and
+        // the invoice can take a payment.
+        $payLinkUrl = can_view_financials() ? \FleetForge\QboPushers\PayLink::payableUrl((int) $invoice['id'], $invoice) : '';
+        if ($payLinkUrl !== ''): ?>
+        <button type="button" class="btn btn-secondary btn-sm no-print"
+                onclick="navigator.clipboard.writeText(<?= e(json_encode($payLinkUrl)) ?>).then(() => FF_Toast.success('Pay link copied', 'Paste it into a text or chat — it opens this invoice\'s QuickBooks payment page.'), () => FF_Toast.error('Copy failed', 'Select and copy the link from the invoice email instead.'))"
+                title="Copy this invoice's online payment link">
+            <?= heroicon('credit-card', 'icon-sm') ?>
+            Copy pay link
+        </button>
+        <?php endif; ?>
+
         <?php if ($canEdit): ?>
             <!-- Edit Notes -->
             <button class="btn btn-secondary btn-sm" @click="startEdit()">

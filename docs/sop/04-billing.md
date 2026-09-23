@@ -62,10 +62,11 @@ From the lease → **Generate Invoice**:
 - **Send**: **Send Invoice**. It sets Sent, adds the balance to the customer, posts the revenue entry and queues QuickBooks. **It does not email.** Email with **Email Invoice**; check the To field, which defaults to the main email, not the Invoice Email.
 - **Sent invoices are frozen.** Only PO number, notes and delivery details can change. Correct a sent invoice with a credit note.
 - **Void**: **Void** → reason → **Void Invoice** (draft or sent only). This reverses the balance and revenue and makes the month billable again. Paid, partially paid and overdue invoices cannot be voided.
-- **Customers pay online** once `{pay_online_link}` is in the invoice email template and the invoice is in QuickBooks.
+- **Customers pay online with the Pay now button.** While QuickBooks Payments is on ({{QuickBooks › Settings › Master Controls @/quickbooks/settings}}), every email about an unpaid invoice gets a **Pay now** button above the signature — Email Invoice, batch Send & Email, the due-soon and overdue reminders — as do dunning letters, and the invoice PDF gets the button plus a QR code. It opens the invoice's QuickBooks payment page (card or bank transfer). Nothing to add to the templates; the compose window says when the button will be added.
+- **Copy pay link** on the invoice page copies the same link, to text or paste into a chat.
 
 :::callout warning Billing rules
-- Invoice date = period start; due = 30 days later.
+- Invoice date = period start; due = invoice date + the customer's Payment Terms (30 days when blank).
 - Billing a month before it ends bills the whole month ahead.
 - Drafts count for nothing in reports or receivables.
 - A precharge can be billed on one invoice only.
@@ -86,7 +87,7 @@ FleetForge also makes credits itself: overpayments, precharge credits at close, 
 ## Payments
 
 :::callout rule After QuickBooks go-live, customer payments are recorded in QuickBooks
-Pay links, portal payments and the accountant's deposits all arrive in FleetForge on their own. Record a payment in FleetForge only for money QuickBooks will never see.
+Pay now payments, portal payments and the accountant's deposits all arrive in FleetForge on their own — usually within a minute, and within 10 minutes even if QuickBooks' notification is lost. The invoice turns Paid and the ledger entry posts by itself. Record a payment in FleetForge only for money QuickBooks will never see.
 :::
 
 If you do record one here: {{Payments › Record Payment @/payments/create}} → pick the invoice → amount (or **Pay full balance**) → method → date → reference → **Record Payment**. Money over the balance becomes an Overpayment credit note after a confirm step. **Void / Remove Payment** (manager or higher) reverses it. There is no screen to re-allocate a payment to another invoice.

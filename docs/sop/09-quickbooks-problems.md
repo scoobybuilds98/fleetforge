@@ -34,4 +34,8 @@ Nearly every blocked item names its own fix in the error text. **Fix the cause f
 | Red "Sync blocked — different QuickBooks company" | Connected to another company than the one mapped | Super Admin: **Reset mappings for this company**, then map again ([go-live](sop:quickbooks-go-live#map)) |
 | Accountant can't see the QuickBooks menu | Not granted by default | Super Admin grants it on {{Users › Role permissions @/users/role_permissions}}; the accountant logs out and back in |
 | Yellow "Income accounts don't line up" on **Items** | QuickBooks items and FleetForge revenue accounts differ | F85 decision ([Open decisions](sop:open-decisions)) |
+| Customer clicks **Pay now** and sees "Payment link almost ready" | The invoice hasn't reached QuickBooks yet (sent a minute ago), or its push failed | Wait a minute and retry; if it stays, fix the invoice on {{Invoices @/quickbooks/invoices}} (Failed / Pre-flight Block) and **Retry** |
+| Customer sees "Online payment unavailable" | QBO Payments is off, or QuickBooks is disconnected | {{Settings @/quickbooks/settings}} → Master Controls / Connection Status |
+| No **Pay now** button in an email or PDF | QBO Payments is off, or the invoice is a draft, paid or void (a PDF made before Payments was on has none) | Turn on QBO Payments; send the invoice; regenerate the PDF |
+| QuickBooks invoice shows no terms | QuickBooks has no term with that many days (e.g. no "Net 15") | Add the term in QuickBooks; the next update of the invoice carries it |
 :::

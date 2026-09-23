@@ -121,6 +121,25 @@ try {
     $environment = (string) settings_get('quickbooks.environment', 'sandbox');
     $realmId     = (string) settings_get('quickbooks.realm_id', '');
 
+    // ── Payment backstop (S-QBO-INVOICE-PAYNOW) ───────────────
+    // Every 10 minutes, one QuickBooks change-feed call brings in any
+    // customer payment whose webhook never arrived (Pay-now payments, the
+    // accountant's deposits). Runs before the queue claim because most runs
+    // find the queue empty and exit there. Never fatal to the worker; the
+    // window only advances on success. Skipped in dry-run (no side effects).
+    if (!$dryRun) {
+        try {
+            $backstop = \FleetForge\QboPushers\PaymentBackstop::runIfDue();
+            if ($backstop !== null) {
+                echo "[{$startedAt}] Payment backstop: {$backstop['checked']} changed, {$backstop['relevant']} for FleetForge"
+                    . ($backstop['results'] ? ' (' . http_build_query($backstop['results'], '', ', ') . ')' : '') . "\n";
+            }
+        } catch (\Throwable $bsErr) {
+            error_log('cron/qbo_sync_worker: payment backstop failed — ' . $bsErr->getMessage());
+            \FleetForge\Observability\Sentry::captureException($bsErr);
+        }
+    }
+
     // ── Pre-resolve notification audience (super_admin + accountant) ──
     // Per S-QBO-1 precedent (cron/qbo_token_refresh.php) we pass
     // $specificUserIds explicitly because user_permissions has no

@@ -64,6 +64,24 @@ if (!function_exists('ff_reminder_cta')) {
     }
 }
 
+if (!function_exists('ff_reminder_pay_cta')) {
+    /**
+     * S-QBO-INVOICE-PAYNOW: invoice reminders pay in one click — the "Pay
+     * now" button opens the invoice's QuickBooks pay page ($d['pay_url'],
+     * PayLink::payableUrl) when online payment is on; otherwise the old
+     * portal button ($d['portal_url']).
+     */
+    function ff_reminder_pay_cta(array $d, string $portalLabel): string
+    {
+        $pay = (string) ($d['pay_url'] ?? '');
+        if ($pay === '') {
+            return ff_reminder_cta((string) ($d['portal_url'] ?? ''), $portalLabel);
+        }
+        return ff_reminder_cta($pay, 'Pay now')
+            . '<p style="margin:-8px 0 16px;font-size:12px;color:#6b7280;">Secure online payment through QuickBooks — card or bank transfer. It is recorded on your account automatically.</p>';
+    }
+}
+
 if (!function_exists('ff_reminder_footer_note')) {
     /** Small muted closing line, shared. */
     function ff_reminder_footer_note(string $text): string
@@ -90,7 +108,7 @@ if (!function_exists('render_customer_invoice_due_soon')) {
                 ['Due date',  htmlspecialchars((string) ($d['due_date'] ?? ''), ENT_QUOTES, 'UTF-8')],
                 ['Amount due', htmlspecialchars((string) ($d['amount'] ?? ''), ENT_QUOTES, 'UTF-8')],
             ])
-            . ff_reminder_cta((string) ($d['portal_url'] ?? ''), 'View & Pay Invoice')
+            . ff_reminder_pay_cta($d, 'View & Pay Invoice')
             . ff_reminder_footer_note('If you have already sent payment, thank you — please disregard this notice.');
     }
 }
@@ -114,7 +132,7 @@ if (!function_exists('render_customer_invoice_overdue')) {
                 ['Balance due', htmlspecialchars((string) ($d['amount'] ?? ''), ENT_QUOTES, 'UTF-8')],
             ])
             . '<p style="margin:0 0 16px;">Please arrange payment at your earliest convenience to keep your account in good standing.</p>'
-            . ff_reminder_cta((string) ($d['portal_url'] ?? ''), 'Pay Now')
+            . ff_reminder_pay_cta($d, 'Pay Now')
             . ff_reminder_footer_note('If payment is already on its way, thank you — please disregard this reminder.');
     }
 }

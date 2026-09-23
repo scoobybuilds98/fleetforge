@@ -640,3 +640,5 @@ QUICKBOOKS_PROGRESS.md §2 SESSION LOG ends at S-QBO-MATCHER-GREEDY-FIX (2026-05
 **Progress marker 2026-09-24 — S-QBO-MONEY-JSON:** ✅ outgoing QuickBooks money via `QboMoney` + exact `encodeBody()` (18 float casts removed). No migration. `_smoke_qbo_money_json.php` 4/4.
 
 **Progress marker 2026-09-24 — S-QBO-ITEM-ACCOUNT-CHECK:** ✅ QuickBooks → Items reports each item's income account vs FF's revenue account (audit B8). All pre-go-live audit code items are now closed; remaining work is operator/accountant (F80–F85). `_smoke_qbo_item_account_check.php` 8/8.
+
+**Progress marker 2026-09-24 — S-QBO-INVOICE-PAYNOW:** ✅ pushed invoices carry BillEmail (always), the matching term, bill-to and PO; FF due dates follow customer terms; Pay now in invoice emails / reminders / dunning / PDF (+QR); PaymentBackstop catches missed payment webhooks every 10 min. No migration. `_smoke_qbo_invoice_paynow.php` 12/12. Still open: F80 prove the pay link on the real company.

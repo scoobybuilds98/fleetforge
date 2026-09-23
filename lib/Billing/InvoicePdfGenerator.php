@@ -221,6 +221,13 @@ class InvoicePdfGenerator
             .fs-balance td { font-weight: 700; font-size: 10.5pt; }
             .notes-box { margin-top: 20px; padding: 10px 12px; background: #f9fafb; font-size: 8.5pt; }
             .footer { margin-top: 24px; padding-top: 8px; border-top: 0.5pt solid #d1d5db; font-size: 7.5pt; color: #9ca3af; text-align: center; }
+            .paynow { width: 100%; margin-top: 20px; border: 1pt solid #d1d5db; background: #f9fafb; }
+            .paynow td { vertical-align: middle; padding: 12px 14px; }
+            .paynow-title { font-size: 11pt; font-weight: 700; color: #111827; margin-bottom: 3px; }
+            .paynow-sub { font-size: 8pt; color: #4b5563; line-height: 1.45; margin-bottom: 8px; }
+            .paynow-btn td { padding: 7px 18px; font-size: 10pt; font-weight: 700; }
+            .paynow-btn a { color: #ffffff; text-decoration: none; }
+            .paynow-url { font-size: 7pt; color: #6b7280; margin-top: 6px; }
         </style>';
 
         $html .= '<table class="hdr-table"><tr>
@@ -368,6 +375,14 @@ class InvoicePdfGenerator
             $html .= '<div class="notes-box"><strong>Notes</strong><br>' . nl2br($e($invoice['notes'])) . '</div>';
         }
 
+        // ── Pay online (S-QBO-INVOICE-PAYNOW) ───────────────────────
+        // While QuickBooks Payments is on, an unpaid invoice's PDF carries a
+        // "Pay now" button (a live link in the PDF) and a QR code for a
+        // printed copy. The link is FleetForge's stable pay link, so a PDF
+        // made before the invoice reached QuickBooks still works; the pay
+        // page re-checks the invoice when it is opened.
+        $html .= self::payNowBlock($invoice);
+
         // ── Payment instructions (bug #23) ──────────────────────────
         // invoice.payment_instructions ("Default text shown at the bottom of
         // all invoice PDFs") was an editable setting nothing read. Resolve it
@@ -383,5 +398,51 @@ class InvoicePdfGenerator
         $html .= '<div class="footer">' . $e($companyName) . ($companyWebsite ? ' &middot; ' . $e($companyWebsite) : '') . ($companyEmail ? ' &middot; ' . $e($companyEmail) : '') . '</div>';
 
         return $html;
+    }
+
+    /**
+     * The PDF's "Pay this invoice online" box (button + QR code), or '' when
+     * QuickBooks Payments is off or nothing is owing. Drafts get it too: the
+     * PDF emailed on send is usually rendered while the invoice is still a
+     * draft, and the link is stable.
+     */
+    public static function payNowBlock(array $invoice): string
+    {
+        if (in_array((string) $invoice['status'], ['void', 'paid', 'written_off'], true)
+            || bccomp((string) $invoice['balance_due'], '0', 2) <= 0) {
+            return '';
+        }
+        $url = \FleetForge\QboPushers\PayLink::url((int) $invoice['id']);
+        if ($url === '') {
+            return '';
+        }
+        $e     = static fn ($v) => \e((string) $v);
+        $color = trim((string) \settings_get('brand.primary_color', ''));
+        $color = preg_match('/^#[0-9a-fA-F]{6}$/', $color) ? $color : '#F97316';
+
+        $qr = '';
+        try {
+            $renderer = new \BaconQrCode\Renderer\ImageRenderer(
+                new \BaconQrCode\Renderer\RendererStyle\RendererStyle(240, 1),
+                new \BaconQrCode\Renderer\Image\SvgImageBackEnd()
+            );
+            $svg = (new \BaconQrCode\Writer($renderer))->writeString($url);
+            $qr  = '<img src="data:image/svg+xml;base64,' . base64_encode($svg) . '" width="92" height="92" alt="">'
+                 . '<div class="paynow-url" style="text-align:center;">Scan to pay</div>';
+        } catch (\Throwable $ex) {
+            // The button still works without the code; say why in the log.
+            error_log('[InvoicePdfGenerator] QR code for invoice ' . $invoice['id'] . ' failed: ' . $ex->getMessage());
+        }
+
+        return '<table class="paynow"><tr>
+            <td>
+                <div class="paynow-title">Pay this invoice online</div>
+                <div class="paynow-sub">Secure payment through QuickBooks &mdash; card or bank transfer. Your payment is recorded on your account automatically.</div>
+                <table class="paynow-btn"><tr><td style="background:' . $e($color) . ';"><a href="' . $e($url) . '" style="color:#ffffff;text-decoration:none;font-weight:bold;">Pay now &mdash; '
+                    . $e(\format_currency($invoice['balance_due'])) . ' ' . $e($invoice['currency']) . '</a></td></tr></table>
+                <div class="paynow-url">' . $e($url) . '</div>
+            </td>' . ($qr !== '' ? '
+            <td width="110" style="text-align:center;">' . $qr . '</td>' : '') . '
+        </tr></table>';
     }
 }
