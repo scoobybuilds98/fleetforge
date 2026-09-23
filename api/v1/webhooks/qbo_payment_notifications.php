@@ -24,7 +24,10 @@ declare(strict_types=1);
  *   8. Return 200 to Intuit IMMEDIATELY (don't make Intuit wait on
  *      our processing — they have aggressive retry policies)
  *   9. fastcgi_finish_request() to release the HTTP connection
- *  10. Process each event via PaymentWebhookHandler::handle()
+ *  10. Process each event via PaymentWebhookHandler::handle() (Payment),
+ *      BillPaymentWebhookHandler::handle() (BillPayment — bills paid in
+ *      QuickBooks, S-QBO-BILLPAY-MIRROR) or DocumentWebhookHandler
+ *      (Invoice / CreditMemo edits made in QuickBooks)
  *  11. UPDATE acc_qbo_webhook_events.processed_at + processing_result
  *
  * Always returns:
@@ -174,20 +177,29 @@ foreach ($events as $ev) {
     // S-QBO-GOLIVE-AUDIT: Invoice / CreditMemo events for documents FF
     // pushed — a void / delete / edit made in QuickBooks becomes a drift
     // event instead of an invisible disagreement. Other entities are ignored.
-    $isPayment = strcasecmp($ev['name'], 'Payment') === 0;
-    if (!$isPayment && !\FleetForge\QboPushers\DocumentWebhookHandler::handles($ev['name'])) {
+    // S-QBO-BILLPAY-MIRROR: BillPayment events (a bill the accountant paid
+    // in QuickBooks) mirror into FF's AP. Intuit names the entity
+    // "BillPayment" (legacy envelope) / "Billpayment" (CloudEvents type
+    // qbo.billpayment.*) — compared case-insensitively.
+    $isPayment     = strcasecmp($ev['name'], 'Payment') === 0;
+    $isBillPayment = strcasecmp($ev['name'], 'BillPayment') === 0;
+    if (!$isPayment && !$isBillPayment && !\FleetForge\QboPushers\DocumentWebhookHandler::handles($ev['name'])) {
         continue;
     }
 
     try {
-        $res = $isPayment
-            ? PaymentWebhookHandler::handle($ev['entity_id'], $ev['operation'], $ev['realm_id'], $webhookEventId)
-            : \FleetForge\QboPushers\DocumentWebhookHandler::handle($ev['name'], $ev['entity_id'], $ev['operation'], $ev['realm_id']);
+        if ($isPayment) {
+            $res = PaymentWebhookHandler::handle($ev['entity_id'], $ev['operation'], $ev['realm_id'], $webhookEventId);
+        } elseif ($isBillPayment) {
+            $res = \FleetForge\QboPushers\BillPaymentWebhookHandler::handle($ev['entity_id'], $ev['operation'], $ev['realm_id'], $webhookEventId);
+        } else {
+            $res = \FleetForge\QboPushers\DocumentWebhookHandler::handle($ev['name'], $ev['entity_id'], $ev['operation'], $ev['realm_id']);
+        }
         $lastResult = (string) ($res['result'] ?? 'unknown');
     } catch (\Throwable $e) {
         $lastResult = 'error';
         $lastError  = $e->getMessage();
-        error_log("[qbo_payment_webhook] PaymentWebhookHandler threw: " . $e->getMessage());
+        error_log("[qbo_payment_webhook] {$ev['name']} handler threw: " . $e->getMessage());
     }
 }
 

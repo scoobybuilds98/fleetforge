@@ -68,7 +68,7 @@ $total = db_count(
 $rows = db_select(
     "SELECT ap.id, ap.payment_number, ap.vendor_id, v.name AS vendor_name,
             ap.payment_date, ap.payment_method, ap.reference_number,
-            ap.check_number, ap.amount, ap.currency, ap.status,
+            ap.check_number, ap.amount, ap.currency, ap.status, ap.origin,
             ba.name AS bank_account_name,
             ap.created_at
      FROM acc_ap_payments ap

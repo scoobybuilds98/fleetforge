@@ -71,7 +71,7 @@ $canLink = can('quickbooks', 'force_full_resync');
         </div>
         <template x-if="canLink">
             <button class="btn btn-secondary btn-sm" @click="catchUpPayments()" :disabled="busy"
-                    title="For every open FleetForge invoice that is in QuickBooks, bring in payments QuickBooks has and FleetForge does not.">
+                    title="For every open FleetForge invoice and bill that is in QuickBooks, bring in payments QuickBooks has and FleetForge does not.">
                 Check QuickBooks for payments
             </button>
         </template>
@@ -698,26 +698,39 @@ function qboCutoverLinker(canLink) {
         },
 
         async catchUpPayments() {
-            if (!confirm('Check every open FleetForge invoice that is in QuickBooks and bring in payments QuickBooks has recorded?')) return;
+            if (!confirm('Check every open FleetForge invoice and bill that is in QuickBooks and bring in payments QuickBooks has recorded?')) return;
             this.busy = true;
             try {
-                // Time-boxed slices: the server stops before its limit and
-                // says where to resume (next_after_id).
-                const d = { checked: 0, imported: 0, unchanged: 0, errors: 0, details: [] };
-                let after = 0, r = null, loops = 0;
-                do {
-                    r = await FF_Api.post('<?= base_url('api/v1/quickbooks/cutover_link') ?>', { action: 'catch_up_payments', limit: 500, after_id: after });
+                // Invoices (customer payments), then bills (bill payments the
+                // accountant made in QuickBooks — S-QBO-BILLPAY-MIRROR). Each
+                // kind runs in time-boxed slices: the server stops before its
+                // limit and says where to resume (next_after_id).
+                const totals = {};
+                let r = null;
+                for (const kind of ['invoice', 'bill']) {
+                    const d = { checked: 0, imported: 0, unchanged: 0, errors: 0, details: [] };
+                    let after = 0, loops = 0;
+                    do {
+                        r = await FF_Api.post('<?= base_url('api/v1/quickbooks/cutover_link') ?>', { action: 'catch_up_payments', kind: kind, limit: 500, after_id: after });
+                        if (!r.success) break;
+                        ['checked', 'imported', 'unchanged', 'errors'].forEach(k => { d[k] += (r.data[k] || 0); });
+                        d.details = d.details.concat(r.data.details || []);
+                        after = r.data.next_after_id;
+                    } while (after !== null && after !== undefined && ++loops < 100);
+                    totals[kind] = d;
                     if (!r.success) break;
-                    ['checked', 'imported', 'unchanged', 'errors'].forEach(k => { d[k] += (r.data[k] || 0); });
-                    d.details = d.details.concat(r.data.details || []);
-                    after = r.data.next_after_id;
-                } while (after !== null && after !== undefined && ++loops < 100);
+                }
                 if (r && r.success) {
-                    this.msg = { type: d.errors ? 'warning' : 'success',
-                                 text: 'Checked ' + d.checked + ' invoice(s): ' + d.imported + ' had QuickBooks payments brought in, ' + d.unchanged + ' unchanged'
-                                     + (d.errors ? ', ' + d.errors + ' need attention:\n' + (d.details || []).filter(x => x.status !== 'imported').map(x => x.invoice + ': ' + (x.detail || x.status)).join('\n') : '.') };
+                    const inv = totals.invoice, bil = totals.bill;
+                    const errors = inv.errors + bil.errors;
+                    const attention = inv.details.filter(x => x.status !== 'imported').map(x => x.invoice + ': ' + (x.detail || x.status))
+                        .concat(bil.details.filter(x => x.status !== 'imported').map(x => 'Bill ' + x.bill + ': ' + (x.detail || x.status)));
+                    this.msg = { type: errors ? 'warning' : 'success',
+                                 text: 'Checked ' + inv.checked + ' invoice(s): ' + inv.imported + ' had QuickBooks payments brought in, ' + inv.unchanged + ' unchanged.\n'
+                                     + 'Checked ' + bil.checked + ' bill(s): ' + bil.imported + ' had QuickBooks bill payments brought in, ' + bil.unchanged + ' unchanged'
+                                     + (errors ? '.\n' + errors + ' need attention:\n' + attention.join('\n') : '.') };
                 } else {
-                    this.msg = { type: 'danger', text: (r.error && r.error.message) || 'Check failed.' };
+                    this.msg = { type: 'danger', text: (r && r.error && r.error.message) || 'Check failed.' };
                 }
             } catch (e) {
                 this.msg = { type: 'danger', text: 'Check failed: ' + (e.message || e) };

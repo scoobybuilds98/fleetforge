@@ -177,7 +177,7 @@ class BillPaymentPusher
 
         // 2. Load FF ap_payment.
         $ff = db_row(
-            "SELECT id, payment_number, status FROM acc_ap_payments WHERE id = ?",
+            "SELECT id, payment_number, status, origin FROM acc_ap_payments WHERE id = ?",
             [$ffApPaymentId]
         );
         if ($ff === null) {
@@ -186,6 +186,21 @@ class BillPaymentPusher
                 'status'  => 'ff_not_found',
                 'outcome' => 'failed',
                 'error'   => "FF ap_payment {$ffApPaymentId} not found",
+            ] + self::RESULT_BASE;
+        }
+
+        // S-QBO-BILLPAY-MIRROR: a copy mirrored FROM QuickBooks (the
+        // accountant paid the bill there) is QuickBooks' own record —
+        // never pushed, updated or voided by FF (D-QBO-14-1 equivalent;
+        // BillPaymentEnqueuer already refuses it, this covers retries /
+        // manual sync). No map row write: the pulled_from_qbo row stays.
+        if (($ff['origin'] ?? 'ff_native') !== 'ff_native') {
+            self::writeNonHttpSyncLog($ffApPaymentId, 'void', 'skipped_non_ff_origin',
+                "ap_payment {$ff['payment_number']} origin='{$ff['origin']}' — mirrored from QuickBooks, never pushed back");
+            return [
+                'success' => true,
+                'status'  => 'skipped_non_ff_origin',
+                'outcome' => 'skipped',
             ] + self::RESULT_BASE;
         }
 
@@ -298,7 +313,7 @@ class BillPaymentPusher
         $ff = db_row(
             "SELECT id, payment_number, vendor_id, bank_account_id, payment_date,
                     payment_method, reference_number, check_number, amount,
-                    currency, exchange_rate_to_cad, status, notes
+                    currency, exchange_rate_to_cad, status, notes, origin
                FROM acc_ap_payments
               WHERE id = ?",
             [$ffApPaymentId]
@@ -309,6 +324,21 @@ class BillPaymentPusher
                 'status'  => 'ff_not_found',
                 'outcome' => 'failed',
                 'error'   => "FF ap_payment {$ffApPaymentId} not found",
+            ] + self::RESULT_BASE;
+        }
+
+        // S-QBO-BILLPAY-MIRROR: a copy mirrored FROM QuickBooks (the
+        // accountant paid the bill there) is QuickBooks' own record —
+        // never pushed, updated or voided by FF (D-QBO-14-1 equivalent;
+        // BillPaymentEnqueuer already refuses it, this covers retries /
+        // manual sync). No map row write: the pulled_from_qbo row stays.
+        if (($ff['origin'] ?? 'ff_native') !== 'ff_native') {
+            self::writeNonHttpSyncLog($ffApPaymentId, $operation, 'skipped_non_ff_origin',
+                "ap_payment {$ff['payment_number']} origin='{$ff['origin']}' — mirrored from QuickBooks, never pushed back");
+            return [
+                'success' => true,
+                'status'  => 'skipped_non_ff_origin',
+                'outcome' => 'skipped',
             ] + self::RESULT_BASE;
         }
 

@@ -76,6 +76,18 @@ class QboFixture
     private static array $errorInjections = [];
 
     /**
+     * Canned GET bodies keyed by endpoint ('billpayment/123'). The generic
+     * GET answer only echoes Name/Id/SyncToken — enough for the pushers, not
+     * for a pull-side handler that reads a whole transaction (Line[],
+     * TotalAmt, VendorRef …). Persistent until reset(), so a smoke can model
+     * "QuickBooks now shows this" and re-read it.
+     *
+     * @var array<string, array>
+     * @session S-QBO-BILLPAY-MIRROR
+     */
+    private static array $cannedGets = [];
+
+    /**
      * Queue a single-shot synthetic error response. Pops on first match.
      * Used by the offline pipeline smoke + QboDemoSeed to manufacture a
      * failed-push state for an entity without needing real QBO errors.
@@ -89,11 +101,21 @@ class QboFixture
         self::$errorInjections[$key] = ['status' => $status, 'body' => $body];
     }
 
+    /**
+     * Answer GET {$endpoint} with $body (decoded, e.g. ['BillPayment' => [...]])
+     * until reset() — see $cannedGets.
+     */
+    public static function cannedGet(string $endpoint, array $body): void
+    {
+        self::$cannedGets[$endpoint] = $body;
+    }
+
     /** Reset all queued injections + counters. Useful between smoke runs. */
     public static function reset(): void
     {
         self::$idCounter      = [];
         self::$errorInjections = [];
+        self::$cannedGets     = [];
     }
 
     /**
@@ -204,6 +226,10 @@ class QboFixture
         // Endpoint like 'account/123' — pull the id off the back of the path.
         $parts = explode('/', $endpoint, 2);
         $id    = isset($parts[1]) ? urldecode($parts[1]) : '0';
+
+        if (isset(self::$cannedGets[$endpoint])) {
+            return ['status' => 200, 'body' => (string) json_encode(self::$cannedGets[$endpoint] + ['time' => self::nowIso()])];
+        }
 
         // S-QBO-GOLIVE-AUDIT: portal Pay Online reads the pay-now URL from
         // GET invoice/{id}?include=invoiceLink (QuickBooksClient::

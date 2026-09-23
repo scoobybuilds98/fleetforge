@@ -29,6 +29,7 @@ $validStatuses = [
     'skipped_voided', 'skipped_unmapped_void', 'skipped_by_mode',
     'failed_preflight', 'failed_preflight_currency_mismatch',
     'failed_preflight_field_too_long',
+    'pulled_from_qbo',   // S-QBO-BILLPAY-MIRROR: bill paid in QuickBooks, mirrored into FF
 ];
 $statusFilter = isset($_GET['status']) && $_GET['status'] !== ''
     ? array_values(array_intersect(explode(',', (string) $_GET['status']), $validStatuses))
@@ -57,6 +58,7 @@ try {
         'skipped_voided'                     => 0,
         'skipped_unmapped_void'              => 0,
         'skipped_by_mode'                    => 0,
+        'pulled_from_qbo'                    => 0,
     ];
     foreach ($kpiRows as $k) {
         $kpis[$k['push_status']] = (int) $k['c'];

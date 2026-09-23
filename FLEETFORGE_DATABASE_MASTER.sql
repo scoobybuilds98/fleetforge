@@ -114,6 +114,7 @@ CREATE TABLE `acc_ap_payments` (
   `currency` enum('CAD','USD') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'CAD',
   `exchange_rate_to_cad` decimal(10,6) DEFAULT NULL,
   `status` enum('pending','cleared','void') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'cleared',
+  `origin` enum('ff_native','qbo_payments_webhook','qbo_other') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ff_native' COMMENT 'S-QBO-BILLPAY-MIRROR: ff_native = recorded in FF (pushed to QBO); qbo_payments_webhook / qbo_other = mirrored from a QuickBooks BillPayment (never pushed back)',
   `void_reason` text COLLATE utf8mb4_unicode_ci,
   `voided_by` int unsigned DEFAULT NULL,
   `voided_at` datetime DEFAULT NULL,
@@ -1151,7 +1152,7 @@ CREATE TABLE `acc_qbo_bill_map` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-18: FF→QBO bill push state tracking. Mirrors acc_qbo_invoice_map (S-QBO-11) shape with bill-specific deltas (vendor instead of customer; no engine_version; reduced ENUM for absent preflight sub-states in v1).';
 CREATE TABLE `acc_qbo_bill_payment_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `ff_ap_payment_id` int unsigned NOT NULL COMMENT 'NOT NULL: bill payments originate in FF only in S-QBO-19 v1 (D-QBO-19-1 mirrors D-QBO-18-6). QBO-authored bill payments handled via S-QBO-26 manual sync.',
+  `ff_ap_payment_id` int unsigned NOT NULL COMMENT 'FK acc_ap_payments.id. FF-recorded payments get a row on push; QuickBooks-side payments get one when mirrored (S-QBO-BILLPAY-MIRROR, origin <> ff_native).',
   `qbo_bill_payment_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Intuit BillPayment.Id; NULL until first successful push',
   `qbo_sync_token` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO optimistic-lock token',
   `qbo_vendor_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO VendorRef.value snapshot — drift detection across vendor remapping',
@@ -1163,9 +1164,13 @@ CREATE TABLE `acc_qbo_bill_payment_map` (
   `qbo_txn_date` date DEFAULT NULL COMMENT 'QBO TxnDate snapshot',
   `qbo_doc_number` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO PrivateNote or PaymentRefNum equivalent (Intuit varies by API version)',
   `ff_payment_snapshot_total` decimal(15,2) DEFAULT NULL COMMENT 'FF amount snapshot at push time — drift baseline',
-  `push_status` enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Mirrors acc_qbo_bill_map.push_status (S-QBO-18 + S-QBO-BILL-GOTCHAS-PAYDOWN) — typed sub-states for currency_mismatch + field_too_long applicable here too.',
+  `origin` enum('ff_native','qbo_payments_webhook','qbo_other') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ff_native' COMMENT 'S-QBO-BILLPAY-MIRROR: provenance, same vocabulary as acc_qbo_payment_map.origin',
+  `webhook_event_id` varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-QBO-BILLPAY-MIRROR: webhook event (or cutover-import) that mirrored the QuickBooks BillPayment',
+  `realm_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'S-QBO-BILLPAY-MIRROR: QBO realm at mirror time',
+  `push_status` enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','pulled_from_qbo') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'Mirrors acc_qbo_bill_map.push_status (S-QBO-18 + S-QBO-BILL-GOTCHAS-PAYDOWN). pulled_from_qbo = mirrored from QuickBooks (S-QBO-BILLPAY-MIRROR) — terminal, never pushed.',
   `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
   `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
+  `pulled_at` datetime DEFAULT NULL COMMENT 'S-QBO-BILLPAY-MIRROR: UTC time the QuickBooks BillPayment was last mirrored into FF',
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent state mutation (push, gate fail, skip)',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -1174,6 +1179,7 @@ CREATE TABLE `acc_qbo_bill_payment_map` (
   UNIQUE KEY `uq_qbo_bill_payment` (`qbo_bill_payment_id`) COMMENT 'No two FF ap_payments share a QBO BillPayment.Id; NULL-multi-OK per InnoDB',
   KEY `idx_status` (`push_status`),
   KEY `idx_pushed_at` (`pushed_at`),
+  KEY `idx_origin` (`origin`),
   CONSTRAINT `fk_qbo_bill_payment_map_ff` FOREIGN KEY (`ff_ap_payment_id`) REFERENCES `acc_ap_payments` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Phase QBO-8 S-QBO-19: FF→QBO bill payment push state tracking. Mirrors acc_qbo_bill_map (S-QBO-18) shape with bill-payment-specific deltas (bank_account snapshot + pay_type + no doc_number column — BillPayment has no DocNumber in QBO API).';
 CREATE TABLE `acc_qbo_credit_memo_map` (

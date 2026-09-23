@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-BILLPAY-MIRROR** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + D-QBO-BILLPAY-MIRROR-1). **Bills the accountant pays in QuickBooks now show paid in FleetForge (webhook + go-live link + "Check QuickBooks for payments"), with FF's AP / bank books posted the same way as the Bill Payments page (new `BillPaymentWebhookHandler` + shared `ApPaymentService`). QuickBooks-origin AP payments are never pushed back; what FF can't represent becomes one drift event. Operator next: subscribe the Intuit webhook to BillPayment (F81); link each QuickBooks bank / card account the accountant pays bills from to an FF bank account.**
+
 **S-QBO-GOLIVE-AUDIT** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + `docs/audits/CLAUDE_2026-09-23_quickbooks.md`). **QuickBooks pre-go-live audit (22 fixes + 3 second-pass criticals), go-live build-out for a shared company file (linker, pre-go-live guard, exact-name matching, Class/Location, per-rate Canadian tax, rounding settlement, pay link), and a full go-live rehearsal on a production copy against a Canadian sandbox (129/129 invoices linked correctly, 60 QBO payments mirrored; 13 more bugs found and fixed). Operator next: F80 (pay link + tax-remittance JE on the real company), F83 (September invoices / July drafts), F84 (process rules with the accountant), then F81 go-live checklist.**
 
 **S-TRAINING-CAPTIONS-DOUBLE** — SHIPPED 2026-09-17 (see PROGRESS.md SESSION LOG row). **Training player no longer shows subtitles twice.**

@@ -58,6 +58,10 @@ if (!$payment) {
     exit;
 }
 
+// S-QBO-BILLPAY-MIRROR: the accountant paid this bill in QuickBooks and
+// FleetForge mirrored it — QuickBooks owns it.
+$fromQbo = ($payment['origin'] ?? 'ff_native') !== 'ff_native';
+
 // ── Allocations ──────────────────────────────────────────────────────────────
 $allocations = db_select(
     "SELECT apa.id, apa.bill_id, apa.amount_applied, apa.created_at,
@@ -116,6 +120,10 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
     <h1 class="page-header-title h4">
         Payment <?= e($payment['payment_number']) ?>
         <span class="badge <?= e($statusBadgeClass($payment['status'])) ?>" style="margin-left:8px;font-size:0.7rem;vertical-align:middle;"><?= e($payment['status']) ?></span>
+        <?php if ($fromQbo): /* S-QBO-BILLPAY-MIRROR */ ?>
+            <span class="badge badge-blue" style="margin-left:4px;font-size:0.7rem;vertical-align:middle;"
+                  title="Paid in QuickBooks by the accountant and copied into FleetForge. Change or void it in QuickBooks — FleetForge follows.">From QuickBooks</span>
+        <?php endif; ?>
     </h1>
     <div class="page-header-actions">
         <a class="btn btn-secondary btn-sm" href="<?= base_url('accounting/ap-payments') ?>">← Back to list</a>
@@ -165,7 +173,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
         <div>
             <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">Created</div>
             <div>
-                <?= e($payment['created_by_name'] ?? 'system') ?>
+                <?= e($payment['created_by_name'] ?? ($fromQbo ? 'QuickBooks' : 'system')) ?>
                 <span style="font-size:0.75rem;color:var(--text-secondary);">— <?= e($payment['created_at']) ?></span>
             </div>
         </div>

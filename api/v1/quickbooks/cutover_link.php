@@ -16,13 +16,15 @@ declare(strict_types=1);
  *      unlink            ff_id — undo a go-live link (not a real push)
  *      push_new          ff_id — QuickBooks really lacks this pre-go-live
  *                        document: allow it to push as NEW, and queue it
- *      import_payments   ff_id — mirror QuickBooks payments of one linked invoice
- *      catch_up_payments limit — every open linked/pushed invoice paid down in
- *                        QuickBooks gets its payments mirrored
+ *      import_payments   ff_id — mirror QuickBooks payments of one linked
+ *                        invoice (kind=bill: its QuickBooks bill payments)
+ *      catch_up_payments limit, after_id — every open linked/pushed invoice
+ *                        (kind=bill: bill) paid down in QuickBooks gets its
+ *                        payments mirrored
  *
  * @auth GET quickbooks.view; POST quickbooks.force_full_resync (accounting
  *       decisions: they create FF payments and decide what reaches QuickBooks)
- * @session S-QBO-GOLIVE-AUDIT
+ * @session S-QBO-GOLIVE-AUDIT; bills' payments S-QBO-BILLPAY-MIRROR
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -118,20 +120,28 @@ try {
             $r['ok'] ? json_success($r) : json_error(strtoupper($r['code'] ?? 'FAILED'), $r['error'] ?? 'Could not release.', 422);
 
         case 'import_payments':
-            if ($kind !== 'invoice') {
-                json_validation_error(['kind' => 'Payments import is for invoices.']);
+            if ($kind === 'credit_memo') {
+                json_validation_error(['kind' => 'Payments import is for invoices and bills.']);
             }
-            json_success(InvoiceLinker::importPayments((int) ($body['ff_id'] ?? 0)));
+            // S-QBO-BILLPAY-MIRROR: bills bring in their QuickBooks bill payments.
+            json_success($kind === 'bill'
+                ? InvoiceLinker::importBillPayments((int) ($body['ff_id'] ?? 0))
+                : InvoiceLinker::importPayments((int) ($body['ff_id'] ?? 0)));
 
         case 'catch_up_payments':
-            $out = InvoiceLinker::syncOpenInvoicePayments((int) ($body['limit'] ?? 200), null, (int) ($body['after_id'] ?? 0), $deadline);
+            // kind=invoice → customer payments; kind=bill → bill payments
+            // (S-QBO-BILLPAY-MIRROR). The page sweeps both, one kind at a time.
+            $out = $kind === 'bill'
+                ? InvoiceLinker::syncOpenBillPayments((int) ($body['limit'] ?? 200), null, (int) ($body['after_id'] ?? 0), $deadline)
+                : InvoiceLinker::syncOpenInvoicePayments((int) ($body['limit'] ?? 200), null, (int) ($body['after_id'] ?? 0), $deadline);
+            $what = $kind === 'bill' ? 'bill payment' : 'payment';
             db_insert('audit_log', [
                 'user_id'     => $user['id'] ?? null,
                 'user_name'   => $user['name'] ?? 'system',
                 'action'      => 'update',
                 'module'      => 'quickbooks',
                 'entity_type' => 'qbo_payment_catchup',
-                'notes'       => "QuickBooks payment catch-up: checked {$out['checked']}, imported {$out['imported']}, unchanged {$out['unchanged']}, errors {$out['errors']}",
+                'notes'       => "QuickBooks {$what} catch-up: checked {$out['checked']}, imported {$out['imported']}, unchanged {$out['unchanged']}, errors {$out['errors']}",
                 'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? null,
             ]);
             json_success($out);

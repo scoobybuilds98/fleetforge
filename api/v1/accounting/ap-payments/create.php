@@ -5,7 +5,8 @@ declare(strict_types=1);
  * api/v1/accounting/ap-payments/create.php
  *
  * Create an AP payment and allocate to one or more bills.
- * Posts JE: DR 2010 AP / CR Cash (bank GL account).
+ * Posts JE: DR 2010 AP / CR Cash (bank GL account) — via ApPaymentService,
+ * shared with the QuickBooks bill-payment mirror (S-QBO-BILLPAY-MIRROR).
  * Supports partial payments — bill stays partially_paid until fully paid.
  * Uses FOR UPDATE on bill rows during allocation (D20).
  *
@@ -27,7 +28,7 @@ require_auth_api();
 require_permission('accounts_payable', 'create');
 
 use FleetForge\Accounting\AccountingService;
-use FleetForge\Accounting\JournalEntryService;
+use FleetForge\Accounting\ApPaymentService;
 
 // VALID-2: accept JSON or form-encoded payloads
 $jsonBody = json_body();
@@ -170,37 +171,12 @@ $result = db_transaction(function () use (
         }
     }
 
-    // Post JE: DR AP / CR Cash
-    $apAccountId = AccountingService::setting('accounting.ap_account_id');
-    if (!$apAccountId) {
-        throw new \RuntimeException('AP account not configured.');
-    }
-
-    $jeLines = [
-        [
-            'account_id'  => (int) $apAccountId,
-            'debit'       => $totalAmount,
-            'credit'      => '0.00',
-            'description' => "AP payment {$paymentNumber} — {$vendor['name']}",
-            'vendor_id'   => $vendorId,
-        ],
-        [
-            'account_id'  => (int) $bankAccount['gl_account_id'],
-            'debit'       => '0.00',
-            'credit'      => $totalAmount,
-            'description' => "Cash — AP payment {$paymentNumber}",
-            'vendor_id'   => $vendorId,
-        ],
-    ];
-
-    $je = JournalEntryService::create([
-        'entry_date'       => $paymentDate,
-        'description'      => "AP Payment {$paymentNumber} — {$vendor['name']}",
-        'entry_type'       => 'system',
-        'reference'        => $paymentNumber,
-        'source_type'      => 'ap_payment',
-        'post_immediately' => true,
-    ], $jeLines, current_user_id());
+    // Post JE: DR AP / CR Cash (shared with the QuickBooks bill-payment
+    // mirror — S-QBO-BILLPAY-MIRROR)
+    $je = ApPaymentService::postPaymentJournalEntry(
+        $paymentNumber, $paymentDate, $vendorId, (string) $vendor['name'],
+        (int) $bankAccount['gl_account_id'], $totalAmount, current_user_id()
+    );
 
     // Insert payment record
     $paymentId = db_insert('acc_ap_payments', [
@@ -236,26 +212,7 @@ $result = db_transaction(function () use (
 
     // Allocate to bills and update bill balances
     foreach ($validatedAllocations as $alloc) {
-        db_insert('acc_ap_payment_allocations', [
-            'ap_payment_id' => $paymentId,
-            'bill_id'       => $alloc['bill_id'],
-            'amount_applied'=> $alloc['amount_applied'],
-        ]);
-
-        // Update bill amount_paid and balance_due
-        // WHY: MySQL SET evaluates left-to-right, so balance_due is already
-        // subtracted when the CASE runs — compare to 0, not subtract again.
-        db_execute(
-            "UPDATE acc_bills SET
-                amount_paid = amount_paid + ?,
-                balance_due = balance_due - ?,
-                status = CASE
-                    WHEN balance_due <= 0 THEN 'paid'
-                    ELSE 'partially_paid'
-                END
-             WHERE id = ?",
-            [$alloc['amount_applied'], $alloc['amount_applied'], $alloc['bill_id']]
-        );
+        ApPaymentService::applyToBill($paymentId, (int) $alloc['bill_id'], $alloc['amount_applied']);
     }
 
     db_insert('audit_log', [

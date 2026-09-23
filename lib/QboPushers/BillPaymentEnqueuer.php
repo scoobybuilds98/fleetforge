@@ -17,14 +17,17 @@ declare(strict_types=1);
  *     wired into api/v1/accounting/ap-payments/update.php post-commit
  *     (3 of 4 editable fields directly affect QBO payload: payment_date →
  *     TxnDate, reference_number + check_number → PrivateNote).
- *   - void: still NOT in v1 (rides the pushVoid trio in OPERATOR_FOLLOWUPS F7);
- *     gate-3 allowlist rejects it.
+ *   - void: SUPPORTED since S-QBO-PUSHVOID-TRIO (requires status='void').
  *
- * No origin filter (D-QBO-14-1-equivalent) because acc_ap_payments has no
- * origin column — bill payments are FF-native only per D-QBO-19-1.
+ * Origin gate (S-QBO-BILLPAY-MIRROR, the D-QBO-14-1 equivalent): only
+ * origin='ff_native' payments are pushed. Bills paid in QuickBooks are
+ * mirrored into FF by BillPaymentWebhookHandler with origin
+ * 'qbo_payments_webhook' / 'qbo_other' — they are already in QuickBooks,
+ * and pushing them back would duplicate the accountant's payment.
  *
  * @session  S-QBO-19
- * @decision D-QBO-19-1 (FF-origin only),
+ * @decision D-QBO-19-1 (FF-origin only — enforced by the origin gate since
+ *               S-QBO-BILLPAY-MIRROR),
  *           D-QBO-19-5 (pushUpdate stub — CLOSED by S-QBO-BILL-PAYMENT-UPDATE;
  *               D-QBO-BILL-PAYMENT-UPDATE-1; gate-3 now allows 'update'),
  *           D-ENQUEUER-CONTRACT (best-effort discipline),
@@ -51,6 +54,12 @@ class BillPaymentEnqueuer
     ];
 
     /**
+     * Eligible origins. QuickBooks-mirrored copies are already in QuickBooks
+     * (S-QBO-BILLPAY-MIRROR — same invariant as PaymentEnqueuer D-QBO-14-1).
+     */
+    private const ALLOWED_ORIGINS = ['ff_native'];
+
+    /**
      * Best-effort enqueue. Returns true on success, false on rejection.
      *
      * @param int    $apPaymentId FF acc_ap_payments.id
@@ -63,11 +72,16 @@ class BillPaymentEnqueuer
         try {
             // Gate 0: eligibility.
             $ff = db_row(
-                "SELECT id, status FROM acc_ap_payments WHERE id = ?",
+                "SELECT id, status, origin FROM acc_ap_payments WHERE id = ?",
                 [$apPaymentId]
             );
             if ($ff === null) {
                 error_log("[BillPaymentEnqueuer] gate-0 reject: ap_payment id {$apPaymentId} not found");
+                return false;
+            }
+            // Origin gate first — a QuickBooks-owned copy is never pushed,
+            // whatever its status (S-QBO-BILLPAY-MIRROR).
+            if (!in_array((string) ($ff['origin'] ?? 'ff_native'), self::ALLOWED_ORIGINS, true)) {
                 return false;
             }
 

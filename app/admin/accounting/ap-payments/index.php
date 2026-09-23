@@ -75,7 +75,7 @@ $total = (int) (db_row(
 // ── Page rows ────────────────────────────────────────────────────────────────
 $rows = db_select(
     "SELECT ap.id, ap.payment_number, ap.payment_date, ap.payment_method,
-            ap.reference_number, ap.check_number, ap.amount, ap.currency, ap.status,
+            ap.reference_number, ap.check_number, ap.amount, ap.currency, ap.status, ap.origin,
             v.name AS vendor_name,
             ba.name AS bank_account_name,
             je.id AS je_id, je.entry_number AS je_number
@@ -211,6 +211,9 @@ require_once FF_ROOT . '/includes/header.php';
                         </td>
                         <td style="padding:8px 12px;text-align:center;">
                             <span class="badge <?= e($statusBadgeClass($r['status'])) ?>"><?= e($r['status']) ?></span>
+                            <?php if (($r['origin'] ?? 'ff_native') !== 'ff_native'): /* S-QBO-BILLPAY-MIRROR */ ?>
+                                <span class="badge badge-blue" title="Paid in QuickBooks by the accountant and copied into FleetForge">QuickBooks</span>
+                            <?php endif; ?>
                         </td>
                         <td class="font-mono" style="padding:8px 12px;">
                             <?php if ($r['je_number']): ?>

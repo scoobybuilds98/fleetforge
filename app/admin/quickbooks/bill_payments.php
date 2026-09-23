@@ -50,6 +50,8 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
         acc_qbo_account_map lookup per D-QBO-19-3. Retry failed pushes from this page; investigate
         failed_preflight states by checking the listed reason (typically unmapped vendor, unmapped bank
         account, or per-allocation bill unmapped).
+        Bills the accountant paid in QuickBooks are copied into FleetForge and show as
+        <span class="font-mono">pulled_from_qbo</span> — they are never pushed back.
     </div>
 </div>
 
@@ -117,7 +119,7 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
 
         <div class="table-toolbar-left table-toolbar-left--wrap">
             <span class="text-secondary text-sm" style="white-space:nowrap;">Status:</span>
-            <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','skipped_voided','skipped_unmapped_void','skipped_by_mode']" :key="s">
+            <template x-for="s in ['pending','pushed','voided','failed','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','skipped_voided','skipped_unmapped_void','skipped_by_mode','pulled_from_qbo']" :key="s">
                 <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;font-size:0.825rem;">
                     <input type="checkbox" :value="s" x-model="filters.statuses" @change="page=1; reload()">
                     <span x-text="s"></span>
@@ -243,6 +245,7 @@ function qboBillPaymentsAdmin(canEdit) {
             failed_preflight_currency_mismatch: 0,
             failed_preflight_field_too_long: 0,
             skipped_voided: 0, skipped_unmapped_void: 0, skipped_by_mode: 0,
+            pulled_from_qbo: 0,
         },
         page: 1,
         perPage: 25,
@@ -330,6 +333,7 @@ function qboBillPaymentsAdmin(canEdit) {
                 'skipped_voided': 'badge-secondary',
                 'skipped_unmapped_void': 'badge-secondary',
                 'skipped_by_mode': 'badge-secondary',
+                'pulled_from_qbo': 'badge-info',
             }[s] || 'badge-secondary';
         },
 

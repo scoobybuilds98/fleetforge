@@ -21,7 +21,9 @@ declare(strict_types=1);
  *   3. importPayments() — mirrors the payments QuickBooks recorded against a
  *      linked invoice into FF (payment + allocations + counters + GL, via the
  *      same PaymentWebhookHandler path the live webhook uses), so FF shows
- *      the invoice paid and the FF accounting module moves with it.
+ *      the invoice paid and the FF accounting module moves with it;
+ *      importBillPayments() does the same for a linked bill's QuickBooks
+ *      bill payments via BillPaymentWebhookHandler (S-QBO-BILLPAY-MIRROR).
  *
  * Safety rules (the company file is shared — FleetForge must not disturb it):
  *   - linking never writes to QuickBooks;
@@ -423,10 +425,12 @@ class InvoiceLinker
         }
 
         $res = self::linkWithQboDoc($kind, $ffId, $qbo, $method, $user, $acceptDifference);
-        if (!$res['ok'] || $kind !== 'invoice') {
+        if (!$res['ok'] || $kind === 'credit_memo') {
             return $res;
         }
-        $res['payments'] = self::importPayments($ffId, $qbo);
+        // S-QBO-BILLPAY-MIRROR: a linked bill brings in the payments the
+        // accountant made in QuickBooks, as a linked invoice does.
+        $res['payments'] = $kind === 'bill' ? self::importBillPayments($ffId, $qbo) : self::importPayments($ffId, $qbo);
         return $res;
     }
 
@@ -565,6 +569,18 @@ class InvoiceLinker
                 if ($mirrored > 0) {
                     return ['ok' => false, 'code' => 'has_mirrored_payments',
                             'error' => "{$mirrored} QuickBooks payment(s) are mirrored onto this invoice — void them in FleetForge first."];
+                }
+            }
+            if ($kind === 'bill') {
+                // S-QBO-BILLPAY-MIRROR: same rule for bills paid in QuickBooks.
+                $mirrored = (int) (db_row(
+                    "SELECT COUNT(*) AS n FROM acc_ap_payment_allocations al JOIN acc_ap_payments p ON p.id = al.ap_payment_id
+                      WHERE al.bill_id = ? AND p.status <> 'void' AND p.origin IN ('qbo_payments_webhook','qbo_other')",
+                    [$ffId]
+                )['n'] ?? 0);
+                if ($mirrored > 0) {
+                    return ['ok' => false, 'code' => 'has_mirrored_payments',
+                            'error' => "{$mirrored} QuickBooks bill payment(s) are mirrored onto this bill — void them in FleetForge first."];
                 }
             }
             db_execute("DELETE FROM {$cfg['map']} WHERE id = ?", [(int) $map['id']]);
@@ -752,6 +768,154 @@ class InvoiceLinker
             $out['details'][] = ['invoice' => $r['invoice_number']] + $res;
         }
         return $out;
+    }
+
+    /**
+     * Mirror the payments QuickBooks holds against a linked / pushed bill
+     * into FF (S-QBO-BILLPAY-MIRROR). Each QuickBooks BillPayment goes
+     * through BillPaymentWebhookHandler with Update semantics: new → create;
+     * already mirrored → unchanged unless QuickBooks edited it.
+     *
+     * A QuickBooks Bill lists its payments in LinkedTxn; Intuit tags them
+     * "BillPaymentCheck" / "BillPaymentCreditCard" (older responses:
+     * "BillPayment"), so any BillPayment* type counts.
+     *
+     * @return array{status:string, detail?:string, results?:list<array>, ff_balance?:string, qbo_balance?:?string}
+     */
+    public static function importBillPayments(int $ffBillId, ?array $qboBill = null, ?QuickBooksClient $client = null): array
+    {
+        $map = db_row("SELECT qbo_bill_id FROM acc_qbo_bill_map WHERE ff_bill_id = ? AND qbo_bill_id IS NOT NULL", [$ffBillId]);
+        if (!$map) {
+            return ['status' => 'not_linked', 'detail' => 'Bill is not linked to QuickBooks.'];
+        }
+        $bill = db_row("SELECT status, balance_due FROM acc_bills WHERE id = ?", [$ffBillId]);
+        if ($qboBill === null) {
+            try {
+                $client ??= new QuickBooksClient();
+                $qboBill = $client->getEntity('bill', (string) $map['qbo_bill_id'], ['entity_type' => 'bill', 'entity_id' => $ffBillId, 'operation' => 'payment_catchup'])['Bill'] ?? null;
+            } catch (\Throwable $e) {
+                return ['status' => 'qbo_error', 'detail' => $e->getMessage()];
+            }
+            if (!is_array($qboBill)) {
+                return ['status' => 'qbo_error', 'detail' => 'QuickBooks returned no Bill.'];
+            }
+        }
+        $paymentIds = [];
+        foreach ($qboBill['LinkedTxn'] ?? [] as $lt) {
+            if (str_starts_with((string) ($lt['TxnType'] ?? ''), 'BillPayment') && !empty($lt['TxnId'])) {
+                $paymentIds[(string) $lt['TxnId']] = true;
+            }
+        }
+        if ($paymentIds === []) {
+            return ['status' => 'none', 'detail' => 'QuickBooks has no payments on this bill.',
+                    'ff_balance' => (string) ($bill['balance_due'] ?? ''), 'qbo_balance' => isset($qboBill['Balance']) ? self::money($qboBill['Balance']) : null];
+        }
+        if (!$bill || !in_array($bill['status'], array_merge(BillPaymentWebhookHandler::PAYABLE_BILL_STATUSES, ['paid']), true)) {
+            return ['status' => 'not_payable',
+                    'detail' => 'QuickBooks has ' . count($paymentIds) . " payment(s) on this bill, but it is '" . ($bill['status'] ?? '?')
+                        . "' in FleetForge — approve it (or void it) in FleetForge, then check again."];
+        }
+        $realm   = (string) settings_get('quickbooks.realm_id', '');
+        $results = [];
+        foreach (array_keys($paymentIds) as $pid) {
+            $pid = (string) $pid;
+            $r = BillPaymentWebhookHandler::handle($pid, 'Update', $realm, 'cutover-import', 'qbo_other');
+            $results[] = ['qbo_bill_payment_id' => $pid] + $r;
+        }
+        $after = db_row("SELECT status, balance_due FROM acc_bills WHERE id = ?", [$ffBillId]);
+        return [
+            'status'      => 'imported',
+            'results'     => $results,
+            'ff_status'   => (string) ($after['status'] ?? ''),
+            'ff_balance'  => (string) ($after['balance_due'] ?? ''),
+            'qbo_balance' => isset($qboBill['Balance']) ? self::money($qboBill['Balance']) : null,
+        ];
+    }
+
+    /**
+     * Catch-up sweep for bills (S-QBO-BILLPAY-MIRROR): every linked/pushed
+     * FF bill still open in FF but paid down in QuickBooks gets its
+     * QuickBooks bill payments mirrored — covers go-live history and any
+     * webhook that never arrived. Same keyset / deadline contract as
+     * syncOpenInvoicePayments (next_after_id = resume point).
+     *
+     * @return array{checked:int, imported:int, unchanged:int, errors:int, details:list<array>, next_after_id:?int}
+     */
+    public static function syncOpenBillPayments(int $limit = 200, ?QuickBooksClient $client = null, int $afterId = 0, ?float $deadline = null): array
+    {
+        $limit = max(1, min(1000, $limit));
+        $rows = db_select(
+            "SELECT m.ff_bill_id, m.qbo_bill_id, b.bill_number, b.balance_due
+               FROM acc_qbo_bill_map m
+               JOIN acc_bills b ON b.id = m.ff_bill_id
+              WHERE m.qbo_bill_id IS NOT NULL
+                AND b.status IN ('approved','scheduled','partially_paid')
+                AND b.balance_due > 0
+                AND b.id > ?
+              ORDER BY b.id ASC
+              LIMIT {$limit}",
+            [$afterId]
+        );
+        $client ??= new QuickBooksClient();
+        $out = ['checked' => 0, 'imported' => 0, 'unchanged' => 0, 'errors' => 0, 'details' => [], 'next_after_id' => null];
+        foreach ($rows as $r) {
+            if ($deadline !== null && microtime(true) > $deadline) {
+                $out['next_after_id'] = (int) $r['ff_bill_id'] - 1;   // resume here
+                break;
+            }
+            $out['checked']++;
+            try {
+                $qbo = $client->getEntity('bill', (string) $r['qbo_bill_id'], ['entity_type' => 'bill', 'entity_id' => (int) $r['ff_bill_id'], 'operation' => 'payment_catchup'])['Bill'] ?? null;
+            } catch (\Throwable $e) {
+                $out['errors']++;
+                $out['details'][] = ['bill' => $r['bill_number'], 'status' => 'qbo_error', 'detail' => $e->getMessage()];
+                continue;
+            }
+            $qboBal = self::money($qbo['Balance'] ?? $r['balance_due']);
+            $ffBal  = self::money($r['balance_due']);
+            // Nothing to do when QuickBooks is not lower — or lower only by a
+            // tax-rounding cent on a bill it still shows open.
+            if (!is_array($qbo) || bccomp($qboBal, $ffBal, 2) >= 0
+                || (bccomp($qboBal, '0', 2) > 0 && self::sameAmount($qboBal, $ffBal))) {
+                $out['unchanged']++;
+                continue;
+            }
+            $res = self::importBillPayments((int) $r['ff_bill_id'], $qbo);
+            $created = array_filter($res['results'] ?? [], static fn($x) => in_array($x['result'] ?? '', ['payment_created', 'payment_resynced'], true));
+            if ($res['status'] === 'imported' && $created !== []) {
+                $out['imported']++;
+            } elseif ($res['status'] === 'none' || ($res['status'] === 'imported' && self::allSettled($res['results'] ?? []))) {
+                $out['unchanged']++;
+            } else {
+                $out['errors']++;
+                if ($res['status'] === 'imported') {
+                    // Payments were read but not recorded (e.g. paid from a
+                    // QuickBooks account with no FF bank account) — say why.
+                    $res['status'] = 'needs_attention';
+                    $res['detail'] = implode('; ', array_map(
+                        static fn($x) => ($x['result'] ?? '?') . ': ' . ($x['detail'] ?? ''),
+                        array_filter($res['results'] ?? [], static fn($x) => !self::allSettled([$x]))
+                    ));
+                }
+            }
+            $out['details'][] = ['bill' => $r['bill_number']] + $res;
+        }
+        return $out;
+    }
+
+    /**
+     * True when every BillPayment result is a benign no-op (already in FF).
+     *
+     * @param list<array<string,mixed>> $results
+     */
+    private static function allSettled(array $results): bool
+    {
+        foreach ($results as $x) {
+            if (!in_array($x['result'] ?? '', ['already_mapped', 'unchanged', 'ff_origin_echo', 'already_voided'], true)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ────────────────────────────────────────────────────────────────
