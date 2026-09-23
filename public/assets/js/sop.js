@@ -115,13 +115,13 @@
             init() {
                 const bar = this.$refs.readbar;
                 // Scroll-spy: the last heading above the upper third of the
-                // window is the current section. Computed on scroll (one rAF
-                // per frame) rather than IntersectionObserver, which misses
-                // jumps (anchor links, search results) that skip past headings.
+                // window is the current section. Computed directly on every
+                // scroll (≈20 headings — cheap) rather than IntersectionObserver
+                // (misses jumps past headings) or rAF (never fires while the
+                // tab is hidden, leaving a stale section lit). Re-run on load
+                // for the browser's own scroll restoration / #anchor jump.
                 const heads = [...document.querySelectorAll('.sop-content h2.sop-h, .sop-content h3.sop-h, #checklist')];
-                let queued = false;
                 const update = () => {
-                    queued = false;
                     const h = document.documentElement;
                     const max = h.scrollHeight - h.clientHeight;
                     if (bar) bar.style.transform = 'scaleX(' + (max > 0 ? Math.min(1, h.scrollTop / max) : 0) + ')';
@@ -130,7 +130,9 @@
                     for (const hd of heads) { if (hd.getBoundingClientRect().top < line) current = hd.id; else break; }
                     this.activeId = current;
                 };
-                window.addEventListener('scroll', () => { if (!queued) { queued = true; requestAnimationFrame(update); } }, { passive: true });
+                window.addEventListener('scroll', update, { passive: true });
+                window.addEventListener('load', update);
+                window.addEventListener('hashchange', update);
                 update();
 
                 // Arriving from a search result: highlight the searched words once.
