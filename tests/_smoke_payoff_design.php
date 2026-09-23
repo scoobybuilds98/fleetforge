@@ -10,9 +10,17 @@
  * Each page runs in a SEPARATE child PHP process to avoid duplicate
  * function/declaration collisions across page includes.
  *
+ * The two equipment/show.php cases are DATA-INDEPENDENT: instead of
+ * hard-coding unit ids (units 6/7 were soft-deleted on 2026-06-25, so
+ * show.php redirected + exited and rendered 0 bytes), the parent looks up
+ * a live unit that IS linked to a fixed asset and one that is NOT, using
+ * the same predicates show.php uses, and passes the unit id to the child.
+ * A case with no qualifying unit is SKIPPED with a message, not failed.
+ *
  * Usage:
- *   php tests/_smoke_payoff_design.php          # parent — runs all 4 cases
- *   php tests/_smoke_payoff_design.php <case>   # child  — renders one page
+ *   php tests/_smoke_payoff_design.php                  # parent — runs all 4 cases
+ *   php tests/_smoke_payoff_design.php <case> [<id>]    # child  — renders one page
+ *                                                       #   (<id> → $_GET['id'])
  */
 
 // Each test case is: [label, relPath, expectedMarkers, $_GET overrides]
@@ -53,21 +61,24 @@ $cases = [
     ],
     'equipment_show_linked' => [
         'path'    => 'app/admin/equipment/show.php',
-        'get'     => ['id' => 6],
-        // The PHP injects linkedAssetId via PHP_EOL-aligned formatting,
-        // so we match it via regex (any amount of whitespace, then 17).
+        // WHY: resolved at run time by resolve_unit_fixture() — the unit id
+        // becomes $_GET['id'] and the linked asset id feeds the regex below.
+        'unit'    => 'linked',
         'markers' => [
             'class="tab-bar"',
             'Payoff Analysis',
             'FF_UnitDetail',
         ],
+        // The PHP injects linkedAssetId via PHP_EOL-aligned formatting, so
+        // we match it via regex (any amount of whitespace, then the id).
+        // {asset_id} is substituted with the resolved fixed-asset id.
         'regex' => [
-            '/linkedAssetId:\s*17\b/',
+            '/linkedAssetId:\s*{asset_id}\b/',
         ],
     ],
     'equipment_show_unlinked' => [
         'path'    => 'app/admin/equipment/show.php',
-        'get'     => ['id' => 7],
+        'unit'    => 'unlinked',
         'markers' => [
             'class="tab-bar"',
             'Payoff Analysis',
@@ -79,8 +90,57 @@ $cases = [
     ],
 ];
 
+/**
+ * Find a live equipment unit for a show.php case, mirroring show.php's own
+ * lookups so the page renders and computes the linkedAssetId we expect.
+ *
+ * show.php only renders a unit that is live (deleted_at IS NULL) and has a
+ * template (INNER JOIN equipment_templates); otherwise it redirects + exits.
+ * Its linked asset is the newest non-disposed acc_fixed_assets row for the
+ * unit, else 0.
+ *
+ * @param  string $kind 'linked' (has a non-disposed fixed asset) or
+ *                      'unlinked' (has none — disposed-only counts as none)
+ * @return array{unit_id:int, asset_id:int}|null null when no unit qualifies
+ */
+function resolve_unit_fixture(string $kind): ?array
+{
+    $existsClause = ($kind === 'linked' ? 'EXISTS' : 'NOT EXISTS');
+    $unit = db_row(
+        "SELECT u.id
+           FROM equipment_units u
+           JOIN equipment_templates t ON t.id = u.template_id
+          WHERE u.deleted_at IS NULL
+            AND {$existsClause} (
+                SELECT 1 FROM acc_fixed_assets fa
+                 WHERE fa.equipment_unit_id = u.id
+                   AND fa.status != 'disposed'
+            )
+          ORDER BY u.id
+          LIMIT 1"
+    );
+    if (!$unit) {
+        return null;
+    }
+    $unitId = (int) $unit['id'];
+
+    // WHY: same query as show.php's "Linked fixed asset lookup" — a unit
+    // with several live assets shows the newest one, so the expected id
+    // must be picked the same way, not just "any linked asset".
+    $asset = db_row(
+        "SELECT id
+           FROM acc_fixed_assets
+          WHERE equipment_unit_id = ?
+            AND status != 'disposed'
+          ORDER BY acquisition_date DESC, id DESC
+          LIMIT 1",
+        [$unitId]
+    );
+    return ['unit_id' => $unitId, 'asset_id' => $asset ? (int) $asset['id'] : 0];
+}
+
 // ── CHILD MODE ──────────────────────────────────────────────
-// Invoked as: php _smoke_payoff_design.php <case-key>
+// Invoked as: php _smoke_payoff_design.php <case-key> [<unit-id>]
 // Renders one page and writes the captured HTML to /tmp.
 if (isset($argv[1])) {
     $key = $argv[1];
@@ -98,7 +158,11 @@ if (isset($argv[1])) {
     $_SERVER['SCRIPT_NAME']     = '/index.php';
     $_SERVER['REMOTE_ADDR']     = '127.0.0.1';
     $_SERVER['HTTP_USER_AGENT'] = 'ff-smoke-cli';
-    $_GET                       = $case['get'];
+    $_GET                       = $case['get'] ?? [];
+    // WHY: unit-backed cases get their id from the parent's run-time lookup.
+    if (isset($argv[2])) {
+        $_GET['id'] = (string) (int) $argv[2];
+    }
 
     // Bootstrap the app and stub a super_admin session.
     require_once __DIR__ . '/../config/app.php';
@@ -141,10 +205,45 @@ if (isset($argv[1])) {
 $self = __FILE__;
 $php  = PHP_BINARY;
 
+// WHY: resolve every unit-backed case BEFORE printing anything —
+// config/app.php sets session ini values, which warns once output has
+// been sent. Children bootstrap the app on their own, so this is the
+// parent's only DB touch.
+$fixtures = [];
+foreach ($cases as $key => $case) {
+    if (isset($case['unit'])) {
+        require_once __DIR__ . '/../config/app.php';
+        $fixtures[$key] = resolve_unit_fixture($case['unit']);
+    }
+}
+
 echo "\n=== PAYOFF-1 design smoke test ===\n";
 $totalPass = 0;
+$totalSkip = 0;
 foreach ($cases as $key => $case) {
-    $cmd = escapeshellarg($php) . ' ' . escapeshellarg($self) . ' ' . escapeshellarg($key) . ' 2>&1';
+    $childArgs = escapeshellarg($key);
+
+    // Unit-backed case: pass the resolved unit id to the child and bake the
+    // resolved asset id into the regex — or SKIP when the DB has no such unit.
+    if (isset($case['unit'])) {
+        $fixture = $fixtures[$key];
+        if ($fixture === null) {
+            $totalSkip++;
+            $why = $case['unit'] === 'linked'
+                ? 'no live equipment unit (deleted_at IS NULL, with a template) is linked to a non-disposed fixed asset'
+                : 'every live equipment unit (deleted_at IS NULL, with a template) is linked to a non-disposed fixed asset';
+            echo sprintf("[SKIP] %-26s %s\n", $key, $why);
+            continue;
+        }
+        $childArgs .= ' ' . escapeshellarg((string) $fixture['unit_id']);
+        $case['regex'] = array_map(
+            static fn(string $rx): string => str_replace('{asset_id}', (string) $fixture['asset_id'], $rx),
+            $case['regex'] ?? []
+        );
+        echo sprintf("       %-26s unit #%d → linkedAssetId %d\n", $key, $fixture['unit_id'], $fixture['asset_id']);
+    }
+
+    $cmd = escapeshellarg($php) . ' ' . escapeshellarg($self) . ' ' . $childArgs . ' 2>&1';
     $out = [];
     $exitCode = 0;
     exec($cmd, $out, $exitCode);
@@ -152,6 +251,14 @@ foreach ($cases as $key => $case) {
     if ($exitCode !== 0) {
         echo sprintf("[FAIL] %-26s child exit=%d\n", $key, $exitCode);
         foreach ($out as $line) echo "        $line\n";
+        continue;
+    }
+
+    // WHY: a page that redirects + `exit`s (missing/soft-deleted record)
+    // ends the child with code 0 and prints nothing — say so explicitly
+    // rather than reporting a wall of "missing markers" on 0 bytes.
+    if ($out === []) {
+        echo sprintf("[FAIL] %-26s child rendered nothing — page exited early (redirect on a missing or soft-deleted record?)\n", $key);
         continue;
     }
 
@@ -183,5 +290,6 @@ foreach ($cases as $key => $case) {
     }
 }
 
-echo sprintf("\n%d / %d pages passed\n", $totalPass, count($cases));
-exit($totalPass === count($cases) ? 0 : 1);
+echo sprintf("\n%d / %d pages passed", $totalPass, count($cases) - $totalSkip);
+echo $totalSkip > 0 ? sprintf(" (%d skipped — no qualifying data)\n", $totalSkip) : "\n";
+exit($totalPass === count($cases) - $totalSkip ? 0 : 1);
