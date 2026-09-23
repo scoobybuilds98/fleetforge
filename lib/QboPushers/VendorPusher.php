@@ -279,6 +279,7 @@ class VendorPusher
         //    writes per S-QBO-2 — Pusher consumes the parsed response.
         //    NEVER use per-entity wrappers like createVendor() — they
         //    don't exist (K-22 Trap #63). Use the typed entity API.
+        $renameNote = null;   // S-QBO-NAME-CLASH
         $client = new QuickBooksClient();
         try {
             if ($effectiveOperation === 'update') {
@@ -297,20 +298,33 @@ class VendorPusher
                 $response = $client->createEntity('vendor', $qboPayload);
             }
         } catch (QuickBooksException $e) {
-            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
-            // in map row. HTTP-level sync_log is written by QuickBooksClient.
-            // QuickBooksException exposes httpStatus / errorCode as public
-            // readonly PROPERTIES, not methods — method_exists() is ALWAYS false
-            // for them and silently dropped the real HTTP status + QBO fault code.
-            $httpCode = $e->httpStatus ?? 0;
-            self::recordPushFailure($ffVendorId, $e->getMessage(), $httpCode);
-            return [
-                'success'    => false,
-                'status'     => 'qbo_error',
-                'outcome'    => 'failed',
-                'error'      => $e->getMessage(),
-                'error_code' => $e->errorCode ?? null,
-            ] + self::RESULT_BASE;
+            // S-QBO-NAME-CLASH: "name already taken" (6240) on create — the
+            // name belongs to a different kind of record (a dual-role
+            // company's other side, an employee) → create as "X (Vendor)";
+            // a vendor of the same name already exists → ask for a link.
+            $clash = null;
+            if ($effectiveOperation === 'create' && DisplayNameClash::isClash($e)) {
+                $clash = DisplayNameClash::createAnyway($client, 'Vendor', $qboPayload,
+                    static fn(array $payload) => $client->createEntity('vendor', $payload));
+            }
+            if ($clash === null || !isset($clash['response'])) {
+                // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
+                // in map row. HTTP-level sync_log is written by QuickBooksClient.
+                // QuickBooksException exposes httpStatus / errorCode as public
+                // readonly PROPERTIES, not methods — method_exists() is ALWAYS false
+                // for them and silently dropped the real HTTP status + QBO fault code.
+                $httpCode = $e->httpStatus ?? 0;
+                self::recordPushFailure($ffVendorId, $clash['error'] ?? $e->getMessage(), $httpCode);
+                return [
+                    'success'    => false,
+                    'status'     => $clash['status'] ?? 'qbo_error',
+                    'outcome'    => 'failed',
+                    'error'      => $clash['error'] ?? $e->getMessage(),
+                    'error_code' => $e->errorCode ?? null,
+                ] + self::RESULT_BASE;
+            }
+            $response = $clash['response'];
+            $renameNote = $clash['note'];
         }
 
         // 8. QBO returns { "Vendor": {...}, "time": "..." } for both
@@ -332,6 +346,9 @@ class VendorPusher
         // push_status='pushed', push_error=null, pushed_at=NOW. Mirrors
         // CustomerPusher::recordSuccessfulPush().
         self::recordSuccessfulPush($ffVendorId, $ff, $qboVendor, $mapping);
+        if ($renameNote !== null) {
+            self::recordRename($ffVendorId, $renameNote);
+        }
 
         return [
             'success'    => true,
@@ -341,6 +358,7 @@ class VendorPusher
             'outcome'    => $effectiveOperation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboVendor['Id'],
             'sync_token' => (string) ($qboVendor['SyncToken'] ?? '0'),
+            'renamed_to' => $renameNote !== null ? ($response['Vendor']['DisplayName'] ?? null) : null,   // S-QBO-NAME-CLASH
         ] + self::RESULT_BASE;
     }
 
@@ -449,6 +467,30 @@ class VendorPusher
     // Mirror CustomerPusher's 4-helper pattern + InvoicePusher template.
     // D-CV-PUSH-STATE-COLUMN-PATH + D-CV-RECORD-HELPERS-MIRROR + D-CV-ENUM-SCOPE.
     // ============================================================
+
+    /**
+     * S-QBO-NAME-CLASH: the QuickBooks name was taken by another kind of
+     * record, so this one was created with a suffix — note it on the map
+     * row (shown on the mapping page) and in the audit log.
+     */
+    private static function recordRename(int $ffId, string $note): void
+    {
+        try {
+            db_execute("UPDATE acc_qbo_vendor_map SET match_notes = ? WHERE ff_vendor_id = ?", [$note, $ffId]);
+            db_insert('audit_log', [
+                'user_id'     => null,
+                'user_name'   => 'QuickBooks sync',
+                'action'      => 'update',
+                'module'      => 'quickbooks',
+                'entity_type' => 'vendor',
+                'entity_id'   => $ffId,
+                'notes'       => $note,
+                'ip_address'  => '127.0.0.1',
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[vendor name clash] could not record the rename: ' . $e->getMessage());
+        }
+    }
 
     /**
      * Upsert mapping row with success state. Stamps push_status='pushed',

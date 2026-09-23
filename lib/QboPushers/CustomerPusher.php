@@ -285,6 +285,7 @@ class CustomerPusher
         // 7. HTTP call via QuickBooksClient. The client handles auth,
         //    retries (transient errors), Sentry capture, and sync_log
         //    writes — we just consume the parsed response.
+        $renameNote = null;   // S-QBO-NAME-CLASH
         $client = new QuickBooksClient();
         try {
             if ($effectiveOperation === 'update') {
@@ -306,23 +307,36 @@ class CustomerPusher
                 $response = $client->createEntity('customer', $qboPayload);
             }
         } catch (QuickBooksException $e) {
-            // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
-            // in map row (push_status='failed' + push_error). HTTP-level
-            // sync_log is written by QuickBooksClient itself on the failed
-            // request, so no separate sync_log write needed here.
-            // QuickBooksException exposes httpStatus / errorCode as public
-            // readonly PROPERTIES, not methods — method_exists() is ALWAYS false
-            // for them and silently dropped the real HTTP status + QBO fault code
-            // (e.g. 6240 duplicate) that drive retry classification + Push State.
-            $httpCode = $e->httpStatus ?? 0;
-            self::recordPushFailure($ffCustomerId, $e->getMessage(), $httpCode);
-            return [
-                'success'    => false,
-                'status'     => 'qbo_error',
-                'outcome'    => 'failed',
-                'error'      => $e->getMessage(),
-                'error_code' => $e->errorCode ?? null,
-            ] + self::RESULT_BASE;
+            // S-QBO-NAME-CLASH: "name already taken" (6240) on create — the
+            // name belongs to a different kind of record (a dual-role
+            // company's other side, an employee) → create as "X (Customer)";
+            // a customer of the same name already exists → ask for a link.
+            $clash = null;
+            if ($effectiveOperation === 'create' && DisplayNameClash::isClash($e)) {
+                $clash = DisplayNameClash::createAnyway($client, 'Customer', $qboPayload,
+                    static fn(array $payload) => $client->createEntity('customer', $payload));
+            }
+            if ($clash === null || !isset($clash['response'])) {
+                // S-QBO-CUSTOMER-VENDOR-PUSH-STATE-INFRA: record HTTP failure
+                // in map row (push_status='failed' + push_error). HTTP-level
+                // sync_log is written by QuickBooksClient itself on the failed
+                // request, so no separate sync_log write needed here.
+                // QuickBooksException exposes httpStatus / errorCode as public
+                // readonly PROPERTIES, not methods — method_exists() is ALWAYS false
+                // for them and silently dropped the real HTTP status + QBO fault code
+                // (e.g. 6240 duplicate) that drive retry classification + Push State.
+                $httpCode = $e->httpStatus ?? 0;
+                self::recordPushFailure($ffCustomerId, $clash['error'] ?? $e->getMessage(), $httpCode);
+                return [
+                    'success'    => false,
+                    'status'     => $clash['status'] ?? 'qbo_error',
+                    'outcome'    => 'failed',
+                    'error'      => $clash['error'] ?? $e->getMessage(),
+                    'error_code' => $e->errorCode ?? null,
+                ] + self::RESULT_BASE;
+            }
+            $response = $clash['response'];
+            $renameNote = $clash['note'];
         }
 
         // 8. QBO returns { "Customer": {...}, "time": "..." } for both
@@ -345,6 +359,9 @@ class CustomerPusher
         // operator-facing admin view + Push State queries surface the
         // success state. Mirrors InvoicePusher::recordSuccessfulPush().
         self::recordSuccessfulPush($ffCustomerId, $ff, $qboCustomer, $mapping, $effectiveOperation === 'create');
+        if ($renameNote !== null) {
+            self::recordRename($ffCustomerId, $renameNote);
+        }
 
         return [
             'success'    => true,
@@ -354,6 +371,7 @@ class CustomerPusher
             'outcome'    => $effectiveOperation === 'update' ? 'updated' : 'created',
             'qbo_id'     => (string) $qboCustomer['Id'],
             'sync_token' => (string) ($qboCustomer['SyncToken'] ?? '0'),
+            'renamed_to' => $renameNote !== null ? ($response['Customer']['DisplayName'] ?? null) : null,   // S-QBO-NAME-CLASH
         ] + self::RESULT_BASE;
     }
 
@@ -477,6 +495,30 @@ class CustomerPusher
     // MIRROR + D-CV-ENUM-SCOPE. See db_migrations/202605270100_S-QBO-
     // CUSTOMER-VENDOR-PUSH-STATE-INFRA.sql for the schema additions.
     // ============================================================
+
+    /**
+     * S-QBO-NAME-CLASH: the QuickBooks name was taken by another kind of
+     * record, so this one was created with a suffix — note it on the map
+     * row (shown on the mapping page) and in the audit log.
+     */
+    private static function recordRename(int $ffId, string $note): void
+    {
+        try {
+            db_execute("UPDATE acc_qbo_customer_map SET match_notes = ? WHERE ff_customer_id = ?", [$note, $ffId]);
+            db_insert('audit_log', [
+                'user_id'     => null,
+                'user_name'   => 'QuickBooks sync',
+                'action'      => 'update',
+                'module'      => 'quickbooks',
+                'entity_type' => 'customer',
+                'entity_id'   => $ffId,
+                'notes'       => $note,
+                'ip_address'  => '127.0.0.1',
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[customer name clash] could not record the rename: ' . $e->getMessage());
+        }
+    }
 
     /**
      * Upsert mapping row with success state. Stamps push_status='pushed',

@@ -196,6 +196,9 @@ require_once FF_ROOT . '/includes/header.php';
                                     <div>
                                         <div x-text="row.qbo_display_name || '(no name)'"></div>
                                         <div class="text-sm text-secondary font-mono" x-text="'qbo #' + row.qbo_customer_id"></div>
+                                        <!-- S-QBO-NAME-CLASH: created with a suffix because the name was taken -->
+                                        <div class="text-xs text-secondary" x-show="(row.match_notes || '').includes('S-QBO-NAME-CLASH')" x-cloak
+                                             title="QuickBooks names must be unique across customers, vendors and employees">Name taken by a vendor or employee in QuickBooks — suffix added</div>
                                     </div>
                                 </template>
                                 <template x-if="!row.qbo_customer_id && !row.suggestion">

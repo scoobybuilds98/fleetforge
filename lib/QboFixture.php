@@ -71,7 +71,7 @@ class QboFixture
      * Pops on first match — single-shot so successive calls go back to the
      * happy path.
      *
-     * @var array<string, array{status:int, body:array}>
+     * @var array<string, list<array{status:int, body:array}>>
      */
     private static array $errorInjections = [];
 
@@ -98,7 +98,9 @@ class QboFixture
      */
     public static function injectError(string $key, int $status, array $body): void
     {
-        self::$errorInjections[$key] = ['status' => $status, 'body' => $body];
+        // Queued per key (S-QBO-NAME-CLASH): injecting twice fails the next
+        // two matching calls, in order — each still single-shot.
+        self::$errorInjections[$key][] = ['status' => $status, 'body' => $body];
     }
 
     /**
@@ -146,9 +148,11 @@ class QboFixture
             $entityType . ':' . $operation,
         ];
         foreach ($candidates as $k) {
-            if (isset(self::$errorInjections[$k])) {
-                $err = self::$errorInjections[$k];
-                unset(self::$errorInjections[$k]); // single-shot
+            if (!empty(self::$errorInjections[$k])) {
+                $err = array_shift(self::$errorInjections[$k]); // single-shot, queued in order
+                if (self::$errorInjections[$k] === []) {
+                    unset(self::$errorInjections[$k]);
+                }
                 return ['status' => $err['status'], 'body' => (string) json_encode($err['body'])];
             }
         }
