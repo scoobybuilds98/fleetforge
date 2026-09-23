@@ -61,8 +61,8 @@ $createModalEvent = 'open-create-yard';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Yards</h1>
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ── -->
+<?php ob_start(); ?>
     <?php if ($canEdit): ?>
     <?php // This button sits OUTSIDE FF_YardsManager's scope, so it must not call
           // openCreate() directly (that threw "openCreate is not defined") — it
@@ -73,32 +73,42 @@ require_once FF_ROOT . '/includes/header.php';
         + New Yard
     </button>
     <?php endif; ?>
-    <div class="page-header-actions">
-        <?= help_button('yards') ?>
-    </div>
-</div>
+    <?= help_button('yards') ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Yards', null]],
+    'eyebrow'  => 'Operations',
+    'icon'     => 'map-pin',
+    'accent'   => 'success',
+    'title'    => 'Yards',
+    'subtitle' => 'The lots and depots where your equipment is parked and picked up — only active yards show up when booking a reservation.',
+    'art'      => 'yards',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- TILES-1: KPI tiles dispatch `ff-yards-filter` to the Alpine component
      below. Total Yards → showAll=true, Active → showAll=false, Inactive →
      showAll=true + a second inactive-only hint consumed by the table. -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--3 ff-stats" style="margin-bottom:24px;">
 
-    <div class="stat-card" style="cursor:pointer"
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
          onclick="window.dispatchEvent(new CustomEvent('ff-yards-filter',{detail:{view:'all'}}))">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-building"/></svg></span>
         <div class="stat-label">Total Yards</div>
         <div class="stat-value font-mono"><?= e($totalYards) ?></div>
         <div class="stat-delta">configured in system</div>
     </div>
 
-    <div class="stat-card" style="cursor:pointer"
+    <div class="stat-card stat-card--green" style="cursor:pointer"
          onclick="window.dispatchEvent(new CustomEvent('ff-yards-filter',{detail:{view:'active'}}))">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Active</div>
         <div class="stat-value font-mono" style="color:var(--color-success);"><?= e($activeYards) ?></div>
         <div class="stat-delta">available for reservations</div>
     </div>
 
-    <div class="stat-card" style="cursor:pointer"
+    <div class="stat-card stat-card--slate" style="cursor:pointer"
          onclick="window.dispatchEvent(new CustomEvent('ff-yards-filter',{detail:{view:'inactive'}}))">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-x-circle"/></svg></span>
         <div class="stat-label">Inactive</div>
         <div class="stat-value font-mono" style="color:var(--text-secondary);"><?= e($inactiveYards) ?></div>
         <div class="stat-delta">hidden from dropdowns</div>

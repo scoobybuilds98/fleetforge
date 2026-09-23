@@ -5,8 +5,8 @@ declare(strict_types=1);
  * FleetForge — Dashboard Tables API
  *
  * @file        api/v1/dashboard/tables.php
- * @description Returns ten operational tables for the dashboard. All ten
- *              return up to 10 rows.
+ * @description Returns eleven operational tables for the dashboard. The first
+ *              ten return up to 10 rows; idle_units returns up to 8.
  *
  *              active_leases       — newest start_date first. Includes
  *                                    days_active for the "Active For X days"
@@ -37,6 +37,10 @@ declare(strict_types=1);
  *              overdue_payments    — invoices with status='overdue' and
  *                                    balance_due > 0, sorted biggest debt first.
  *                                    Includes days_overdue.
+ *              idle_units          — S-DASHBOARD-VIZ. Up to 8 AVAILABLE units
+ *                                    idle longest: { id, unit_number, type,
+ *                                    category, yard, idle_since, idle_days }.
+ *                                    No money fields. See WHY at the query.
  *
  *              No caching — these need to be live (small queries, fast).
  *              No module permission required — dashboard accessible to all staff.
@@ -46,11 +50,12 @@ declare(strict_types=1);
  * @returns     200 { active_leases[], pending_leases[], upcoming_returns[],
  *                    invoices[], reservations[], expiring_this_month[],
  *                    draft_invoices[], high_value_leases[],
- *                    recently_activated[], overdue_payments[] }
+ *                    recently_activated[], overdue_payments[], idle_units[] }
  *
  * @depends     api/bootstrap.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.1 Dashboard
- * @session     S008, S-DASHBOARD-CAROUSEL-REORGANIZE, S-DASHBOARD-CAROUSEL-ENRICH
+ * @session     S008, S-DASHBOARD-CAROUSEL-REORGANIZE, S-DASHBOARD-CAROUSEL-ENRICH,
+ *              S-DASHBOARD-VIZ
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -276,6 +281,92 @@ $overduePayments = db_select(
     [$today]
 );
 
+// ── Idle units — AVAILABLE units idle longest (S-DASHBOARD-VIZ) ────
+// idle_since = the latest effective end (actual_return_date, else end_date) of
+// the unit's leases that is NOT after today; a unit with no such lease falls
+// back to its created_at, converted to the company-local date (created_at is a
+// UTC DATETIME — DATE() in SQL would be the UTC day). idle_days = days since.
+// STATUS CHOICES:
+//   - Only active + completed leases count. cancelled never ran, and a pending
+//     lease has not been handed over, so its (planned) end_date says nothing
+//     about when the unit was last out. Same allowlist as FleetUtilization.
+//   - An end date AFTER today (a future-dated return, or an active lease's
+//     planned end) is not "idle since" — only ends <= today count.
+//   - A unit whose status says 'available' but which still has an active/
+//     completed lease covering today (started, not yet ended — e.g. an open-
+//     ended active lease) is NOT idle; that is unit-status drift, so it is
+//     left out rather than listed with a misleading idle age.
+// All available units are fetched and ranked in PHP because the created_at
+// fallback needs the UTC → local conversion; the available pool is small.
+// Business DATE vs company-local today: SQL CURDATE() is the UTC day (ff_today).
+// Three placeholders (last-end cutoff, still-out start, still-out end) — one $today each.
+$idleCandidates = db_select(
+    "SELECT eu.id, eu.unit_number, eu.created_at,
+            et.name                               AS type,
+            et.category                           AS category_slug,
+            ec.label                              AS category_label,
+            NULLIF(TRIM(eu.yard_location), '')    AS yard,
+            (SELECT MAX(COALESCE(l.actual_return_date, l.end_date))
+               FROM leases l
+              WHERE l.equipment_unit_id = eu.id
+                AND l.deleted_at IS NULL
+                AND l.status IN ('active', 'completed')
+                AND COALESCE(l.actual_return_date, l.end_date) <= ?) AS last_end
+     FROM equipment_units eu
+     LEFT JOIN equipment_templates et  ON et.id   = eu.template_id
+     LEFT JOIN equipment_categories ec ON ec.slug = et.category
+     WHERE eu.status = 'available'
+       AND eu.deleted_at IS NULL
+       AND NOT EXISTS (
+             SELECT 1 FROM leases l2
+              WHERE l2.equipment_unit_id = eu.id
+                AND l2.deleted_at IS NULL
+                AND l2.status IN ('active', 'completed')
+                AND l2.start_date <= ?
+                AND (COALESCE(l2.actual_return_date, l2.end_date) IS NULL
+                     OR COALESCE(l2.actual_return_date, l2.end_date) > ?)
+           )",
+    [$today, $today, $today]
+);
+
+$idleUnits = [];
+$todayDt   = new DateTimeImmutable($today);
+foreach ($idleCandidates as $u) {
+    // yard_location is the yard NAME string (no FK — see api/v1/yards/destroy.php).
+    $since = $u['last_end'] !== null
+        ? (string) $u['last_end']
+        : ($u['created_at'] !== null ? ff_utc_to_local((string) $u['created_at']) : null);
+    $days  = null;
+    if ($since !== null) {
+        // max(0): a created_at stamped later today (UTC → local) can't go negative.
+        $days = max(0, (int) (new DateTimeImmutable($since))->diff($todayDt)->format('%r%a'));
+    }
+    $slug = $u['category_slug'];
+    $idleUnits[] = [
+        'id'          => (int) $u['id'],
+        'unit_number' => (string) $u['unit_number'],
+        'type'        => (string) ($u['type'] ?? ''),
+        // Operator label for the category slug, else the humanised slug (the
+        // chart_occupancy_by_type / fleet_mix format).
+        'category'    => $u['category_label'] !== null && $u['category_label'] !== ''
+            ? (string) $u['category_label']
+            : ($slug !== null && $slug !== '' ? ucwords(str_replace('_', ' ', (string) $slug)) : null),
+        'yard'        => $u['yard'] !== null ? (string) $u['yard'] : null,
+        'idle_since'  => $since,
+        'idle_days'   => $days,
+    ];
+}
+// Longest idle first; unknown idle age last; unit number breaks ties so the
+// list is stable between refreshes.
+usort($idleUnits, static function (array $a, array $b): int {
+    if ($a['idle_days'] === null || $b['idle_days'] === null) {
+        return ($a['idle_days'] === null) <=> ($b['idle_days'] === null)
+            ?: strnatcasecmp($a['unit_number'], $b['unit_number']);
+    }
+    return ($b['idle_days'] <=> $a['idle_days']) ?: strnatcasecmp($a['unit_number'], $b['unit_number']);
+});
+$idleUnits = array_slice($idleUnits, 0, 8);
+
 $payload = [
     'active_leases'        => $activeLeases,
     'pending_leases'       => $pendingLeases,
@@ -287,6 +378,7 @@ $payload = [
     'high_value_leases'    => $highValueLeases,
     'recently_activated'   => $recentlyActivated,
     'overdue_payments'     => $overduePayments,
+    'idle_units'           => $idleUnits,
 ];
 
 // Serve-time financial redaction. Dispatchers (payments=NONE) get the

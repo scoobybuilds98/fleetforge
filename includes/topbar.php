@@ -23,7 +23,12 @@ declare(strict_types=1);
  *           includes/helpers.php (heroicon, base_url, e)
  *           public/assets/js/app.js (FF_Theme.toggle)
  *           public/assets/css/app.css (topbar-* · user-avatar-* · topbar-create-*)
- * @session  S009 (enhanced)
+ * S-SHELL-REDESIGN: the left side is a context block (module icon tile in
+ * the module's accent + company name + page title); the preference/utility
+ * buttons (theme, text size, sound, team chat, AI) sit in one .topbar-tray;
+ * search is the flexible middle (CSS order). Visuals: public/assets/css/shell.css.
+ *
+ * @session  S009 (enhanced), S-SHELL-REDESIGN
  */
 
 // ── Notification unread count ─────────────────────────────────────────────────
@@ -146,6 +151,11 @@ $_topbarTitle = isset($pageTitle) ? trim($pageTitle) : '';
 // `url` is each module's main page (e.g. /invoices, /accounting/dashboard).
 $_moduleHref  = null;
 $_moduleLabel = null;
+// S-SHELL-REDESIGN: the context tile shows the current module's icon in its
+// accent. Resolved from the same navigation config — top-level items first,
+// then children (e.g. /credit_notes lives under Invoices). Default = home.
+$_moduleIcon   = 'home';
+$_moduleAccent = 'primary';
 $_navPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
 $_navRel  = ltrim((string) substr($_navPath, strlen(FF_BASE_PATH)), '/'); // e.g. 'invoices/create'
 $_navSeg  = $_navRel === '' ? '' : (explode('/', $_navRel)[0] ?? '');      // 'invoices'
@@ -162,10 +172,29 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                 $_moduleHref  = base_url(ltrim((string) $_ni['url'], '/'));
                 $_moduleLabel = $_ni['label'] ?? null;
             }
+            $_moduleIcon   = (string) ($_ni['icon'] ?? 'home');
+            $_moduleAccent = (string) ($_ni['accent'] ?? 'primary');
             break;
         }
     }
+    if ($_moduleIcon === 'home') {
+        // Not a top-level module: look for a child whose url matches (icon only —
+        // the title link keeps the top-level rule above).
+        foreach ((array) (require FF_ROOT . '/config/navigation.php') as $_ni) {
+            foreach ((array) ($_ni['children'] ?? []) as $_nc) {
+                if ((explode('/', ltrim((string) ($_nc['url'] ?? ''), '/'))[0] ?? '') === $_navSeg) {
+                    $_moduleIcon   = (string) ($_nc['icon'] ?? 'home');
+                    $_moduleAccent = (string) ($_ni['accent'] ?? 'primary');
+                    break 2;
+                }
+            }
+        }
+    }
 }
+if (!in_array($_moduleAccent, ['primary', 'info', 'success', 'warning', 'danger', 'purple'], true)) {
+    $_moduleAccent = 'primary';
+}
+$_topbarCompany = (string) settings_get('company.name', 'FleetForge');
 ?>
 
 <header class="topbar" role="banner">
@@ -194,20 +223,27 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
             <?= heroicon('bars-3', 'nav-icon') ?>
         </button>
 
-        <a href="<?= base_url('dashboard') ?>" class="btn-icon topbar-home-btn" aria-label="Dashboard">
-            <?= heroicon('home', 'nav-icon') ?>
-        </a>
-
-        <?php if ($_topbarTitle !== ''): ?>
-            <h1 class="topbar-title">
-                <?php if ($_moduleHref !== null): ?>
-                    <a href="<?= e($_moduleHref) ?>" class="topbar-title-link"
-                       title="Open <?= e($_moduleLabel ?? 'module') ?> dashboard"><?= e($_topbarTitle) ?></a>
-                <?php else: ?>
-                    <?= e($_topbarTitle) ?>
+        <!-- S-SHELL-REDESIGN context block: module tile (links home) +
+             company name + page title (links to the module's main page). -->
+        <div class="topbar-context">
+            <a href="<?= base_url('dashboard') ?>" class="topbar-context-ic ff-acc--<?= e($_moduleAccent) ?>"
+               aria-label="Dashboard" title="Dashboard">
+                <?= heroicon($_moduleIcon, 'nav-icon') ?>
+            </a>
+            <div class="topbar-context-text">
+                <a href="<?= base_url('dashboard') ?>" class="topbar-company-name"><?= e($_topbarCompany) ?></a>
+                <?php if ($_topbarTitle !== ''): ?>
+                    <h1 class="topbar-title">
+                        <?php if ($_moduleHref !== null): ?>
+                            <a href="<?= e($_moduleHref) ?>" class="topbar-title-link"
+                               title="Open <?= e($_moduleLabel ?? 'module') ?> dashboard"><?= e($_topbarTitle) ?></a>
+                        <?php else: ?>
+                            <?= e($_topbarTitle) ?>
+                        <?php endif; ?>
+                    </h1>
                 <?php endif; ?>
-            </h1>
-        <?php endif; ?>
+            </div>
+        </div>
 
     </div>
 
@@ -373,6 +409,12 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
                 </template>
             </div>
         </div>
+
+        <!-- ── S-SHELL-REDESIGN utility tray: theme · text size · sound ·
+             team chat · AI in one segmented group. Children keep their
+             own classes, so the responsive hide rules in app.css still
+             apply to each of them. ─────────────────────────────────── -->
+        <div class="topbar-tray" role="group" aria-label="Preferences and assistants">
 
         <!-- ── Theme toggle ──────────────────────────────────────────── -->
         <!-- Initialises from <html data-theme>; tracks state locally so  -->
@@ -587,6 +629,8 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
             </a>
         </div>
         <?php endif; ?>
+
+        </div><!-- /topbar-tray -->
 
         <!-- ── Notifications bell (NOTIF-1 — Alpine factory) ────────── -->
         <!-- FF_Notifications() factory is in public/assets/js/app.js.
@@ -862,5 +906,6 @@ if ($_navSeg !== '' && $_navSeg !== 'dashboard') {
 </header>
 
 <?php
-unset($_unreadCount, $_topbarTitle, $_topbarCompany, $_me, $_initials, $_roleMap, $_roleLabel, $_creates);
+unset($_unreadCount, $_topbarTitle, $_topbarCompany, $_me, $_initials, $_roleMap, $_roleLabel, $_creates,
+      $_moduleIcon, $_moduleAccent, $_moduleHref, $_moduleLabel);
 ?>

@@ -1,0 +1,61 @@
+<svg class="dg dg--art-maintenance" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A unit on the lift and its work order</title>
+  <!-- status chip -->
+  <rect class="dg-chip" x="16" y="14" width="104" height="22" rx="11"/>
+  <circle class="dg-dot--warn" cx="29" cy="25" r="4"/><text class="dg-t-sm dg-t-start" x="39" y="29">In the shop</text>
+
+  <!-- floor + scissor lift -->
+  <line class="dg-line" x1="8" y1="186" x2="262" y2="186"/>
+  <rect class="dg-surface-2" x="48" y="178" width="164" height="7" rx="3"/>
+  <line class="dg-line" x1="64" y1="156" x2="130" y2="178" style="stroke-width:2"/>
+  <line class="dg-line" x1="64" y1="178" x2="130" y2="156" style="stroke-width:2"/>
+  <line class="dg-line" x1="130" y1="156" x2="196" y2="178" style="stroke-width:2"/>
+  <line class="dg-line" x1="130" y1="178" x2="196" y2="156" style="stroke-width:2"/>
+  <circle class="dg-ink" cx="97" cy="167" r="2.5"/>
+  <circle class="dg-ink" cx="163" cy="167" r="2.5"/>
+  <rect class="dg-surface" x="36" y="148" width="188" height="8" rx="3"/>
+
+  <!-- trailer up on the lift -->
+  <rect class="dg-acc-soft" x="40" y="78" width="180" height="50" rx="6"/>
+  <line class="dg-line-soft" x1="70" y1="82" x2="70" y2="124"/>
+  <line class="dg-line-soft" x1="94" y1="82" x2="94" y2="124"/>
+  <line class="dg-line-soft" x1="166" y1="82" x2="166" y2="124"/>
+  <line class="dg-line-soft" x1="190" y1="82" x2="190" y2="124"/>
+  <text class="dg-acc-t" x="130" y="108" style="font-size:12px;letter-spacing:.08em">TRL-204</text>
+  <rect class="dg-ink" x="62" y="128" width="5" height="20" rx="2"/>
+  <circle class="dg-surface" cx="176" cy="138" r="10"/><circle class="dg-ink" cx="176" cy="138" r="4"/>
+  <circle class="dg-surface" cx="202" cy="138" r="10"/><circle class="dg-ink" cx="202" cy="138" r="4"/>
+
+  <!-- wrench at work -->
+  <g class="dg-float">
+    <g transform="translate(236 30) rotate(148)">
+      <path class="dg-acc" d="M-10.25,-4 L-3,-4 L-3,4 L-10.25,4 A11,11 0 1 0 -10.25,-4 Z"/>
+      <rect class="dg-acc" x="6" y="-4.5" width="50" height="9" rx="4.5"/>
+    </g>
+  </g>
+
+  <!-- unit → its work order -->
+  <path class="dg-acc-flow" d="M224,104 C248,104 262,92 288,92"/>
+  <circle class="dg-packet--acc" r="3.5"><animateMotion dur="2s" repeatCount="indefinite" path="M224,104 C248,104 262,92 288,92"/></circle>
+
+  <!-- work order card: Open → In shop → Done -->
+  <rect class="dg-surface" x="290" y="20" width="136" height="146" rx="10"/>
+  <text class="dg-t-xs dg-t-start" x="303" y="42">WO-1042</text>
+  <rect class="dg-warn-soft" x="372" y="30" width="44" height="17" rx="8.5"/>
+  <text class="dg-t-xs" x="394" y="42">HIGH</text>
+  <text class="dg-t dg-t-start" x="303" y="66">Brake repair</text>
+  <rect class="dg-ink" x="303" y="78" width="100" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="303" y="90" width="72" height="5" rx="2.5" opacity=".55"/>
+  <line class="dg-line-soft" x1="303" y1="106" x2="413" y2="106"/>
+  <line class="dg-line" x1="314" y1="128" x2="402" y2="128"/>
+  <rect class="dg-acc dg-grow" x="314" y="126.5" width="88" height="3" rx="1.5"/>
+  <circle class="dg-acc" cx="314" cy="128" r="5"/>
+  <circle class="dg-acc" cx="358" cy="128" r="5"/>
+  <circle class="dg-pulse dg-pulse--ok" cx="402" cy="128" r="9"/>
+  <circle class="dg-ok-soft" cx="402" cy="128" r="9"/>
+  <path class="dg-check" d="M397,128 l3.5,3.5 l6,-7" style="stroke-width:2.5"/>
+  <circle class="dg-packet--acc" r="3.5"><animateMotion dur="2.6s" repeatCount="indefinite" path="M314,128 L402,128"/></circle>
+  <text class="dg-t-xs" x="314" y="152">OPEN</text>
+  <text class="dg-t-xs" x="358" y="152">IN SHOP</text>
+  <text class="dg-t-xs" x="402" y="152">DONE</text>
+</svg>

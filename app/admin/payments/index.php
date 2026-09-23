@@ -69,21 +69,24 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<div class="page-header">
-    <div>
-        <h1 class="page-header-title h4">Payments</h1>
-        <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">Record and track customer payments against invoices</p>
-    </div>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <?= help_button('payments') ?>
         <a href="<?= base_url('/payments/create') ?>" class="btn btn-primary btn-md">
             <?= heroicon('plus', 'icon-sm') ?>
             Record Payment
         </a>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Payments', null]],
+    'eyebrow'  => 'Billing',
+    'icon'     => 'credit-card',
+    'accent'   => 'success',
+    'title'    => 'Payments',
+    'subtitle' => 'Record the money customers send you, apply it to their invoices and keep an eye on what\'s still owed.',
+    'art'      => 'payments',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      KPI tiles
@@ -93,7 +96,7 @@ require_once FF_ROOT . '/includes/header.php';
      outranks every responsive .stat-grid rule — so this row stayed 4-across
      on a phone (68px tiles, values sheared off). .stat-grid--4 is the same
      4-up desktop layout but collapses 2-up at tablet and 1-up at mobile. -->
-<div class="stat-grid stat-grid--4" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:24px;">
 
     <!-- Collected This Month — filters table by status=cleared -->
     <div class="stat-card stat-card--green"

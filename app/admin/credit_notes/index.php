@@ -110,13 +110,8 @@ $helpModuleSlug = 'credit-notes';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<!-- Page header -->
-<div class="page-header">
-    <div>
-        <h1 class="page-header-title h4">Credit Notes</h1>
-        <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">Issue and track customer credit notes against outstanding invoices</p>
-    </div>
-    <div class="page-header-actions">
+<!-- Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) -->
+<?php ob_start(); ?>
         <?= help_button('credit-notes') ?>
         <?php if (can('invoices', 'create')): ?>
         <a href="<?= base_url('credit_notes/create') ?>" class="btn btn-primary btn-md">
@@ -124,12 +119,20 @@ require_once FF_ROOT . '/includes/header.php';
             New Credit Note
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Credit Notes', null]],
+    'eyebrow'  => 'Billing',
+    'icon'     => 'receipt-percent',
+    'accent'   => 'purple',
+    'title'    => 'Credit Notes',
+    'subtitle' => 'Money you owe a customer back — from an overpayment, a billing fix or goodwill — used up against their invoices.',
+    'art'      => 'credit-notes',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- KPI tiles -->
 <div x-data="creditNotesKpis()" x-init="loadKpis()" @cn-customer-scope-changed.window="customerId = $event.detail.customer_id; loadKpis()">
-<div class="stat-grid" style="margin-bottom:1.5rem;">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:1.5rem;">
     <div class="stat-card stat-card--blue" style="cursor:pointer;"
          @click="activeTile = activeTile === 'active' ? '' : 'active'; drill('status', activeTile === 'active' ? 'active' : '')"
          :class="{ 'ring-active': activeTile === 'active' }">

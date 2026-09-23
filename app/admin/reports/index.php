@@ -40,18 +40,26 @@ $pageNeedsCharts = true;
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Reports</h1>
-        <p class="page-subtitle">Financial, fleet, customer, and compliance analytics</p>
-    </div>
-    <div class="page-header-actions no-print">
+<!-- ============================================================
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
+     The old actions row was .no-print; .ff-hero-actions is hidden in print
+     by module-chrome.css, so the printed report keeps only the title.
+     ============================================================ -->
+<?php ob_start(); ?>
         <?= help_button('reports') ?>
         <button class="btn btn-secondary btn-sm" onclick="window.print()">
             <svg width="14" height="14"><use href="#icon-printer"/></svg> Print
         </button>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Reports', null]],
+    'eyebrow'  => 'Insights',
+    'icon'     => 'chart-bar',
+    'accent'   => 'purple',
+    'title'    => 'Reports',
+    'subtitle' => 'What happened over any period you pick — revenue, fleet use, customers and document expiry, ready to print or export.',
+    'art'      => 'reports',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <div x-data="FF_Reports()" x-cloak id="reports-root">
 
@@ -95,13 +103,13 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     ════════════════════════════════════════════════════════════ -->
     <div x-show="mainTab==='financial'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
-        <div x-show="tabs.financial.kpis" class="stat-grid mb-4">
-                <div class="stat-card stat-card--green"><div class="stat-label">Gross Revenue</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.gross_revenue)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.invoice_count??'')+' invoices'"></div></div>
-                <div class="stat-card stat-card--blue"><div class="stat-label">Collected</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.total_collected)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.collection_rate??'')+'% rate'"></div></div>
-                <div class="stat-card stat-card--amber"><div class="stat-label">Outstanding</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.total_outstanding)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.overdue_count??'')+' overdue'"></div></div>
-                <div class="stat-card stat-card--red"><div class="stat-label">Overdue Amount</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.overdue_amount)"></div></div>
-                <div class="stat-card stat-card--purple"><div class="stat-label">Avg Invoice</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.avg_invoice_value)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.unique_customers??'')+' customers'"></div></div>
-                <div class="stat-card stat-card--teal"><div class="stat-label">Tax Collected</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.total_tax)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.paid_count??'')+' paid'"></div></div>
+        <div x-show="tabs.financial.kpis" class="stat-grid ff-stats mb-4">
+                <div class="stat-card stat-card--green"><span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span><div class="stat-label">Gross Revenue</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.gross_revenue)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.invoice_count??'')+' invoices'"></div></div>
+                <div class="stat-card stat-card--blue"><span class="stat-icon stat-icon--blue"><svg><use href="#icon-check-circle"/></svg></span><div class="stat-label">Collected</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.total_collected)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.collection_rate??'')+'% rate'"></div></div>
+                <div class="stat-card stat-card--amber"><span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span><div class="stat-label">Outstanding</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.total_outstanding)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.overdue_count??'')+' overdue'"></div></div>
+                <div class="stat-card stat-card--red"><span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span><div class="stat-label">Overdue Amount</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.overdue_amount)"></div></div>
+                <div class="stat-card stat-card--purple"><span class="stat-icon stat-icon--purple"><svg><use href="#icon-document-text"/></svg></span><div class="stat-label">Avg Invoice</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.avg_invoice_value)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.unique_customers??'')+' customers'"></div></div>
+                <div class="stat-card stat-card--teal"><span class="stat-icon stat-icon--teal"><svg><use href="#icon-tag"/></svg></span><div class="stat-label">Tax Collected</div><div class="stat-value font-mono" x-text="money(tabs.financial.kpis?.total_tax)"></div><div class="stat-delta" x-text="(tabs.financial.kpis?.paid_count??'')+' paid'"></div></div>
         </div>
         <div x-show="tabs.financial.loading&&!tabs.financial.kpis" class="stat-grid mb-4"><template x-for="i in 6"><div class="stat-card"><div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div><div class="skeleton-bar" style="width:80%;height:24px;"></div></div></template></div>
 
@@ -197,13 +205,13 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     ════════════════════════════════════════════════════════════ -->
     <div x-show="mainTab==='fleet'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
-        <div x-show="tabs.fleet.kpis" class="stat-grid mb-4">
-                <div class="stat-card stat-card--blue"><div class="stat-label">Fleet Utilization</div><div class="stat-value font-mono" x-text="pct(tabs.fleet.kpis?.avg_utilization)"></div><div class="stat-delta" x-text="tabs.fleet.kpis?.util_window_from ? (tabs.fleet.kpis.period_days+' days measured, to '+tabs.fleet.kpis.util_window_to) : 'No elapsed days in range'"></div></div>
-                <div class="stat-card stat-card--green"><div class="stat-label">Total Units</div><div class="stat-value" x-text="tabs.fleet.kpis?.total_units"></div><div class="stat-delta" x-text="(tabs.fleet.kpis?.active_units??'')+' active'"></div></div>
-                <div class="stat-card stat-card--amber"><div class="stat-label">Idle Units</div><div class="stat-value" x-text="tabs.fleet.kpis?.idle_units"></div><div class="stat-delta">0 days leased in period</div></div>
-                <div class="stat-card stat-card--green"><div class="stat-label">Fleet Revenue</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_revenue)"></div></div>
-                <div class="stat-card stat-card--red"><div class="stat-label">Maintenance Cost</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_maint_cost)"></div></div>
-                <div class="stat-card" :class="parseFloat(tabs.fleet.kpis?.total_roi||0)>=0?'stat-card--green':'stat-card--red'"><div class="stat-label">Fleet ROI</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_roi)"></div><div class="stat-delta">Revenue – Maintenance</div></div>
+        <div x-show="tabs.fleet.kpis" class="stat-grid ff-stats mb-4">
+                <div class="stat-card stat-card--blue"><span class="stat-icon stat-icon--blue"><svg><use href="#icon-chart-bar"/></svg></span><div class="stat-label">Fleet Utilization</div><div class="stat-value font-mono" x-text="pct(tabs.fleet.kpis?.avg_utilization)"></div><div class="stat-delta" x-text="tabs.fleet.kpis?.util_window_from ? (tabs.fleet.kpis.period_days+' days measured, to '+tabs.fleet.kpis.util_window_to) : 'No elapsed days in range'"></div></div>
+                <div class="stat-card stat-card--green"><span class="stat-icon stat-icon--green"><svg><use href="#icon-truck"/></svg></span><div class="stat-label">Total Units</div><div class="stat-value" x-text="tabs.fleet.kpis?.total_units"></div><div class="stat-delta" x-text="(tabs.fleet.kpis?.active_units??'')+' active'"></div></div>
+                <div class="stat-card stat-card--amber"><span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span><div class="stat-label">Idle Units</div><div class="stat-value" x-text="tabs.fleet.kpis?.idle_units"></div><div class="stat-delta">0 days leased in period</div></div>
+                <div class="stat-card stat-card--green"><span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span><div class="stat-label">Fleet Revenue</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_revenue)"></div></div>
+                <div class="stat-card stat-card--red"><span class="stat-icon stat-icon--red"><svg><use href="#icon-wrench"/></svg></span><div class="stat-label">Maintenance Cost</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_maint_cost)"></div></div>
+                <div class="stat-card" :class="parseFloat(tabs.fleet.kpis?.total_roi||0)>=0?'stat-card--green':'stat-card--red'"><span class="stat-icon" :class="parseFloat(tabs.fleet.kpis?.total_roi||0)>=0?'stat-icon--green':'stat-icon--red'"><svg><use href="#icon-arrow-trending-up"/></svg></span><div class="stat-label">Fleet ROI</div><div class="stat-value font-mono" x-text="money(tabs.fleet.kpis?.total_roi)"></div><div class="stat-delta">Revenue – Maintenance</div></div>
         </div>
         <div x-show="tabs.fleet.loading&&!tabs.fleet.kpis" class="stat-grid mb-4"><template x-for="i in 6"><div class="stat-card"><div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div><div class="skeleton-bar" style="width:80%;height:24px;"></div></div></template></div>
 
@@ -289,13 +297,13 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
     ════════════════════════════════════════════════════════════ -->
     <div x-show="mainTab==='customer'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
 
-        <div x-show="tabs.customer.kpis" class="stat-grid mb-4">
-                <div class="stat-card stat-card--blue"><div class="stat-label">Unique Customers</div><div class="stat-value" x-text="tabs.customer.kpis?.unique_customers"></div><div class="stat-delta" x-text="(tabs.customer.kpis?.active_customers??'')+' active'"></div></div>
-                <div class="stat-card stat-card--green"><div class="stat-label">Period Revenue</div><div class="stat-value font-mono" x-text="money(tabs.customer.kpis?.total_revenue)"></div></div>
-                <div class="stat-card stat-card--purple"><div class="stat-label">Avg Invoice Value</div><div class="stat-value font-mono" x-text="money(tabs.customer.kpis?.avg_invoice_value)"></div></div>
-                <div class="stat-card" :class="parseFloat(tabs.customer.kpis?.avg_days_to_pay||0)>30?'stat-card--red':parseFloat(tabs.customer.kpis?.avg_days_to_pay||0)>15?'stat-card--amber':'stat-card--green'"><div class="stat-label">Avg Days to Pay</div><div class="stat-value font-mono" x-text="(tabs.customer.kpis?.avg_days_to_pay??'')+' days'"></div></div>
-                <div class="stat-card stat-card--teal"><div class="stat-label">Invoices</div><div class="stat-value" x-text="tabs.customer.kpis?.invoice_count"></div></div>
-                <div class="stat-card stat-card--slate"><div class="stat-label">Leases</div><div class="stat-value" x-text="tabs.customer.kpis?.lease_count"></div></div>
+        <div x-show="tabs.customer.kpis" class="stat-grid ff-stats mb-4">
+                <div class="stat-card stat-card--blue"><span class="stat-icon stat-icon--blue"><svg><use href="#icon-building"/></svg></span><div class="stat-label">Unique Customers</div><div class="stat-value" x-text="tabs.customer.kpis?.unique_customers"></div><div class="stat-delta" x-text="(tabs.customer.kpis?.active_customers??'')+' active'"></div></div>
+                <div class="stat-card stat-card--green"><span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span><div class="stat-label">Period Revenue</div><div class="stat-value font-mono" x-text="money(tabs.customer.kpis?.total_revenue)"></div></div>
+                <div class="stat-card stat-card--purple"><span class="stat-icon stat-icon--purple"><svg><use href="#icon-document-text"/></svg></span><div class="stat-label">Avg Invoice Value</div><div class="stat-value font-mono" x-text="money(tabs.customer.kpis?.avg_invoice_value)"></div></div>
+                <div class="stat-card" :class="parseFloat(tabs.customer.kpis?.avg_days_to_pay||0)>30?'stat-card--red':parseFloat(tabs.customer.kpis?.avg_days_to_pay||0)>15?'stat-card--amber':'stat-card--green'"><span class="stat-icon" :class="parseFloat(tabs.customer.kpis?.avg_days_to_pay||0)>30?'stat-icon--red':parseFloat(tabs.customer.kpis?.avg_days_to_pay||0)>15?'stat-icon--amber':'stat-icon--green'"><svg><use href="#icon-clock"/></svg></span><div class="stat-label">Avg Days to Pay</div><div class="stat-value font-mono" x-text="(tabs.customer.kpis?.avg_days_to_pay??'')+' days'"></div></div>
+                <div class="stat-card stat-card--teal"><span class="stat-icon stat-icon--teal"><svg><use href="#icon-clipboard"/></svg></span><div class="stat-label">Invoices</div><div class="stat-value" x-text="tabs.customer.kpis?.invoice_count"></div></div>
+                <div class="stat-card stat-card--slate"><span class="stat-icon stat-icon--slate"><svg><use href="#icon-key"/></svg></span><div class="stat-label">Leases</div><div class="stat-value" x-text="tabs.customer.kpis?.lease_count"></div></div>
         </div>
         <div x-show="tabs.customer.loading&&!tabs.customer.kpis" class="stat-grid mb-4"><template x-for="i in 6"><div class="stat-card"><div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div><div class="skeleton-bar" style="width:80%;height:24px;"></div></div></template></div>
 
@@ -389,14 +397,14 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             </div>
         </div>
 
-        <div x-show="tabs.compliance.kpis" class="stat-grid mb-4">
-                <div class="stat-card stat-card--slate"><div class="stat-label">Total Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.total_units"></div></div>
-                <div class="stat-card stat-card--red"><div class="stat-label">Expired Documents</div><div class="stat-value" x-text="tabs.compliance.kpis?.expired_count"></div><div class="stat-delta">Past expiry date</div></div>
-                <div class="stat-card stat-card--amber"><div class="stat-label">Expiring ≤30 Days</div><div class="stat-value" x-text="tabs.compliance.kpis?.expiring_30"></div></div>
-                <div class="stat-card stat-card--blue"><div class="stat-label">Expiring ≤90 Days</div><div class="stat-value" x-text="tabs.compliance.kpis?.expiring_90"></div></div>
+        <div x-show="tabs.compliance.kpis" class="stat-grid ff-stats mb-4">
+                <div class="stat-card stat-card--slate"><span class="stat-icon stat-icon--slate"><svg><use href="#icon-truck"/></svg></span><div class="stat-label">Total Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.total_units"></div></div>
+                <div class="stat-card stat-card--red"><span class="stat-icon stat-icon--red"><svg><use href="#icon-x-circle"/></svg></span><div class="stat-label">Expired Documents</div><div class="stat-value" x-text="tabs.compliance.kpis?.expired_count"></div><div class="stat-delta">Past expiry date</div></div>
+                <div class="stat-card stat-card--amber"><span class="stat-icon stat-icon--amber"><svg><use href="#icon-exclamation-triangle"/></svg></span><div class="stat-label">Expiring ≤30 Days</div><div class="stat-value" x-text="tabs.compliance.kpis?.expiring_30"></div></div>
+                <div class="stat-card stat-card--blue"><span class="stat-icon stat-icon--blue"><svg><use href="#icon-clock"/></svg></span><div class="stat-label">Expiring ≤90 Days</div><div class="stat-value" x-text="tabs.compliance.kpis?.expiring_90"></div></div>
                 <!-- Compliant requires all three dates on file; a unit with a missing date is UNKNOWN, not compliant -->
-                <div class="stat-card stat-card--green"><div class="stat-label">Compliant Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.ok_count"></div><div class="stat-delta">All 3 dates on file, &gt;90 days left</div></div>
-                <div class="stat-card stat-card--slate"><div class="stat-label">Not Tracked</div><div class="stat-value" x-text="tabs.compliance.kpis?.not_tracked_count"></div><div class="stat-delta" x-text="(tabs.compliance.kpis?.no_dates_count??0)+' with no dates at all'"></div></div>
+                <div class="stat-card stat-card--green"><span class="stat-icon stat-icon--green"><svg><use href="#icon-shield-check"/></svg></span><div class="stat-label">Compliant Units</div><div class="stat-value" x-text="tabs.compliance.kpis?.ok_count"></div><div class="stat-delta">All 3 dates on file, &gt;90 days left</div></div>
+                <div class="stat-card stat-card--slate"><span class="stat-icon stat-icon--slate"><svg><use href="#icon-magnifying-glass"/></svg></span><div class="stat-label">Not Tracked</div><div class="stat-value" x-text="tabs.compliance.kpis?.not_tracked_count"></div><div class="stat-delta" x-text="(tabs.compliance.kpis?.no_dates_count??0)+' with no dates at all'"></div></div>
         </div>
         <div x-show="tabs.compliance.loading&&!tabs.compliance.kpis" class="stat-grid mb-4"><template x-for="i in 6"><div class="stat-card"><div class="skeleton-bar" style="width:60%;height:12px;margin-bottom:8px;"></div><div class="skeleton-bar" style="width:80%;height:24px;"></div></div></template></div>
 

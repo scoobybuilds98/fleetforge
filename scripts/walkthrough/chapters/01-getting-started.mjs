@@ -110,8 +110,23 @@ export default {
       },
     },
     {
-      say: 'After you sign in, you land on the Dashboard. It is a live summary of the whole business, and every number on it links to the records behind it.',
-      run: async (d) => { await becomeStaff(d); await d.goto('/dashboard'); await d.wait(2500); await d.highlight('h1.page-header-title', 'Dashboard', 1800); },
+      // S-DASHBOARD-REDESIGN: the dashboard steps follow the redesigned page —
+      // welcome banner, fleet ring, Needs attention, grouped numbers, section
+      // bar, then the Money / Leases / Fleet / Activity sections.
+      say: 'After you sign in, you land on the Dashboard. The banner greets you, sums up the fleet in one sentence, and gives you shortcuts to the things you do most: a new lease, a new reservation, recording a payment and batch invoicing.',
+      run: async (d) => {
+        await becomeStaff(d); await d.goto('/dashboard'); await d.wait(2500);
+        await d.highlight('h1.page-header-title', 'Dashboard', 1800);
+        await d.highlight('.dash-hero .ff-hero-actions', 'Shortcuts', 1800);
+      },
+    },
+    {
+      say: 'The ring on the right is the fleet right now: units out on lease, units ready to rent, and everything else, such as units in the shop.',
+      run: async (d) => { await d.highlight('.dash-pulse', 'The fleet right now', 2600); },
+    },
+    {
+      say: 'Needs attention lists only what is waiting for you today: overdue invoices, drafts to send, leases waiting to start, returns this week, renewals and more. Click a card to open that list. When nothing needs you, it says all clear.',
+      run: async (d) => { await d.highlight('.dash-attn', 'Waiting for you', 3000); },
     },
     {
       say: 'Active Revenue adds up the monthly rate of every active lease, in Canadian dollars. On Lease Now is the share of your fleet that is out on lease right now.',
@@ -138,7 +153,7 @@ export default {
       },
     },
     {
-      say: 'The second row covers open work orders, open damage claims, invoices sent and awaiting payment, money collected this month, and pending or confirmed reservations.',
+      say: 'The twelve key numbers are grouped into Money, Fleet and Pipeline. Money also shows invoices sent and awaiting payment and the money collected this month; Fleet adds open work orders and damage claims.',
       run: async (d) => { await d.highlight('#kpi-grid', 'Twelve key numbers', 2600); },
     },
     {
@@ -150,38 +165,40 @@ export default {
       },
     },
     {
-      say: 'Below the tiles, Revenue compares invoiced revenue month by month against last year, and Fleet Status breaks your units down by status.',
+      say: 'Below the numbers, the section bar jumps straight to Money, Leases, Fleet, Customers or Activity, and it stays at the top of the screen as you scroll.',
+      run: async (d) => { await d.highlight('.dash-nav', 'Jump to a section', 2400); },
+    },
+    {
+      say: 'Money shows what you billed against what came in each month, how much customers still owe and how late it is, and who owes the most. The Receivables panel has tabs for overdue, unpaid and draft invoices, and every panel has a View all link to the full list.',
       run: async (d) => {
-        await d.scroll(430);
-        await d.hover(card('Revenue — Last 12 Months'), 1200);
-        await d.hover(card('Fleet Status'), 1200);
+        await d.click('.dash-nav-link:has-text("Money")');
+        await d.wait(1200);
+        await d.hover(card('Billed vs Collected'), 1200);
+        await d.hover(card('Owed to you'), 1000);
+        await d.highlight('.dash-panel:has(h3.dashboard-section-title:text-is("Receivables"))', 'Overdue, unpaid and drafts', 1800);
+        await d.click('.dash-tab:has-text("Drafts")');
+        await d.wait(900);
       },
     },
     {
-      say: 'Strips of cards follow: active leases, upcoming reservations, and draft invoices still waiting to be sent. Each strip has a View All link to the full list.',
+      say: 'The Leases panel switches between leases on rent, leases waiting to start, units returning soon, leases ending this month and the newest starts. Upcoming reservations sit beside it.',
       run: async (d) => {
-        await d.scroll(520);
-        await d.highlight(section('Active Leases'), 'Active leases', 1400);
-        await d.scroll(900);
-        await d.highlight(section('Draft Invoices'), 'Waiting to be sent', 1400);
-        await d.hover(`a:near(${section('Draft Invoices')}):has-text("View all")`, 700);
+        await d.click('.dash-nav-link:has-text("Leases")');
+        await d.wait(1200);
+        await d.highlight('.dash-panel:has(h3.dashboard-section-title:text-is("Leases"))', 'Every lease list in one place', 1800);
+        await d.click('.dash-tab:has-text("Starting")');
+        await d.wait(900);
       },
     },
     {
-      say: 'Further down are receivables aging, utilization over the past year, overdue payments, average days to pay, and a calendar of when leases expire.',
+      say: 'Fleet shows every unit by status and how busy each equipment type is, utilization over the past year, and the units that have sat idle longest. At the bottom, Recent Activity is a live feed of changes across the system.',
       run: async (d) => {
-        await d.scroll(700);
-        await d.hover(card('AR Aging'), 900);
-        await d.scroll(1100);
-        await d.hover(card('Lease Expiry Calendar — Next 12 Months'), 1000);
-      },
-    },
-    {
-      say: 'Near the bottom, Pending Activations lists leases whose start date has passed but have not been activated, and Upcoming Returns shows units due back soon. Recent Activity is a live feed of changes across the system.',
-      run: async (d) => {
-        await d.scroll(1100);
-        await d.highlight(section('Pending Activations'), 'Start date passed, not activated', 1600);
-        await d.scroll(700);
+        await d.click('.dash-nav-link:has-text("Fleet")');
+        await d.wait(1200);
+        await d.hover(card('Fleet mix'), 1200);
+        await d.hover(card('Sitting idle'), 900);
+        await d.click('.dash-nav-link:has-text("Activity")');
+        await d.wait(1200);
         await d.hover(card('Recent Activity'), 1400);
       },
     },

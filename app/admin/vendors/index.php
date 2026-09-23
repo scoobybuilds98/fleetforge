@@ -53,21 +53,28 @@ $helpModuleSlug = 'vendors';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Vendors</h1>
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ── -->
+<?php ob_start(); ?>
+    <?= help_button('vendors') ?>
     <?php if (can('maintenance', 'create')): ?>
     <a href="<?= base_url('vendors/create') ?>" class="btn btn-primary btn-sm">
         + New Vendor
     </a>
     <?php endif; ?>
-    <div class="page-header-actions">
-        <?= help_button('vendors') ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Vendors', null]],
+    'eyebrow'  => 'Partners',
+    'icon'     => 'building-storefront',
+    'accent'   => 'warning',
+    'title'    => 'Vendors',
+    'subtitle' => 'The repair shops, parts suppliers and service providers you work with — contacts, ratings and what you\'ve spent with each.',
+    'art'      => 'vendors',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
 <div x-data="vendorsKpis()" x-init="loadKpis()">
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:24px;">
 
     <div class="stat-card stat-card--blue"
          style="cursor:pointer"

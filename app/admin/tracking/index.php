@@ -56,26 +56,13 @@ $gpsConfigured = ($samsaraKey !== '');
 
 <div x-data="FF_FleetTracking()">
 
-<!-- ── Page header ───────────────────────────────────────────────── -->
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-    <div>
-        <h1 class="page-header-title">
-            Fleet Tracking
-            <span class="badge badge-info" style="font-size:0.75rem;vertical-align:middle;margin-left:6px;">
-                <span x-text="stats.linked"></span> Linked
-            </span>
-            <span class="badge badge-neutral" style="font-size:0.75rem;vertical-align:middle;margin-left:4px;">
-                <span x-text="stats.unlinked"></span> Unlinked
-            </span>
-        </h1>
-        <p style="margin:4px 0 0;font-size:0.8125rem;color:var(--text-muted);">
-            Live Samsara telemetry · synced every 5 minutes
-            <span x-show="lastUpdated" x-cloak style="margin-left:8px;">
-                · Updated <span x-text="formatTime(lastUpdated)"></span>
-            </span>
-        </p>
-    </div>
-    <div class="page-header-actions" style="align-items:center;">
+<!-- ============================================================
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
+     WHY inside FF_FleetTracking(): the Linked / Unlinked badges, the
+     "Updated" time and the Refresh / Import / Sync buttons all bind to
+     this component's state, exactly as the old .page-header did.
+     ============================================================ -->
+<?php ob_start(); ?>
         <?= help_button('tracking') ?>
         <label style="display:flex;align-items:center;gap:6px;font-size:0.8125rem;color:var(--text-secondary);cursor:pointer;">
             <input type="checkbox" x-model="autoRefresh" style="accent-color:var(--color-primary);">
@@ -96,8 +83,20 @@ $gpsConfigured = ($samsaraKey !== '');
             <span x-show="syncing" x-cloak>Syncing…</span>
         </button>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Samsara Tracking', null]],
+    'eyebrow'    => 'Fleet',
+    'icon'       => 'map',
+    'accent'     => 'info',
+    // Live counts stay Alpine-bound; .ff-hero-title .badge sizes them.
+    'title_html' => 'Fleet Tracking'
+        . ' <span class="badge badge-info"><span x-text="stats.linked"></span> Linked</span>'
+        . ' <span class="badge badge-neutral"><span x-text="stats.unlinked"></span> Unlinked</span>',
+    'subtitle'   => 'Where every unit is right now — live location, speed and battery from Samsara, synced every 5 minutes'
+        . '<span x-show="lastUpdated" x-cloak> · Updated <span x-text="formatTime(lastUpdated)"></span></span>.',
+    'art'        => 'tracking',
+    'actions'    => ob_get_clean(),
+]) ?>
 
 <?php if (!$gpsConfigured): ?>
 <!-- Dev mode banner -->

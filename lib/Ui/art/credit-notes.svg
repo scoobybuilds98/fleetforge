@@ -1,0 +1,41 @@
+<svg class="dg dg--art-credit-notes" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A credit note used up against an invoice</title>
+  <!-- the credit note -->
+  <rect class="dg-surface-2" x="30" y="30" width="124" height="150" rx="10" transform="rotate(-5 92 105)"/>
+  <g class="dg-float">
+    <rect class="dg-surface" x="36" y="24" width="124" height="152" rx="10"/>
+    <rect class="dg-acc" x="50" y="40" width="44" height="8" rx="4"/>
+    <text class="dg-t-xs dg-t-start" x="50" y="64">CREDIT NOTE</text>
+    <rect class="dg-ink" x="50" y="76" width="92" height="5" rx="2.5" opacity=".55"/>
+    <rect class="dg-ink" x="50" y="88" width="66" height="5" rx="2.5" opacity=".55"/>
+    <rect class="dg-acc-soft" x="50" y="102" width="96" height="28" rx="7"/>
+    <text class="dg-acc-t" x="98" y="121" style="font-size:13px">−$180.00</text>
+    <!-- how much of the credit has been used -->
+    <rect class="dg-surface-2" x="50" y="142" width="96" height="6" rx="3"/>
+    <rect class="dg-acc dg-grow" x="50" y="142" width="96" height="6" rx="3"/>
+    <text class="dg-t-xs" x="98" y="165">OVERPAYMENT</text>
+  </g>
+
+  <!-- applied to the next invoice -->
+  <path class="dg-acc-flow" d="M162,100 C196,100 226,100 262,100"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2s" repeatCount="indefinite" path="M162,100 C196,100 226,100 262,100"/></circle>
+  <text class="dg-t-xs" x="211" y="78">APPLY</text>
+  <circle class="dg-pulse" cx="211" cy="100" r="12"/>
+  <circle class="dg-acc" cx="211" cy="100" r="13"/>
+  <text class="dg-t-on-acc" x="211" y="105" style="font-size:16px">−</text>
+
+  <!-- the invoice, reduced by the credit -->
+  <rect class="dg-surface" x="264" y="22" width="140" height="158" rx="10"/>
+  <rect class="dg-ink" x="278" y="38" width="48" height="8" rx="4" opacity=".55"/>
+  <text class="dg-t-xs dg-t-start" x="278" y="62">INVOICE</text>
+  <rect class="dg-ink" x="278" y="74" width="62" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="358" y="74" width="32" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="278" y="88" width="50" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="358" y="88" width="32" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-acc-soft dg-grow" x="274" y="100" width="120" height="22" rx="6"/>
+  <text class="dg-acc-t dg-t-start" x="282" y="115" style="font-size:10.5px">Credit</text>
+  <text class="dg-acc-t" x="370" y="115" style="font-size:10.5px">−$180</text>
+  <line class="dg-line-soft" x1="278" y1="136" x2="390" y2="136"/>
+  <text class="dg-t-xs dg-t-start" x="278" y="156">BALANCE</text>
+  <text class="dg-t" x="362" y="157">$420.00</text>
+</svg>

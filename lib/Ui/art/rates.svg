@@ -1,0 +1,51 @@
+<svg class="dg dg--art-rates" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A price ladder that fills in a new lease</title>
+  <!-- which card the price comes from -->
+  <rect class="dg-chip" x="24" y="12" width="84" height="22" rx="11"/>
+  <circle class="dg-dot--ok" cx="37" cy="23" r="4"/><text class="dg-t-sm dg-t-start" x="47" y="27">General</text>
+  <rect class="dg-chip" x="116" y="12" width="108" height="22" rx="11"/>
+  <circle class="dg-dot--info" cx="129" cy="23" r="4"/><text class="dg-t-sm dg-t-start" x="139" y="27">Customer card</text>
+
+  <!-- the ladder: daily → weekly → monthly -->
+  <line class="dg-line" x1="18" y1="178" x2="300" y2="178"/>
+  <rect class="dg-bar dg-bar--1" x="24" y="140" width="84" height="38" rx="6"/>
+  <rect class="dg-bar dg-bar--2" x="116" y="110" width="84" height="68" rx="6"/>
+  <rect class="dg-bar dg-bar--3" x="208" y="80" width="84" height="98" rx="6"/>
+  <text class="dg-t-xs" x="66" y="168">DAILY</text>
+  <text class="dg-t-xs" x="158" y="168">WEEKLY</text>
+  <text class="dg-t-xs" x="250" y="168">MONTHLY</text>
+
+  <!-- price tags -->
+  <g class="dg-float">
+    <path class="dg-acc-soft" d="M31,104 h60 l14,13 l-14,13 h-60 a4,4 0 0 1 -4,-4 v-18 a4,4 0 0 1 4,-4 z"/>
+    <circle class="dg-surface" cx="95" cy="117" r="2.5"/>
+    <text class="dg-acc-t" x="60" y="121">$85/day</text>
+  </g>
+  <g class="dg-float dg-float--2">
+    <path class="dg-acc-soft" d="M123,74 h60 l14,13 l-14,13 h-60 a4,4 0 0 1 -4,-4 v-18 a4,4 0 0 1 4,-4 z"/>
+    <circle class="dg-surface" cx="187" cy="87" r="2.5"/>
+    <text class="dg-acc-t" x="152" y="91">$450/wk</text>
+  </g>
+  <g class="dg-float">
+    <path class="dg-acc" d="M215,44 h60 l14,13 l-14,13 h-60 a4,4 0 0 1 -4,-4 v-18 a4,4 0 0 1 4,-4 z"/>
+    <circle class="dg-surface" cx="279" cy="57" r="2.5"/>
+    <text class="dg-t-on-acc" x="244" y="61">$1,400/mo</text>
+  </g>
+
+  <!-- the new lease it pre-fills -->
+  <rect class="dg-surface" x="318" y="30" width="106" height="150" rx="10"/>
+  <text class="dg-t-xs dg-t-start" x="330" y="52">NEW LEASE</text>
+  <rect class="dg-ink" x="330" y="62" width="60" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-surface-2" x="330" y="74" width="82" height="20" rx="5"/>
+  <rect class="dg-ink" x="338" y="82" width="40" height="4" rx="2" opacity=".55"/>
+  <text class="dg-t-xs dg-t-start" x="330" y="112">RATE</text>
+  <rect class="dg-acc-soft" x="330" y="118" width="82" height="24" rx="6"/>
+  <text class="dg-acc-t" x="372" y="134">$1,400/mo</text>
+  <rect class="dg-ink" x="330" y="154" width="70" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="330" y="166" width="50" height="5" rx="2.5" opacity=".55"/>
+
+  <path class="dg-acc-flow" d="M292,57 C312,57 306,130 326,130"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2.2s" repeatCount="indefinite" path="M292,57 C312,57 306,130 326,130"/></circle>
+  <circle class="dg-pulse" cx="330" cy="130" r="6"/>
+  <circle class="dg-acc" cx="330" cy="130" r="3.5"/>
+</svg>

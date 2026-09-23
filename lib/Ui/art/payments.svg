@@ -1,0 +1,46 @@
+<svg class="dg dg--art-payments" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A payment applied to an invoice</title>
+  <!-- ways a customer pays: cheque + card -->
+  <g class="dg-float">
+    <rect class="dg-surface" x="40" y="22" width="132" height="64" rx="8"/>
+    <text class="dg-t-xs dg-t-start" x="52" y="41">CHEQUE</text>
+    <rect class="dg-acc-soft" x="116" y="30" width="48" height="18" rx="5"/>
+    <text class="dg-acc-t" x="140" y="43" style="font-size:10px">$1,250</text>
+    <rect class="dg-ink" x="52" y="53" width="70" height="4" rx="2" opacity=".55"/>
+    <rect class="dg-ink" x="52" y="63" width="50" height="4" rx="2" opacity=".55"/>
+    <path class="dg-acc-line" d="M114,74 c5,-9 9,5 14,-2 s8,-7 13,1 s7,4 12,-3" style="stroke-width:1.6"/>
+    <line class="dg-line-soft" x1="110" y1="79" x2="162" y2="79"/>
+  </g>
+  <g class="dg-float dg-float--2">
+    <rect class="dg-acc-soft" x="52" y="102" width="112" height="66" rx="9"/>
+    <rect class="dg-surface-2" x="64" y="116" width="20" height="14" rx="3"/>
+    <text class="dg-t-xs" x="144" y="126">CARD</text>
+    <text class="dg-t-sm dg-t-start" x="64" y="156">•••• 4821</text>
+  </g>
+
+  <!-- money flowing onto the invoice -->
+  <path class="dg-acc-flow" d="M172,54 C220,54 228,92 274,92"/>
+  <path class="dg-acc-flow" d="M164,135 C220,135 228,112 274,112"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2.2s" repeatCount="indefinite" path="M172,54 C220,54 228,92 274,92"/></circle>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2.2s" begin="-1.1s" repeatCount="indefinite" path="M164,135 C220,135 228,112 274,112"/></circle>
+
+  <!-- the invoice it pays off -->
+  <rect class="dg-surface" x="276" y="22" width="120" height="158" rx="10"/>
+  <rect class="dg-acc" x="290" y="38" width="48" height="8" rx="4"/>
+  <text class="dg-t-xs dg-t-start" x="290" y="62">INVOICE</text>
+  <rect class="dg-ink" x="290" y="74" width="88" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="290" y="86" width="64" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="290" y="98" width="76" height="5" rx="2.5" opacity=".55"/>
+  <line class="dg-line-soft" x1="290" y1="114" x2="382" y2="114"/>
+  <text class="dg-t-xs dg-t-start" x="290" y="132">BALANCE</text>
+  <text class="dg-t" x="366" y="133">$0.00</text>
+  <g transform="rotate(-10 336 156)">
+    <rect class="dg-ok-soft" x="298" y="142" width="76" height="28" rx="6"/>
+    <text class="dg-t-xs dg-t-xs--qbo" x="338" y="161" style="font-size:13px;letter-spacing:.2em">PAID</text>
+  </g>
+
+  <!-- applied -->
+  <circle class="dg-pulse dg-pulse--ok" cx="394" cy="26" r="14"/>
+  <circle class="dg-ok-soft" cx="394" cy="26" r="16"/>
+  <path class="dg-check" d="M386,26 l6,6 l10,-11" style="stroke-width:3"/>
+</svg>

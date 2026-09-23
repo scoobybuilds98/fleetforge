@@ -14,11 +14,11 @@ A unit earns money only while it is on an active lease, and every invoice is pri
 
 Dispatcher and manager, every morning:
 
-1. {{Dashboard @/dashboard}} — work the strips top to bottom:
-   - **Pending Activations** — units leaving today;
-   - **Upcoming Returns**;
-   - **Draft Invoices**;
-   - **Overdue Payments**.
+1. {{Dashboard @/dashboard}} — work **Needs attention** left to right, then the panels:
+   - **Leases › Starting** — units leaving today (red = start date already passed);
+   - **Leases › Returning**;
+   - **Receivables › Drafts**;
+   - **Receivables › Overdue**.
 2. {{Leases @/leases}} → *Active & Pending*: an amber **Billed Thru** date means usage not yet invoiced.
 3. Open Service Requests and today's inspections.
 

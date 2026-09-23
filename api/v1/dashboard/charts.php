@@ -5,14 +5,16 @@ declare(strict_types=1);
  * FleetForge — Dashboard Charts API
  *
  * @file        api/v1/dashboard/charts.php
- * @description Returns datasets for the 12 ApexCharts rendered on the admin dashboard.
- *              Each chart dataset is cached independently (15-min TTL per spec §8).
+ * @description Returns datasets for the ApexCharts / visual cards rendered on the
+ *              admin dashboard. Each chart dataset is cached independently
+ *              (15-min TTL per spec §8).
  *
  *              Available charts (pass ?chart=<key> for a single chart, or omit for all):
  *                revenue_trend        — 12-month area (current year vs prior year)
  *                fleet_status         — donut, 5 equipment status segments
  *                ar_aging             — horizontal bar, 4 AR buckets
  *                top_customers        — horizontal bar, top 5 by YTD revenue
+ *                                       (+ ytd_total across ALL customers, for share-of-total)
  *                leases_trend         — grouped bar, opened vs closed per month (12mo)
  *                utilization_trend    — line, monthly utilization % (12mo)
  *                revenue_by_type      — donut, revenue grouped by equipment category
@@ -22,17 +24,34 @@ declare(strict_types=1);
  *                occupancy_by_type    — grouped bar, occupied % vs available % per equipment category
  *                payment_speed        — line, avg days from invoice_date to payment (last 12mo)
  *
+ *              S-DASHBOARD-VIZ (plain-shaped datasets, not ApexCharts series):
+ *                cash_flow            — MONEY. Billed vs collected per month, rolling 12
+ *                                       months ending with the current month (CAD)
+ *                receivables          — MONEY. AR total + 5 aging buckets with invoice
+ *                                       counts, from lib/Reports/ArAging.php
+ *                overdue_customers    — MONEY. Top 6 customers by overdue balance (CAD)
+ *                fleet_mix            — unit counts by status + per-category split, right now
+ *                lease_flow           — leases opened / closed / on rent per month (12mo)
+ *
  * @method      GET
- * @params      chart (optional) — chart key; omit to fetch all
+ * @params      chart  (optional) — one chart key; returns that dataset directly
+ *                                  under `data` (403 for a money chart without
+ *                                  financial access). Wins over `charts`.
+ *              charts (optional) — comma list of chart keys (S-DASHBOARD-VIZ);
+ *                                  returns only those keys, keyed like the
+ *                                  all-charts payload. Unknown/empty list → 422.
+ *                                  Money keys are omitted for non-financial roles.
+ *              omit both to fetch all charts
  * @auth        Session required (require_auth_api)
  * @returns     { [chart_key]: { labels: [], series: [], ... } }
  *
  * @depends     api/bootstrap.php, includes/auth.php, includes/functions.php,
  *              lib/Reports/FleetUtilization.php (utilization_trend),
- *              lib/Reports/ArAging.php (ar_aging)
+ *              lib/Reports/ArAging.php (ar_aging, receivables, overdue_customers),
+ *              lib/Reports/ReportBuilder.php (pct() — fleet_mix)
  * @spec        FLEETFORGE_SPEC_FINAL.md §9 Charts & Analytics Specification
  * @design      FLEETFORGE_DESIGN_DETAILS.md §4 Dashboard Grid Layout
- * @session     S004
+ * @session     S004, S-DASH-CHART-REDACT, S-DASHBOARD-VIZ
  */
 
 // dirname(__DIR__, 3): api/v1/dashboard/ → api/v1/ → api/ → project root
@@ -57,6 +76,12 @@ $allowedCharts = [
     'lease_expiry_calendar',
     'occupancy_by_type',
     'payment_speed',
+    // S-DASHBOARD-VIZ
+    'cash_flow',
+    'receivables',
+    'overdue_customers',
+    'fleet_mix',
+    'lease_flow',
 ];
 
 $requestedChart = clean_string($_GET['chart'] ?? null);
@@ -64,8 +89,33 @@ if ($requestedChart !== null && !in_array($requestedChart, $allowedCharts, true)
     json_error('NOT_FOUND', 'Unknown chart key.', 404);
 }
 
+// S-DASHBOARD-VIZ: ?charts=a,b,c — build/return ONLY those keys in the combined
+// (keyed) payload. WHY: the redesigned dashboard shows 11 of the 17 datasets;
+// fetching all of them rebuilt six unused charts on every cold cache. Same
+// per-chart cache and same serve-time money redaction as the all-charts mode:
+// a money key asked for by a non-financial role is simply omitted (not a 403 —
+// one request serves every role). ?chart= (single mode) wins when both are
+// sent, so existing callers behave exactly as before. maxLen 1000: the full
+// allowlist joined is ~250 chars and clean_string() would otherwise truncate
+// it into a bogus "unknown key".
+$requestedList = ($requestedChart === null) ? clean_string($_GET['charts'] ?? null, 1000) : null;
+$listedCharts  = null;
+if ($requestedList !== null) {
+    $listedCharts = array_values(array_unique(array_filter(
+        array_map('trim', explode(',', $requestedList)),
+        static fn(string $k): bool => $k !== ''
+    )));
+    $unknownCharts = array_values(array_diff($listedCharts, $allowedCharts));
+    if ($listedCharts === [] || $unknownCharts !== []) {
+        $msg = $listedCharts === []
+            ? 'No chart keys given in charts.'
+            : 'Unknown chart key(s): ' . implode(', ', array_slice($unknownCharts, 0, 10)) . '.';
+        json_error('VALIDATION_ERROR', $msg, 422, ['fields' => ['charts' => $msg]]);
+    }
+}
+
 // Build the list of charts to fetch
-$chartsToFetch = ($requestedChart !== null) ? [$requestedChart] : $allowedCharts;
+$chartsToFetch = ($requestedChart !== null) ? [$requestedChart] : ($listedCharts ?? $allowedCharts);
 
 // S-LOCAL-DAY-TS: report_cache timestamps are UTC (cache_cleanup.php purges
 // `expires_at < NOW()` on the +00:00 session — a Pacific wall-time expiry was
@@ -79,7 +129,13 @@ foreach ($chartsToFetch as $chartKey) {
     // Per-chart calc version: bumping it orphans a cached payload computed with
     // superseded maths (utilization merge fix, CAD-canonical AR aging) instead
     // of serving it for up to 15 more minutes.
-    $calcVersion = ['utilization_trend' => '|fleet-util-v2', 'ar_aging' => '|ar-aging-cad-v2'][$chartKey] ?? '';
+    // S-DASHBOARD-VIZ: top_customers gained `ytd_total`; a pre-change cached
+    // payload lacks it, so the new dashboard's share-of-total would read NaN.
+    $calcVersion = [
+        'utilization_trend' => '|fleet-util-v2',
+        'ar_aging'          => '|ar-aging-cad-v2',
+        'top_customers'     => '|ytd-total-v1',
+    ][$chartKey] ?? '';
     $cacheHash = hash('sha256', 'dashboard_chart_' . $chartKey . $calcVersion);
 
     // ── Cache hit? ─────────────────────────────────────────────
@@ -125,7 +181,13 @@ foreach ($chartsToFetch as $chartKey) {
 // S-DASH-CHART-REDACT: top_customers (YTD revenue per customer) and
 // weekly_heatmap (daily revenue totals) are dollar datasets too — a new chart
 // whose builder SUMs invoice amounts belongs in this list.
-$moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast', 'top_customers', 'weekly_heatmap'];
+// S-DASHBOARD-VIZ: cash_flow (billed/collected), receivables (AR buckets) and
+// overdue_customers (per-customer overdue balances) are money; fleet_mix and
+// lease_flow are unit/lease COUNTS only and stay visible to every role.
+$moneyCharts = [
+    'revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast', 'top_customers', 'weekly_heatmap',
+    'cash_flow', 'receivables', 'overdue_customers',
+];
 if (!can_view_financials()) {
     if ($requestedChart !== null && in_array($requestedChart, $moneyCharts, true)) {
         json_error('FORBIDDEN', 'You do not have permission to view financial charts.', 403);
@@ -138,6 +200,12 @@ if (!can_view_financials()) {
 // If a single chart was requested, return its dataset directly under 'data'
 if ($requestedChart !== null) {
     json_success($results[$requestedChart]);
+}
+
+// ?charts= made of money keys only, for a non-financial role, leaves nothing:
+// keep `data` a JSON object ({} — not []) so the keyed contract holds.
+if ($listedCharts !== null && $results === []) {
+    json_success(new \stdClass());
 }
 
 json_success($results);
@@ -167,6 +235,11 @@ function build_chart_dataset(string $key): array
         'lease_expiry_calendar'  => chart_lease_expiry_calendar(),
         'occupancy_by_type'      => chart_occupancy_by_type(),
         'payment_speed'          => chart_payment_speed(),
+        'cash_flow'              => chart_cash_flow(),
+        'receivables'            => chart_receivables(),
+        'overdue_customers'      => chart_overdue_customers(),
+        'fleet_mix'              => chart_fleet_mix(),
+        'lease_flow'             => chart_lease_flow(),
         default                  => [],
     };
 }
@@ -308,9 +381,29 @@ function chart_top_customers(): array
         $data[]   = (float) bcround((string) $row['total'], 2);
     }
 
+    // S-DASHBOARD-VIZ: ytd_total = the same revenue across ALL customers, so the
+    // dashboard can show each top customer's share. Same filters and the same
+    // per-customer grouping as the top-5 query, with each group rounded to 2dp
+    // BEFORE summing (bcmath) — the total is then exactly the sum of what the
+    // chart would show per customer, so the five shares can never add past 100%.
+    $allGroups = db_select(
+        "SELECT SUM(CASE WHEN currency='USD' THEN total_amount*COALESCE(exchange_rate_to_cad,1) ELSE total_amount END) AS total
+           FROM invoices
+          WHERE status NOT IN ('draft','void','written_off')
+            AND deleted_at IS NULL
+            AND YEAR(invoice_date) = ?
+          GROUP BY customer_id, company_name_snapshot, customer_name_snapshot",
+        [$currentYear]
+    );
+    $ytdTotal = '0.00';
+    foreach ($allGroups as $g) {
+        $ytdTotal = bcadd($ytdTotal, bcround((string) $g['total'], 2), 2);
+    }
+
     return [
-        'labels' => $labels,
-        'series' => [['name' => 'Revenue', 'data' => $data]],
+        'labels'    => $labels,
+        'series'    => [['name' => 'Revenue', 'data' => $data]],
+        'ytd_total' => (float) $ytdTotal,
     ];
 }
 
@@ -707,5 +800,456 @@ function chart_payment_speed(): array
     return [
         'labels' => $labels,
         'series' => [['name' => 'Avg Days to Pay', 'data' => $data]],
+    ];
+}
+
+
+// ============================================================
+// S-DASHBOARD-VIZ BUILDERS
+// Plain-shaped datasets for the redesigned dashboard cards (not ApexCharts
+// labels/series pairs — the front-end maps them itself). Rules shared by all:
+//   - Money is CAD-canonical: each row converts with ITS OWN frozen
+//     exchange_rate_to_cad (USD; CAD passes through; a missing/zero USD rate
+//     falls back to 1.0 exactly like ArAging / ReportBuilder::cad()), summed
+//     in bcmath and emitted as floats rounded to 2dp.
+//   - "Today" is ff_today(), the company-local business date. The PDO session
+//     is UTC, so CURDATE() would roll to tomorrow at 5pm Pacific.
+//   - A lease's effective end is actual_return_date, else end_date; NULL is
+//     open-ended. Leases overlap (never cross-validated), so leases are
+//     COUNTED — never assumed one per unit.
+// ============================================================
+
+/**
+ * The rolling 12 calendar months ending with the current company-local month,
+ * oldest first.
+ *
+ * @return list<array{ym:string, label:string, start:string, end:string}>
+ *         ym 'Y-m'; label 'M Y' (e.g. 'Oct 2025'); start/end = first/last
+ *         calendar day of the month (Y-m-d)
+ */
+function chart_rolling_months(): array
+{
+    // Anchor on the 1st so the month arithmetic never skips a month
+    // ("Mar 31 − 1 month" = Mar 3 in PHP).
+    $anchor = new DateTimeImmutable(substr(ff_today(), 0, 7) . '-01');
+    $months = [];
+    for ($i = 11; $i >= 0; $i--) {
+        $m = $anchor->modify("-{$i} months");
+        $months[] = [
+            'ym'    => $m->format('Y-m'),
+            'label' => $m->format('M Y'),
+            'start' => $m->format('Y-m-01'),
+            'end'   => $m->format('Y-m-t'),
+        ];
+    }
+    return $months;
+}
+
+/**
+ * Fold rows grouped by (ym, currency, exchange_rate_to_cad) into CAD per month.
+ *
+ * WHY grouped by rate: SQL sums the native amounts per frozen rate (exact
+ * DECIMAL), and the conversion + cross-rate sum happen here in bcmath, so no
+ * money value ever passes through a float before the final JSON cast.
+ *
+ * @param list<array{ym:string, currency:string, exchange_rate_to_cad:?string, total:string}> $rows
+ * @param list<array{ym:string}> $months chart_rolling_months()
+ * @return array<string,string> ym => CAD 2dp string, one entry per month (zero-filled)
+ */
+function chart_cad_by_month(array $rows, array $months): array
+{
+    $byYm = array_fill_keys(array_column($months, 'ym'), '0');
+    foreach ($rows as $r) {
+        $ym = (string) $r['ym'];
+        if (!isset($byYm[$ym])) {
+            continue; // defensive — the query window already matches the months
+        }
+        $rate = '1';
+        if ((string) $r['currency'] === 'USD'
+            && $r['exchange_rate_to_cad'] !== null
+            && bccomp((string) $r['exchange_rate_to_cad'], '0', 6) > 0) {
+            $rate = (string) $r['exchange_rate_to_cad'];
+        }
+        $byYm[$ym] = bcadd($byYm[$ym], bcmul((string) $r['total'], $rate, 8), 8);
+    }
+    return array_map(static fn(string $v): string => bcround($v, 2), $byYm);
+}
+
+/**
+ * Cash flow — billed vs collected per month, rolling 12 months (MONEY).
+ *
+ * billed    = invoice total_amount by invoice_date month, excluding draft,
+ *             void and written_off (the revenue rule used everywhere).
+ * collected = customer payments by payment_date month. Voided payments are
+ *             SOFT-DELETED (payments/delete.php → FinancialActions::voidPayment),
+ *             so deleted_at IS NULL is the void filter; status void / failed /
+ *             returned / refunded never represent money kept, so they are out
+ *             too (cleared + pending count — a pending cheque was received).
+ *             payment_method 'account_credit' is a customer's existing credit
+ *             being applied, not new cash, so it is excluded. Credit-note
+ *             applications and deposits live in their own tables and never
+ *             appear here.
+ * Whole calendar months (the current month includes invoices dated later in
+ * the month), matching revenue_trend's month bucketing.
+ *
+ * @return array{labels:string[], billed:float[], collected:float[],
+ *               this_month:array{billed:float, collected:float},
+ *               prev_month:array{billed:float, collected:float}}
+ */
+function chart_cash_flow(): array
+{
+    $months = chart_rolling_months();
+    $from   = $months[0]['start'];
+    $to     = $months[11]['end'];
+
+    $billedRows = db_select(
+        "SELECT DATE_FORMAT(invoice_date, '%Y-%m') AS ym, currency, exchange_rate_to_cad,
+                SUM(total_amount) AS total
+           FROM invoices
+          WHERE status NOT IN ('draft','void','written_off')
+            AND deleted_at IS NULL
+            AND invoice_date >= ?
+            AND invoice_date <= ?
+          GROUP BY ym, currency, exchange_rate_to_cad",
+        [$from, $to]
+    );
+
+    $collectedRows = db_select(
+        "SELECT DATE_FORMAT(payment_date, '%Y-%m') AS ym, currency, exchange_rate_to_cad,
+                SUM(amount) AS total
+           FROM payments
+          WHERE deleted_at IS NULL
+            AND status NOT IN ('void','failed','returned','refunded')
+            AND payment_method <> 'account_credit'
+            AND payment_date >= ?
+            AND payment_date <= ?
+          GROUP BY ym, currency, exchange_rate_to_cad",
+        [$from, $to]
+    );
+
+    $billed    = array_values(chart_cad_by_month($billedRows, $months));
+    $collected = array_values(chart_cad_by_month($collectedRows, $months));
+
+    return [
+        'labels'     => array_column($months, 'label'),
+        'billed'     => array_map('floatval', $billed),
+        'collected'  => array_map('floatval', $collected),
+        'this_month' => ['billed' => (float) $billed[11], 'collected' => (float) $collected[11]],
+        'prev_month' => ['billed' => (float) $billed[10], 'collected' => (float) $collected[10]],
+    ];
+}
+
+/**
+ * AR aging as at company-local today, computed ONCE per request.
+ *
+ * receivables and overdue_customers both read it, so in a combined payload the
+ * two cards come from the same per-invoice rows and can never disagree (and
+ * the aging query runs once, not twice).
+ *
+ * @return array ArAging::asOf() result
+ */
+function chart_ar_aging_today(): array
+{
+    static $aging = null;
+    return $aging ??= \FleetForge\Reports\ArAging::asOf(ff_today());
+}
+
+/**
+ * Receivables — total AR + 5 aging buckets with invoice counts (MONEY).
+ *
+ * Straight from lib/Reports/ArAging.php as of ff_today(), so the figures agree
+ * with Accounting → AR Aging to the cent (CAD-canonical, as-of balances).
+ * ArAging returns bucket totals but not counts; the counts come from its
+ * per-invoice rows (each carries the bucket it was summed into), so every
+ * count matches the amount beside it. customer_count = ArAging's customer
+ * groups (invoices with no linked customer form one group).
+ *
+ * @return array{total:float, invoice_count:int, customer_count:int,
+ *               buckets:list<array{key:string, label:string, amount:float, count:int}>}
+ */
+function chart_receivables(): array
+{
+    $aging = chart_ar_aging_today();
+
+    // ArAging bucket key => [dashboard key, plain-English label], display order.
+    $defs = [
+        'current'      => ['current', 'Not due yet'],
+        'days_1_30'    => ['d1_30',   '1–30 days late'],
+        'days_31_60'   => ['d31_60',  '31–60 days late'],
+        'days_61_90'   => ['d61_90',  '61–90 days late'],
+        'days_90_plus' => ['d90',     '90+ days late'],
+    ];
+
+    $counts = array_fill_keys(array_keys($defs), 0);
+    foreach ($aging['invoices'] as $inv) {
+        $counts[$inv['bucket']] = ($counts[$inv['bucket']] ?? 0) + 1;
+    }
+
+    $buckets = [];
+    foreach ($defs as $agingKey => [$key, $label]) {
+        $buckets[] = [
+            'key'    => $key,
+            'label'  => $label,
+            'amount' => (float) $aging['totals'][$agingKey],
+            'count'  => $counts[$agingKey],
+        ];
+    }
+
+    return [
+        'total'          => (float) $aging['totals']['total'],
+        'invoice_count'  => (int) $aging['invoice_count'],
+        'customer_count' => count($aging['customers']),
+        'buckets'        => $buckets,
+    ];
+}
+
+/**
+ * Overdue customers — top 6 customers by overdue balance, largest first (MONEY).
+ *
+ * Overdue = an ArAging row (outstanding: sent / partially_paid / overdue with a
+ * balance, as of ff_today()) whose due_date is before today — ArAging's
+ * days_past_due > 0 is exactly `due_date < ff_today()`. Reading the same rows
+ * as `receivables` means total_overdue always equals that card's four "late"
+ * buckets. oldest_days = days past due of the customer's oldest overdue
+ * invoice. Invoices with no linked customer are grouped by their snapshot name
+ * and reported with customer_id 0 (there is no record to link to).
+ *
+ * @return array{rows:list<array{customer_id:int, name:string, amount:float,
+ *               invoice_count:int, oldest_days:int}>, total_overdue:float}
+ */
+function chart_overdue_customers(): array
+{
+    $aging        = chart_ar_aging_today();
+    $groups       = [];
+    $totalOverdue = '0.00';
+
+    foreach ($aging['invoices'] as $inv) {
+        $days = (int) $inv['days_past_due'];
+        if ($days <= 0) {
+            continue; // not due yet — 'current', not overdue
+        }
+        $cid = $inv['customer_id'];
+        $gk  = $cid !== null ? 'c' . $cid : 'n' . $inv['company_name'];
+        if (!isset($groups[$gk])) {
+            $groups[$gk] = [
+                'customer_id'   => (int) ($cid ?? 0),
+                'name'          => (string) $inv['company_name'],
+                'amount'        => '0.00',
+                'invoice_count' => 0,
+                'oldest_days'   => 0,
+            ];
+        }
+        // balance_due on an ArAging row is already CAD (its own frozen rate).
+        $groups[$gk]['amount']        = bcadd($groups[$gk]['amount'], (string) $inv['balance_due'], 2);
+        $groups[$gk]['invoice_count'] += 1;
+        $groups[$gk]['oldest_days']   = max($groups[$gk]['oldest_days'], $days);
+        $totalOverdue                 = bcadd($totalOverdue, (string) $inv['balance_due'], 2);
+    }
+
+    $rows = array_values($groups);
+    // Largest balance first; ties → oldest debt first, then name (stable output).
+    usort($rows, static fn(array $a, array $b): int =>
+        bccomp($b['amount'], $a['amount'], 2)
+        ?: ($b['oldest_days'] <=> $a['oldest_days'])
+        ?: strcasecmp($a['name'], $b['name']));
+
+    $rows = array_map(static function (array $r): array {
+        $r['amount'] = (float) $r['amount'];
+        return $r;
+    }, array_slice($rows, 0, 6));
+
+    return [
+        'rows'          => $rows,
+        'total_overdue' => (float) $totalOverdue,
+    ];
+}
+
+/**
+ * Fleet mix — unit counts by status plus a per-category split, right now.
+ *
+ * Same universe as chart_fleet_status (not soft-deleted, not decommissioned);
+ * per-category grouping on equipment_templates.category, the same key
+ * chart_occupancy_by_type groups on (the retained category "mirror" — Combo is
+ * its own line). The label prefers the operator-editable
+ * equipment_categories.label for that slug, else the humanised slug (the
+ * occupancy chart's format). Counts come from the UNIT status so the per-type
+ * split always adds back up to the status totals (on_lease + available +
+ * other == total, per type and overall).
+ *
+ * @return array{total:int, statuses:list<array{key:string, label:string, count:int}>,
+ *               types:list<array{label:string, total:int, on_lease:int,
+ *               available:int, other:int, pct_on_lease:float}>}
+ */
+function chart_fleet_mix(): array
+{
+    // LEFT JOINs: template_id is NOT NULL with an FK, so every unit resolves —
+    // but a join must never be what silently drops a unit from the total.
+    $rows = db_select(
+        "SELECT eu.status,
+                COALESCE(et.category, 'unknown') AS category,
+                ec.label                         AS category_label,
+                COUNT(*)                         AS cnt
+           FROM equipment_units eu
+           LEFT JOIN equipment_templates et  ON et.id   = eu.template_id
+           LEFT JOIN equipment_categories ec ON ec.slug = et.category
+          WHERE eu.deleted_at IS NULL
+            AND eu.status <> 'decommissioned'
+          GROUP BY eu.status, et.category, ec.label"
+    );
+
+    $statusDefs = [
+        'on_lease'    => 'On lease',
+        'available'   => 'Available',
+        'reserved'    => 'Reserved',
+        'maintenance' => 'In the shop',
+        'inactive'    => 'Inactive',
+    ];
+    $statusCounts = array_fill_keys(array_keys($statusDefs), 0);
+    $types        = [];
+
+    foreach ($rows as $r) {
+        $status = (string) $r['status'];
+        // The status ENUM is exactly these five once decommissioned is filtered.
+        if (!isset($statusCounts[$status])) {
+            continue;
+        }
+        $n = (int) $r['cnt'];
+        $statusCounts[$status] += $n;
+
+        $slug = (string) $r['category'];
+        if (!isset($types[$slug])) {
+            $types[$slug] = [
+                'label'     => $r['category_label'] !== null && $r['category_label'] !== ''
+                    ? (string) $r['category_label']
+                    : ucwords(str_replace('_', ' ', $slug)),
+                'total'     => 0,
+                'on_lease'  => 0,
+                'available' => 0,
+                'other'     => 0,
+            ];
+        }
+        $types[$slug]['total'] += $n;
+        // reserved / maintenance / inactive all fold into "other".
+        $col = match ($status) {
+            'on_lease', 'available' => $status,
+            default                 => 'other',
+        };
+        $types[$slug][$col] += $n;
+    }
+
+    $typeList = [];
+    foreach ($types as $t) {
+        $t['pct_on_lease'] = (float) \FleetForge\Reports\ReportBuilder::pct((string) $t['on_lease'], (string) $t['total'], 1);
+        $typeList[] = $t;
+    }
+    usort($typeList, static fn(array $a, array $b): int =>
+        ($b['total'] <=> $a['total']) ?: strcasecmp($a['label'], $b['label']));
+
+    $statuses = [];
+    foreach ($statusDefs as $key => $label) {
+        $statuses[] = ['key' => $key, 'label' => $label, 'count' => $statusCounts[$key]];
+    }
+
+    return [
+        'total'    => array_sum($statusCounts),
+        'statuses' => $statuses,
+        'types'    => $typeList,
+    ];
+}
+
+/**
+ * Lease flow — leases opened, closed and on rent per month, rolling 12 months.
+ *
+ * STATUS CHOICES (leases.status is pending / active / completed / cancelled):
+ *   - Only active + completed leases count — the leases that actually went on
+ *     rent (the same allowlist as FleetUtilization and the Days-on-Rent panel).
+ *     cancelled never ran; pending has not been handed over yet, even when its
+ *     start_date has passed.
+ *   - opened  = start_date in the month, and not after today (a future start
+ *               has not opened yet).
+ *   - closed  = COMPLETED leases whose effective end (actual_return_date, else
+ *               end_date) falls in the month and is not after today. An active
+ *               lease past its end_date has not been closed (it is late back),
+ *               and a reopened lease is active again, so status is the gate.
+ *   - on_rent = leases out on the LAST day of the month (the current month:
+ *               ff_today()): start_date <= that day AND (effective end IS NULL
+ *               OR effective end >= that day). A completed lease with neither
+ *               return nor end date is closed but undated; it is left out
+ *               rather than counted as out forever.
+ * Leases are counted, not units: overlapping leases on one unit count twice,
+ * exactly as they appear on the Leases page.
+ *
+ * @return array{labels:string[], opened:int[], closed:int[], on_rent:int[]}
+ */
+function chart_lease_flow(): array
+{
+    $months = chart_rolling_months();
+    $today  = ff_today();
+    $from   = $months[0]['start'];
+
+    $openRows = db_select(
+        "SELECT DATE_FORMAT(start_date, '%Y-%m') AS ym, COUNT(*) AS cnt
+           FROM leases
+          WHERE deleted_at IS NULL
+            AND status IN ('active','completed')
+            AND start_date >= ?
+            AND start_date <= ?
+          GROUP BY ym",
+        [$from, $today]
+    );
+
+    $closeRows = db_select(
+        "SELECT DATE_FORMAT(COALESCE(actual_return_date, end_date), '%Y-%m') AS ym, COUNT(*) AS cnt
+           FROM leases
+          WHERE deleted_at IS NULL
+            AND status = 'completed'
+            AND COALESCE(actual_return_date, end_date) >= ?
+            AND COALESCE(actual_return_date, end_date) <= ?
+          GROUP BY ym",
+        [$from, $today]
+    );
+
+    // Every lease that could be out on any of the 12 as-of days: started by
+    // today, and not ended before the first month-end. Counted per month in PHP
+    // (one query instead of twelve).
+    $spells = db_select(
+        "SELECT start_date, COALESCE(actual_return_date, end_date) AS eff_end
+           FROM leases
+          WHERE deleted_at IS NULL
+            AND status IN ('active','completed')
+            AND NOT (status = 'completed' AND actual_return_date IS NULL AND end_date IS NULL)
+            AND start_date <= ?
+            AND (COALESCE(actual_return_date, end_date) IS NULL
+                 OR COALESCE(actual_return_date, end_date) >= ?)",
+        [$today, $months[0]['end']]
+    );
+
+    $openedBy = array_column($openRows, 'cnt', 'ym');
+    $closedBy = array_column($closeRows, 'cnt', 'ym');
+
+    $opened = [];
+    $closed = [];
+    $onRent = [];
+    foreach ($months as $i => $m) {
+        $opened[] = (int) ($openedBy[$m['ym']] ?? 0);
+        $closed[] = (int) ($closedBy[$m['ym']] ?? 0);
+
+        // As-of day: the month's last day; for the current month, today.
+        $asOf = ($i === count($months) - 1) ? $today : $m['end'];
+        $n    = 0;
+        foreach ($spells as $s) {
+            // Y-m-d strings compare chronologically.
+            if ($s['start_date'] <= $asOf && ($s['eff_end'] === null || $s['eff_end'] >= $asOf)) {
+                $n++;
+            }
+        }
+        $onRent[] = $n;
+    }
+
+    return [
+        'labels'  => array_column($months, 'label'),
+        'opened'  => $opened,
+        'closed'  => $closed,
+        'on_rent' => $onRent,
     ];
 }

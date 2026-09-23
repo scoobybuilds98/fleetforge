@@ -70,21 +70,28 @@ $helpModuleSlug = 'damage-claims';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Damage Claims</h1>
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ── -->
+<?php ob_start(); ?>
     <?php if (can('maintenance', 'create')): ?>
     <a href="<?= base_url('damage_claims/create') ?>" class="btn btn-primary btn-sm">
         + New Claim
     </a>
     <?php endif; ?>
-    <div class="page-header-actions">
-        <?= help_button('damage-claims') ?>
-    </div>
-</div>
+    <?= help_button('damage-claims') ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Damage Claims', null]],
+    'eyebrow'  => 'Fleet care',
+    'icon'     => 'exclamation-triangle',
+    'accent'   => 'danger',
+    'title'    => 'Damage Claims',
+    'subtitle' => 'Damage to your equipment, from report to repair — photos, the repair estimate, and billing the customer for it.',
+    'art'      => 'damage-claims',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
 <div x-data="damageClaimsKpis()" x-init="loadKpis()">
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:24px;">
 
     <div class="stat-card stat-card--amber"
          style="cursor:pointer"

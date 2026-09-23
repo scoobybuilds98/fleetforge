@@ -1,88 +1,92 @@
 ---
-description: Your at-a-glance command center — KPI tiles, revenue and fleet charts, and live carousels of leases, invoices, and reservations that need attention.
+description: Your home screen — a welcome banner with the fleet at a glance, what needs your attention today, the twelve key numbers, and sections for money, leases, the fleet, customers and activity.
 ---
 
 # Dashboard
 
-The home screen of FleetForge — a read-only overview of fleet, revenue, and what needs attention right now. Every tile and card links straight to the underlying records.
+The home screen of FleetForge. It answers one question first — *what needs me today?* — and then gives you the full picture of money, leases and the fleet. Every card, tile and row links straight to the records behind it.
 
-## Reading the KPI tiles
+## The welcome banner
 
-The row of tiles at the top is your live snapshot. Each tile is **clickable** and drills through to a pre-filtered list.
+- **Greeting and summary** — one sentence on the fleet right now, e.g. *140 of 167 units are out on lease, 27 are ready to rent and 3 pickups are booked for today.*
+- **Shortcuts** — **New lease**, **New reservation**, **Record payment** and **Batch invoicing**. You only see the ones your role can use.
+- **The fleet ring** — on the right: units on lease, units ready to rent, and everything else (in the shop, reserved, inactive). The number in the middle is the share of the fleet on lease right now.
 
-- **Active Revenue** — total monthly rate across all active leases. Opens **Reports**.
-- **Fleet Utilization** — percentage of active units currently on lease, with the *X of Y units* count below. Opens **Equipment**.
-- **Overdue Invoices** — count of overdue invoices, with the total dollars outstanding below. Opens **Invoices** filtered to *overdue*.
-- **Compliance Alerts** — units with any document (CVI, registration, MVI, or insurance) expiring in the next 30 days. Opens **Compliance**.
-- **Open Leases** — active and pending leases combined. Opens **Leases** filtered to *active*.
-- **Today's Pickups** — reservations scheduled to pick up today. Opens **Reservations** filtered to today's pickup date.
-- **Available Units** — units ready to rent. Opens **Equipment** filtered to *available*.
-- **Open Work Orders** — open and in-progress maintenance work orders. Opens **Maintenance** filtered to *open*.
-- **Damage Claims** — open claims (turns red when any exist). Opens **Damage Claims**.
-- **Sent Invoices** — sent invoices awaiting payment. Opens **Invoices** filtered to *sent*.
-- **Monthly Collections** — total payments collected this calendar month. Opens **Payments**.
-- **Active Reservations** — pending and confirmed reservations. Opens **Reservations**.
+## Needs attention
 
-> **Note:** A tile reads `—` until its data loads. KPI numbers are cached and refresh roughly every 5 minutes — reload the page to pull the latest.
+A row of cards for the things waiting on you, most urgent first. Only the ones that apply appear:
 
----
+- **Overdue invoices** — past their due date (with the amount owed if your role sees money).
+- **Leases waiting to start** — pending leases; red when a start date has already passed.
+- **Draft invoices** — not sent yet.
+- **Returns this week** — leases ending in the next 7 days.
+- **Pickups today**, **Renewals due** (unit documents expiring within 30 days), **Open damage claims** and **Open work orders**.
 
-## Reading the charts
+Click a card to open that list already filtered. When nothing needs you, the row says **Nothing needs you right now**.
 
-Twelve charts visualize trends across revenue, fleet, and receivables:
+> **Note:** lists on the dashboard show up to 10 rows, so a count of **10+** means "ten or more" — open the list to see them all.
 
-- **Revenue — Last 12 Months** — monthly revenue trend (area).
-- **Fleet Status** — current unit breakdown by status (donut).
-- **Revenue Forecast — Next 6 Months** — projected revenue (bar).
-- **Occupancy by Equipment Type** — share of each type currently on lease (100% stacked bar).
-- **AR Aging** — outstanding receivables by age bucket (horizontal bar).
-- **Utilization Trend** — fleet utilization over time (line).
-- **Avg Days to Pay — Last 12 Months** — average invoice payment speed (line).
-- **Lease Expiry Calendar — Next 12 Months** — leases expiring per month (bar).
-- **Top Customers — YTD** — customers ranked by revenue this year (horizontal bar).
-- **Leases Opened vs Closed** — monthly open/close counts (grouped bar).
-- **Revenue by Equipment Type — YTD** — revenue share per type (donut).
-- **Daily Revenue — Last 12 Weeks** — daily revenue intensity (heatmap).
+## The twelve key numbers
 
-> **Tip:** Hover any chart for exact values, and use the chart's menu icon (top right) to download it as an image.
+Grouped into three panels. Each tile is **clickable** and opens a pre-filtered list.
 
----
+- **Money** — **Active Revenue** (monthly rate of every active lease), **Monthly Collections** (paid this month), **Sent Invoices** (awaiting payment) and **Overdue Invoices** (count and amount owed).
+- **Fleet** — **On Lease Now** (share of the fleet on lease right now), **Available Units**, **Open Work Orders** and **Damage Claims** (red when any are open).
+- **Pipeline** — **Open Leases** (active and pending), **Active Reservations**, **Today's Pickups** and **Compliance Alerts** (documents expiring within 30 days).
 
-## Working the carousels
+> **Note:** a tile reads `—` until its data loads. The numbers are cached for about 5 minutes — reload the page for the latest.
 
-Between the charts are horizontal card strips covering the work that needs attention. Each card links to that record's detail page, and every strip has a **View all →** link to the full filtered list.
+## The section bar
 
-- **Active Leases** — currently running leases, with rate and days active.
-- **Reservations** — upcoming reservations, with pickup date and time.
-- **High-Value Leases** — active leases sorted by highest rate.
-- **Outstanding Invoices** — sent, partially paid, and overdue invoices with balance owing.
-- **Overdue Payments** — overdue invoices flagged by days overdue.
-- **Draft Invoices** — invoices not yet sent, with days in draft.
-- **Expiring This Month** — leases ending this month (red badge at 7 days or fewer).
-- **Pending Activations** — pending leases awaiting activation (red if past the scheduled start).
-- **Upcoming Returns** — leases returning soon, color-coded by days remaining.
-- **Recently Activated** — leases activated in the last 7 days.
+Under the numbers, a bar jumps to **Money**, **Leases**, **Fleet**, **Customers** or **Activity**. It stays at the top of the screen as you scroll and lights up the section you are in.
 
-If a strip is empty it says so (e.g. *No overdue payments*). If a strip fails to load, click **Retry**.
+## Money
 
----
+- **Billed vs Collected** — each of the last 12 months: what you invoiced (bars) and what customers paid (line). Above it: billed and collected this month, each compared with last month, and how much of what you billed over the year has come in.
+- **Owed to you** — everything customers still owe, as one bar split by how late it is (not due yet, 1–30, 31–60, 61–90, 90+ days), with the amount and number of invoices in each.
+- **Receivables** — one panel with tabs: **Overdue**, **Unpaid** (sent, partly paid and overdue invoices with a balance) and **Drafts**. **View all →** opens the full list for the tab you are on.
+- **Most overdue** — the customers with the largest past-due balances, how many invoices and how late the oldest is. Click one to open the customer.
+- **Coming up** — what today's active leases will bill in each of the next 6 months.
+- **Days to pay** — how long customers take to pay on average over the last 3 months, whether that is faster or slower than the 3 months before, and the monthly trend.
 
-## Recent Activity
+## Leases
 
-The **Recent Activity** feed lists the latest actions staff have taken across the system — creates, updates, status changes, and more — each tagged with who did it and how long ago. It is a read-only log; click into the relevant module to act on anything you see.
+- **Leases** — one panel with tabs: **On lease**, **Starting** (pending activation), **Returning** (ending within 60 days), **Ending this month**, **Just started** (last 7 days) and **Top value**.
+- **Reservations** — upcoming pickups, soonest first.
+- **Starting vs returning** — leases that started (up) and ended (down) each month, with how many are on rent now and the change over the year.
+- **Coming to an end** — a 12-month calendar of leases reaching their end date (open-ended leases don't appear).
+
+## Fleet
+
+- **Fleet mix** — every unit by status in one bar, then each equipment type: how many are on lease, available or elsewhere.
+- **Utilization** — occupied ÷ available unit-days each month, with the 12-month average marked.
+- **Sitting idle** — available units that have waited longest for a lease. Click one to open the unit.
+
+## Customers
+
+- **Top customers** — who you billed the most this year and each one's share of the year.
+- **Revenue by equipment type** — which kinds of equipment bring the money in, as a share of this year's billing.
+
+## Activity
+
+**Recent Activity** — the latest changes your team made, newest first, each with who did it and when.
+
+## If you don't see money
+
+Roles without access to financial figures (for example dispatchers) get the same dashboard without dollar amounts: the Money panel becomes **Billing** (the Receivables lists and Days to pay), the money visuals and the Customers section are left out, and lists show no amounts.
 
 ---
 
 <details>
 <summary>Under the hood — how it works technically</summary>
 
-- **Four parallel fetches on load** — the page calls `api/v1/dashboard/kpis`, `charts`, `tables`, and `activity_feed` in parallel when it opens. Each section shows its own loading skeleton and renders independently as its data arrives.
-- **No auto-refresh** — data is fetched once per page load. Reload the page to refresh.
-- **Caching** — KPI tiles are cached for 5 minutes and chart datasets for 15 minutes in the `report_cache` table (shared cache, not per-user). Carousels and the activity feed are queried live on each load.
-- **No permission gate** — every dashboard endpoint requires only an authenticated session (`require_auth_api`). There is no module permission, so the dashboard is visible to all signed-in staff.
-- **Activity feed source** — built from the `audit_log` table, newest first, limited to the most recent entries. Descriptions are generated from each row's action and module.
-- **Charts render client-side** — drawn with ApexCharts after the chart data resolves; colors follow the current light/dark theme.
-- **Empty data** — the *Revenue by Equipment Type* donut shows a "No data yet" message until invoices exist; other charts simply render empty.
+- **Four parallel fetches on load** — `api/v1/dashboard/kpis`, `charts`, `tables` and `activity_feed`. Each block shows its own loading skeleton and fills in as its data arrives.
+- **No auto-refresh** — data is fetched once per page load. Reload to refresh.
+- **Caching** — KPI tiles are cached for 5 minutes and chart datasets for 15 minutes in the shared `report_cache` table. Lists and the activity feed are queried live and return up to 10 rows each.
+- **Money is decided on the server** — without financial access the page never renders the money tiles, money charts or Customers section, and the APIs strip the figures as well.
+- **Needs attention** is built in the browser from the KPIs and the lists; nothing extra is queried.
+- **Charts** — only the month-by-month series are ApexCharts (billed vs collected, coming up, days to pay, starting vs returning, utilization); the rest are simple bars and lists. All follow the light/dark theme and brand colour.
+- **One request for the visuals** — `api/v1/dashboard/charts?charts=…` returns just the datasets this page uses.
 
 </details>
 

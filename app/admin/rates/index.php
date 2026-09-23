@@ -60,15 +60,22 @@ $helpModuleSlug = 'rates';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Rates</h1>
+<!-- Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) -->
+<?php ob_start(); ?>
+    <?= help_button('rates') ?>
     <?php if (can('rates', 'create')): ?>
     <a href="<?= base_url('rates/create') ?>" class="btn btn-primary btn-sm">+ New Rate Card</a>
     <?php endif; ?>
-    <div class="page-header-actions">
-        <?= help_button('rates') ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Rates', null]],
+    'eyebrow'  => 'Billing',
+    'icon'     => 'currency-dollar',
+    'accent'   => 'primary',
+    'title'    => 'Rates',
+    'subtitle' => 'The daily, weekly and monthly prices new leases start from — a general price list plus custom cards for negotiated deals.',
+    'art'      => 'rates',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <style>
 /* Customer tiles — contrasting cream cards on the dark theme (Apple light-card look). */
@@ -125,25 +132,29 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="FF_RatesManager()">
 
 <!-- KPI tiles -->
-<div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:24px;">
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-tag"/></svg></span>
         <div class="stat-label">Rate Cards</div>
         <div class="stat-value font-mono"><?= e($totalCards) ?></div>
         <div class="stat-delta">total in system</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card stat-card--green">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Active Today</div>
         <div class="stat-value font-mono"><?= e($activeCards) ?></div>
         <div class="stat-delta">within effective range</div>
     </div>
-    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+    <div class="stat-card stat-card--purple" role="button" tabindex="0" style="cursor:pointer;"
          @click="scrollToCustomers()" @keydown.enter="scrollToCustomers()" @keydown.space.prevent="scrollToCustomers()">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-building"/></svg></span>
         <div class="stat-label">Customer Cards</div>
         <div class="stat-value font-mono"><?= e($customerCards) ?></div>
         <div class="stat-delta">grouped by customer ↓</div>
     </div>
-    <div class="stat-card" role="button" tabindex="0" style="cursor:pointer;"
+    <div class="stat-card stat-card--teal" role="button" tabindex="0" style="cursor:pointer;"
          @click="globalOpen = true; scrollToGlobal()" @keydown.enter="globalOpen = true; scrollToGlobal()">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Global Cards</div>
         <div class="stat-value font-mono"><?= e($globalCards) ?></div>
         <div class="stat-delta">apply to all customers ↓</div>

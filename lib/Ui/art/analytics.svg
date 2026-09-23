@@ -1,0 +1,47 @@
+<svg class="dg dg--art-analytics" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Where the numbers are heading</title>
+  <!-- chart panel -->
+  <rect class="dg-surface" x="14" y="14" width="286" height="172" rx="14"/>
+  <line class="dg-line-soft" x1="30" y1="60" x2="288" y2="60"/>
+  <line class="dg-line-soft" x1="30" y1="100" x2="288" y2="100"/>
+  <line class="dg-line-soft" x1="30" y1="140" x2="288" y2="140"/>
+  <line class="dg-line" x1="30" y1="160" x2="288" y2="160"/>
+
+  <!-- history (solid) -->
+  <path class="dg-acc-faint" d="M34,150 L62,138 L90,144 L118,118 L146,124 L174,102 L202,92 L202,160 L34,160 Z"/>
+  <path class="dg-acc-line" d="M34,150 L62,138 L90,144 L118,118 L146,124 L174,102 L202,92"/>
+  <!-- forecast (dashed) inside its confidence band -->
+  <path class="dg-acc-faint" d="M202,92 L230,70 L258,56 L286,40 L286,80 L258,88 L230,92 Z"/>
+  <path class="dg-acc-flow" d="M202,92 L230,81 L258,72 L286,60"/>
+  <line class="dg-line-soft" x1="202" y1="30" x2="202" y2="160" stroke-dasharray="4 4"/>
+  <text class="dg-t-xs" x="118" y="40">HISTORY</text>
+  <text class="dg-acc-t" x="246" y="34" style="font-size:9.5px;letter-spacing:.08em">FORECAST</text>
+  <text class="dg-t-xs" x="34" y="176">JAN</text>
+  <text class="dg-t-xs" x="118" y="176">MAY</text>
+  <text class="dg-t-xs" x="202" y="176">SEP</text>
+  <text class="dg-t-xs" x="276" y="176">DEC</text>
+
+  <!-- today's point + a point riding the trend -->
+  <circle class="dg-pulse" cx="202" cy="92" r="8"/>
+  <circle class="dg-acc" cx="202" cy="92" r="5"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="5s" repeatCount="indefinite" path="M34,150 L62,138 L90,144 L118,118 L146,124 L174,102 L202,92 L230,81 L258,72 L286,60"/></circle>
+
+  <!-- projected growth -->
+  <g class="dg-float">
+    <rect class="dg-ok-soft" x="314" y="18" width="114" height="54" rx="12"/>
+    <path class="dg-check" d="M326,52 l12,-12 M330,40 h8 v8" style="stroke-width:2.5"/>
+    <text class="dg-t-lg dg-t-xs--qbo dg-t-start" x="348" y="47">+12%</text>
+    <text class="dg-t-xs dg-t-start" x="326" y="64">NEXT 3 MONTHS</text>
+  </g>
+
+  <!-- customer concentration + seasonality -->
+  <circle class="dg-line" cx="346" cy="126" r="26" style="stroke-width:9"/>
+  <circle class="dg-acc-line" cx="346" cy="126" r="26" style="stroke-width:9" stroke-dasharray="62 102" transform="rotate(-90 346 126)"/>
+  <text class="dg-t" x="346" y="131" style="font-size:12px">38%</text>
+  <text class="dg-t-xs" x="346" y="172">TOP 5</text>
+  <rect class="dg-acc-soft" x="386" y="130" width="8" height="24" rx="2"/>
+  <rect class="dg-acc-soft" x="398" y="116" width="8" height="38" rx="2"/>
+  <rect class="dg-acc" x="410" y="102" width="8" height="52" rx="2"/>
+  <rect class="dg-acc-soft" x="422" y="122" width="8" height="32" rx="2"/>
+  <text class="dg-t-xs" x="408" y="172">SEASON</text>
+</svg>

@@ -25,6 +25,17 @@ declare(strict_types=1);
  *       and no action buttons; invoice hero hidden in print
  *   C6  dispatcher renders customers/show with the hero but WITHOUT the
  *       money fact (can_view_financials() gate)
+ *   C7  dashboard (S-DASHBOARD-REDESIGN) renders for super_admin, accountant
+ *       and dispatcher: hero + attention + #kpi-grid + section bar; each role
+ *       gets exactly its chart containers once (money charts, money tiles
+ *       and the Customers section only with can_view_financials()); the
+ *       selectors the training walkthrough drives still exist; the list
+ *       partial is not routable; dashboard.css is token-only
+ *   C8  shell (S-SHELL-REDESIGN): shell.css linked + token-only + visual-only
+ *       (never sets a sidebar width); navigation config groups the main menu
+ *       into labelled sections and every item's accent is valid; a rendered
+ *       page carries the sidebar brand/find/sections/accent classes and the
+ *       topbar context block + utility tray (walkthrough selectors intact)
  *
  * @session S-MODULE-CHROME
  */
@@ -34,7 +45,7 @@ require_once __DIR__ . '/../api/bootstrap.php';
 use FleetForge\Ui\ModuleHero;
 
 $pass     = 0;
-$total    = 6;
+$total    = 8;
 $failures = [];
 
 function ff_mc_check(string $id, string $label, array $errs): void
@@ -63,6 +74,23 @@ $PAGES = [
     'leases/show'       => ['app/admin/leases/show.php', 'warning', true],
     'reservations'      => ['app/admin/reservations/index.php', 'info', true],
     'reservations/show' => ['app/admin/reservations/show.php', 'info', false],
+    // S-MODULE-CHROME-2 (remaining sidebar modules)
+    'payments'                => ['app/admin/payments/index.php', 'success', true],
+    'credit_notes'            => ['app/admin/credit_notes/index.php', 'purple', true],
+    'rates'                   => ['app/admin/rates/index.php', 'primary', true],
+    'credit_applications'     => ['app/admin/credit_applications/index.php', 'info', true],
+    'vendors'                 => ['app/admin/vendors/index.php', 'warning', true],
+    'maintenance_work_orders' => ['app/admin/maintenance_work_orders/index.php', 'warning', true],
+    'inspections'             => ['app/admin/inspections/index.php', 'info', true],
+    'requests'                => ['app/admin/requests/index.php', 'primary', true],
+    'damage_claims'           => ['app/admin/damage_claims/index.php', 'danger', true],
+    'mileage_logs'            => ['app/admin/mileage_logs/index.php', 'info', true],
+    'yards'                   => ['app/admin/yards/index.php', 'success', true],
+    'tracking'                => ['app/admin/tracking/index.php', 'info', false],
+    'compliance'              => ['app/admin/compliance/index.php', 'warning', true],
+    'documents'               => ['app/admin/documents/index.php', 'primary', false],
+    'reports'                 => ['app/admin/reports/index.php', 'purple', true],
+    'analytics'               => ['app/admin/analytics/index.php', 'info', false],
 ];
 
 // ══ C1 ══════════════════════════════════════════════════════════
@@ -127,6 +155,9 @@ if (preg_match('/#(?!8b5cf6\b)[0-9a-fA-F]{3,8}\b/i', $cssPaint, $hm)) { $e[] = "
 if (str_contains($cssNoComments, '--color-primary-text')) { $e[] = 'uses the un-overridden --color-primary-text'; }
 if (preg_match('/\.ff-stats[^{]*::(before|after)/', $cssNoComments)) { $e[] = 'KPI tiles grew a pseudo-element (top bar) — operator rejected it'; }
 if (!preg_match('/prefers-reduced-motion[^{]*\{[^}]*\.ff-stats/s', $cssNoComments)) { $e[] = 'reduced-motion does not stop the tile rise'; }
+// Accent must reach the hero: a same-specificity `.ff-hero { --acc }` declared after
+// the .ff-acc--* rules silently overrode them (every hero rendered primary).
+if (preg_match('/(^|\})\s*\.ff-hero\s*\{[^}]*--acc\s*:/', $cssNoComments)) { $e[] = '.ff-hero sets --acc (overrides every .ff-acc--* accent) — default it via :where(.ff-hero)'; }
 if (preg_match('/^\.dg-(panel|flow|packet)\b[^{]*\{/m', $src('public/assets/css/sop.css'))) { $e[] = 'dg-* rules duplicated back into sop.css'; }
 ff_mc_check('C3', 'stylesheet loaded in both shells, token-only colours, no tile top bar, reduced motion', $e);
 
@@ -249,6 +280,86 @@ if ($ids['customers/show'] > 0) {
     $e[] = 'no customer to render';
 }
 ff_mc_check('C6', 'money fact gated: dispatcher hidden, accountant shown', $e);
+
+// ══ C7 ══════════════════════════════════════════════════════════
+$e = [];
+// S-DASHBOARD-VIZ: five ApexCharts remain; the rest of the page is HTML visuals.
+$moneyCharts = ['chart-cash-flow', 'chart-revenue-forecast'];
+$opsCharts   = ['chart-payment-speed', 'chart-lease-flow', 'chart-utilization-trend'];
+$retired     = ['chart-revenue-trend', 'chart-ar-aging', 'chart-weekly-heatmap', 'chart-top-customers', 'chart-revenue-by-type',
+                'chart-fleet-status', 'chart-occupancy-by-type', 'chart-leases-trend', 'chart-lease-expiry-calendar'];
+$moneyCards  = ['Billed vs Collected', 'Owed to you', 'Most overdue', 'Coming up', 'Top customers', 'Revenue by equipment type'];
+$opsCards    = ['Days to pay', 'Starting vs returning', 'Coming to an end', 'Fleet mix', 'Utilization', 'Sitting idle'];
+foreach (['super_admin' => true, 'accountant' => true, 'dispatcher' => false] as $role => $money) {
+    $d = ff_mc_render('app/admin/dashboard/index.php', '', $role);
+    $h = (string) ($d['html'] ?? '');
+    if (!empty($d['fatal'])) { $e[] = "{$role}: fatal {$d['fatal']}"; continue; }
+    foreach (['class="ff-hero ff-acc--primary dash-hero"', 'class="dash-attn"', 'id="kpi-grid"', 'class="dash-nav"', 'x-data="FF_Dashboard()"', 'dashboard.css', 'id="dash-leases"', 'id="dash-fleet"', 'id="dash-money"', 'id="dash-activity"'] as $needle) {
+        if (!str_contains($h, $needle)) { $e[] = "{$role}: missing {$needle}"; }
+    }
+    foreach ($opsCharts as $id) {
+        if (substr_count($h, 'id="' . $id . '"') !== 1) { $e[] = "{$role}: {$id} x" . substr_count($h, 'id="' . $id . '"'); }
+    }
+    foreach ($moneyCharts as $id) {
+        $want = $money ? 1 : 0;
+        if (substr_count($h, 'id="' . $id . '"') !== $want) { $e[] = "{$role}: {$id} x" . substr_count($h, 'id="' . $id . '"') . " (want {$want})"; }
+    }
+    foreach ($retired as $id) {
+        if (str_contains($h, 'id="' . $id . '"')) { $e[] = "{$role}: retired chart {$id} still rendered"; }
+    }
+    foreach ($moneyCards as $t) {
+        if ($money !== str_contains($h, '<span class="card-title">' . $t . '</span>')) { $e[] = "{$role}: card '{$t}' " . ($money ? 'missing' : 'shown without financial access'); }
+    }
+    foreach ($opsCards as $t) {
+        if (!str_contains($h, '<span class="card-title">' . $t . '</span>')) { $e[] = "{$role}: card '{$t}' missing"; }
+    }
+    if (!str_contains($h, "api/v1/dashboard/charts') ?>?charts=") && !preg_match('~dashboard/charts[^\']*\?charts=~', $h)) { $e[] = "{$role}: page no longer asks for its chart subset (?charts=)"; }
+    if ($money !== str_contains($h, 'id="dash-customers"')) { $e[] = "{$role}: Customers section " . ($money ? 'missing' : 'shown without financial access'); }
+    foreach (['Active Revenue', 'Monthly Collections'] as $lbl) {
+        if ($money !== str_contains($h, '<div class="stat-label">' . $lbl . '</div>')) { $e[] = "{$role}: tile {$lbl} " . ($money ? 'missing' : 'shown'); }
+    }
+    // Training walkthrough (scripts/walkthrough/chapters/01-getting-started.mjs) selectors
+    foreach (['page-header-title', '<div class="stat-label">On Lease Now</div>', '<div class="stat-label">Overdue Invoices</div>', '<div class="stat-label">Compliance Alerts</div>', 'class="dashboard-section-title"', 'class="dash-pulse"', 'class="dash-attn"'] as $needle) {
+        if (!str_contains($h, $needle)) { $e[] = "{$role}: walkthrough selector gone ({$needle})"; }
+    }
+    $own = array_values(array_filter((array) $d['warnings'], static fn ($w) => preg_match('/^(index|dashboard-list|SopIcons):/', $w)));
+    if ($own !== []) { $e[] = "{$role}: " . implode(' | ', array_slice($own, 0, 2)); }
+}
+if (is_file(FF_ROOT . '/app/admin/dashboard/_dash_list.php')) { $e[] = 'list partial lives under app/admin (routable)'; }
+$dcss = (string) preg_replace('~/\*.*?\*/~s', '', $src('public/assets/css/dashboard.css'));
+if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $dcss, $hm)) { $e[] = "dashboard.css hardcodes {$hm[0]}"; }
+if (preg_match('/\.stat-card[^{]*::(before|after)/', $dcss)) { $e[] = 'dashboard.css gives tiles a pseudo-element (top bar)'; }
+if (!str_contains($dcss, 'prefers-reduced-motion')) { $e[] = 'dashboard.css ignores reduced motion'; }
+ff_mc_check('C7', 'dashboard renders per role: money charts/cards only with financial access, each chart once, retired charts gone, walkthrough selectors kept', $e);
+
+// ══ C8 ══════════════════════════════════════════════════════════
+$e = [];
+if (!str_contains($src('includes/header.php'), "asset_url('assets/css/shell.css')")) { $e[] = 'header.php does not load shell.css'; }
+$shell = (string) preg_replace('~/\*.*?\*/~s', '', $src('public/assets/css/shell.css'));
+if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $shell, $hm)) { $e[] = "shell.css hardcodes {$hm[0]}"; }
+if (preg_match('/(^|[;{\s])width\s*:\s*var\(--sidebar-width/m', $shell)) { $e[] = 'shell.css sets a sidebar width (widths belong to app.css)'; }
+$nav = require FF_ROOT . '/config/navigation.php';
+$labels = []; $sections = 0;
+foreach ($nav as $item) {
+    if (!empty($item['separator'])) { $sections++; continue; }
+    $labels[] = $item['label'];
+    if (isset($item['accent']) && !in_array($item['accent'], ModuleHero::ACCENTS, true)) { $e[] = "nav '{$item['label']}' has unknown accent {$item['accent']}"; }
+    if (!isset($item['accent'])) { $e[] = "nav '{$item['label']}' has no accent"; }
+}
+if ($sections < 8) { $e[] = "expected ≥8 menu sections, got {$sections}"; }
+foreach (['Dashboard', 'Customers', 'Leases', 'Invoices', 'Equipment', 'Maintenance', 'Reports', 'SOP', 'Help Center', 'QuickBooks', 'Accounting'] as $must) {
+    if (!in_array($must, $labels, true)) { $e[] = "menu lost '{$must}'"; }
+}
+$r = ff_mc_render('app/admin/customers/index.php', '');
+$h = (string) ($r['html'] ?? '');
+foreach (['class="sidebar-brand', 'class="sidebar-find-input"', 'class="nav-section-label">Rentals<', 'nav-item ff-acc--purple', 'class="topbar-context"', 'topbar-context-ic ff-acc--purple', 'class="topbar-tray"', 'class="sidebar-footer"', 'aria-label="Toggle navigation menu"', 'class="topbar-create-btn"', 'FF_SidebarFind'] as $needle) {
+    if (!str_contains($h, $needle)) { $e[] = "rendered shell lacks {$needle}"; }
+}
+// heroicon() caches by icon NAME: a custom class passed from the sidebar leaks onto
+// every later use of that icon (the phone search button jumped to the far left).
+if (preg_match('/<svg class="(?!nav-icon)[^"]*"[^>]*>(?:(?!<\/svg>).)*<\/svg>\s*<\/span>\s*<span class="nav-item-label"/s', $h)) { $e[] = 'a nav item icon lost its nav-icon class (heroicon cache leak)'; }
+if (preg_match('/<svg class="(sidebar-find-icon|brand-icon)"/', $h)) { $e[] = 'shell passes a custom class through heroicon() (cache leak)'; }
+ff_mc_check('C8', 'shell: stylesheet token-only + visual-only, grouped menu with valid accents, sidebar + topbar markup rendered', $e);
 
 @unlink($harness);
 

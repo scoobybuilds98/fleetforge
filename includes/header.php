@@ -115,6 +115,8 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
     <link rel="stylesheet" href="<?= asset_url('assets/css/animations.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <!-- S-MODULE-CHROME: module heroes, upgraded KPI tiles, dg-* illustration classes (opt-in classes only) -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/module-chrome.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-SHELL-REDESIGN: sidebar + topbar visuals (widths/collapse stay in app.css) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/shell.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
     <?php
     // ============================================================

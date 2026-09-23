@@ -267,25 +267,35 @@ require_once FF_ROOT . '/includes/header.php';
 }
 </style>
 
-<div class="page-header">
-    <h1 class="page-header-title">Compliance</h1>
-    <div style="display:flex;gap:8px;align-items:center;">
+<!-- ── Alpine.js component wraps hero + tiles + grid so tiles can refresh after save ── -->
+<div x-data="FF_Compliance()">
+
+<!-- ============================================================
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
+     WHY inside FF_Compliance() (the old .page-header sat just above it):
+     Export CSV calls exportCsv(), a method of this component. Outside the
+     scope Alpine threw "exportCsv is not defined" and nothing downloaded.
+     ============================================================ -->
+<?php ob_start(); ?>
         <?php if (can('compliance', 'view')): ?>
         <button class="btn btn-secondary btn-sm" @click.prevent="exportCsv()">
             Export CSV
         </button>
         <?php endif; ?>
-    </div>
-    <div class="page-header-actions">
         <?= help_button('compliance') ?>
-    </div>
-</div>
-
-<!-- ── Alpine.js component wraps tiles + grid so tiles can refresh after save ── -->
-<div x-data="FF_Compliance()">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Compliance', null]],
+    'eyebrow'  => 'Fleet',
+    'icon'     => 'shield-check',
+    'accent'   => 'warning',
+    'title'    => 'Compliance',
+    'subtitle' => 'Keep every unit road-legal — see which CVI and registration papers are valid, due soon or expired, and update the dates right here.',
+    'art'      => 'compliance',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ── KPI tiles ──────────────────────────────────────────────────────────── -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--3 ff-stats" style="margin-bottom:24px;">
 
     <div class="stat-card stat-card--blue" style="cursor:pointer;"
          @click="filters = {q:'',yard:'',status:'',window:'0',expired_only:''}; load(1)"

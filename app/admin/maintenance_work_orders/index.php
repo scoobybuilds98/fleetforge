@@ -90,21 +90,28 @@ $helpModuleSlug = 'maintenance';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Maintenance Work Orders</h1>
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ── -->
+<?php ob_start(); ?>
     <?php if (can('maintenance', 'create')): ?>
     <a href="<?= base_url('maintenance_work_orders/create') ?>" class="btn btn-primary btn-sm">
         + New Work Order
     </a>
     <?php endif; ?>
-    <div class="page-header-actions">
-        <?= help_button('maintenance') ?>
-    </div>
-</div>
+    <?= help_button('maintenance') ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Maintenance', null]],
+    'eyebrow'  => 'Fleet care',
+    'icon'     => 'wrench-screwdriver',
+    'accent'   => 'warning',
+    'title'    => 'Maintenance Work Orders',
+    'subtitle' => 'Repairs and scheduled service for every unit — who is doing the work, what it costs, and when it is done.',
+    'art'      => 'maintenance',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
 <div x-data="woKpis()" x-init="loadKpis()">
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:24px;">
 
     <div class="stat-card stat-card--blue" style="cursor:pointer;"
          @click="activeTile = activeTile === 'total' ? '' : 'total'; setFilter('status','')"

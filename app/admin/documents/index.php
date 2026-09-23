@@ -44,19 +44,25 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="FF_Documents()" x-cloak
      @open-document-upload.window="openUploadModal()">
 
-    <!-- ── Page header ──────────────────────────────────────────── -->
-    <div class="page-header">
-        <div>
-            <h1 class="page-title">Documents</h1>
-            <p class="page-subtitle">All uploaded files across customers, equipment, and leases.</p>
-        </div>
-        <div class="page-header-actions">
+    <!-- ============================================================
+         Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
+         Inside FF_Documents() so "+ Upload" still reaches openUploadModal().
+         ============================================================ -->
+<?php ob_start(); ?>
             <?= help_button('documents') ?>
             <?php if (can('equipment', 'edit') || can('customers', 'edit') || can('leases', 'edit')): ?>
             <button class="btn btn-primary" @click="openUploadModal()">+ Upload</button>
             <?php endif; ?>
-        </div>
-    </div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Documents', null]],
+    'eyebrow'  => 'Records',
+    'icon'     => 'folder-open',
+    'accent'   => 'primary',
+    'title'    => 'Documents',
+    'subtitle' => 'Every file uploaded for your customers, units and leases — agreements, certificates, contracts — in one searchable place.',
+    'art'      => 'documents',
+    'actions'  => ob_get_clean(),
+]) ?>
 
     <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
     <!-- S-LIST-TOOLBAR: was the legacy .filter-bar alias; now the same

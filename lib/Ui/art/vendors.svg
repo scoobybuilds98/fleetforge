@@ -1,0 +1,53 @@
+<svg class="dg dg--art-vendors" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A supplier sending a bill</title>
+  <!-- the supplier's shop -->
+  <line class="dg-line" x1="18" y1="178" x2="182" y2="178"/>
+  <rect class="dg-surface" x="38" y="60" width="120" height="118" rx="3"/>
+  <rect class="dg-acc-soft" x="30" y="22" width="136" height="26" rx="6"/>
+  <text class="dg-acc-t" x="98" y="39" style="letter-spacing:.08em">REPAIR SHOP</text>
+  <!-- striped awning -->
+  <rect class="dg-acc-soft" x="30" y="48" width="136" height="12"/>
+  <rect class="dg-acc" x="30" y="48" width="17" height="12"/>
+  <rect class="dg-acc" x="64" y="48" width="17" height="12"/>
+  <rect class="dg-acc" x="98" y="48" width="17" height="12"/>
+  <rect class="dg-acc" x="132" y="48" width="17" height="12"/>
+  <path class="dg-acc" d="M30,60 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 a8.5,7 0 0 0 17,0 z"/>
+  <!-- window with an OPEN sign, and the door -->
+  <rect class="dg-surface-2" x="50" y="84" width="54" height="46" rx="3"/>
+  <line class="dg-line-soft" x1="66" y1="84" x2="66" y2="96"/>
+  <line class="dg-line-soft" x1="88" y1="84" x2="88" y2="96"/>
+  <rect class="dg-ok-soft" x="58" y="96" width="38" height="16" rx="4"/>
+  <text class="dg-t-xs dg-t-xs--qbo" x="77" y="108">OPEN</text>
+  <rect class="dg-surface-2" x="116" y="96" width="32" height="82" rx="3"/>
+  <circle class="dg-ink" cx="141" cy="140" r="2.2"/>
+  <!-- rating -->
+  <path class="dg-acc" transform="translate(74 190)" d="M0,-5 L1.47,-2.02 L4.76,-1.55 L2.38,0.77 L2.94,4.05 L0,2.5 L-2.94,4.05 L-2.38,0.77 L-4.76,-1.55 L-1.47,-2.02 Z"/>
+  <path class="dg-acc" transform="translate(86 190)" d="M0,-5 L1.47,-2.02 L4.76,-1.55 L2.38,0.77 L2.94,4.05 L0,2.5 L-2.94,4.05 L-2.38,0.77 L-4.76,-1.55 L-1.47,-2.02 Z"/>
+  <path class="dg-acc" transform="translate(98 190)" d="M0,-5 L1.47,-2.02 L4.76,-1.55 L2.38,0.77 L2.94,4.05 L0,2.5 L-2.94,4.05 L-2.38,0.77 L-4.76,-1.55 L-1.47,-2.02 Z"/>
+  <path class="dg-acc" transform="translate(110 190)" d="M0,-5 L1.47,-2.02 L4.76,-1.55 L2.38,0.77 L2.94,4.05 L0,2.5 L-2.94,4.05 L-2.38,0.77 L-4.76,-1.55 L-1.47,-2.02 Z"/>
+  <path class="dg-line-soft" transform="translate(122 190)" d="M0,-5 L1.47,-2.02 L4.76,-1.55 L2.38,0.77 L2.94,4.05 L0,2.5 L-2.94,4.05 L-2.38,0.77 L-4.76,-1.55 L-1.47,-2.02 Z"/>
+
+  <!-- the bill on its way -->
+  <path class="dg-acc-flow" d="M160,128 C206,128 222,100 268,100"/>
+  <g class="dg-packet--acc">
+    <rect class="dg-surface" x="-10" y="-7" width="20" height="14" rx="2"/>
+    <path class="dg-line" d="M-10,-6 l10,7 l10,-7"/>
+    <animateMotion dur="2.6s" repeatCount="indefinite" path="M160,128 C206,128 222,100 268,100"/>
+  </g>
+
+  <!-- the bill -->
+  <rect class="dg-surface" x="270" y="24" width="120" height="156" rx="10"/>
+  <rect class="dg-acc" x="284" y="40" width="40" height="8" rx="4"/>
+  <text class="dg-t-xs dg-t-start" x="284" y="64">BILL</text>
+  <text class="dg-t-sm dg-t-start" x="284" y="84">Brake service</text>
+  <rect class="dg-ink" x="284" y="94" width="84" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-ink" x="284" y="106" width="60" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-acc-soft" x="284" y="120" width="92" height="26" rx="7"/>
+  <text class="dg-acc-t" x="330" y="137" style="font-size:12.5px">$642.50</text>
+  <text class="dg-t-xs" x="330" y="166">NET 30</text>
+
+  <!-- preferred vendor -->
+  <circle class="dg-pulse" cx="388" cy="28" r="14"/>
+  <circle class="dg-acc" cx="388" cy="28" r="15"/>
+  <path class="dg-surface" transform="translate(388 29)" d="M0,-7.5 L2.2,-3.03 L7.13,-2.32 L3.57,1.16 L4.41,6.07 L0,3.75 L-4.41,6.07 L-3.57,1.16 L-7.13,-2.32 L-2.2,-3.03 Z"/>
+</svg>

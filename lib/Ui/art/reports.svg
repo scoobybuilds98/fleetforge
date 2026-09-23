@@ -1,0 +1,47 @@
+<svg class="dg dg--art-reports" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A report ready to export</title>
+  <!-- the report sheet -->
+  <rect class="dg-surface-2" x="40" y="14" width="212" height="176" rx="12" transform="rotate(-3 146 102)"/>
+  <rect class="dg-surface" x="44" y="12" width="212" height="178" rx="12"/>
+  <rect class="dg-acc" x="60" y="28" width="54" height="8" rx="4"/>
+  <text class="dg-t-xs dg-t-start" x="60" y="54">REVENUE REPORT</text>
+  <rect class="dg-chip" x="170" y="24" width="72" height="20" rx="10"/>
+  <text class="dg-t-xs" x="206" y="38">JUL – SEP</text>
+
+  <!-- KPI tiles -->
+  <rect class="dg-surface-2" x="60" y="64" width="56" height="36" rx="7"/>
+  <text class="dg-t-xs" x="88" y="78">GROSS</text>
+  <text class="dg-acc-t" x="88" y="93">$48.2K</text>
+  <rect class="dg-surface-2" x="122" y="64" width="56" height="36" rx="7"/>
+  <text class="dg-t-xs" x="150" y="78">PAID</text>
+  <text class="dg-acc-t" x="150" y="93">92%</text>
+  <rect class="dg-surface-2" x="184" y="64" width="56" height="36" rx="7"/>
+  <text class="dg-t-xs" x="212" y="78">UNITS</text>
+  <text class="dg-acc-t" x="212" y="93">146</text>
+
+  <!-- ranked bars -->
+  <rect class="dg-ink" x="60" y="115" width="22" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-acc dg-grow" x="90" y="111" width="150" height="12" rx="4"/>
+  <rect class="dg-ink" x="60" y="134" width="22" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-acc-soft dg-grow" x="90" y="130" width="118" height="12" rx="4" style="animation-delay:.2s"/>
+  <rect class="dg-ink" x="60" y="153" width="22" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-acc-soft dg-grow" x="90" y="149" width="86" height="12" rx="4" style="animation-delay:.4s"/>
+  <rect class="dg-ink" x="60" y="172" width="22" height="5" rx="2.5" opacity=".55"/>
+  <rect class="dg-acc-soft dg-grow" x="90" y="168" width="58" height="12" rx="4" style="animation-delay:.6s"/>
+
+  <!-- export: CSV download + print -->
+  <path class="dg-acc-flow" d="M258,118 C282,118 300,118 326,118"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="1.8s" repeatCount="indefinite" path="M258,118 C282,118 300,118 326,118"/></circle>
+  <circle class="dg-acc-soft" cx="362" cy="40" r="20"/>
+  <path class="dg-acc-line" d="M362,29 v17 M354,39 l8,8 l8,-8 M352,53 h20"/>
+  <g class="dg-float">
+    <path class="dg-surface" d="M338,74 h40 l16,16 v62 a7,7 0 0 1 -7,7 h-49 a7,7 0 0 1 -7,-7 v-71 a7,7 0 0 1 7,-7 z"/>
+    <path class="dg-line" d="M378,74 v11 a5,5 0 0 0 5,5 h11"/>
+    <rect class="dg-ink" x="340" y="98" width="34" height="5" rx="2.5" opacity=".55"/>
+    <rect class="dg-ink" x="340" y="110" width="44" height="5" rx="2.5" opacity=".55"/>
+    <rect class="dg-ok-soft" x="340" y="126" width="44" height="20" rx="10"/>
+    <text class="dg-t-xs dg-t-xs--qbo" x="362" y="140">CSV</text>
+  </g>
+  <rect class="dg-chip" x="331" y="170" width="62" height="22" rx="11"/>
+  <text class="dg-t-sm" x="362" y="185">Print</text>
+</svg>

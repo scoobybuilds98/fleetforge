@@ -192,12 +192,10 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
 .an-empty--notice .an-empty-body { max-width: 420px; }
 </style>
 
-<div class="page-header">
-    <div>
-        <h1 class="page-title">Analytics</h1>
-        <p class="page-subtitle">Revenue forecasting, utilization patterns, and fleet intelligence</p>
-    </div>
-    <div class="page-header-actions">
+<!-- ============================================================
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
+     ============================================================ -->
+<?php ob_start(); ?>
         <?= help_button('analytics') ?>
         <!-- Outside the FF_Analytics() scope: drive it by window event, mirror its busy state back -->
         <button class="btn btn-secondary btn-sm"
@@ -208,8 +206,16 @@ require_once dirname(__DIR__, 3) . '/includes/header.php';
             <svg width="14" height="14"><use href="#icon-arrow-path"/></svg>
             Refresh All
         </button>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Analytics', null]],
+    'eyebrow'  => 'Insights',
+    'icon'     => 'chart-pie',
+    'accent'   => 'info',
+    'title'    => 'Analytics',
+    'subtitle' => 'Where the business is heading — revenue forecasts, which units earn their keep, busy seasons and the customers you rely on most.',
+    'art'      => 'analytics',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ── AI Report Generator ────────────────────────────────────────────────── -->
 <?php

@@ -81,22 +81,11 @@ $rows = db_select(
 $typeLabels = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABELS;
 ?>
 
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Service Requests</span>
-</nav>
-
-<div class="page-header" style="display:flex;align-items:flex-start;justify-content:space-between;gap:18px;flex-wrap:wrap;">
-    <div>
-        <h1 class="page-header-title h4">Customer Service Requests</h1>
-        <div class="text-secondary text-sm" style="margin-top:4px;">
-            List of service requests submitted via the customer portal.
-            Click into a row to read the full thread and reply. The customer
-            also gets notified when you respond or change status.
-        </div>
-    </div>
-    <div class="page-header-actions" style="align-self:center;">
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ──
+     Replaces the standalone breadcrumb + page header; the old three-line
+     intro ("click a row to read the thread and reply; the customer is
+     notified") is folded into the hero's one-line subtitle. -->
+<?php ob_start(); ?>
         <?= help_button('service-requests') ?>
         <?php if (can('settings', 'edit')): ?>
         <a href="<?= base_url('settings') ?>?tab=portal_users#service-request-routing"
@@ -106,27 +95,37 @@ $typeLabels = \FleetForge\Notifications\PortalRequestNotifier::REQUEST_TYPE_LABE
             Configure routing
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Service Requests', null]],
+    'eyebrow'  => 'Customers',
+    'icon'     => 'envelope-open',
+    'accent'   => 'primary',
+    'title'    => 'Customer Service Requests',
+    'subtitle' => 'Requests customers send from the portal — open one to read the thread and reply, and the customer is told when you respond.',
+    'art'      => 'requests',
+    'actions'  => ob_get_clean(),
+]) ?>
 
-<!-- ── 4 KPI tiles ────────────────────────────────────────────── -->
-<div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:14px;">
-    <div class="kpi-tile">
-        <div class="kpi-label">Open</div>
-        <div class="kpi-value text-warning"><?= (int) $kpis['open'] ?></div>
-    </div>
-    <div class="kpi-tile">
-        <div class="kpi-label">In Review</div>
-        <div class="kpi-value text-info"><?= (int) $kpis['in_review'] ?></div>
-    </div>
-    <div class="kpi-tile">
-        <div class="kpi-label">Resolved</div>
-        <div class="kpi-value text-success"><?= (int) $kpis['resolved'] ?></div>
-    </div>
-    <div class="kpi-tile">
-        <div class="kpi-label">Closed</div>
-        <div class="kpi-value text-secondary"><?= (int) $kpis['closed'] ?></div>
-    </div>
+<!-- ── 4 KPI tiles (S-MODULE-CHROME-2: were unstyled .kpi-tile boxes; now the
+     standard glowing stat cards, each one filters the list to its status) ── -->
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:14px;">
+    <?php
+    // [status, label, colour, sprite icon, note]
+    $reqTiles = [
+        ['open',      'Open',      'amber', 'clock',        'waiting for a reply'],
+        ['in_review', 'In Review', 'blue',  'magnifying-glass', 'being worked on'],
+        ['resolved',  'Resolved',  'green', 'check-circle', 'answered'],
+        ['closed',    'Closed',    'slate', 'x-circle',     'finished'],
+    ];
+    foreach ($reqTiles as [$rs, $rl, $rc, $ri, $rn]): ?>
+    <a href="?status=<?= e($rs) ?>" class="stat-card stat-card--link stat-card--<?= $rc ?><?= $statusFilter === $rs ? ' ring-active' : '' ?>"
+       style="text-decoration:none;" aria-label="<?= e($rl) ?> requests — show them">
+        <span class="stat-icon stat-icon--<?= $rc ?>"><svg><use href="#icon-<?= $ri ?>"/></svg></span>
+        <div class="stat-label"><?= e($rl) ?></div>
+        <div class="stat-value font-mono"><?= (int) $kpis[$rs] ?></div>
+        <div class="stat-delta text-secondary"><?= e($rn) ?></div>
+    </a>
+    <?php endforeach; ?>
 </div>
 
 <!-- ── FILTER TOOLBAR ──────────────────────────────────────────── -->

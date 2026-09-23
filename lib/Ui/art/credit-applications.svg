@@ -1,0 +1,49 @@
+<svg class="dg dg--art-credit-applications" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A credit application sent, signed and reviewed</title>
+  <!-- sent to the customer -->
+  <path class="dg-acc-flow" d="M22,178 C30,150 22,124 46,102"/>
+  <circle class="dg-packet--acc" r="3.5"><animateMotion dur="1.8s" repeatCount="indefinite" path="M22,178 C30,150 22,124 46,102"/></circle>
+  <g class="dg-float">
+    <path class="dg-acc-soft" d="M36,90 L96,62 L78,114 L64,96 Z"/>
+    <path class="dg-acc-line" d="M64,96 L96,62" style="stroke-width:1.4"/>
+  </g>
+  <text class="dg-t-xs" x="66" y="140">SENT</text>
+
+  <!-- the application, filled in and signed -->
+  <rect class="dg-surface" x="108" y="18" width="136" height="166" rx="10"/>
+  <path class="dg-acc-faint" d="M118,18 h116 a10,10 0 0 1 10,10 v18 h-136 v-18 a10,10 0 0 1 10,-10 z"/>
+  <text class="dg-t-xs dg-t-start" x="122" y="36">APPLICATION</text>
+  <rect class="dg-ok-soft" x="122" y="56" width="16" height="16" rx="4"/>
+  <path class="dg-check" d="M126,64 l3.5,3.5 l6.5,-7" style="stroke-width:2.2"/>
+  <text class="dg-t-sm dg-t-start" x="146" y="68">Business info</text>
+  <rect class="dg-ok-soft" x="122" y="82" width="16" height="16" rx="4"/>
+  <path class="dg-check" d="M126,90 l3.5,3.5 l6.5,-7" style="stroke-width:2.2"/>
+  <text class="dg-t-sm dg-t-start" x="146" y="94">Bank details</text>
+  <rect class="dg-ok-soft" x="122" y="108" width="16" height="16" rx="4"/>
+  <path class="dg-check" d="M126,116 l3.5,3.5 l6.5,-7" style="stroke-width:2.2"/>
+  <text class="dg-t-sm dg-t-start" x="146" y="120">References</text>
+  <path class="dg-acc-line" d="M124,150 c7,-14 12,9 19,-2 s9,-12 16,0 s10,6 18,-5" style="stroke-width:1.8"/>
+  <line class="dg-line-soft" x1="122" y1="158" x2="230" y2="158"/>
+  <text class="dg-t-xs dg-t-start" x="122" y="174">SIGNED ONLINE</text>
+
+  <!-- the review: three possible outcomes -->
+  <path class="dg-edge dg-edge--muted" d="M246,100 C272,100 274,49 300,49"/>
+  <path class="dg-edge dg-edge--muted" d="M246,100 C272,100 274,151 300,151"/>
+  <path class="dg-acc-flow" d="M246,100 L290,100"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="1.4s" repeatCount="indefinite" path="M246,100 L290,100"/></circle>
+
+  <rect class="dg-chip" x="300" y="36" width="120" height="26" rx="13"/>
+  <circle class="dg-dot--warn" cx="316" cy="49" r="4"/>
+  <text class="dg-t-sm dg-t-start" x="326" y="53">Needs info</text>
+
+  <g class="dg-float">
+    <rect class="dg-ok-soft" x="292" y="82" width="136" height="36" rx="18"/>
+    <circle class="dg-pulse dg-pulse--ok" cx="313" cy="100" r="9"/>
+    <path class="dg-check" d="M306,100 l5,5 l10,-11" style="stroke-width:3"/>
+    <text class="dg-t" x="370" y="105">Approved</text>
+  </g>
+
+  <rect class="dg-chip" x="300" y="138" width="120" height="26" rx="13"/>
+  <circle class="dg-dot--danger" cx="316" cy="151" r="4"/>
+  <text class="dg-t-sm dg-t-start" x="326" y="155">Declined</text>
+</svg>

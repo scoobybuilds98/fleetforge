@@ -1,0 +1,59 @@
+<svg class="dg dg--art-mileage" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Odometer readings from the road</title>
+  <!-- odometer dial -->
+  <path class="dg-surface" d="M28,100 A68,68 0 0 1 164,100 Z"/>
+  <path class="dg-line-soft" d="M42,100 A54,54 0 0 1 150,100" style="stroke-width:6"/>
+  <path class="dg-acc-line dg-grow" d="M42,100 A54,54 0 0 1 137.4,65.3" style="stroke-width:6"/>
+  <line class="dg-line" x1="36" y1="100" x2="30" y2="100"/>
+  <line class="dg-line" x1="53.6" y1="57.6" x2="49.3" y2="53.3"/>
+  <line class="dg-line" x1="96" y1="40" x2="96" y2="34"/>
+  <line class="dg-line" x1="138.4" y1="57.6" x2="142.7" y2="53.3"/>
+  <line class="dg-line" x1="156" y1="100" x2="162" y2="100"/>
+  <line class="dg-acc-line" x1="96" y1="100" x2="128.2" y2="73" style="stroke-width:3"/>
+  <circle class="dg-acc" cx="96" cy="100" r="5"/>
+  <!-- counter -->
+  <rect class="dg-surface-2" x="36" y="112" width="120" height="28" rx="6"/>
+  <text class="dg-t" x="88" y="131" style="font-size:15px;letter-spacing:.14em">048215</text>
+  <text class="dg-t-xs" x="138" y="130">KM</text>
+  <text class="dg-t-xs" x="96" y="160">ODOMETER</text>
+
+  <!-- the reading log: GPS, by hand, at lease start -->
+  <rect class="dg-chip" x="214" y="16" width="212" height="28" rx="14"/>
+  <circle class="dg-pulse" cx="230" cy="30" r="5"/>
+  <circle class="dg-dot--info" cx="230" cy="30" r="4.5"/>
+  <text class="dg-t-sm dg-t-start" x="242" y="34">GPS sync</text>
+  <text class="dg-acc-t dg-t-start" x="344" y="34">48,215 km</text>
+
+  <rect class="dg-chip" x="214" y="52" width="212" height="28" rx="14"/>
+  <circle class="dg-dot--warn" cx="230" cy="66" r="4.5"/>
+  <text class="dg-t-sm dg-t-start" x="242" y="70">Manual</text>
+  <text class="dg-t-sm dg-t-start" x="344" y="70">47,980 km</text>
+
+  <rect class="dg-chip" x="214" y="88" width="212" height="28" rx="14"/>
+  <circle class="dg-dot--ok" cx="230" cy="102" r="4.5"/>
+  <text class="dg-t-sm dg-t-start" x="242" y="106">Lease start</text>
+  <text class="dg-t-sm dg-t-start" x="344" y="106">47,610 km</text>
+
+  <!-- newest reading updates the odometer -->
+  <path class="dg-acc-flow" d="M212,30 C186,30 184,126 158,126"/>
+  <circle class="dg-packet--acc" r="3.5"><animateMotion dur="2.2s" repeatCount="indefinite" path="M212,30 C186,30 184,126 158,126"/></circle>
+
+  <!-- road -->
+  <line class="dg-line" x1="8" y1="178" x2="432" y2="178"/>
+  <line class="dg-roll" x1="8" y1="190" x2="432" y2="190"/>
+  <!-- rig on the move -->
+  <rect class="dg-acc-soft" x="250" y="134" width="110" height="32" rx="5"/>
+  <line class="dg-line-soft" x1="280" y1="138" x2="280" y2="162"/>
+  <line class="dg-line-soft" x1="330" y1="138" x2="330" y2="162"/>
+  <rect class="dg-surface" x="364" y="140" width="36" height="26" rx="6"/>
+  <path class="dg-surface-2" d="M384,144 h10 l5,10 h-15 z"/>
+  <rect class="dg-surface" x="396" y="150" width="18" height="16" rx="5"/>
+  <rect class="dg-ink" x="369" y="128" width="4" height="13" rx="2"/>
+  <g>
+    <circle class="dg-surface" cx="272" cy="171" r="7"/><circle class="dg-ink" cx="272" cy="171" r="2.8"/>
+    <circle class="dg-surface" cx="290" cy="171" r="7"/><circle class="dg-ink" cx="290" cy="171" r="2.8"/>
+    <circle class="dg-surface" cx="340" cy="171" r="7"/><circle class="dg-ink" cx="340" cy="171" r="2.8"/>
+    <circle class="dg-surface" cx="378" cy="171" r="7"/><circle class="dg-ink" cx="378" cy="171" r="2.8"/>
+    <circle class="dg-surface" cx="404" cy="171" r="7"/><circle class="dg-ink" cx="404" cy="171" r="2.8"/>
+  </g>
+</svg>

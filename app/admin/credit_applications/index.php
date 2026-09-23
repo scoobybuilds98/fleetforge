@@ -31,16 +31,22 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<div class="page-header">
-    <h1 class="page-header-title h4">Credit Applications</h1>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <a href="<?= base_url('settings?tab=credit_application') ?>"
            class="btn btn-ghost btn-sm">⚙ Settings</a>
         <?= help_button('credit-applications') ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Credit Applications', null]],
+    'eyebrow'  => 'Customers',
+    'icon'     => 'clipboard-document-check',
+    'accent'   => 'info',
+    'title'    => 'Credit Applications',
+    'subtitle' => 'Send a customer a credit application to fill in and sign online, then review it and approve, decline or ask for more.',
+    'art'      => 'credit-applications',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      CREDIT APPLICATIONS ALPINE COMPONENT
@@ -48,7 +54,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="FF_CreditApps()">
 
     <!-- ── KPI TILES ─────────────────────────────────────────── -->
-    <div class="stat-grid">
+    <div class="stat-grid stat-grid--4 ff-stats">
 
         <div class="stat-card stat-card--amber" style="cursor:pointer;"
              :class="{ 'ring-active': filters.status === 'submitted' }"

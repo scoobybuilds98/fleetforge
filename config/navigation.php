@@ -14,6 +14,8 @@ declare(strict_types=1);
 //              sidebar.php prepends FF_BASE_PATH when building href
 //   module   — permission module slug; null = visible to all logged-in users
 //   badge    — badge key passed to sidebar_badge_count(); null = no badge
+//   accent   — optional primary|info|success|warning|danger|purple; tints the
+//              item's icon on hover/active (S-SHELL-REDESIGN). Default primary.
 //
 // Separator items:
 //   separator => true
@@ -25,35 +27,67 @@ declare(strict_types=1);
 return [
 
     // ----------------------------------------------------------
-    // Main navigation
+    // Main navigation — grouped into labelled sections (S-SHELL-REDESIGN).
+    // WHY sections: 25 flat items were hard to scan; each group matches
+    // how the office thinks about the work. 'accent' colours the item's
+    // icon on hover/active with the same colour as that module's hero.
     // ----------------------------------------------------------
     [
         'label'  => 'Dashboard',
         'icon'   => 'home',
+        'accent' => 'primary',
         'url'    => '/dashboard',
         'module' => null,
         'badge'  => null,
     ],
     [
+        'separator' => true,
+        'label'     => 'Rentals',
+    ],
+    [
         'label'  => 'Customers',
         'icon'   => 'user-group',
+        'accent' => 'purple',
         'url'    => '/customers',
         'module' => 'customers',
         'badge'  => null,
     ],
     [
-        'label'  => 'Equipment',
-        'icon'   => 'truck',
-        'url'    => '/equipment',
-        'module' => 'equipment',
-        'badge'  => null,
-    ],
-    [
         'label'  => 'Leases',
         'icon'   => 'document-text',
+        'accent' => 'warning',
         'url'    => '/leases',
         'module' => 'leases',
         'badge'  => null,
+    ],
+    [
+        'label'  => 'Reservations',
+        'icon'   => 'calendar',
+        'accent' => 'info',
+        'url'    => '/reservations',
+        'module' => 'reservations',
+        'badge'  => null,
+    ],
+    [
+        'label'        => 'Credit Applications',
+        'icon'         => 'clipboard-document-check',
+        'accent'       => 'info',
+        'url'          => '/credit_applications',
+        'match_prefix' => '/credit_applications',
+        'module'       => 'customers', // sub-resource of customers (D-CCA-PERM)
+        'badge'        => 'pending_credit_apps',
+    ],
+    [
+        'label'  => 'Service Requests',
+        'icon'   => 'envelope-open',
+        'accent' => 'primary',
+        'url'    => '/requests',
+        'module' => 'customers',
+        'badge'  => null,
+    ],
+    [
+        'separator' => true,
+        'label'     => 'Billing',
     ],
     [
         // Invoices is a collapsible GROUP (S-BATCH-INVOICING): the parent
@@ -70,6 +104,7 @@ return [
         // Batch Invoicing highlighted — a run belongs to that section.
         'label'        => 'Invoices',
         'icon'         => 'banknotes',
+        'accent'       => 'primary',
         'url'          => '/invoices',
         'match_prefix' => '/invoices',
         'module'       => 'invoices',
@@ -101,51 +136,65 @@ return [
         ],
     ],
     [
-        'label'  => 'Rates',
-        'icon'   => 'currency-dollar',
-        'url'    => '/rates',
-        'module' => 'rates',
-        'badge'  => null,
-    ],
-    [
-        'label'        => 'Credit Applications',
-        'icon'         => 'clipboard-document-check',
-        'url'          => '/credit_applications',
-        'match_prefix' => '/credit_applications',
-        'module'       => 'customers', // sub-resource of customers (D-CCA-PERM)
-        'badge'        => 'pending_credit_apps',
-    ],
-    [
-        'label'  => 'Samsara Tracking',
-        'icon'   => 'map',
-        'url'    => '/tracking',
-        'module' => 'equipment',  // WHY: same permission as equipment — anyone who can view equipment can track
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Reservations',
-        'icon'   => 'calendar',
-        'url'    => '/reservations',
-        'module' => 'reservations',
-        'badge'  => null,
-    ],
-    [
-        'label'  => 'Yards',
-        'icon'   => 'map-pin',
-        'url'    => '/yards',
-        'module' => 'reservations',
-        'badge'  => null,
-    ],
-    [
         'label'  => 'Payments',
         'icon'   => 'credit-card',
+        'accent' => 'success',
         'url'    => '/payments',
         'module' => 'payments',
         'badge'  => null,
     ],
     [
+        'label'  => 'Rates',
+        'icon'   => 'currency-dollar',
+        'accent' => 'primary',
+        'url'    => '/rates',
+        'module' => 'rates',
+        'badge'  => null,
+    ],
+    [
+        'separator' => true,
+        'label'     => 'Fleet',
+    ],
+    [
+        'label'  => 'Equipment',
+        'icon'   => 'truck',
+        'accent' => 'success',
+        'url'    => '/equipment',
+        'module' => 'equipment',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Samsara Tracking',
+        'icon'   => 'map',
+        'accent' => 'info',
+        'url'    => '/tracking',
+        'module' => 'equipment',  // WHY: same permission as equipment — anyone who can view equipment can track
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Yards',
+        'icon'   => 'map-pin',
+        'accent' => 'success',
+        'url'    => '/yards',
+        'module' => 'reservations',
+        'badge'  => null,
+    ],
+    [
+        'label'  => 'Compliance',
+        'icon'   => 'shield-check',
+        'accent' => 'warning',
+        'url'    => '/compliance',
+        'module' => 'compliance',
+        'badge'  => 'compliance_alerts',
+    ],
+    [
+        'separator' => true,
+        'label'     => 'Fleet care',
+    ],
+    [
         'label'  => 'Maintenance',
         'icon'   => 'wrench-screwdriver',
+        'accent' => 'warning',
         'url'    => '/maintenance_work_orders',
         'module' => 'maintenance',
         'badge'  => null,
@@ -153,20 +202,15 @@ return [
     [
         'label'  => 'Inspections',
         'icon'   => 'clipboard-document-check',
+        'accent' => 'info',
         'url'    => '/inspections',
         'module' => 'inspections',
         'badge'  => null,
     ],
     [
-        'label'  => 'Service Requests',
-        'icon'   => 'envelope-open',
-        'url'    => '/requests',
-        'module' => 'customers',
-        'badge'  => null,
-    ],
-    [
         'label'  => 'Damage Claims',
         'icon'   => 'exclamation-triangle',
+        'accent' => 'danger',
         'url'    => '/damage_claims',
         'module' => 'maintenance',    // same permission group as maintenance (§12 matrix)
         'badge'  => 'open_damage_claims',
@@ -174,6 +218,7 @@ return [
     [
         'label'  => 'Mileage Logs',
         'icon'   => 'chart-bar-square',
+        'accent' => 'info',
         'url'    => '/mileage_logs',
         'module' => 'maintenance',    // same permission group as maintenance (§12 matrix)
         'badge'  => null,
@@ -181,27 +226,19 @@ return [
     [
         'label'  => 'Vendors',
         'icon'   => 'building-storefront',
+        'accent' => 'warning',
         'url'    => '/vendors',
         'module' => 'maintenance',    // same permission group as maintenance (§12 matrix)
         'badge'  => null,
     ],
     [
-        'label'  => 'Compliance',
-        'icon'   => 'shield-check',
-        'url'    => '/compliance',
-        'module' => 'compliance',
-        'badge'  => 'compliance_alerts',
-    ],
-    [
-        'label'  => 'Documents',
-        'icon'   => 'folder-open',
-        'url'    => '/documents',
-        'module' => null,            // visible to all logged-in users
-        'badge'  => null,
+        'separator' => true,
+        'label'     => 'Insights',
     ],
     [
         'label'  => 'Reports',
         'icon'   => 'chart-bar',
+        'accent' => 'purple',
         'url'    => '/reports',
         'module' => 'reports',
         'badge'  => null,
@@ -209,6 +246,7 @@ return [
     [
         'label'  => 'Analytics',
         'icon'   => 'chart-pie',
+        'accent' => 'info',
         'url'    => '/analytics',
         'module' => 'analytics',
         'badge'  => null,
@@ -216,13 +254,27 @@ return [
     [
         'label'  => 'AI Assistant',
         'icon'   => 'sparkles',
+        'accent' => 'purple',
         'url'    => '/ai',
         'module' => 'ai',
         'badge'  => null,
     ],
     [
+        'label'  => 'Documents',
+        'icon'   => 'folder-open',
+        'accent' => 'primary',
+        'url'    => '/documents',
+        'module' => null,            // visible to all logged-in users
+        'badge'  => null,
+    ],
+    [
+        'separator' => true,
+        'label'     => 'Learn',
+    ],
+    [
         'label'  => 'SOP',
         'icon'   => 'clipboard-document-check',
+        'accent' => 'primary',
         'url'    => '/sop',
         'module' => null,   // S-SOP-MODULE: every staff user; the live month-end checklist is gated in-page (can view payments)
         'badge'  => null,
@@ -230,6 +282,7 @@ return [
     [
         'label'  => 'Training',
         'icon'   => 'academic-cap',
+        'accent' => 'success',
         'url'    => '/training',
         'module' => null,   // S-TRAINING-MODULE: every staff user; team report gated in-page to super_admin
         'badge'  => null,
@@ -237,6 +290,7 @@ return [
     [
         'label'  => 'Help Center',
         'icon'   => 'book-open',
+        'accent' => 'info',
         'url'    => '/help',
         'module' => null,   // visible to all authenticated users
         'badge'  => null,
@@ -272,6 +326,7 @@ return [
     [
         'label'        => 'QuickBooks',
         'icon'         => 'quickbooks',
+        'accent'       => 'success',
         'url'          => '/quickbooks/dashboard',
         'match_prefix' => '/quickbooks',
         'module'       => 'quickbooks',
@@ -438,6 +493,7 @@ return [
     [
         'label'        => 'Accounting',
         'icon'         => 'calculator',
+        'accent'       => 'primary',
         'url'          => '/accounting/dashboard',
         'match_prefix' => '/accounting',   // highlighted on ANY /accounting/* page
         'module'       => 'journal_entries',
@@ -606,6 +662,7 @@ return [
     [
         'label'  => 'Users',
         'icon'   => 'users',
+        'accent' => 'purple',
         'url'    => '/users',
         'module' => 'users',
         'badge'  => null,
@@ -613,6 +670,7 @@ return [
     [
         'label'  => 'Audit Log',
         'icon'   => 'clipboard-document-list',
+        'accent' => 'info',
         'url'    => '/audit',
         'module' => 'audit',
         'badge'  => null,
@@ -620,6 +678,7 @@ return [
     [
         'label'  => 'Settings',
         'icon'   => 'cog-6-tooth',
+        'accent' => 'primary',
         'url'    => '/settings',
         'module' => 'settings',
         'badge'  => null,

@@ -41,9 +41,16 @@ declare(strict_types=1);
  * from the cache it warmed — proves the redaction is serve-time, not a
  * side-effect of a per-role rebuild.
  *
+ * S-DASHBOARD-VIZ: three more money charts (cash_flow, receivables,
+ * overdue_customers) and two operational ones (fleet_mix, lease_flow). The
+ * lists below mirror charts.php again (9 money / 8 operational / 17 total),
+ * and the single-chart 403/200 probes cover the three new money charts too.
+ * Their datasets are not ApexCharts-shaped, so the 200 probe checks each
+ * chart's own top-level field instead of `series`.
+ *
  * Run:  php tests/_smoke_dashboard_authz_redaction.php   Exit 0/1 (2 setup).
  *
- * @session WAVE-5-DASHBOARD-AUTHZ, S-DASH-CHART-REDACT
+ * @session WAVE-5-DASHBOARD-AUTHZ, S-DASH-CHART-REDACT, S-DASHBOARD-VIZ
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -197,10 +204,18 @@ try {
 
     // ── CHARTS, every money chart, real logins (S-DASH-CHART-REDACT) ────────
     // Mirrors charts.php's $moneyCharts; the operational list is the rest of
-    // its $allowedCharts. top_customers / weekly_heatmap are the two added.
-    $moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast', 'top_customers', 'weekly_heatmap'];
-    $opsCharts   = ['fleet_status', 'leases_trend', 'utilization_trend', 'lease_expiry_calendar', 'occupancy_by_type', 'payment_speed'];
-    $newCharts   = ['top_customers', 'weekly_heatmap'];
+    // its $allowedCharts. top_customers / weekly_heatmap were added by
+    // S-DASH-CHART-REDACT; cash_flow / receivables / overdue_customers (money)
+    // and fleet_mix / lease_flow (operational) by S-DASHBOARD-VIZ.
+    $moneyCharts = ['revenue_trend', 'ar_aging', 'revenue_by_type', 'revenue_forecast', 'top_customers', 'weekly_heatmap',
+                    'cash_flow', 'receivables', 'overdue_customers'];
+    $opsCharts   = ['fleet_status', 'leases_trend', 'utilization_trend', 'lease_expiry_calendar', 'occupancy_by_type', 'payment_speed',
+                    'fleet_mix', 'lease_flow'];
+    // Single-chart probes: chart key => the top-level field a served dataset must carry.
+    $newCharts   = ['top_customers' => 'series', 'weekly_heatmap' => 'series',
+                    'cash_flow' => 'billed', 'receivables' => 'buckets', 'overdue_customers' => 'rows'];
+    $nMoney = count($moneyCharts);
+    $nOps   = count($opsCharts);
 
     // Prefer the dedicated test fixture per role (test-dispatcher, not the
     // override-grant dispatcher); the FIN precondition catches a mis-pick.
@@ -236,13 +251,13 @@ try {
             $leaked  = array_values(array_intersect($moneyCharts, $keys));
             $lostOps = array_values(array_diff($opsCharts, $keys));
             if (($all['resp']['success'] ?? false) === true && !$leaked && !$lostOps) {
-                $pass("charts[{$slug}] combined — all 6 money charts omitted (incl. top_customers, weekly_heatmap), 6 operational charts served");
+                $pass("charts[{$slug}] combined — all {$nMoney} money charts omitted (incl. top_customers, weekly_heatmap, cash_flow, receivables, overdue_customers), {$nOps} operational charts served");
             } else {
                 $fail("charts[{$slug}] combined — leaked=[" . implode(',', $leaked) . "] missing_ops=[" . implode(',', $lostOps) . "]"
                     . " success=" . var_export($all['resp']['success'] ?? null, true));
             }
             // Single-chart request: 403 FORBIDDEN, no dataset in the body.
-            foreach ($newCharts as $ck) {
+            foreach (array_keys($newCharts) as $ck) {
                 $one  = $getAs('api/v1/dashboard/charts.php', 'chart=' . $ck, $uid)['resp'];
                 $code = $one['error']['code'] ?? null;
                 if (($one['success'] ?? null) === false && $code === 'FORBIDDEN' && !isset($one['data'])) {
@@ -256,15 +271,16 @@ try {
             $missing = array_values(array_diff(array_merge($moneyCharts, $opsCharts), $keys));
             if (($all['resp']['success'] ?? false) === true && !$missing) {
                 $d = $all['resp']['data'];
-                $pass("charts[{$slug}] combined — all 12 charts served (top_customers " . count($d['top_customers']['labels'] ?? [])
-                    . " customers, weekly_heatmap " . count($d['weekly_heatmap']['series'] ?? []) . " weeks)");
+                $pass("charts[{$slug}] combined — all " . ($nMoney + $nOps) . " charts served (top_customers " . count($d['top_customers']['labels'] ?? [])
+                    . " customers, weekly_heatmap " . count($d['weekly_heatmap']['series'] ?? []) . " weeks, receivables "
+                    . count($d['receivables']['buckets'] ?? []) . " buckets)");
             } else {
                 $fail("charts[{$slug}] combined — missing=[" . implode(',', $missing) . "] success="
                     . var_export($all['resp']['success'] ?? null, true));
             }
-            foreach ($newCharts as $ck) {
+            foreach ($newCharts as $ck => $field) {
                 $one = $getAs('api/v1/dashboard/charts.php', 'chart=' . $ck, $uid)['resp'];
-                if (($one['success'] ?? null) === true && is_array($one['data']['series'] ?? null)) {
+                if (($one['success'] ?? null) === true && is_array($one['data'][$field] ?? null)) {
                     $pass("charts[{$slug}] ?chart={$ck} — 200 with dataset");
                 } else {
                     $fail("charts[{$slug}] ?chart={$ck} — expected 200 dataset, got success=" . var_export($one['success'] ?? null, true)

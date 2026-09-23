@@ -1,0 +1,61 @@
+<svg class="dg dg--art-tracking" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Live fleet map</title>
+  <!-- the map: city blocks, roads are the gaps between them -->
+  <rect class="dg-surface" x="14" y="14" width="282" height="172" rx="14"/>
+  <rect class="dg-surface-2" x="30" y="30" width="70" height="44" rx="6"/>
+  <rect class="dg-surface-2" x="114" y="30" width="84" height="44" rx="6"/>
+  <rect class="dg-surface-2" x="212" y="30" width="68" height="44" rx="6"/>
+  <rect class="dg-surface-2" x="30" y="88" width="70" height="82" rx="6"/>
+  <rect class="dg-surface-2" x="114" y="88" width="84" height="36" rx="6"/>
+  <rect class="dg-surface-2" x="114" y="138" width="84" height="32" rx="6"/>
+  <rect class="dg-surface-2" x="212" y="88" width="68" height="82" rx="6"/>
+
+  <!-- parked units, coloured by status -->
+  <circle class="dg-surface" cx="65" cy="52" r="8"/><circle class="dg-dot--ok" cx="65" cy="52" r="4"/>
+  <circle class="dg-surface" cx="156" cy="52" r="8"/><circle class="dg-dot--info" cx="156" cy="52" r="4"/>
+  <circle class="dg-surface" cx="65" cy="128" r="8"/><circle class="dg-dot--warn" cx="65" cy="128" r="4"/>
+  <circle class="dg-surface" cx="156" cy="154" r="8"/><circle class="dg-dot--ok" cx="156" cy="154" r="4"/>
+
+  <!-- units on the move -->
+  <path class="dg-acc-flow" d="M22,81 H107 V131 H205 V178"/>
+  <circle class="dg-packet--acc" r="5"><animateMotion dur="4.2s" repeatCount="indefinite" path="M22,81 H107 V131 H205 V178"/></circle>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="3s" begin="-1.4s" repeatCount="indefinite" path="M205,22 V81 H288"/></circle>
+
+  <!-- the selected unit -->
+  <circle class="dg-pulse" cx="246" cy="128" r="9"/>
+  <circle class="dg-pulse dg-pulse--2" cx="246" cy="128" r="9"/>
+  <g class="dg-float">
+    <path class="dg-acc" d="M246,128 c-9,-11 -13,-17 -13,-24 a13,13 0 1,1 26,0 c0,7 -4,13 -13,24 z"/>
+    <circle class="dg-surface" cx="246" cy="104" r="4.5"/>
+  </g>
+
+  <!-- satellite -->
+  <g class="dg-float dg-float--2">
+    <rect class="dg-acc-soft" x="326" y="30" width="28" height="16" rx="2"/>
+    <line class="dg-line-soft" x1="335" y1="30" x2="335" y2="46"/>
+    <line class="dg-line-soft" x1="344" y1="30" x2="344" y2="46"/>
+    <line class="dg-line" x1="354" y1="38" x2="360" y2="38"/>
+    <rect class="dg-surface" x="360" y="27" width="22" height="22" rx="5"/>
+    <circle class="dg-acc" cx="371" cy="38" r="4"/>
+    <line class="dg-line" x1="382" y1="38" x2="388" y2="38"/>
+    <rect class="dg-acc-soft" x="388" y="30" width="28" height="16" rx="2"/>
+    <line class="dg-line-soft" x1="397" y1="30" x2="397" y2="46"/>
+    <line class="dg-line-soft" x1="406" y1="30" x2="406" y2="46"/>
+  </g>
+  <text class="dg-t-xs" x="371" y="17">SAMSARA GPS</text>
+  <path class="dg-acc-flow" d="M358,54 C330,68 292,78 262,96"/>
+  <circle class="dg-packet--acc" r="3.5"><animateMotion dur="2.2s" repeatCount="indefinite" path="M358,54 C330,68 292,78 262,96"/></circle>
+
+  <!-- live telemetry for the selected unit -->
+  <rect class="dg-surface" x="306" y="86" width="126" height="100" rx="10"/>
+  <circle class="dg-dot--ok" cx="320" cy="103" r="4"/>
+  <text class="dg-t-chip dg-t-start" x="330" y="107">Unit TR-104</text>
+  <line class="dg-line-soft" x1="316" y1="116" x2="422" y2="116"/>
+  <text class="dg-t-xs dg-t-start" x="316" y="134">SPEED</text>
+  <text class="dg-acc-t" x="400" y="134">62 km/h</text>
+  <text class="dg-t-xs dg-t-start" x="316" y="152">BATTERY</text>
+  <text class="dg-acc-t" x="410" y="152">84%</text>
+  <rect class="dg-surface-2" x="316" y="160" width="106" height="7" rx="3.5"/>
+  <rect class="dg-acc dg-grow" x="316" y="160" width="88" height="7" rx="3.5"/>
+  <text class="dg-t-xs" x="369" y="180">UPDATED 2 MIN AGO</text>
+</svg>

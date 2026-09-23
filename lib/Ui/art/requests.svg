@@ -1,0 +1,39 @@
+<svg class="dg dg--art-requests" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A customer message becomes a ticket</title>
+  <!-- the customer's message from the portal -->
+  <g class="dg-float">
+    <path class="dg-surface" d="M30,24 h132 a14,14 0 0 1 14,14 v42 a14,14 0 0 1 -14,14 h-94 l-18,20 l2,-20 h-22 a14,14 0 0 1 -14,-14 v-42 a14,14 0 0 1 14,-14 z"/>
+    <text class="dg-t-xs dg-t-start" x="30" y="44">LEASE EXTENSION</text>
+    <text class="dg-t-sm dg-t-start" x="30" y="64">Can we keep unit 118</text>
+    <text class="dg-t-sm dg-t-start" x="30" y="81">two more weeks?</text>
+  </g>
+  <circle class="dg-surface" cx="44" cy="144" r="20"/>
+  <text class="dg-t" x="44" y="148" style="font-size:11.5px">JR</text>
+  <circle class="dg-pulse" cx="60" cy="128" r="5"/>
+  <circle class="dg-acc" cx="60" cy="128" r="4.5"/>
+  <text class="dg-t-xs" x="44" y="186">PORTAL</text>
+
+  <!-- message → ticket -->
+  <path class="dg-acc-flow" d="M180,60 C206,60 222,56 248,56"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2s" repeatCount="indefinite" path="M180,60 C206,60 222,56 248,56"/></circle>
+
+  <!-- the ticket -->
+  <rect class="dg-surface" x="252" y="20" width="174" height="140" rx="12"/>
+  <path class="dg-acc-faint" d="M264,20 h150 a12,12 0 0 1 12,12 v16 h-174 v-16 a12,12 0 0 1 12,-12 z"/>
+  <text class="dg-acc-t dg-t-start" x="266" y="38">REQ #58</text>
+  <rect class="dg-info-soft" x="346" y="27" width="70" height="16" rx="8"/>
+  <text class="dg-t-xs" x="381" y="38.5">IN REVIEW</text>
+  <text class="dg-t dg-t-start" x="266" y="70">Lease extension</text>
+  <text class="dg-t-sm dg-t-start" x="266" y="88">Assigned to dispatch</text>
+  <line class="dg-line-soft" x1="266" y1="100" x2="412" y2="100"/>
+  <!-- thread: their message, your reply -->
+  <rect class="dg-surface-2" x="266" y="110" width="92" height="16" rx="8"/>
+  <rect class="dg-ink" x="276" y="116" width="62" height="4" rx="2" opacity=".5"/>
+  <rect class="dg-acc-soft" x="318" y="132" width="96" height="18" rx="9"/>
+  <text class="dg-acc-t" x="366" y="145" style="font-size:9.5px">Reply sent</text>
+
+  <!-- the customer hears back -->
+  <path class="dg-flow dg-flow--qbo dg-flow--back" d="M68,152 C130,170 200,168 250,140"/>
+  <circle class="dg-packet dg-packet--qbo" r="3.5"><animateMotion dur="2.6s" begin="-1.2s" repeatCount="indefinite" path="M250,140 C200,168 130,170 68,152"/></circle>
+  <text class="dg-t-xs dg-t-xs--qbo" x="160" y="184">CUSTOMER NOTIFIED</text>
+</svg>

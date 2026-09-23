@@ -1,0 +1,53 @@
+<svg class="dg dg--art-yards" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A yard from above</title>
+  <!-- the lot, fenced, with a gate on the right -->
+  <rect class="dg-acc-faint" x="16" y="16" width="280" height="168" rx="12"/>
+  <path class="dg-line" d="M296,86 V28 a12,12 0 0 0 -12,-12 H28 a12,12 0 0 0 -12,12 V172 a12,12 0 0 0 12,12 H284 a12,12 0 0 0 12,-12 V114"/>
+  <line class="dg-edge dg-edge--muted" x1="30" y1="100" x2="282" y2="100"/>
+
+  <!-- stalls -->
+  <g>
+    <line class="dg-line-soft" x1="40" y1="26" x2="40" y2="80"/><line class="dg-line-soft" x1="76" y1="26" x2="76" y2="80"/>
+    <line class="dg-line-soft" x1="112" y1="26" x2="112" y2="80"/><line class="dg-line-soft" x1="148" y1="26" x2="148" y2="80"/>
+    <line class="dg-line-soft" x1="184" y1="26" x2="184" y2="80"/><line class="dg-line-soft" x1="220" y1="26" x2="220" y2="80"/>
+    <line class="dg-line-soft" x1="256" y1="26" x2="256" y2="80"/>
+    <line class="dg-line-soft" x1="40" y1="120" x2="40" y2="174"/><line class="dg-line-soft" x1="76" y1="120" x2="76" y2="174"/>
+    <line class="dg-line-soft" x1="112" y1="120" x2="112" y2="174"/><line class="dg-line-soft" x1="148" y1="120" x2="148" y2="174"/>
+    <line class="dg-line-soft" x1="184" y1="120" x2="184" y2="174"/><line class="dg-line-soft" x1="220" y1="120" x2="220" y2="174"/>
+    <line class="dg-line-soft" x1="256" y1="120" x2="256" y2="174"/>
+  </g>
+
+  <!-- parked trailers, seen from above (8 of 12 stalls) -->
+  <g>
+    <rect class="dg-acc-soft" x="46" y="30" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="48" y1="70" x2="68" y2="70"/>
+    <rect class="dg-acc-soft" x="82" y="30" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="84" y1="70" x2="104" y2="70"/>
+    <rect class="dg-acc-soft" x="154" y="30" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="156" y1="70" x2="176" y2="70"/>
+    <rect class="dg-acc-soft" x="190" y="30" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="192" y1="70" x2="212" y2="70"/>
+    <rect class="dg-acc-soft" x="82" y="124" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="84" y1="130" x2="104" y2="130"/>
+    <rect class="dg-acc-soft" x="118" y="124" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="120" y1="130" x2="140" y2="130"/>
+    <rect class="dg-acc-soft" x="190" y="124" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="192" y1="130" x2="212" y2="130"/>
+    <rect class="dg-acc-soft" x="226" y="124" width="24" height="46" rx="3"/><line class="dg-line-soft" x1="228" y1="130" x2="248" y2="130"/>
+  </g>
+
+  <!-- gate: arm up, a unit rolling in -->
+  <path class="dg-acc-flow" d="M432,150 C384,150 340,100 300,100"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2.6s" repeatCount="indefinite" path="M432,150 C384,150 340,100 300,100"/></circle>
+  <circle class="dg-pulse" cx="296" cy="100" r="10"/>
+  <line class="dg-acc-line" x1="296" y1="84" x2="314" y2="64" style="stroke-width:3"/>
+  <circle class="dg-acc" cx="296" cy="84" r="4.5"/>
+  <circle class="dg-acc" cx="296" cy="116" r="4.5"/>
+  <text class="dg-t-xs" x="322" y="132">GATE</text>
+
+  <!-- yard card -->
+  <rect class="dg-surface" x="332" y="16" width="94" height="90" rx="10"/>
+  <path class="dg-acc" d="M350,48 c-6,-8 -9,-12 -9,-17 a9,9 0 1 1 18,0 c0,5 -3,9 -9,17 z"/>
+  <circle class="dg-surface" cx="350" cy="31" r="3.2"/>
+  <text class="dg-t dg-t-start" x="364" y="40">Yard A</text>
+  <text class="dg-t-xs dg-t-start" x="346" y="66">CAPACITY</text>
+  <rect class="dg-surface-2" x="346" y="74" width="66" height="8" rx="4"/>
+  <rect class="dg-acc dg-grow" x="346" y="74" width="44" height="8" rx="4"/>
+  <text class="dg-t-sm dg-t-start" x="346" y="98">8 of 12</text>
+
+  <rect class="dg-chip" x="344" y="160" width="82" height="22" rx="11"/>
+  <circle class="dg-dot--ok" cx="357" cy="171" r="4"/><text class="dg-t-sm dg-t-start" x="367" y="175">Active</text>
+</svg>

@@ -1,0 +1,59 @@
+<svg class="dg dg--art-damage-claims" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Damage found, priced and billed</title>
+  <!-- claim status -->
+  <rect class="dg-chip" x="16" y="14" width="92" height="22" rx="11"/>
+  <circle class="dg-dot--danger" cx="29" cy="25" r="4"/><text class="dg-t-sm dg-t-start" x="39" y="29">Reported</text>
+
+  <!-- trailer side panel, close up -->
+  <line class="dg-line" x1="8" y1="184" x2="236" y2="184"/>
+  <rect class="dg-surface" x="16" y="44" width="184" height="108" rx="8"/>
+  <line class="dg-line-soft" x1="62" y1="48" x2="62" y2="148"/>
+  <line class="dg-line-soft" x1="108" y1="48" x2="108" y2="148"/>
+  <line class="dg-line-soft" x1="154" y1="48" x2="154" y2="148"/>
+  <g>
+    <circle class="dg-ink" cx="62" cy="56" r="1.8"/><circle class="dg-ink" cx="62" cy="100" r="1.8"/><circle class="dg-ink" cx="62" cy="142" r="1.8"/>
+    <circle class="dg-ink" cx="108" cy="56" r="1.8"/><circle class="dg-ink" cx="108" cy="142" r="1.8"/>
+    <circle class="dg-ink" cx="154" cy="100" r="1.8"/><circle class="dg-ink" cx="154" cy="142" r="1.8"/>
+  </g>
+  <rect class="dg-surface-2" x="16" y="152" width="184" height="9" rx="2"/>
+  <circle class="dg-surface" cx="140" cy="172" r="11"/><circle class="dg-ink" cx="140" cy="172" r="4.5"/>
+  <circle class="dg-surface" cx="168" cy="172" r="11"/><circle class="dg-ink" cx="168" cy="172" r="4.5"/>
+
+  <!-- the dent, circled -->
+  <path class="dg-acc-soft" d="M78,84 l14,-9 l9,10 l15,-7 l5,15 l-7,9 l6,13 l-16,4 l-8,-8 l-14,6 l-5,-14 l8,-8 z"/>
+  <path class="dg-line" d="M92,86 l7,9 l-5,7 l9,8"/>
+  <path class="dg-line" d="M101,96 l10,-3"/>
+  <circle class="dg-pulse" cx="99" cy="97" r="14"/>
+  <circle class="dg-acc-flow" cx="99" cy="97" r="32"/>
+
+  <!-- photo of the damage -->
+  <g class="dg-float dg-float--2">
+    <g transform="rotate(6 178 40)">
+      <rect class="dg-surface" x="148" y="12" width="60" height="56" rx="5"/>
+      <rect class="dg-surface-2" x="154" y="18" width="48" height="32" rx="3"/>
+      <path class="dg-acc-soft" d="M166,40 l6,-10 l5,6 l7,-8 l4,10 l-8,6 z"/>
+      <text class="dg-t-xs" x="178" y="62">PHOTO</text>
+    </g>
+  </g>
+  <path class="dg-acc-flow" d="M210,40 C230,40 232,62 248,62"/>
+  <circle class="dg-packet--acc" r="3.5"><animateMotion dur="1.8s" repeatCount="indefinite" path="M210,40 C230,40 232,62 248,62"/></circle>
+
+  <!-- repair estimate → bill the customer -->
+  <rect class="dg-surface" x="250" y="18" width="176" height="164" rx="12"/>
+  <text class="dg-t-xs dg-t-start" x="264" y="40">DC-0231</text>
+  <rect class="dg-warn-soft" x="344" y="28" width="70" height="17" rx="8.5"/>
+  <text class="dg-t-xs" x="379" y="40">MODERATE</text>
+  <text class="dg-t dg-t-start" x="264" y="64">Side panel dent</text>
+  <text class="dg-t-sm dg-t-start" x="264" y="90">Parts</text>
+  <text class="dg-t-sm dg-t-start" x="366" y="90">$640</text>
+  <text class="dg-t-sm dg-t-start" x="264" y="110">Labour</text>
+  <text class="dg-t-sm dg-t-start" x="366" y="110">$600</text>
+  <line class="dg-line-soft" x1="264" y1="122" x2="412" y2="122"/>
+  <text class="dg-t-xs dg-t-start" x="264" y="143">ESTIMATE</text>
+  <text class="dg-acc-t dg-t-start" x="366" y="144" style="font-size:14px">$1,240</text>
+  <rect class="dg-acc" x="264" y="154" width="100" height="20" rx="10"/>
+  <text class="dg-t-on-acc" x="314" y="168">Bill customer</text>
+  <path class="dg-acc-flow" d="M368,164 L394,164"/>
+  <circle class="dg-ok-soft" cx="406" cy="164" r="9"/>
+  <path class="dg-check" d="M401,164 l3.5,3.5 l6,-7" style="stroke-width:2.5"/>
+</svg>

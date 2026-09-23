@@ -25,6 +25,10 @@
 .ff-acc--warning { --acc: var(--color-warning); }
 .ff-acc--danger  { --acc: var(--color-danger); }
 .ff-acc--purple  { --acc: #8b5cf6; }   /* same value as .badge-purple / .stat-card--purple */
+/* Default accent at ZERO specificity. WHY :where(): a plain `.ff-hero { --acc }`
+   later in this file tied with `.ff-acc--*` on specificity and, coming later,
+   won — every hero rendered in the primary colour whatever accent it asked for. */
+:where(.ff-hero) { --acc: var(--color-primary); }
 
 /* ============================================================
    DIAGRAMS (lib/Sop/diagrams/*.svg)
@@ -46,9 +50,10 @@
 .dg-t-lg { fill: var(--text-primary); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
 .dg-t-chip { fill: var(--text-primary); font-size: 12.5px; font-weight: 550; }
 .dg-t-sm { fill: var(--text-secondary); font-size: 11.5px; }
-.dg-t-warn { fill: var(--color-warning-text); font-weight: 600; }
 .dg-t-xs { fill: var(--text-tertiary); font-size: 9.5px; font-weight: 600; letter-spacing: .08em; }
 .dg-t-xs--qbo, .dg-t-lane--qbo { fill: var(--color-success-text); }
+/* After .dg-t-xs so an amber label (`dg-t-xs dg-t-warn`) actually turns amber. */
+.dg-t-warn { fill: var(--color-warning-text); font-weight: 600; }
 .dg-t-lane { fill: var(--color-primary); font-size: 11px; font-weight: 600; }
 .dg-num { fill: color-mix(in srgb, var(--color-primary) 16%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-primary) 50%, transparent); }
 .dg-num-t { fill: var(--color-primary); font-size: 12px; font-weight: 700; }
@@ -120,7 +125,6 @@
    MODULE HERO — .ff-hero (lib/Ui/ModuleHero.php)
    ============================================================ */
 .ff-hero {
-    --acc: var(--color-primary);
     position: relative; overflow: hidden;
     display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
     gap: 24px; align-items: center;

@@ -50,45 +50,53 @@ $helpModuleSlug = 'mileage-logs';
 require_once dirname(__DIR__, 3) . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <div>
-        <h1 class="page-header-title">Mileage Logs</h1>
-        <p style="color:var(--text-secondary);margin:0;">Odometer history across all equipment units</p>
-    </div>
-    <div class="page-header-actions">
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ── -->
+<?php ob_start(); ?>
         <?= help_button('mileage-logs') ?>
         <?php if (can('maintenance', 'create')): ?>
         <a href="<?= base_url('mileage_logs/create') ?>" class="btn btn-primary">
             + Record Mileage
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Mileage Logs', null]],
+    'eyebrow'  => 'Fleet care',
+    'icon'     => 'chart-bar-square',
+    'accent'   => 'info',
+    'title'    => 'Mileage Logs',
+    'subtitle' => 'Odometer history for every unit — readings typed in by hand, pulled from GPS each day, or taken at the start and end of a lease.',
+    'art'      => 'mileage',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- TILES-1: KPI tiles now dispatch `ff-mileage-filter` events that the
      FF_MileageLogs Alpine component below listens for. Each click toggles
      the matching log_type filter and reloads page 1. The "Last GPS Sync"
      tile is display-only (no log_type to filter by). -->
-<div class="stat-grid" style="margin-bottom:1.5rem;">
-    <div class="stat-card"
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:1.5rem;">
+    <div class="stat-card stat-card--blue"
          style="cursor:pointer"
          onclick="window.dispatchEvent(new CustomEvent('ff-mileage-filter', { detail: { log_type: '' } }))">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-chart-bar"/></svg></span>
         <div class="stat-value"><?= number_format($totalLogs) ?></div>
         <div class="stat-label">Total Entries</div>
     </div>
-    <div class="stat-card"
+    <div class="stat-card stat-card--slate"
          style="cursor:pointer"
          onclick="window.dispatchEvent(new CustomEvent('ff-mileage-filter', { detail: { log_type: 'manual' } }))">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-pencil-square"/></svg></span>
         <div class="stat-value"><?= number_format($manualCount) ?></div>
         <div class="stat-label">Manual Entries</div>
     </div>
-    <div class="stat-card"
+    <div class="stat-card stat-card--teal"
          style="cursor:pointer"
          onclick="window.dispatchEvent(new CustomEvent('ff-mileage-filter', { detail: { log_type: 'gps_sync' } }))">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-map-pin"/></svg></span>
         <div class="stat-value"><?= number_format($gpsSyncCount) ?></div>
         <div class="stat-label">GPS Sync Entries</div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-value" style="font-size:1.1rem;"><?= e($lastGpsSyncDate) ?></div>
         <div class="stat-label">Last GPS Sync</div>
     </div>

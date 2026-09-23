@@ -43,21 +43,28 @@ $helpModuleSlug = 'inspections';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <h1 class="page-header-title">Inspections</h1>
+<!-- ── Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php) ── -->
+<?php ob_start(); ?>
     <?php if (can('inspections', 'create')): ?>
     <a href="<?= base_url('inspections/create') ?>" class="btn btn-primary btn-sm">
         + New Inspection
     </a>
     <?php endif; ?>
-    <div class="page-header-actions">
-        <?= help_button('inspections') ?>
-    </div>
-</div>
+    <?= help_button('inspections') ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Inspections', null]],
+    'eyebrow'  => 'Fleet care',
+    'icon'     => 'clipboard-document-check',
+    'accent'   => 'info',
+    'title'    => 'Inspections',
+    'subtitle' => 'Check a unit\'s condition before and after every rental — work the checklist, add photos, sign it off.',
+    'art'      => 'inspections',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
 <div x-data="inspectionsKpis()" x-init="loadKpis()">
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid stat-grid--4 ff-stats" style="margin-bottom:24px;">
 
     <div class="stat-card stat-card--blue" style="cursor:pointer"
          @click="activeTile = activeTile === 'total' ? '' : 'total'; drill('status', '')"
