@@ -1421,6 +1421,7 @@ CREATE TABLE `acc_qbo_customer_map` (
   `pushed_at` datetime DEFAULT NULL COMMENT 'Most recent successful push timestamp',
   `match_confidence` enum('exact','high','medium','low','manual') COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'How the link was determined (exact=normalized name, high=Levenshtein≤3, medium=email, low=phone, manual=operator override)',
   `match_notes` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `ff_created_in_qbo` tinyint(1) NOT NULL DEFAULT '0' COMMENT 'S-QBO-CUSTOMER-TERMS-ADDR: 1 = FleetForge created this QuickBooks customer (FF keeps its address in sync); 0 = linked to an existing QuickBooks record (the accountant''s — FF never overwrites its address or terms)',
   `last_synced_at` datetime DEFAULT NULL COMMENT 'Most recent successful round-trip with QBO',
   `last_pull_at` datetime DEFAULT NULL,
   `last_push_at` datetime DEFAULT NULL,

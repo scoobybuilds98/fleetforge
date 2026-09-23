@@ -31,7 +31,7 @@
 - QBO live verification: **2nd real FF→QBO push on record** — Bill #148 (LIVETEST-BILL-20260527-162957 / FF#999992, $262.50 CAD) pushed to sandbox realm 9341457119548719 during S-QBO-18 live test 2026-05-27 16:29:59. 1st was Invoice #147 from S-QBO-LIVE-VERIFY-RERUN-2026-05-26.
 
 
-**Progress marker 2026-09-23 — S-QBO-GOLIVE-AUDIT:** ✅ pre-go-live audit (22 fixes + second-pass criticals) + go-live build-out for a shared company file + full rehearsal on a production copy against a **Canadian** sandbox (first non-US live verification: per-rate GST/PST invoices pushed with QBO totals identical to FF's; 129/129 pre-go-live invoices linked; QBO payments mirrored). Migration count +1 (`202609232000`). Remaining work is operator/accountant-gated — see OPERATOR_FOLLOWUPS F80/F81/F83/F84 and QUICKBOOKS_PROGRESS §10. Still not built: customer billing address / terms on push.
+**Progress marker 2026-09-23 — S-QBO-GOLIVE-AUDIT:** ✅ pre-go-live audit (22 fixes + second-pass criticals) + go-live build-out for a shared company file + full rehearsal on a production copy against a **Canadian** sandbox (first non-US live verification: per-rate GST/PST invoices pushed with QBO totals identical to FF's; 129/129 pre-go-live invoices linked; QBO payments mirrored). Migration count +1 (`202609232000`). Remaining work is operator/accountant-gated — see OPERATOR_FOLLOWUPS F80/F81/F83/F84 and QUICKBOOKS_PROGRESS §10. ~~Still not built: customer billing address / terms on push.~~ Built by S-QBO-CUSTOMER-TERMS-ADDR (below).
 
 **Progress marker 2026-09-23 — S-QBO-BILLPAY-MIRROR:** ✅ QBO-side bill-payment mirroring built — `BillPaymentWebhookHandler` (webhook + go-live link + catch-up), shared `ApPaymentService`, `acc_ap_payments.origin` (never pushed back). Migration count +1 (`202609232100`). Smoke `_smoke_qbo_bill_payment_mirror.php` 19/19. Operator: subscribe the Intuit webhook to BillPayment; link every QBO pay-from account to an FF bank account (F81).
 ---
@@ -628,3 +628,5 @@ QUICKBOOKS_PROGRESS.md §2 SESSION LOG ends at S-QBO-MATCHER-GREEDY-FIX (2026-05
 *End of FLEETFORGE QBO Integration — Remaining Work as of 2026-05-26.*
 
 *Next update trigger: next planning chat that re-sequences the build slate, OR after S-QBO-12 / S-QBO-13 / S-QBO-14 ship (one of the recommended next 5).*
+
+**Progress marker 2026-09-23 — S-QBO-CUSTOMER-TERMS-ADDR:** ✅ customer payment terms (`TermResolver` → `SalesTermRef`) + billing address on customers FF creates in QuickBooks; linked customers never overwritten (`acc_qbo_customer_map.ff_created_in_qbo`). Migration count +1 (`202609232200`). Smoke `_smoke_qbo_customer_terms_addr.php` 7/7.

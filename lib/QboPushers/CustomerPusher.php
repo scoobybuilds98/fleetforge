@@ -44,7 +44,17 @@ declare(strict_types=1);
  *   customers.province     → BillAddr.CountrySubDivisionCode  (Canadian context)
  *   customers.postal_code  → BillAddr.PostalCode
  *   customers.country      → BillAddr.Country  (default 'CA')
+ *   customers.billing_address (multi-line) → BillAddr.Line1..5 when set,
+ *                            and the main address above moves to ShipAddr
+ *   customers.payment_terms → SalesTermRef (TermResolver) — CREATE only
  *   customers.deleted_at non-null → SKIP (returns skipped_soft_deleted)
+ *
+ * Who owns terms + address (S-QBO-CUSTOMER-TERMS-ADDR, operator decision
+ * 2026-09-23): FF sends payment terms and the billing address when IT
+ * creates the QuickBooks customer, and keeps the address in sync on later
+ * updates of customers it created (acc_qbo_customer_map.ff_created_in_qbo).
+ * A customer LINKED to the accountant's existing record keeps the
+ * accountant's terms and address — updates send name / email / phone only.
  *
  * @session  S-QBO-6
  * @updated  S-QBO-FIXPACK-2 — always emit CurrencyRef on customer create
@@ -142,7 +152,8 @@ class CustomerPusher
         //    (added S-QBO-FIXPACK-2: needed for CurrencyRef emission
         //    per D-QBO-FIXPACK-6/-7).
         $ff = db_row(
-            "SELECT id, company_name, email, invoice_email, billing_email, phone, address, city, province, postal_code, country, currency, deleted_at, updated_at, created_at
+            "SELECT id, company_name, email, invoice_email, billing_email, phone, address, city, province, postal_code, country,
+                    billing_address, payment_terms, currency, deleted_at, updated_at, created_at
                FROM customers
               WHERE id = ?",
             [$ffCustomerId]
@@ -167,7 +178,7 @@ class CustomerPusher
         //    may exist from a prior pull (qbo_only), prior auto-match
         //    (mapped/manual), or a prior push (mapped/manual).
         $mapping = db_row(
-            "SELECT id, qbo_customer_id, qbo_sync_token, mapping_status, match_confidence
+            "SELECT id, qbo_customer_id, qbo_sync_token, mapping_status, match_confidence, ff_created_in_qbo
                FROM acc_qbo_customer_map
               WHERE ff_customer_id = ?",
             [$ffCustomerId]
@@ -255,6 +266,20 @@ class CustomerPusher
             // be unique across every customer/vendor/employee (a rename can
             // collide, error 6240). CompanyName still follows FF.
             unset($qboPayload['DisplayName']);
+            // S-QBO-CUSTOMER-TERMS-ADDR: the address of a customer linked to
+            // the accountant's record is the accountant's — only a customer
+            // FF itself created in QuickBooks gets FF's address edits.
+            if (empty($mapping['ff_created_in_qbo'])) {
+                unset($qboPayload['BillAddr'], $qboPayload['ShipAddr']);
+            }
+        } else {
+            // S-QBO-CUSTOMER-TERMS-ADDR: a customer FF creates starts with its
+            // FF payment terms (a QuickBooks Term matched by name, else by
+            // days). No confident match → QuickBooks' default terms.
+            $termId = TermResolver::qboTermId($ff['payment_terms'] ?? null);
+            if ($termId !== null) {
+                $qboPayload['SalesTermRef'] = ['value' => $termId];
+            }
         }
 
         // 7. HTTP call via QuickBooksClient. The client handles auth,
@@ -319,7 +344,7 @@ class CustomerPusher
         // push_status='pushed', push_error=null, pushed_at=NOW so the
         // operator-facing admin view + Push State queries surface the
         // success state. Mirrors InvoicePusher::recordSuccessfulPush().
-        self::recordSuccessfulPush($ffCustomerId, $ff, $qboCustomer, $mapping);
+        self::recordSuccessfulPush($ffCustomerId, $ff, $qboCustomer, $mapping, $effectiveOperation === 'create');
 
         return [
             'success'    => true,
@@ -414,7 +439,31 @@ class CustomerPusher
         ], static fn($v) => $v !== null && $v !== '');
         // BillAddr is only meaningful with at least one address line
         // (Line1, City, or PostalCode). Country alone isn't enough.
-        if (!empty($addr['Line1']) || !empty($addr['City']) || !empty($addr['PostalCode'])) {
+        $hasMain = !empty($addr['Line1']) || !empty($addr['City']) || !empty($addr['PostalCode']);
+
+        // S-QBO-CUSTOMER-TERMS-ADDR (audit B7): invoices go to the BILLING
+        // address when the customer has one (free text, one line per row —
+        // the same text FF prints on its invoice PDF). QuickBooks takes up to
+        // five address lines; the main (yard / site) address becomes ShipAddr
+        // so it isn't lost.
+        $billLines = array_values(array_filter(
+            array_map('trim', preg_split('/\R/', (string) ($ff['billing_address'] ?? '')) ?: []),
+            static fn($l) => $l !== ''
+        ));
+        if ($billLines !== []) {
+            $bill = [];
+            foreach (array_slice($billLines, 0, 5) as $i => $line) {
+                $bill['Line' . ($i + 1)] = mb_substr($line, 0, 500);
+            }
+            if (count($billLines) > 5) {
+                // Keep every word: fold the overflow into the last line.
+                $bill['Line5'] = mb_substr(implode(', ', array_slice($billLines, 4)), 0, 500);
+            }
+            $payload['BillAddr'] = $bill;
+            if ($hasMain) {
+                $payload['ShipAddr'] = $addr;
+            }
+        } elseif ($hasMain) {
             $payload['BillAddr'] = $addr;
         }
 
@@ -438,7 +487,8 @@ class CustomerPusher
         int $ffCustomerId,
         array $ff,
         array $qboCustomer,
-        ?array $existingMapping
+        ?array $existingMapping,
+        bool $createdInQbo = false
     ): void {
         $now = ff_now_utc(); // S-UTC-STAMPS: QBO map stamps (last_synced_at/pushed_at/…) are UTC
         $snapshot = [
@@ -456,6 +506,11 @@ class CustomerPusher
             'last_synced_at'   => $now,
             'last_push_at'     => $now,
         ];
+        // S-QBO-CUSTOMER-TERMS-ADDR: FF created this QuickBooks customer, so
+        // it owns its address from now on. Never cleared by a later update.
+        if ($createdInQbo) {
+            $snapshot['ff_created_in_qbo'] = 1;
+        }
 
         if ($existingMapping === null) {
             // First time — INSERT with match_confidence='manual' (the

@@ -103,7 +103,8 @@ class QboFixture
 
     /**
      * Answer GET {$endpoint} with $body (decoded, e.g. ['BillPayment' => [...]])
-     * until reset() — see $cannedGets.
+     * until reset() — see $cannedGets. Key 'query:<Entity>' answers every
+     * query FROM that entity instead (e.g. 'query:Term').
      */
     public static function cannedGet(string $endpoint, array $body): void
     {
@@ -258,6 +259,11 @@ class QboFixture
         $sql = (string) ($opts['query']['query'] ?? '');
         if (preg_match('/FROM\s+([A-Za-z_]+)/i', $sql, $m)) {
             $pascal     = $m[1];
+            // cannedGet('query:Term', ['QueryResponse' => [...]]) answers
+            // every query FROM that entity (S-QBO-CUSTOMER-TERMS-ADDR).
+            if (isset(self::$cannedGets['query:' . $pascal])) {
+                return ['status' => 200, 'body' => (string) json_encode(self::$cannedGets['query:' . $pascal] + ['time' => self::nowIso()])];
+            }
             $entityType = self::snakeFromPascal($pascal);
             $items      = self::cannedCollection($entityType, $pascal);
 
