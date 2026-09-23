@@ -634,3 +634,5 @@ QUICKBOOKS_PROGRESS.md §2 SESSION LOG ends at S-QBO-MATCHER-GREEDY-FIX (2026-05
 **Progress marker 2026-09-23 — S-QBO-INVOICE-WRITEOFF:** ✅ invoice write-offs (AR bad debt + damage claims) close the invoice in QuickBooks — CreditMemo on the Bad-debt item applied by a $0 Payment (`InvoiceWriteoffPusher`); FF write-offs unified (`InvoiceWriteOff`); `damage_writeoff` JE no longer pushed. Migration count +1 (`202609232300`). Smoke `_smoke_qbo_invoice_writeoff.php` 12/12.
 
 **Progress marker 2026-09-24 — S-QBO-NAME-CLASH:** ✅ QuickBooks 6240 name clashes on customer/vendor create handled (`DisplayNameClash`: different-kind holder → " (Vendor)"/" (Customer)" suffix, same-kind → link). No migration. Smoke `_smoke_qbo_name_clash.php` 7/7.
+
+**Progress marker 2026-09-24 — S-QBO-HISTPULL-SHARED:** ✅ historical pull (S-QBO-27 machinery) refused for a shared company file — live gate + transactional pull, even in dry-run; reference pulls unaffected. No migration. `_smoke_qbo_historical_pull.php` 24/24.

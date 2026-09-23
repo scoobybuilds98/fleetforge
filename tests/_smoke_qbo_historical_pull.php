@@ -40,6 +40,12 @@ declare(strict_types=1);
  *     C21 status.php + remediation_plan.php exist + lint clean
  *     C22 manual_sync.php hosts the qboHistoricalPull section (D-QBO-27-7)
  *
+ *   Module E — shared company file (S-QBO-HISTPULL-SHARED)
+ *     C23 shared file → live gate, startRun('live') and pullTransactional
+ *         refused (even with dry-run off + sync on), before any QBO call;
+ *         not shared → the gate opens
+ *     C24 status.php reports the block; manual_sync.php shows it
+ *
  * Sentinel IDs 999990-999999; cleaned in finally. Uses real AR account
  * (code 1030) + a valid period; detection is asserted at the sentinel-invoice
  * level (search result arrays), never on global counts.
@@ -55,7 +61,7 @@ use FleetForge\QboPushers\ArDriftRemediator;
 use FleetForge\Exceptions\QuickBooksException;
 
 $pass = 0;
-$total = 22;
+$total = 24;
 $failures = [];
 
 function ff_smoke_hp_set(string $key, string $value): void
@@ -82,7 +88,7 @@ function ff_smoke_hp_cleanup(): void
     db_execute("DELETE FROM customers WHERE id BETWEEN 999990 AND 999999");
 }
 
-$snapshotKeys = ['quickbooks.historical_pull.dry_run', 'quickbooks.historical_pull.batch_size', 'quickbooks.sync_enabled', 'quickbooks.realm_id'];
+$snapshotKeys = ['quickbooks.historical_pull.dry_run', 'quickbooks.historical_pull.batch_size', 'quickbooks.sync_enabled', 'quickbooks.realm_id', 'quickbooks.shared_company_file'];
 $snapshot = [];
 foreach ($snapshotKeys as $k) { $snapshot[$k] = ff_smoke_hp_get($k); }
 $createdRunIds = [];
@@ -262,6 +268,36 @@ try {
     if (strpos($msSrc, 'qboHistoricalPull') !== false && strpos($msSrc, 'historical_pull/start.php') !== false) {
         echo "PASS C22 manual_sync.php hosts qboHistoricalPull section (D-QBO-27-7)\n"; $pass++;
     } else { echo "FAIL C22 manual_sync missing historical-pull section\n"; $failures[] = 'C22'; }
+
+    // ══ Module E — shared company file (S-QBO-HISTPULL-SHARED) ════════════
+    $c23 = [];
+    ff_smoke_hp_set('quickbooks.historical_pull.dry_run', '0');
+    ff_smoke_hp_set('quickbooks.sync_enabled', '1');
+    ff_smoke_hp_set('quickbooks.shared_company_file', '1');
+    settings_cache_flush();
+    try { HistoricalPuller::assertLiveAllowed(); $c23[] = 'live gate opened in a shared file'; }
+    catch (QuickBooksException $e) { if (!str_contains($e->getMessage(), 'shared with other businesses')) { $c23[] = 'gate: ' . $e->getMessage(); } }
+    try { $rid = HistoricalPuller::startRun('live', null); $createdRunIds[] = $rid; $c23[] = "startRun('live') allowed in a shared file"; }
+    catch (QuickBooksException $e) { /* expected */ }
+    $logBefore = (int) db_row("SELECT COALESCE(MAX(id), 0) AS m FROM acc_qbo_sync_log")['m'];
+    try { HistoricalPuller::pullTransactional($runId, 'invoice'); $c23[] = 'pullTransactional ran in a shared file'; }
+    catch (QuickBooksException $e) { if (!str_contains($e->getMessage(), 'shared with other businesses')) { $c23[] = 'pull: ' . $e->getMessage(); } }
+    if ((int) db_row("SELECT COALESCE(MAX(id), 0) AS m FROM acc_qbo_sync_log")['m'] !== $logBefore) { $c23[] = 'QuickBooks was queried before the refusal'; }
+    ff_smoke_hp_set('quickbooks.shared_company_file', '0');
+    settings_cache_flush();
+    try { HistoricalPuller::assertLiveAllowed(); }
+    catch (QuickBooksException $e) { $c23[] = 'not shared: gate still closed — ' . $e->getMessage(); }
+    ff_smoke_hp_set('quickbooks.historical_pull.dry_run', '1');
+    ff_smoke_hp_set('quickbooks.sync_enabled', '0');
+    ff_smoke_hp_set('quickbooks.shared_company_file', '1');
+    settings_cache_flush();
+    if (empty($c23)) { echo "PASS C23 shared company file → live gate, live run and transactional pull refused before any QBO call; unshared → gate opens\n"; $pass++; }
+    else { echo "FAIL C23 " . implode('; ', $c23) . "\n"; $failures[] = 'C23'; }
+
+    $statusSrc = (string) file_get_contents(__DIR__ . '/../api/v1/quickbooks/historical_pull/status.php');
+    if (strpos($statusSrc, "'shared_file_block' => HistoricalPuller::sharedFileBlockReason()") !== false && strpos($msSrc, 'sharedFileBlock') !== false) {
+        echo "PASS C24 status.php reports the shared-file block; manual_sync.php shows it\n"; $pass++;
+    } else { echo "FAIL C24 shared-file block not surfaced\n"; $failures[] = 'C24'; }
 
 } finally {
     foreach ($createdRunIds as $rid) { db_execute("DELETE FROM acc_qbo_historical_pull_runs WHERE id = ?", [$rid]); }

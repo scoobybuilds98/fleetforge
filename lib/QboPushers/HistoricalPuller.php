@@ -35,6 +35,10 @@ declare(strict_types=1);
  * @session  S-QBO-27
  * @phase    QBO-13
  * @spec     FLEETFORGE_QUICKBOOKS_SPEC.md §16
+ * S-QBO-HISTPULL-SHARED: refused outright (live gate + transactional pull)
+ * when the QuickBooks company file is shared with other businesses — go-live
+ * history is linked by InvoiceLinker, never imported.
+ *
  * @decision D-QBO-27-1 (batch 100), D-QBO-27-2 (resume via MAX(pushed_at)),
  *           D-QBO-27-3 (dry-run gate), D-QBO-27-6 (AR verify $0±$1),
  *           D-QBO-27-7 (UI shares /quickbooks/manual_sync)
@@ -110,6 +114,24 @@ class HistoricalPuller
         return $n > 0 ? $n : 100;
     }
 
+    /**
+     * Why the historical pull must not run against this QuickBooks company,
+     * or null (S-QBO-HISTPULL-SHARED). A company file shared with other
+     * businesses (quickbooks.shared_company_file, the go-live default) holds
+     * their invoices, bills and payments too: a transactional pull reads
+     * every one of them and a live run would import them into FleetForge.
+     * Pre-go-live history is LINKED instead (InvoiceLinker).
+     */
+    public static function sharedFileBlockReason(): ?string
+    {
+        if (!PartyAutoMatch::sharedFile()) {
+            return null;
+        }
+        return 'The historical pull is disabled because this QuickBooks company is shared with other businesses '
+            . '(QuickBooks → Settings → Business tagging) — it would import their history into FleetForge. '
+            . 'Link the documents QuickBooks already has on QuickBooks → Invoices ("Go-live: link documents") instead.';
+    }
+
     /** Dry-run gate (D-QBO-27-3). Default ON — refuses live writes. */
     public static function isDryRun(): bool
     {
@@ -126,6 +148,12 @@ class HistoricalPuller
      */
     public static function assertLiveAllowed(): void
     {
+        // S-QBO-HISTPULL-SHARED: never in a shared company file, whatever
+        // the dry-run setting says.
+        $shared = self::sharedFileBlockReason();
+        if ($shared !== null) {
+            throw new QuickBooksException($shared);
+        }
         if (self::isDryRun()) {
             throw new QuickBooksException("Historical pull is in DRY-RUN (quickbooks.historical_pull.dry_run='1') — live writes refused. Flip to '0' with a seeded sandbox connected (operator action).");
         }
@@ -313,6 +341,12 @@ class HistoricalPuller
     {
         if (!in_array($entityType, self::TRANSACTIONAL_TYPES, true)) {
             throw new QuickBooksException("'{$entityType}' is not a transactional pull type.");
+        }
+        // S-QBO-HISTPULL-SHARED: even a dry run would page through (and
+        // checkpoint) every other business's transactions.
+        $shared = self::sharedFileBlockReason();
+        if ($shared !== null) {
+            throw new QuickBooksException($shared);
         }
         self::setPhase($runId, 'transactional');
         $meta = self::mapMeta($entityType);

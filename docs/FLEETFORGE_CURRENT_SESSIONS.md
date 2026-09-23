@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-HISTPULL-SHARED** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-HISTPULL-SHARED-1). **The historical QuickBooks import is switched off for a company file shared with other businesses (it would pull their history into FleetForge); QuickBooks → Manual Sync says so. Go-live history is linked instead.**
+
 **S-QBO-NAME-CLASH** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-NAME-CLASH-1). **When a customer's or vendor's name is already used in QuickBooks by the other kind of record (e.g. a company that both rents from us and supplies us), FleetForge now creates it as "ACME (Vendor)" / "ACME (Customer)" instead of failing — company and cheque name stay "ACME". If QuickBooks already has the same kind of record with that name, FleetForge asks for a link instead of making a duplicate.**
 
 **S-QBO-INVOICE-WRITEOFF** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + D-QBO-INVOICE-WRITEOFF-1). **Writing off an invoice (bad debt, or a damage claim) now closes it everywhere: in FleetForge (the damage path used to leave the invoice open with its full balance) and in QuickBooks (a credit memo on the Bad Debt Write-off item applied to the invoice, instead of a journal entry that left the invoice open). Operator next: map FF's Bad Debt Expense account, then map/create the "Bad Debt Write-off" item on QuickBooks → Items.**

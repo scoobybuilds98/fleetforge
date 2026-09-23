@@ -211,6 +211,9 @@ require_once FF_ROOT . '/includes/header.php';
          :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
          style="margin:14px 0;" x-text="flash.message"></div>
 
+    <!-- S-QBO-HISTPULL-SHARED: the live import is off in a shared company file -->
+    <div x-show="sharedFileBlock" x-cloak class="alert alert-warning" style="margin:14px 0;" x-text="sharedFileBlock"></div>
+
     <div class="card" style="padding:16px 20px;">
         <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
             <span class="badge" :class="dryRun ? 'badge-secondary' : 'badge-warning'"
@@ -283,6 +286,7 @@ function qboHistoricalPull() {
     return {
         busy: false,
         dryRun: true,
+        sharedFileBlock: null,   // S-QBO-HISTPULL-SHARED
         batchSize: 100,
         detection: null,
         plan: [],
@@ -294,6 +298,7 @@ function qboHistoricalPull() {
                 const j = await FF_Api.get(FF_Api.url('/api/v1/quickbooks/historical_pull/status.php'));
                 if (j.success) {
                     this.dryRun = !!j.data.dry_run;
+                    this.sharedFileBlock = j.data.shared_file_block || null;
                     this.batchSize = j.data.batch_size || 100;
                 }
             } catch (e) { /* non-fatal */ }

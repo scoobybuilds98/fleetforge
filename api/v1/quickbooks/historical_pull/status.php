@@ -39,6 +39,8 @@ try {
 
     json_success([
         'dry_run'      => HistoricalPuller::isDryRun(),
+        // S-QBO-HISTPULL-SHARED: why the live pull can't run here (null = it can).
+        'shared_file_block' => HistoricalPuller::sharedFileBlockReason(),
         'batch_size'   => HistoricalPuller::batchSize(),
         'entity_order' => HistoricalPuller::ENTITY_ORDER,
         'latest'       => $recent[0] ?? null,
