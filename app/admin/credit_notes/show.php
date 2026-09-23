@@ -149,6 +149,17 @@ $canCreate    = can('invoices', 'create');
 // payments:view — this only bites per-user overrides, who fall through to the
 // Edit Metadata card instead. api/v1/credit_notes/apply.php is unchanged.
 $showApply    = $canEdit && $isApplicable && $canSeeMoney;
+// SOP I18: pay the unused credit back in cash (api/v1/credit_notes/refund.php).
+$showRefund   = $showApply && can('payments', 'create');
+$refundBanks  = $showRefund
+    ? db_select("SELECT id, name, is_default FROM acc_bank_accounts WHERE is_active = 1 AND currency = ? ORDER BY is_default DESC, name", [$cn['currency']])
+    : [];
+$cnRefunds    = db_select(
+    "SELECT r.refund_date, r.amount, r.method, r.reference, u.name AS by_name
+       FROM credit_note_refunds r LEFT JOIN users u ON u.id = r.created_by
+      WHERE r.credit_note_id = ? ORDER BY r.id",
+    [(int) $cn['id']]
+);
 
 $pageTitle      = 'Credit Note ' . e($cn['credit_note_number']);
 $helpModuleSlug = 'credit-notes';
@@ -363,6 +374,61 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
             </div>
         </div>
     </div>
+    <?php if ($showRefund): ?>
+    <!-- Refund as cash (SOP I18) -->
+    <div class="card" x-data="refundForm()" style="margin-top:1rem;">
+        <div class="card-header"><strong>Refund as Cash</strong></div>
+        <div class="card-body">
+            <p style="font-size:0.875rem; color:var(--text-secondary); margin:0 0 1rem;">
+                Pay the customer back instead of applying the credit. Posts DR 2060 Customer Credits / CR the bank.
+                Not sent to QuickBooks — record the refund against this credit memo in QuickBooks too.
+            </p>
+            <div x-show="error" class="alert alert-danger" x-text="error" style="margin-bottom:1rem;"></div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem;">
+                <div>
+                    <label class="form-label">Amount (<?= e($cn['currency']) ?>)</label>
+                    <input class="form-input font-mono" type="text" x-model="amount">
+                </div>
+                <div>
+                    <label class="form-label">Date paid</label>
+                    <input class="form-input" type="date" x-model="refund_date">
+                </div>
+                <div>
+                    <label class="form-label">Paid by</label>
+                    <select class="form-input" x-model="method">
+                        <option value="cheque">Cheque</option>
+                        <option value="eft">EFT</option>
+                        <option value="e_transfer">e-Transfer</option>
+                        <option value="wire">Wire</option>
+                        <option value="credit_card">Credit card</option>
+                        <option value="cash">Cash</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label">Reference (cheque #…)</label>
+                    <input class="form-input" type="text" x-model="reference" maxlength="100">
+                </div>
+                <?php if ($refundBanks): ?>
+                <div style="grid-column:1 / -1;">
+                    <label class="form-label">Paid from</label>
+                    <select class="form-input" x-model="bank_account_id">
+                        <option value="">Default bank account</option>
+                        <?php foreach ($refundBanks as $b): ?>
+                        <option value="<?= (int) $b['id'] ?>"><?= e($b['name']) ?><?= $b['is_default'] ? ' (default)' : '' ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
+            </div>
+            <div style="margin-top:1rem;">
+                <button class="btn btn-primary btn-sm" @click="submit()" :disabled="submitting || !(parseFloat(amount) > 0)">
+                    <span x-text="submitting ? 'Recording…' : 'Record Refund'"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php else: ?>
     <!-- Edit metadata card when credit is not applicable -->
     <?php if ($canEdit && $cn['status'] !== 'void'): ?>
@@ -527,7 +593,61 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 </div>
 <?php endif; ?>
 
+<?php if ($cnRefunds): ?>
+<div class="card" style="margin-top:1rem;">
+    <div class="card-header"><strong>Cash refunds</strong></div>
+    <div class="card-body" style="padding:0;">
+        <table class="table" style="width:100%;">
+            <thead><tr><th>Date</th><th style="text-align:right;">Amount</th><th>Method</th><th>Reference</th><th>By</th></tr></thead>
+            <tbody>
+            <?php foreach ($cnRefunds as $r): ?>
+                <tr>
+                    <td><?= e(format_date($r['refund_date'])) ?></td>
+                    <td class="font-mono" style="text-align:right;"><?= e($cn['currency'] . ' ' . number_format((float) $r['amount'], 2)) ?></td>
+                    <td><?= e(str_replace('_', ' ', $r['method'])) ?></td>
+                    <td><?= e($r['reference'] ?? '') ?></td>
+                    <td><?= e($r['by_name'] ?? '') ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
+
 <script>
+// SOP I18: refund the unused credit in cash.
+function refundForm() {
+    return {
+        amount: <?= json_encode((string) $cn['amount_remaining']) ?>,
+        refund_date: FF_localDate(),
+        method: 'cheque',
+        reference: '',
+        bank_account_id: '',
+        submitting: false,
+        error: '',
+        async submit() {
+            this.submitting = true;
+            this.error = '';
+            const r = await FF_Api.post('<?= base_url('api/v1/credit_notes/refund') ?>', {
+                credit_note_id: <?= (int) $cn['id'] ?>,
+                amount: String(this.amount),
+                refund_date: this.refund_date,
+                method: this.method,
+                reference: this.reference || null,
+                bank_account_id: this.bank_account_id || null,
+            });
+            this.submitting = false;
+            if (r.success) {
+                FF_Toast.success('Refund recorded. ' + (r.data.quickbooks_note || ''));
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                const f = (r.error && r.error.fields) || {};
+                this.error = Object.values(f)[0] || (r.error && r.error.message) || 'Could not record the refund.';
+            }
+        },
+    };
+}
 <?php
 // applyForm() embeds the note's remaining balance in page source, so it is only
 // emitted alongside the card that uses it — a financial viewer's page (see $showApply).

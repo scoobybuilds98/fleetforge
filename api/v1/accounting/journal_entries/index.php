@@ -128,4 +128,10 @@ $rows = db_select(
     $params
 );
 
+// SOP I9: tell the page which rows may be reversed by hand, and why not.
+foreach ($rows as &$r) {
+    $r['reverse_block_reason'] = \FleetForge\Accounting\JournalEntryService::manualReversalBlockReason($r);
+}
+unset($r);
+
 json_paginated($rows, $total, $page, $perPage);

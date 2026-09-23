@@ -114,8 +114,13 @@ if ($dup = \FleetForge\Accounting\AccountingService::findDuplicateVendorBill($ve
 }
 
 // Validate optional work order / unit links (same rules as create.php)
-if ($workOrderId && !db_row("SELECT id FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL", [$workOrderId])) {
+$woRow = $workOrderId ? db_row("SELECT id, equipment_unit_id FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL", [$workOrderId]) : null;
+if ($workOrderId && !$woRow) {
     json_validation_error(['work_order_id' => 'Work order not found.'], 'Work order not found.');
+}
+// SOP I15: a work order's bill is that unit's cost — default the unit.
+if (!$equipmentUnitId && $woRow && !empty($woRow['equipment_unit_id'])) {
+    $equipmentUnitId = (int) $woRow['equipment_unit_id'];
 }
 if ($equipmentUnitId && !db_row("SELECT id FROM equipment_units WHERE id = ? AND deleted_at IS NULL", [$equipmentUnitId])) {
     json_validation_error(['equipment_unit_id' => 'Equipment unit not found.'], 'Equipment unit not found.');
@@ -185,6 +190,12 @@ foreach ($rawLines as $i => $line) {
     $lineHst = clean_decimal($line['tax_hst_amount'] ?? '0') ?? '0.00';
     $isItc = (int)($line['is_tax_input_credit'] ?? 1);
     $isAutoCategorized = (int)($line['is_auto_categorized'] ?? 0);
+    // SOP I15: the unit this line's cost belongs to (blank = the bill's unit).
+    $lineUnitId = clean_int($line['equipment_unit_id'] ?? null);
+    if ($lineUnitId && !db_row("SELECT id FROM equipment_units WHERE id = ? AND deleted_at IS NULL", [$lineUnitId])) {
+        $lineErrors[] = "Line {$lineNum}: equipment unit not found.";
+        continue;
+    }
 
     if (bccomp($lineGst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: GST cannot be negative."; continue; }
     if (bccomp($linePst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: PST cannot be negative."; continue; }
@@ -206,6 +217,7 @@ foreach ($rawLines as $i => $line) {
         'tax_hst_amount'      => $lineHst,
         'is_tax_input_credit' => $isItc,
         'is_auto_categorized' => $isAutoCategorized,
+        'equipment_unit_id'   => $lineUnitId ?: $equipmentUnitId,
         'sort_order'          => $i,
     ];
 }

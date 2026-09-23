@@ -365,7 +365,17 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal-body">
                 <div class="form-error-banner" x-show="remitFormError" x-cloak x-text="remitFormError"></div>
                 <p class="text-sm" x-text="remitTarget ? formatTaxType(remitTarget.tax_type) + ' ' + remitTarget.period_start + ' → ' + remitTarget.period_end : ''"></p>
-                <p class="text-secondary text-sm">Records the CRA / authority payment and posts a JE: <code>DR Tax Payable / CR Cash</code>. The period status flips to <strong>remitted</strong>.</p>
+                <?php // SOP I4: a GST/HST remittance clears 2030 AND 1050; refund periods are received, not paid. ?>
+                <p class="text-secondary text-sm" x-show="remitTarget && remitTarget.tax_type === 'gst_hst'">
+                    Posts <code>DR 2030 GST collected / CR 1050 input tax credits</code> for the period, and the difference
+                    <span x-show="!remitIsRefund()">is paid from the bank (<code>CR bank</code>).</span>
+                    <span x-show="remitIsRefund()">is the refund the CRA pays you (<code>DR bank</code>).</span>
+                    The amount must equal the filed return's net tax. The period flips to <strong>remitted</strong>.
+                </p>
+                <p class="text-secondary text-sm" x-show="remitTarget && remitTarget.tax_type !== 'gst_hst'">Records the payment and posts <code>DR PST Payable / CR bank</code>. The period flips to <strong>remitted</strong>.</p>
+                <div class="alert alert-info text-sm" x-show="remitIsRefund()" x-cloak style="margin-bottom:10px;">
+                    Refund period: input tax credits exceed GST collected. Enter the refund amount the CRA paid, and the bank it went into.
+                </div>
                 <div class="form-row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div class="form-group">
                         <label>Remittance Date *</label>
@@ -375,8 +385,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" x-show="remitErrors.remittance_date" x-cloak x-text="remitErrors.remittance_date"></div>
                     </div>
                     <div class="form-group">
-                        <label>Amount *</label>
-                        <input type="number" step="0.01" min="0.01" class="form-control form-control-sm" x-model="remitForm.amount"
+                        <label x-text="remitIsRefund() ? 'Refund received *' : 'Amount paid *'">Amount *</label>
+                        <input type="number" step="0.01" min="0" class="form-control form-control-sm" x-model="remitForm.amount"
                                :class="remitErrors.amount ? 'is-invalid' : ''"
                                @input="remitErrors.amount = ''">
                         <div class="field-error" x-show="remitErrors.amount" x-cloak x-text="remitErrors.amount"></div>
@@ -428,7 +438,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="remitOpen = false">Cancel</button>
                 <button class="btn btn-warning btn-sm" @click="submitRemit()" :disabled="remitBusy">
-                    <span x-show="!remitBusy">Record &amp; Post JE</span>
+                    <span x-show="!remitBusy" x-text="remitIsRefund() ? 'Record Refund & Post JE' : 'Record & Post JE'">Record &amp; Post JE</span>
                     <span x-show="remitBusy">Posting…</span>
                 </button>
             </div>
@@ -571,7 +581,9 @@ function FF_TaxPeriods() {
             } else if (!/^\d+(\.\d{1,2})?$/.test(amt)) {
                 this.remitErrors.amount = 'Amount must be a valid amount.';
                 ok = false;
-            } else if (parseFloat(amt) <= 0) {
+            } else if (parseFloat(amt) <= 0 && !(this.remitTarget && this.remitTarget.tax_type === 'gst_hst')) {
+                // GST/HST may be 0 (nil return still clears 2030 against 1050); the
+                // server checks the exact figure against the filed return.
                 this.remitErrors.amount = 'Amount must be greater than zero.';
                 ok = false;
             }
@@ -688,12 +700,18 @@ function FF_TaxPeriods() {
         },
 
         // ── Remit ──────────────────────────────────────────────
+        // True when the target GST/HST period nets to a refund (ITC > collected).
+        remitIsRefund() {
+            const t = this.remitTarget;
+            return !!t && t.tax_type === 'gst_hst' && parseFloat(t.net_tax_owing || 0) < 0;
+        },
         openRemit(p) {
             this.remitTarget = p;
-            // Pre-fill amount with the period's net_tax_owing as a convenience.
+            // Pre-fill amount with the period's net tax — as a positive figure;
+            // a negative net is a refund (SOP I4), shown via remitIsRefund().
             this.remitForm = {
                 remittance_date: FF_localDate(),
-                amount: parseFloat(p.net_tax_owing || 0).toFixed(2),
+                amount: Math.abs(parseFloat(p.net_tax_owing || 0)).toFixed(2),
                 payment_method: '',
                 bank_account_id: '',
                 reference_number: '',

@@ -141,17 +141,22 @@ class Gst34Service
             $l103Amount = bcmul($l101Amount, bcdiv($quickRatePct, '100', 6), 2);
             $l103Desc   = "Quick Method: revenue × {$quickRatePct}%";
         } else {
+            // SOP I4: same basis as TaxFilingService::sumTaxCollected — the
+            // NET movement of the payable account (credit notes and void
+            // reversals reduce it), excluding the remittance entries that
+            // clear it.
             $l103Row = \db_row(
-                "SELECT COALESCE(SUM(jel.credit), 0) AS total
+                "SELECT COALESCE(SUM(jel.credit - jel.debit), 0) AS total
                    FROM acc_journal_entry_lines jel
                    JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                   WHERE jel.account_id = ?
-                    AND je.status = 'posted'
+                    AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                    AND (je.source_type IS NULL OR je.source_type <> 'tax_remittance')
                     AND je.entry_date BETWEEN ? AND ?",
                 [$gstPayableId, $start, $end]
             );
-            $l103Amount = (string) ($l103Row['total'] ?? '0.00');
-            $l103Desc   = "GST/HST collected (CREDIT side of acct #{$gstPayableId})";
+            $l103Amount = bcadd((string) ($l103Row['total'] ?? '0.00'), '0', 2);
+            $l103Desc   = "GST/HST collected (net movement of acct #{$gstPayableId})";
         }
 
         // ── LINE 104 — Adjustments ────────────────────────────────────────
@@ -192,16 +197,19 @@ class Gst34Service
             $l106Amount = (string) ($row['total'] ?? '0.00');
             $l106Desc   = 'Quick Method: capital ITCs only (asset-linked bills)';
         } else {
+            // SOP I4: net movement of the ITC account, excluding the
+            // remittance entries that clear it (TaxFilingService::sumItc).
             $row = \db_row(
-                "SELECT COALESCE(SUM(jel.debit), 0) AS total
+                "SELECT COALESCE(SUM(jel.debit - jel.credit), 0) AS total
                    FROM acc_journal_entry_lines jel
                    JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                   WHERE jel.account_id = ?
-                    AND je.status = 'posted'
+                    AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                    AND (je.source_type IS NULL OR je.source_type <> 'tax_remittance')
                     AND je.entry_date BETWEEN ? AND ?",
                 [$gstReceivableId, $start, $end]
             );
-            $rawItc = (string) ($row['total'] ?? '0.00');
+            $rawItc = bcadd((string) ($row['total'] ?? '0.00'), '0', 2);
             $restricted = self::applyItcRestrictions($start, $end, $rawItc);
             $l106Amount = $restricted['adjusted_itc'];
             $restrictionsApplied = $restricted['restrictions'];
@@ -228,7 +236,9 @@ class Gst34Service
         // remittances against this filing_period_id (K-22 — confirmed key
         // name filing_period_id, not tax_filing_period_id).
         $remitRow = \db_row(
-            "SELECT COALESCE(SUM(amount), 0) AS total, COUNT(*) AS n
+            // A refund received (SOP I4) counts negative: it settles a
+            // negative L109 so L113 comes back to nil.
+            "SELECT COALESCE(SUM(CASE WHEN direction = 'refund' THEN -amount ELSE amount END), 0) AS total, COUNT(*) AS n
                FROM acc_tax_remittances
               WHERE filing_period_id = ?",
             [$periodId]

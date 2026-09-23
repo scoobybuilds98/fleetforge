@@ -9,7 +9,9 @@ declare(strict_types=1);
  *
  * Three responsibilities (S-CRON-3):
  *   4a — Morning digest emails to managers / accountants / super_admins
- *   4c — Auto-generate dunning letters at 30/60/90-day buckets
+ *   4c — Auto-generate dunning letters at 30/60/90-day buckets — only for
+ *        customers cleared by Settings → Customer Emails ("Dunning letters"
+ *        type, master switch, do-not-email list; I22)
  *   4e — Dispatch any scheduled_reports whose next_send_at has passed
  *
  * NOT IN SCOPE for this cron (handled by existing crons; surfaced in
@@ -446,6 +448,19 @@ function render_digest_body(string $userName, array $p): string
 // =======================================================================
 
 /**
+ * run_dunning_letters — 4c: one letter per overdue customer at the 30/60/90
+ * stage, emailed through the Customer Emails gate.
+ *
+ * I22: this used to Mailer::send() every letter unconditionally, ignoring the
+ * Customer Emails master switch and the do-not-email list. Now each customer
+ * passes CustomerReminders::mayEmailCustomer('dunning', …, true) BEFORE a
+ * letter is generated — master switch, the "Dunning letters" type toggle
+ * (ships OFF, so automatic letters stop until an operator turns it on),
+ * global do-not-email list, per-type audience / portal opt-out, and a usable
+ * (non-bounced) address. Blocked customers get no letter and no email.
+ * Delivery goes through CustomerReminders::deliver() so every send is logged
+ * in notification_log with reply-to/BCC, and a Mailer failure is counted.
+ *
  * @return array{0:array<string,int>,1:int,2:int}  [counts, skipped, errors]
  */
 function run_dunning_letters(): array
@@ -453,6 +468,14 @@ function run_dunning_letters(): array
     $counts  = ['reminder_30' => 0, 'reminder_60' => 0, 'warning_90' => 0];
     $skipped = 0;
     $errors  = 0;
+
+    // Fast exit: with the master switch or the dunning type off, every
+    // customer would be blocked anyway — skip the candidate query entirely.
+    if (!\FleetForge\Notifications\CustomerReminders::typeEnabled('dunning')) {
+        error_log('[CRON notification_digest dunning] "Dunning letters" customer email is OFF (Settings → Customer Emails) — no letters generated.');
+        return [$counts, $skipped, $errors];
+    }
+    $dunningCfg = \FleetForge\Notifications\CustomerReminders::config('dunning');
 
     // For each customer with overdue invoices, find their max days overdue
     // and pick the appropriate letter type. Schema dedup: per CUSTOMER per
@@ -479,7 +502,8 @@ function run_dunning_letters(): array
     foreach ($candidates as $cust) {
         $custId   = (int)$cust['id'];
         $name     = (string)$cust['company_name'];
-        $email    = (string)$cust['email'];
+        // Recipient is resolved by mayEmailCustomer() (invoice → billing → main
+        // email), not taken from c.email here (I22).
         $maxDays  = (int)$cust['max_days'];
 
         $letterType = match (true) {
@@ -510,28 +534,50 @@ function run_dunning_letters(): array
                 continue;
             }
 
-            $result = \FleetForge\Accounting\DunningLetterGenerator::generate(
-                customerId: $custId,
-                letterType: $letterType,
-                sentMethod: 'email',
-                createdBy:  null,
-            );
-
-            // Email the customer if we have a valid address.
-            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
-                \FleetForge\Notifications\Mailer::send(
-                    toEmail:  $email,
-                    toName:   $name,
-                    subject:  $result['subject'],
-                    htmlBody: $result['html_body'],
-                );
+            // I22 gate BEFORE generating: an automatic letter exists only to be
+            // emailed, so a blocked customer gets neither a PDF nor a log row.
+            $gate = \FleetForge\Notifications\CustomerReminders::mayEmailCustomer('dunning', $custId, true);
+            if (!$gate['ok']) {
+                $skipped++;
+                error_log("[CRON notification_digest dunning] Customer #{$custId} skipped: {$gate['reason']}");
+                continue;
             }
 
-            // Notify accounting team in-app.
+            $result = \FleetForge\Accounting\DunningLetterGenerator::generate(
+                customerId:  $custId,
+                letterType:  $letterType,
+                sentMethod:  'email',
+                createdBy:   null,
+                sentToEmail: (string) $gate['to'],
+            );
+
+            // Logged delivery (notification_log + reply-to/BCC); the letter
+            // carries its own letterhead, so no branded shell (raw_html).
+            $delivered = \FleetForge\Notifications\CustomerReminders::deliver([
+                'reminder_key' => 'dunning',
+                'customer_id'  => $custId,
+                'dedup_type'   => $dunningCfg['dedup_type'],
+                'entity_type'  => 'customer',
+                'entity_id'    => $custId,
+                'channels'     => ['email'],
+                'to_email'     => (string) $gate['to'],
+                'to_name'      => (string) $gate['to_name'] ?: $name,
+                'subject'      => $result['subject'],
+                'body_html'    => $result['html_body'],
+                'raw_html'     => true,
+                'log_summary'  => "Dunning letter {$letterType} (#{$result['id']}) — "
+                                . "{$result['total_overdue']} overdue across {$result['invoice_count']} invoice(s)",
+            ]);
+            $emailed = $delivered['email'] === true;
+
+            // Notify accounting team in-app — and say so when the email failed,
+            // since the letter row exists but the customer never received it.
             \FleetForge\Notifications\NotificationService::notify(
                 type:       'accounting.dunning_sent',
-                title:      "Dunning letter sent: {$name}",
-                message:    "Sent {$letterType} to {$name} — \${$result['total_overdue']} overdue across {$result['invoice_count']} invoice(s).",
+                title:      $emailed ? "Dunning letter sent: {$name}" : "Dunning letter NOT emailed: {$name}",
+                message:    $emailed
+                    ? "Sent {$letterType} to {$name} ({$gate['to']}) — \${$result['total_overdue']} overdue across {$result['invoice_count']} invoice(s)."
+                    : "Generated {$letterType} for {$name} but the email to {$gate['to']} failed — resend or mail the PDF.",
                 entityType: 'dunning_letter',
                 entityId:   $result['id'],
                 url:        '/fleetforge/accounting/collections?customer_id=' . $custId,
@@ -539,6 +585,9 @@ function run_dunning_letters(): array
             );
 
             $counts[$letterType]++;
+            if (!$emailed) {
+                $errors++;
+            }
         } catch (\Throwable $e) {
             $errors++;
             error_log("[CRON notification_digest dunning] Customer #{$custId}: " . $e->getMessage());

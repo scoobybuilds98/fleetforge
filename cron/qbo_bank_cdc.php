@@ -15,7 +15,8 @@ declare(strict_types=1);
  *
  * Do NOT install the crontab in S-QBO-20 — documented only. Operator
  * wires it during S-QBO-30 production cutover alongside the other QBO
- * crons (token_refresh, sync_worker, drift_check, webhook_replay).
+ * crons (token_refresh, sync_worker, drift_check; the webhook replay and payment
+ * backstop run inside sync_worker — lib/QboPushers/WebhookReplay.php).
  *
  * Decision tree:
  *

@@ -544,6 +544,22 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         <dd style="margin:0;"><?= e($customer['billing_email'] ?? '—') ?></dd>
                         <dt class="text-secondary text-sm">Billing Phone</dt>
                         <dd style="margin:0;"><?= e($customer['billing_phone'] ?? '—') ?></dd>
+                        <?php
+                        // I12: the Bill To block on invoice PDFs + the QuickBooks invoice
+                        // BillAddr come from this column. When it's blank, InvoiceGenerator
+                        // composes Bill To from the main address instead — say so here so
+                        // staff know what the invoice will actually print.
+                        $_billAddr = trim((string) ($customer['billing_address'] ?? ''));
+                        ?>
+                        <dt class="text-secondary text-sm">Billing Address</dt>
+                        <dd style="margin:0;">
+                            <?php if ($_billAddr !== ''): ?>
+                                <span style="white-space:pre-line;"><?= e($_billAddr) ?></span>
+                            <?php else: ?>
+                                <span class="text-secondary text-sm">— (invoices use the main address)</span>
+                            <?php endif; ?>
+                        </dd>
+                        <?php unset($_billAddr); ?>
                         <dt class="text-secondary text-sm">Invoice Email</dt>
                         <dd style="margin:0;"><?= e($customer['invoice_email'] ?? '—') ?></dd>
                         <dt class="text-secondary text-sm">Invoice Delivery</dt>

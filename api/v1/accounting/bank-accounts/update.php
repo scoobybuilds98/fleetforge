@@ -120,6 +120,30 @@ db_transaction(function () use ($id, &$data, $oldValues, $existing, $userId, $in
 
     db_update('acc_bank_accounts', $data, 'id = ?', [$id]);
 
+    // SOP I8: a changed opening balance / date / GL account re-posts the
+    // opening entry (old one reversed on its own date). Blocked once a
+    // reconciliation is completed — its balances started from the old figure.
+    $openingChanged = false;
+    foreach (['opening_balance', 'opening_balance_date', 'gl_account_id'] as $k) {
+        if (array_key_exists($k, $data) && (string) $data[$k] !== (string) ($existing[$k] ?? '')) {
+            $openingChanged = true;
+        }
+    }
+    if ($openingChanged) {
+        $done = db_count(
+            "SELECT COUNT(*) FROM acc_bank_reconciliations WHERE bank_account_id = ? AND status IN ('completed','locked')",
+            [$id]
+        );
+        if ($done > 0) {
+            json_validation_error(['opening_balance' => 'This account has completed reconciliations — its opening balance and GL account can no longer change. Post a journal entry for any correction.']);
+        }
+        try {
+            \FleetForge\Accounting\BankService::syncOpeningBalanceEntry($id, $userId);
+        } catch (\RuntimeException $e) {
+            json_validation_error(['opening_balance' => $e->getMessage()], $e->getMessage());
+        }
+    }
+
     db_insert('audit_log', [
         'user_id'     => $userId,
         'action'      => 'update',

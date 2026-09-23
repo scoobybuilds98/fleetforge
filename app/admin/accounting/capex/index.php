@@ -484,6 +484,24 @@ JS;
 JS;
                 include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
                 ?>
+                <?php
+                // SOP I2: the account the money came from — posts DR asset account / CR this account.
+                $pickerId          = 'capex_cap_funding_account_id';
+                $pickerLabel       = 'Paid from account (optional)';
+                $pickerRequired    = false;
+                $pickerPlaceholder = 'Search code or name…';
+                $pickerLabelHint   = 'Leave blank to move the work order\'s approved bill costs into the asset. Needed only when those bills do not add up to the work order cost.';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'capitalizeForm.asset_data.funding_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary btn-sm" @click="capitalizeOpen = false">Cancel</button>
@@ -632,6 +650,24 @@ JS;
     format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
     initialId: '',
     targetPath: 'completeForm.asset_data.depr_expense_account_id'
+}
+JS;
+                include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                ?>
+                <?php
+                // SOP I2: the account the money came from — posts DR asset account / CR this account.
+                $pickerId          = 'capex_done_funding_account_id';
+                $pickerLabel       = 'Paid from account';
+                $pickerRequired    = true;
+                $pickerPlaceholder = 'Search code or name…';
+                $pickerLabelHint   = 'e.g. 1010 Cash or 2210 Equipment Loans. Bought on a bill? Add the asset from the Asset Register instead and choose the bill.';
+                $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'completeForm.asset_data.funding_account_id'
 }
 JS;
                 include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';

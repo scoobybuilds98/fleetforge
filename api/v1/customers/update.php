@@ -334,6 +334,14 @@ foreach ($optionals as $col => $val) {
     }
 }
 
+// I12: the loop above can't tell "key absent" from "key sent empty" —
+// clean_string('') returns null, so a billing address could never be cleared
+// once set. The key being PRESENT with an empty value is an explicit clear:
+// store NULL so invoice Bill To falls back to the main address again.
+if (array_key_exists('billing_address', $body) && $billingAddress === null) {
+    $data['billing_address'] = null;
+}
+
 // Bool fields need explicit handling (false is valid)
 if ($gstExempt !== null)  $data['gst_exempt']  = $gstExempt  ? 1 : 0;
 if ($gpsRevenuePresentation !== null) $data['gps_revenue_presentation'] = $gpsRevenuePresentation;

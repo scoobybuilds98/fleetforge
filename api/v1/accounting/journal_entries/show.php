@@ -31,4 +31,7 @@ if (!$entry) {
     json_error('NOT_FOUND', 'Journal entry not found.', 404);
 }
 
+// SOP I9: same flag as the list — automatic entries are reversed from their document.
+$entry['reverse_block_reason'] = JournalEntryService::manualReversalBlockReason($entry);
+
 json_success($entry);

@@ -105,11 +105,15 @@ if ($dup = AccountingService::findDuplicateVendorBill($vendorId, $vendorBillNum)
 // Validate optional work order link
 if ($workOrderId) {
     $wo = db_row(
-        "SELECT id FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL",
+        "SELECT id, equipment_unit_id FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL",
         [$workOrderId]
     );
     if (!$wo) {
         json_validation_error(['work_order_id' => 'Work order not found.'], 'Work order not found.');
+    }
+    // SOP I15: a work order's bill is that unit's cost — default the unit.
+    if (!$equipmentUnitId && !empty($wo['equipment_unit_id'])) {
+        $equipmentUnitId = (int) $wo['equipment_unit_id'];
     }
 }
 
@@ -194,6 +198,12 @@ foreach ($rawLines as $i => $line) {
     $lineHst = clean_decimal($line['tax_hst_amount'] ?? '0') ?? '0.00';
     $isItc = (int)($line['is_tax_input_credit'] ?? 1);
     $isAutoCategorized = (int)($line['is_auto_categorized'] ?? 0);
+    // SOP I15: the unit this line's cost belongs to (blank = the bill's unit).
+    $lineUnitId = clean_int($line['equipment_unit_id'] ?? null);
+    if ($lineUnitId && !db_row("SELECT id FROM equipment_units WHERE id = ? AND deleted_at IS NULL", [$lineUnitId])) {
+        $lineErrors[] = "Line {$lineNum}: equipment unit not found.";
+        continue;
+    }
 
     // VALID-2: reject negative taxes — they would invert the JE sides
     if (bccomp($lineGst, '0', 2) < 0) { $lineErrors[] = "Line {$lineNum}: GST cannot be negative."; continue; }
@@ -216,6 +226,7 @@ foreach ($rawLines as $i => $line) {
         'tax_hst_amount'      => $lineHst,
         'is_tax_input_credit' => $isItc,
         'is_auto_categorized' => $isAutoCategorized,
+        'equipment_unit_id'   => $lineUnitId ?: $equipmentUnitId,
         'sort_order'          => $i,
     ];
 }
@@ -348,6 +359,8 @@ function self_postBillJe(
             'credit'      => '0.00',
             'description' => $line['description'],
             'vendor_id'   => $vendorId,
+            // SOP I15: tag the unit so the Per-Unit P&L sees the cost.
+            'equipment_unit_id' => !empty($line['equipment_unit_id']) ? (int) $line['equipment_unit_id'] : null,
         ];
     }
 

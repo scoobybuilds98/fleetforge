@@ -138,6 +138,13 @@ class InvoiceGenerator
             // record is NOT modified; only the invoice snapshots are demoted.
             $lease = db_row(
                 "SELECT l.*, c.province, c.billing_address, c.email AS customer_email,
+                        -- I12: main-address parts for the Bill To fallback
+                        -- (billingAddressSnapshot) when billing_address is blank.
+                        -- Aliased so they can't collide with l.* columns.
+                        c.address     AS customer_address,
+                        c.city        AS customer_city,
+                        c.postal_code AS customer_postal_code,
+                        c.country     AS customer_country,
                         c.payment_terms AS customer_payment_terms,
                         c.gst_exempt_expiry  AS customer_gst_exempt_expiry,
                         c.pst_exempt_expiry  AS customer_pst_exempt_expiry,
@@ -2123,7 +2130,12 @@ class InvoiceGenerator
                 'company_name_snapshot'      => $lease['company_name_snapshot'],
                 'contract_number_snapshot'   => $lease['contract_number'],
                 'unit_number_invoice_snapshot' => $lease['unit_number_snapshot'],
-                'billing_address_snapshot'   => $lease['billing_address'] ?? null,
+                // I12: explicit billing_address, else composed from the main address
+                'billing_address_snapshot'   => self::billingAddressSnapshot(
+                    $lease['billing_address'] ?? null,  $lease['customer_address'] ?? null,
+                    $lease['customer_city'] ?? null,    $lease['province'] ?? null,
+                    $lease['customer_postal_code'] ?? null, $lease['customer_country'] ?? null
+                ),
                 'province_snapshot'          => $province,
                 'customer_email_snapshot'    => $lease['customer_email'] ?? null,
                 'gst_exempt_snapshot'        => (int)$gstExempt,
@@ -2464,7 +2476,12 @@ class InvoiceGenerator
                     'credit_note_number'      => $cnNumber,
                     'company_name_snapshot'   => $lease['company_name_snapshot']  ?? null,
                     'customer_name_snapshot'  => $lease['customer_name_snapshot'] ?? null,
-                    'billing_address_snapshot' => $lease['billing_address']        ?? null,
+                    // I12: explicit billing_address, else composed from the main address
+                    'billing_address_snapshot' => self::billingAddressSnapshot(
+                        $lease['billing_address'] ?? null,  $lease['customer_address'] ?? null,
+                        $lease['customer_city'] ?? null,    $lease['province'] ?? null,
+                        $lease['customer_postal_code'] ?? null, $lease['customer_country'] ?? null
+                    ),
                     'province_snapshot'        => $lease['province']                ?? null,
                     'customer_email_snapshot'  => $lease['customer_email']          ?? null,
                     'customer_id'             => $lease['customer_id'],
@@ -3100,7 +3117,16 @@ class InvoiceGenerator
                 'company_name_snapshot'          => $orig['company_name_snapshot'],
                 'contract_number_snapshot'       => $orig['contract_number_snapshot'],
                 'unit_number_invoice_snapshot'   => $orig['unit_number_invoice_snapshot'],
-                'billing_address_snapshot'       => $orig['billing_address_snapshot'],
+                // I12: copy the original's Bill To; if it was snapshotted blank
+                // (pre-I12 invoice for a customer with no billing_address), compose
+                // it from the customer's current addresses instead of copying blank.
+                'billing_address_snapshot'       => trim((string) ($orig['billing_address_snapshot'] ?? '')) !== ''
+                    ? $orig['billing_address_snapshot']
+                    : self::billingAddressSnapshot(...array_values(db_row(
+                        "SELECT billing_address, address, city, province, postal_code, country
+                         FROM customers WHERE id = ?",
+                        [(int) $orig['customer_id']]
+                    ) ?: [null])),
                 'province_snapshot'              => $orig['province_snapshot'] ?? null,
                 'customer_email_snapshot'        => $orig['customer_email_snapshot'],
                 'gst_exempt_snapshot'            => $orig['gst_exempt_snapshot'],
@@ -3360,5 +3386,41 @@ class InvoiceGenerator
             'daily_minimum' => 'daily',  // S-LEASE-MIN-DAYS: flat short-lease floor → economic basis 'daily'
             default         => 'none',  // 'none' or any unknown
         };
+    }
+
+    /**
+     * I12: the invoice / credit-note "Bill To" snapshot.
+     *
+     * WHY: billing_address_snapshot drives the invoice PDF "Bill To" block and
+     * the QuickBooks invoice BillAddr. customers.billing_address had no form
+     * field until I12, so it's NULL for every customer that wasn't imported —
+     * the snapshot was blank. Use the explicit billing address when set;
+     * otherwise compose one from the main address as
+     *   street / "City, Province Postal" / country
+     * (one part per line, blank parts skipped). Returns null only when the
+     * customer has no address data at all.
+     */
+    private static function billingAddressSnapshot(
+        ?string $billingAddress,
+        ?string $address = null,
+        ?string $city = null,
+        ?string $province = null,
+        ?string $postalCode = null,
+        ?string $country = null
+    ): ?string {
+        if (trim((string) $billingAddress) !== '') {
+            return $billingAddress;   // stored verbatim — operator-entered formatting wins
+        }
+
+        $city     = trim((string) $city);
+        $region   = trim(trim((string) $province) . ' ' . trim((string) $postalCode));
+        $cityLine = ($city !== '' && $region !== '') ? "{$city}, {$region}" : ($city . $region);
+
+        $lines = array_values(array_filter(
+            [trim((string) $address), $cityLine, trim((string) $country)],
+            static fn(string $l): bool => $l !== ''
+        ));
+
+        return $lines ? implode("\n", $lines) : null;
     }
 }

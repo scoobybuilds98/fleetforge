@@ -891,6 +891,60 @@ require_once FF_ROOT . '/includes/header.php';
                     GVWR &gt; 11,788 kg (≈ 25,990 lbs) typically belongs in Class 16 (40% DB) or Class 55 (ZEV equivalent). Server-side validator surfaces a non-blocking warning if the chosen class doesn't match the equipment unit's weight.
                 </p>
 
+                <!-- ── How it was paid for (SOP I2) ─────────────── -->
+                <?php // WHY: creating an asset now posts its purchase entry: DR the asset account / CR where the money came from. ?>
+                <div class="section-header">
+                    <h3 class="section-title">How was it paid for? *</h3>
+                    <span class="section-hint">Posts the purchase to the ledger</span>
+                </div>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:0.85rem;">
+                    <label style="display:flex;align-items:center;gap:6px;"><input type="radio" value="account" x-model="createForm.paid_how"> Paid from an account (bank, loan…)</label>
+                    <label style="display:flex;align-items:center;gap:6px;"><input type="radio" value="bill" x-model="createForm.paid_how"> Bought on a supplier bill</label>
+                    <label style="display:flex;align-items:center;gap:6px;"><input type="radio" value="opening" x-model="createForm.paid_how"> Owned before FleetForge (opening balance)</label>
+                </div>
+                <div class="field-error" x-show="createErrors.funding_account_id" x-cloak x-text="createErrors.funding_account_id"></div>
+                <div x-show="createForm.paid_how === 'account'" x-cloak>
+                    <?php
+                    $pickerId          = 'create_funding_account_id';
+                    $pickerLabel       = 'Paid from account';
+                    $pickerRequired    = true;
+                    $pickerPlaceholder = 'Search code or name…';
+                    $pickerLabelHint   = 'e.g. 1010 Cash, 2210 Equipment Loans. Posts DR asset account / CR this account.';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/accounts/index.php',
+    extraParams: { flat: 1, active: 1 },
+    format: r => (r.code ? r.code + ' — ' : '') + (r.name || ''),
+    initialId: '',
+    targetPath: 'createForm.funding_account_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
+                </div>
+                <div x-show="createForm.paid_how === 'bill'" x-cloak>
+                    <?php
+                    $pickerId          = 'create_acquisition_bill_id';
+                    $pickerLabel       = 'Purchase bill';
+                    $pickerRequired    = true;
+                    $pickerPlaceholder = 'Search bill # or vendor…';
+                    $pickerLabelHint   = 'The approved bill already posted the cost; lines not coded to the asset account are moved into it.';
+                    $pickerConfig = <<<JS
+{
+    endpoint: '/api/v1/accounting/bills/index.php',
+    searchParam: 'q',
+    format: r => (r.bill_number || ('#' + r.id)) + ' — ' + (r.vendor_name || '') + ' — \$' + (r.total_amount || '') + ' (' + (r.status || '') + ')',
+    initialId: '',
+    targetPath: 'createForm.acquisition_bill_id'
+}
+JS;
+                    include __DIR__ . '/../../../../includes/partials/pickers/lookup_picker.php';
+                    ?>
+                </div>
+                <p x-show="createForm.paid_how === 'opening'" x-cloak class="text-secondary" style="font-size:0.78rem;margin:0 0 10px;">
+                    No purchase entry is posted — the asset's cost must already be in the opening balances (e.g. assets imported at go-live).
+                </p>
+
                 <!-- ── GL Accounts ──────────────────────────────── -->
                 <div class="section-header">
                     <h3 class="section-title">GL Accounts</h3>
@@ -1256,6 +1310,10 @@ function FF_FixedAssets() {
                 asset_account_id: '',
                 accum_depr_account_id: '',
                 depr_expense_account_id: '',
+                // SOP I2: how the asset was paid for.
+                paid_how: '',
+                funding_account_id: '',
+                acquisition_bill_id: '',
                 equipment_unit_id: '',
                 location: '',
                 serial_number: '',
@@ -1649,6 +1707,9 @@ function FF_FixedAssets() {
                 }
             }
 
+            if (!f.paid_how) { this.createErrors.funding_account_id = 'Say how the asset was paid for.'; ok = false; }
+            else if (f.paid_how === 'account' && !f.funding_account_id) { this.createErrors.funding_account_id = 'Choose the account it was paid from.'; ok = false; }
+            else if (f.paid_how === 'bill' && !f.acquisition_bill_id) { this.createErrors.funding_account_id = 'Choose the purchase bill.'; ok = false; }
             if (!f.asset_account_id)    { this.createErrors.asset_account_id = 'Please select an asset GL account.'; ok = false; }
             if (!f.accum_depr_account_id) { this.createErrors.accum_depr_account_id = 'Please select an accumulated depreciation account.'; ok = false; }
             if (!f.depr_expense_account_id) { this.createErrors.depr_expense_account_id = 'Please select a depreciation expense account.'; ok = false; }
@@ -1694,6 +1755,11 @@ function FF_FixedAssets() {
             try {
                 // Coerce is_financed checkbox to 1/0 for the API
                 const payload = { ...this.createForm, is_financed: this.createForm.is_financed ? 1 : 0 };
+                // SOP I2: send exactly one purchase basis.
+                payload.funding_account_id  = payload.paid_how === 'account' ? payload.funding_account_id : null;
+                payload.acquisition_bill_id = payload.paid_how === 'bill' ? payload.acquisition_bill_id : null;
+                payload.is_opening_balance  = payload.paid_how === 'opening' ? 1 : 0;
+                delete payload.paid_how;
                 const r = await FF_Api.post('<?= base_url('api/v1/accounting/fixed_assets/create.php') ?>', payload);
                 if (r.success) {
                     FF_Toast.success('Asset created: ' + r.data.asset_number);

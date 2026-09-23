@@ -69,7 +69,14 @@ $result = db_transaction(function () use ($depositId, $refundMethod) {
 
     // Post JE: DR Deposit Liability / CR Cash
     $depositAccountId = AccountingService::setting('accounting.customer_deposits_account_id');
-    $cashAccountId    = AccountingService::setting('accounting.default_cash_account_id');
+    // SOP I10: refunded from the bank the deposit went into (or the default).
+    try {
+        $cashAccountId = \FleetForge\Accounting\AutoEntryBridge::cashAccountForBank(
+            !empty($deposit['bank_account_id']) ? (int) $deposit['bank_account_id'] : null
+        );
+    } catch (\RuntimeException $e) {
+        $cashAccountId = null; // reported as ACCOUNTING_CONFIG_INCOMPLETE below
+    }
 
     // S-AUDIT-BILLING-ENGINE-1 #10: HARD BLOCK on missing mappings (§16) —
     // this endpoint used to mark the deposit refunded even when the JE was

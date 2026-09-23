@@ -807,8 +807,10 @@ try {
     } else {
         // Sanity: must match spec §8.10 verbatim (+ the two damage-claim
         // retags added in S-QBO-GOLIVE-AUDIT — same invoice/bill JE renamed —
-        // and damage_writeoff, pushed as a CreditMemo since S-QBO-INVOICE-WRITEOFF).
-        $expected = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment', 'damage_recovery', 'damage_repair', 'damage_writeoff'];
+        // and damage_writeoff, pushed as a CreditMemo since S-QBO-INVOICE-WRITEOFF;
+        // S-SOP-KNOWN-ISSUES: bank_opening_balance — QuickBooks has its own —
+        // and credit_note_refund — recorded against the CreditMemo in QuickBooks).
+        $expected = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment', 'damage_recovery', 'damage_repair', 'damage_writeoff', 'bank_opening_balance', 'credit_note_refund'];
         if ($pConst !== $expected) {
             $c28Errors[] = "diverges from spec §8.10 canonical: got " . json_encode($pConst);
         }

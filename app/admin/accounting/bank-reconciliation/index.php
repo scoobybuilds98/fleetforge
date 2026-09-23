@@ -147,9 +147,10 @@ require_once FF_ROOT . '/includes/header.php';
 
             <!-- Summary Cards -->
             <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px;">
+                <?php // SOP I11: Difference = Statement − (Beginning + cleared deposits − cleared withdrawals). ?>
                 <div class="card" style="padding:12px;">
-                    <div style="font-size:0.6875rem;text-transform:uppercase;font-weight:600;color:var(--text-secondary);letter-spacing:0.05em;">Book Balance</div>
-                    <div class="font-mono" style="font-size:1rem;font-weight:700;" x-text="fmtAmt(reconSummary.book_balance)"></div>
+                    <div style="font-size:0.6875rem;text-transform:uppercase;font-weight:600;color:var(--text-secondary);letter-spacing:0.05em;">Beginning Balance</div>
+                    <div class="font-mono" style="font-size:1rem;font-weight:700;" x-text="fmtAmt(reconSummary.beginning_balance)"></div>
                 </div>
                 <div class="card" style="padding:12px;">
                     <div style="font-size:0.6875rem;text-transform:uppercase;font-weight:600;color:var(--text-secondary);letter-spacing:0.05em;">Statement Balance</div>
@@ -167,6 +168,17 @@ require_once FF_ROOT . '/includes/header.php';
                     <div style="font-size:0.6875rem;text-transform:uppercase;font-weight:600;letter-spacing:0.05em;" :style="reconSummary.is_balanced ? 'color:var(--color-success)' : 'color:var(--color-danger)'">Difference</div>
                     <div class="font-mono" style="font-size:1.25rem;font-weight:700;" :style="reconSummary.is_balanced ? 'color:var(--color-success)' : 'color:var(--color-danger)'" x-text="fmtAmt(reconSummary.difference)"></div>
                 </div>
+            </div>
+
+            <div class="text-secondary text-sm" style="margin:-6px 0 16px;">
+                Difference = Statement − (Beginning + Cleared Deposits − Cleared Withdrawals). Beginning is last month's reconciled statement balance (or the account's opening balance).
+                <span x-show="reconSummary.book_balance !== undefined">
+                    Book check: ledger <span class="font-mono" x-text="fmtAmt(reconSummary.book_balance)"></span>
+                    − deposits in transit <span class="font-mono" x-text="fmtAmt(reconSummary.outstanding_deposits)"></span>
+                    + uncleared cheques <span class="font-mono" x-text="fmtAmt(reconSummary.outstanding_checks)"></span>
+                    = <span class="font-mono" x-text="fmtAmt(reconSummary.adjusted_book_balance)"></span>
+                    <span x-show="Number(reconSummary.book_difference || 0) !== 0">(off the statement by <span class="font-mono" x-text="fmtAmt(reconSummary.book_difference)"></span> — look for a receipt or payment with no bank line)</span>.
+                </span>
             </div>
 
             <!-- Transaction Checklist -->
@@ -235,7 +247,7 @@ function reconPage() {
         history: [],
         activeRecon: null,
         reconTransactions: [],
-        reconSummary: { book_balance:'0.00', statement_ending_balance:'0.00', outstanding_deposits:'0.00', outstanding_checks:'0.00', adjusted_book_balance:'0.00', difference:'0.00', cleared_deposits:'0.00', cleared_withdrawals:'0.00', is_balanced:false },
+        reconSummary: { beginning_balance:'0.00', cleared_balance:'0.00', book_difference:'0.00', book_balance:'0.00', statement_ending_balance:'0.00', outstanding_deposits:'0.00', outstanding_checks:'0.00', adjusted_book_balance:'0.00', difference:'0.00', cleared_deposits:'0.00', cleared_withdrawals:'0.00', is_balanced:false },
         saving: false,
         historyAccountFilter: '',
         newRecon: { bank_account_id: '', statement_date: '', statement_ending_balance: '' },

@@ -138,7 +138,7 @@ class UnitProfitabilityService
      *
      * Two paths combine into the result:
      *   1. acc_journal_entry_lines WHERE jel.equipment_unit_id = $unitId
-     *      AND a.account_type = 'cost_of_revenue' → grouped by account code
+     *      AND a.account_type IN (cost_of_revenue, operating_expense) → by account code
      *   2. acc_depreciation_run_lines JOIN acc_fixed_assets
      *      WHERE fa.equipment_unit_id = $unitId — picks up depreciation
      *      booked through the run-line pipeline (which DOES post JE lines
@@ -157,7 +157,11 @@ class UnitProfitabilityService
             'total_direct'  => '0.00',
         ];
 
-        // 1. JE-line cost_of_revenue lines tagged with equipment_unit_id
+        // 1. JE lines tagged with equipment_unit_id on cost_of_revenue OR
+        //    operating_expense accounts. SOP I15: repairs (6010/6020) are
+        //    operating expenses; once a bill line carries the unit, that cost
+        //    is this unit's direct cost — and is left OUT of the overhead
+        //    pool (getOverheadPool) so it is never counted twice.
         // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
         $rows = \db_select(
             "SELECT a.code, a.name,
@@ -169,7 +173,7 @@ class UnitProfitabilityService
               WHERE jel.equipment_unit_id = ?
                 AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?
-                AND a.account_type = 'cost_of_revenue'
+                AND a.account_type IN ('cost_of_revenue', 'operating_expense')
               GROUP BY a.id, a.code, a.name",
             [$unitId, $from, $to]
         );
@@ -254,7 +258,7 @@ class UnitProfitabilityService
         };
     }
 
-    /** Sum of operating_expense debits in [$from, $to] (the overhead pool). */
+    /** Sum of operating_expense debits in [$from, $to] not tagged to a unit (the overhead pool — SOP I15). */
     public static function getOverheadPool(string $from, string $to): string
     {
         // reversed originals stay on the books (offset by their posted reversal) — AccountingService::LEDGER_STATUSES_SQL.
@@ -265,7 +269,8 @@ class UnitProfitabilityService
                JOIN acc_accounts a ON a.id = jel.account_id
               WHERE je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
                 AND je.entry_date BETWEEN ? AND ?
-                AND a.account_type = 'operating_expense'",
+                AND a.account_type = 'operating_expense'
+                AND jel.equipment_unit_id IS NULL",
             [$from, $to]
         );
         return (string) ($row['pool'] ?? '0.00');

@@ -121,22 +121,24 @@ db_transaction(function () use (
             ? bcmul($adjustmentAmount, '-1', 2)
             : $adjustmentAmount;
 
+        // SOP I11: Difference = statement − cleared. A positive adjustment
+        // means the bank holds MORE than the cleared items explain (e.g.
+        // interest) → DR Cash / CR the adjustment account; negative (e.g. a
+        // bank fee) → DR the adjustment account / CR Cash.
         $lines = [];
         if (bccomp($adjustmentAmount, '0.00', 2) > 0) {
-            // Positive adjustment: book balance too high → DR Expense, CR Cash
-            $lines = [
-                ['account_id' => $adjustmentAccountId, 'debit' => $absAdj, 'credit' => '0.00', 'description' => 'Reconciliation adjustment'],
-                ['account_id' => $cashAccountId, 'debit' => '0.00', 'credit' => $absAdj, 'description' => 'Reconciliation adjustment'],
-            ];
-        } else {
-            // Negative adjustment: book balance too low → DR Cash, CR Income/Adjustment
             $lines = [
                 ['account_id' => $cashAccountId, 'debit' => $absAdj, 'credit' => '0.00', 'description' => 'Reconciliation adjustment'],
                 ['account_id' => $adjustmentAccountId, 'debit' => '0.00', 'credit' => $absAdj, 'description' => 'Reconciliation adjustment'],
             ];
+        } else {
+            $lines = [
+                ['account_id' => $adjustmentAccountId, 'debit' => $absAdj, 'credit' => '0.00', 'description' => 'Reconciliation adjustment'],
+                ['account_id' => $cashAccountId, 'debit' => '0.00', 'credit' => $absAdj, 'description' => 'Reconciliation adjustment'],
+            ];
         }
 
-        JournalEntryService::create([
+        $adjJe = JournalEntryService::create([
             'entry_date'       => $recon['statement_date'],
             'description'      => "Bank reconciliation adjustment — {$bankAccount['name']}",
             'entry_type'       => 'adjustment',
@@ -144,6 +146,28 @@ db_transaction(function () use (
             'source_id'        => $id,
             'post_immediately' => true,
         ], $lines, $userId);
+
+        // The adjustment is a line on the statement too: record it as a
+        // cleared bank line in this reconciliation, so the account's bank
+        // register and the next month's beginning balance agree.
+        db_insert('acc_bank_transactions', [
+            'bank_account_id'   => (int) $recon['bank_account_id'],
+            'transaction_date'  => $recon['statement_date'],
+            'description'       => 'Reconciliation adjustment',
+            'amount'            => $adjustmentAmount,
+            'transaction_type'  => bccomp($adjustmentAmount, '0.00', 2) > 0 ? 'other' : 'bank_charge',
+            'source'            => 'system',
+            'status'            => 'matched',
+            'matched_type'      => 'journal_entry',
+            'matched_id'        => (int) $adjJe['id'],
+            'matched_at'        => ff_now_utc(),
+            'matched_by'        => $userId,
+            'reconciliation_id' => $id,
+            'is_cleared'        => 1,
+            'cleared_date'      => $recon['statement_date'],
+            'journal_entry_id'  => (int) $adjJe['id'],
+            'created_by'        => $userId,
+        ]);
     }
 
     // Lock all cleared transactions for this reconciliation
@@ -155,6 +179,8 @@ db_transaction(function () use (
     // Complete the reconciliation
     db_update('acc_bank_reconciliations', [
         'status'                => 'completed',
+        'beginning_balance'     => $summary['beginning_balance'],
+        'cleared_balance'       => $recon['statement_ending_balance'], // = cleared + any adjustment
         'book_balance'          => $summary['book_balance'],
         'outstanding_deposits'  => $summary['outstanding_deposits'],
         'outstanding_checks'    => $summary['outstanding_checks'],

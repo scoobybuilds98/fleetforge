@@ -37,7 +37,7 @@ Dispatcher and manager, every morning:
 
 :::callout warning Customer rules that surprise people
 - **Payment Terms sets the due date.** "Net 15" makes each new invoice due 15 days after its invoice date; "Due on receipt" the same day. Blank or unusual terms ("2% 10 Net 30") fall back to 30 days (Settings default). The matching term goes to QuickBooks on every invoice, so type terms as "Net 15", "Net 30"…
-- **There is no billing-address field on the customer forms.** The invoice PDF's "Bill To" and the QuickBooks billing address come from a stored billing address. Only imported customers have one today ([Known issues](sop:known-issues)).
+- **Billing Address** (customer form → Billing Contact) is the invoice PDF's "Bill To" and the QuickBooks invoice billing address. Leave it blank to use the main address; clear it to go back to the main address. Each invoice keeps the address it was created with.
 - **Credit Limit and Credit Hold block nothing.** Batch invoicing still bills Credit Hold customers. Suspended or Inactive customers lose portal login.
 - **Delete** appears only when the customer has no active leases. It never deletes the QuickBooks customer.
 :::
@@ -126,4 +126,5 @@ Manager or Super Admin: **Reopen Lease** → give a reason → correct it (for e
    1. On a draft invoice, **Edit Line Items** → add a **Damage** line → send it.
    2. Move the claim to **Invoiced** and pick that **Recovery Invoice**.
 4. **Written Off** closes the recovery invoice's remaining balance as bad debt: the invoice is closed, the customer's balance drops, and QuickBooks gets a credit memo. It fails with a clear message if Bad Debt Expense isn't set up. With no invoice, or a draft or paid one, only the claim status changes.
+   - The claim's **Actual Repair Cost** is for reference only. The repair reaches the books when the shop's bill is approved ({{Payables › Bills @/accounting/bills}}, linked to the work order and the unit); the claim never posts it, so it is never counted twice.
 5. Only Reported and Assessed claims can be deleted. Resolved and Written Off are final.

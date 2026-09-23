@@ -65,6 +65,14 @@ if (!$txn) {
         'fields' => ['transaction_id' => 'Transaction not found for this bank account.'],
     ]);
 }
+// SOP I11: rows mirrored from QuickBooks are QuickBooks' register, not
+// statement lines — they never take part in a reconciliation.
+if ((int) ($txn['is_readonly'] ?? 0) === 1) {
+    json_validation_error(
+        ['transaction_id' => 'This line was copied from QuickBooks and cannot be reconciled in FleetForge.'],
+        'This line was copied from QuickBooks and cannot be reconciled in FleetForge.'
+    );
+}
 if ($txn['status'] === 'excluded') {
     json_validation_error(
         ['transaction_id' => 'Cannot clear an excluded transaction.'],
@@ -75,7 +83,7 @@ if ($txn['status'] === 'excluded') {
 db_transaction(function () use ($reconId, $txnId, $isCleared, $recon) {
     db_update('acc_bank_transactions', [
         'is_cleared'        => $isCleared,
-        'cleared_date'      => $isCleared ? date('Y-m-d') : null,
+        'cleared_date'      => $isCleared ? ff_today() : null,
         'reconciliation_id' => $isCleared ? $reconId : null,
     ], 'id = ?', [$txnId]);
 
@@ -88,6 +96,8 @@ db_transaction(function () use ($reconId, $txnId, $isCleared, $recon) {
 
     // Update the reconciliation record with current totals
     db_update('acc_bank_reconciliations', [
+        'beginning_balance'     => $summary['beginning_balance'],
+        'cleared_balance'       => $summary['cleared_balance'],
         'book_balance'          => $summary['book_balance'],
         'outstanding_deposits'  => $summary['outstanding_deposits'],
         'outstanding_checks'    => $summary['outstanding_checks'],

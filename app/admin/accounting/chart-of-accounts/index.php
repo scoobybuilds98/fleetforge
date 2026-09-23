@@ -384,8 +384,12 @@ require_once FF_ROOT . '/includes/header.php';
                             <option value="liability">Liability</option>
                             <option value="equity">Equity</option>
                             <option value="revenue">Revenue</option>
-                            <option value="expense">Expense</option>
-                            <option value="cogs">COGS</option>
+                            <?php /* WHY: values must match the acc_accounts.account_type ENUM
+                                     (and create.php's $validTypes). The old 'expense'/'cogs'
+                                     values were rejected by the API, so Expense/COGS
+                                     accounts could never be created from this form. */ ?>
+                            <option value="cost_of_revenue">Cost of Revenue</option>
+                            <option value="operating_expense">Operating Expense</option>
                             <option value="other_income">Other Income</option>
                             <option value="other_expense">Other Expense</option>
                         </select>
@@ -744,8 +748,8 @@ function FF_ChartOfAccounts() {
                 liability:     'badge-amber',
                 equity:        'badge-purple',
                 revenue:       'badge-green',
-                expense:       'badge-red',
-                cogs:          'badge-red',
+                cost_of_revenue:   'badge-red',
+                operating_expense: 'badge-red',
                 other_income:  'badge-green',
                 other_expense: 'badge-red'
             };
@@ -758,8 +762,8 @@ function FF_ChartOfAccounts() {
                 liability:     'Liability',
                 equity:        'Equity',
                 revenue:       'Revenue',
-                expense:       'Expense',
-                cogs:          'COGS',
+                cost_of_revenue:   'Cost of Revenue',
+                operating_expense: 'Operating Expense',
                 other_income:  'Other Income',
                 other_expense: 'Other Expense'
             };
@@ -768,7 +772,9 @@ function FF_ChartOfAccounts() {
 
         // -- Auto-set normal balance when type changes --------------
         autoNormalBalance() {
-            const debitTypes = ['asset', 'expense', 'cogs'];
+            // WHY: keys are the real account_type ENUM values; every expense
+            // flavour (cost of revenue, operating, other) is debit-normal.
+            const debitTypes = ['asset', 'cost_of_revenue', 'operating_expense', 'other_expense'];
             this.form.normal_balance = debitTypes.includes(this.form.account_type)
                 ? 'debit'
                 : 'credit';
@@ -804,7 +810,10 @@ function FF_ChartOfAccounts() {
                 parent_id:       acct.parent_id || '',
                 normal_balance:  acct.normal_balance,
                 description:     acct.description || '',
-                is_header:       !!acct.is_header
+                is_header:       !!acct.is_header,
+                // WHY: update.php requires the updated_at the row was loaded with
+                // (optimistic-lock token); without it every edit 422s.
+                updated_at:      acct.updated_at || ''
             };
             this.editMode   = true;
             this._clearErrors();
@@ -829,10 +838,11 @@ function FF_ChartOfAccounts() {
                 this.errors.account_type = 'Please select an account type.';
                 ok = false;
             } else {
+                // WHY: mirror create.php's $validTypes (the DB ENUM) exactly.
                 const validTypes = ['asset', 'liability', 'equity', 'revenue',
-                                    'expense', 'cogs', 'other_income', 'other_expense'];
+                                    'cost_of_revenue', 'operating_expense', 'other_income', 'other_expense'];
                 if (!validTypes.includes(this.form.account_type)) {
-                    this.errors.account_type = 'Account type must be one of: asset, liability, equity, revenue, expense, cogs, other_income, other_expense.';
+                    this.errors.account_type = 'Account type must be one of: asset, liability, equity, revenue, cost_of_revenue, operating_expense, other_income, other_expense.';
                     ok = false;
                 }
             }
@@ -869,7 +879,9 @@ function FF_ChartOfAccounts() {
             };
 
             if (this.editMode) {
-                payload.id = this.form.id;
+                payload.id         = this.form.id;
+                // WHY: optimistic-lock token required by update.php.
+                payload.updated_at = this.form.updated_at;
             }
 
             try {

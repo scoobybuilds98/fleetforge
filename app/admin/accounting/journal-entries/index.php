@@ -316,10 +316,15 @@ require_once FF_ROOT . '/includes/header.php';
                                                 @click="recallEntry(je.id)"
                                                 title="Recall to draft">Recall</button>
                                     </template>
-                                    <template x-if="je.status === 'posted'">
+                                    <template x-if="je.status === 'posted' && !je.reverse_block_reason">
                                         <button class="btn btn-ghost btn-xs"
                                                 @click="reverseEntry(je.id)"
                                                 title="Reverse entry">Reverse</button>
+                                    </template>
+                                    <?php // SOP I9: automatic entries are undone from their document, not here. ?>
+                                    <template x-if="je.status === 'posted' && je.reverse_block_reason">
+                                        <span class="text-secondary" style="font-size:0.72rem;cursor:help;"
+                                              :title="je.reverse_block_reason">Automatic</span>
                                     </template>
                                     <?php endif; ?>
                                 </td>
@@ -465,10 +470,13 @@ require_once FF_ROOT . '/includes/header.php';
                         </button>
                     </template>
                     <button class="btn btn-danger btn-sm"
-                            x-show="viewEntry && viewEntry.status === 'posted'"
+                            x-show="viewEntry && viewEntry.status === 'posted' && !viewEntry.reverse_block_reason"
                             @click="reverseEntry(viewEntry.id); showViewModal = false;">
                         Reverse Entry
                     </button>
+                    <span class="text-secondary text-sm" style="max-width:360px;"
+                          x-show="viewEntry && viewEntry.status === 'posted' && viewEntry.reverse_block_reason"
+                          x-text="viewEntry ? viewEntry.reverse_block_reason : ''"></span>
                     <?php endif; ?>
                     <button class="btn btn-secondary btn-sm" @click="showViewModal = false">Close</button>
                 </div>

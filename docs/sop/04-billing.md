@@ -84,13 +84,19 @@ From {{Invoices › Credit Notes › New Credit Note @/credit_notes/create}}:
 
 FleetForge also makes credits itself: overpayments, precharge credits at close, and rental reconciliation overflow. Overpayment credits never go to QuickBooks as credit memos, because the QuickBooks payment already holds the excess.
 
+**Apply credits in FleetForge.** FleetForge sends each application to QuickBooks; one applied inside QuickBooks is not copied back (it raises a drift item). The setting is **Credit applications** under {{QuickBooks › Settings › Sync & monitoring @/quickbooks/settings}}.
+
+**Paying a credit back in cash**: on the credit note, **Refund as Cash** → amount, date, how it was paid, reference, the bank it was paid from → **Record Refund**. It posts DR 2060 Customer Credits / CR the bank and reduces the credit. It is not sent to QuickBooks: the accountant records the same refund against the credit memo there. A credit note that has been partly refunded can no longer be voided.
+
 ## Payments
 
 :::callout rule After QuickBooks go-live, customer payments are recorded in QuickBooks
 Pay now payments, portal payments and the accountant's deposits all arrive in FleetForge on their own — usually within a minute, and within 10 minutes even if QuickBooks' notification is lost. The invoice turns Paid and the ledger entry posts by itself. Record a payment in FleetForge only for money QuickBooks will never see.
 :::
 
-If you do record one here: {{Payments › Record Payment @/payments/create}} → pick the invoice → amount (or **Pay full balance**) → method → date → reference → **Record Payment**. Money over the balance becomes an Overpayment credit note after a confirm step. **Void / Remove Payment** (manager or higher) reverses it. There is no screen to re-allocate a payment to another invoice.
+If you do record one here: {{Payments › Record Payment @/payments/create}} → pick the invoice → amount (or **Pay full balance**) → method → date → reference → **Deposited to** (the bank account it went into; blank = the default for that currency) → **Record Payment**. Money over the balance becomes an Overpayment credit note after a confirm step. **Void / Remove Payment** (manager or higher) reverses it.
+
+**Money applied to the wrong invoice**: open the payment → **Move** on the allocation → pick another open invoice of the same customer → amount → **Move**. No journal entry is needed (both invoices are in the same receivable) and QuickBooks is updated. Payments that came from QuickBooks are moved in QuickBooks instead.
 
 ## Collections
 
@@ -99,9 +105,11 @@ If you do record one here: {{Payments › Record Payment @/payments/create}} →
    - **Collection Notes** — each call or email, with a follow-up date;
    - **Promise to Pay**;
    - **Dunning Letters** — 30/60/90-day and final notices.
-   - **Generate & Send** emails the customer at once, even with customer emails switched off.
+   - **Generate & Send** always makes the letter; it emails it only when customer emails are on (the master switch in {{Settings › Customer Emails @/settings?tab=customer_notifications}}) and the customer is not on the do-not-email list. The message says which happened — print and mail the letter when it was not emailed.
+   - The nightly automatic dunning letters follow the **Dunning letters** reminder in Customer Emails, which ships OFF.
 3. **Statements**: {{Receivables › Statements @/accounting/statements}} → customer → **Generate PDF**.
 4. **Automatic reminders** ({{Settings › Customer Emails @/settings?tab=customer_notifications}}): every reminder ships OFF. A reminder sends only when all three are on: the master switch, that reminder's own tick, and the dispatcher job. Use **Send me a sample** before turning one on.
-5. **Writing off a bad debt**: today the only on-screen route is a damage claim set to **Written Off** ([Daily operations](sop:daily-operations#damage-claims)). An invoice that is simply uncollectable has no write-off button yet ([Known issues](sop:known-issues)).
+5. **Writing off a bad debt**: on the invoice, **Write Off** → reason → **Write Off** (sent, overdue or partly paid invoices; needs journal-entry permission). It posts DR Bad Debt Expense / CR AR, closes the invoice and sends QuickBooks a credit memo. Don't use a credit note — that reduces revenue instead. Damage-claim invoices are written off from the claim ([Daily operations](sop:daily-operations#damage-claims)).
+6. **Money received after a write-off**: on the written-off invoice, **Record Recovery** → amount, date, bank → it posts DR the bank / CR Bad Debt Expense and the invoice stays written off. The entry is sent to QuickBooks as a journal entry, so don't record the same money there again.
 
-Jobs that run on their own: mark overdue invoices; apply late fees (no rules exist yet, so it does nothing); collections escalation (15 days overdue = watch, 45 = collections, internal only); promise-to-pay checks.
+Jobs that run on their own: mark overdue invoices; apply late fees — only once a rule exists on {{Settings › Late Fees @/settings/late_fees}} (a global rule, plus per-customer overrides or exemptions; each overdue invoice gets one late-fee invoice, as a draft); collections escalation (15 days overdue = watch, 45 = collections, internal only); promise-to-pay checks.

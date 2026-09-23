@@ -140,6 +140,22 @@ try {
         }
     }
 
+    // ── Webhook replay (SOP I25) ──────────────────────────────
+    // Every 15 minutes: re-process QuickBooks webhook deliveries that
+    // errored or never finished (process died after answering Intuit),
+    // within quickbooks.webhook.replay_window_hours. Never fatal.
+    if (!$dryRun) {
+        try {
+            $replay = \FleetForge\QboPushers\WebhookReplay::replayDue();
+            if ($replay !== null && $replay['replayed'] > 0) {
+                echo "[{$startedAt}] Webhook replay: {$replay['replayed']} replayed, {$replay['recovered']} recovered, {$replay['still_failing']} still failing\n";
+            }
+        } catch (\Throwable $rpErr) {
+            error_log('cron/qbo_sync_worker: webhook replay failed — ' . $rpErr->getMessage());
+            \FleetForge\Observability\Sentry::captureException($rpErr);
+        }
+    }
+
     // ── Pre-resolve notification audience (super_admin + accountant) ──
     // Per S-QBO-1 precedent (cron/qbo_token_refresh.php) we pass
     // $specificUserIds explicitly because user_permissions has no

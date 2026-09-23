@@ -67,12 +67,26 @@ class YearEndService
             array_map(fn($r) => !in_array($r['status'], ['open', 'closed', 'locked'], true) ? $r['name'] : null, $periodRows),
             fn($n) => $n !== null
         ));
+        // SOP I6: the closing entry posts on Dec 31. A CLOSED December is fine
+        // (the close posts into it and then locks the year); a LOCKED
+        // December can never take it, so say so here rather than letting
+        // the close fail after an all-green preflight. (An already-closed
+        // year is reported by already_closed instead.)
+        $decRow = \db_row("SELECT status FROM acc_periods WHERE `year` = ? AND `month` = 12", [$fiscalYear]);
+        $activeClosure = \db_row(
+            "SELECT id FROM acc_year_end_closures WHERE fiscal_year = ? AND status = 'closed' LIMIT 1",
+            [$fiscalYear]
+        );
+        $decemberLocked = $decRow && $decRow['status'] === 'locked' && !$activeClosure;
+
         $periodsCheck = [
-            'pass'   => $periodCount === 12 && empty($periodNamesNonCompliant),
+            'pass'   => $periodCount === 12 && empty($periodNamesNonCompliant) && !$decemberLocked,
             'detail' => $periodCount === 12
-                ? (empty($periodNamesNonCompliant)
-                    ? 'All 12 periods present.'
-                    : 'Non-compliant period statuses: ' . implode(', ', $periodNamesNonCompliant))
+                ? ($decemberLocked
+                    ? "December {$fiscalYear} is locked, so the closing entry cannot post. A Super Admin must unlock it on Accounting → Periods."
+                    : (empty($periodNamesNonCompliant)
+                        ? 'All 12 periods present.'
+                        : 'Non-compliant period statuses: ' . implode(', ', $periodNamesNonCompliant)))
                 : "Only {$periodCount}/12 periods found.",
             'period_count' => $periodCount,
         ];
@@ -324,14 +338,19 @@ class YearEndService
                         );
                     }
 
+                    // allow_closed_period (SOP I6): December is normally
+                    // closed before the year-end close runs; the closing
+                    // entry still belongs on Dec 31. A LOCKED December is
+                    // still refused (preflight check periods_not_locked).
                     $closingJe = JournalEntryService::create([
-                        'entry_date'       => $yearEnd,
-                        'description'      => "Year-End Close — Fiscal Year {$fiscalYear}",
-                        'entry_type'       => 'year_end',
-                        'reference'        => "YE-{$fiscalYear}",
-                        'source_type'      => 'year_end',
-                        'currency'         => 'CAD',
-                        'post_immediately' => true,
+                        'entry_date'          => $yearEnd,
+                        'description'         => "Year-End Close — Fiscal Year {$fiscalYear}",
+                        'entry_type'          => 'year_end',
+                        'reference'           => "YE-{$fiscalYear}",
+                        'source_type'         => 'year_end',
+                        'currency'            => 'CAD',
+                        'post_immediately'    => true,
+                        'allow_closed_period' => true,
                     ], $lines, $userId);
 
                     $closingJeId = (int) $closingJe['id'];
@@ -889,23 +908,29 @@ HTML;
         }
 
         return \db_transaction(function () use ($row, $userId, $reason, $fiscalYear) {
-            $reversalJe = null;
-            if (!empty($row['closing_je_id'])) {
-                $reversalJe = JournalEntryService::reverse(
-                    (int) $row['closing_je_id'],
-                    date('Y-m-d'),
-                    $userId
-                );
-            }
-
             // Unlock periods back to 'closed' (not 'open' — they should not be editable
-            // until the operator deliberately re-opens them).
+            // until the operator deliberately re-opens them). FIRST, so the
+            // Dec-31 reversal below lands in a closed — not locked — month.
             \db_execute(
                 "UPDATE acc_periods
                     SET status = 'closed', locked_by = NULL, locked_at = NULL
                   WHERE `year` = ? AND status = 'locked'",
                 [$fiscalYear]
             );
+
+            $reversalJe = null;
+            if (!empty($row['closing_je_id'])) {
+                // SOP I6: undo the closing entry on the same Dec 31 it was
+                // posted on — dating it today dropped last year's closing
+                // reversal into THIS year's P&L. The periods are about to go
+                // back to 'closed', which the year_end allowance accepts.
+                $reversalJe = JournalEntryService::reverse(
+                    (int) $row['closing_je_id'],
+                    sprintf('%04d-12-31', $fiscalYear),
+                    $userId,
+                    true
+                );
+            }
 
             \db_update(
                 'acc_year_end_closures',

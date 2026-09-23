@@ -725,6 +725,11 @@ foreach ($tabPermMap as $tab => $perm) {
             <?= heroicon('paper-airplane', 'btn-icon') ?>
             Bulk Email
         </a>
+        <?php /* I19: standalone late-fee rules screen (app/admin/settings/late_fees.php) */ ?>
+        <a href="<?= base_url('settings/late_fees') ?>" class="btn btn-secondary btn-sm">
+            <?= heroicon('receipt-percent', 'btn-icon') ?>
+            Late Fees
+        </a>
         <?php if (!$canEdit): ?>
         <span class="badge badge-neutral">View Only</span>
         <?php endif; ?>
@@ -2037,6 +2042,9 @@ foreach ($cronJobs as $cronName => $cronMeta) {
                 </div>
                 <?php if (!empty($cronMeta['description'])): ?>
                 <p class="text-muted" style="font-size:0.72rem;margin:2px 0 0 22px;"><?= e($cronMeta['description']) ?></p>
+                <?php endif; ?>
+                <?php if ($cronName === 'late_fee_apply'): /* I19: the job charges nothing until a rule exists */ ?>
+                <p style="font-size:0.72rem;margin:2px 0 0 22px;"><a href="<?= base_url('settings/late_fees') ?>">Set up late fee rules &rarr;</a></p>
                 <?php endif; ?>
             </div>
             <?php endforeach; ?>

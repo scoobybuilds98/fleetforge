@@ -39,6 +39,14 @@ $outstandingInvoices = db_select(
     []
 );
 
+// SOP I10: the bank accounts money can be deposited to. The payment's ledger
+// entry debits the chosen account's GL account; blank = the currency's
+// default bank (or the Settings cash account when none is set up).
+$depositBanks = db_select(
+    "SELECT id, name, currency, is_default FROM acc_bank_accounts WHERE is_active = 1 ORDER BY is_default DESC, name",
+    []
+);
+
 // If an invoice_id was passed in the query string (coming from invoice show page), pre-select it
 $preselectedInvoiceId = clean_int($_GET['invoice_id'] ?? null);
 
@@ -247,8 +255,20 @@ require_once FF_ROOT . '/includes/header.php';
                         <input type="text" class="form-input font-mono"
                                x-model="form.check_number" maxlength="50">
                     </div>
+                    <?php if ($depositBanks): ?>
+                    <div class="form-group">
+                        <label class="form-label">Deposited to</label>
+                        <select class="form-input" x-model="form.deposit_bank_account_id">
+                            <option value="">Default account for this currency</option>
+                            <template x-for="b in depositBanks.filter(b => b.currency === form.currency)" :key="b.id">
+                                <option :value="b.id" x-text="b.name + (Number(b.is_default) ? ' (default)' : '')"></option>
+                            </template>
+                        </select>
+                        <div class="form-hint text-secondary text-sm">The FleetForge bank account the money went into. Its ledger account is debited.</div>
+                    </div>
+                    <?php endif; ?>
                     <div class="form-group" x-show="['check','ach','wire'].includes(form.payment_method)">
-                        <label class="form-label">Bank Name</label>
+                        <label class="form-label">Customer's Bank</label>
                         <input type="text" class="form-input"
                                x-model="form.bank_name" maxlength="100">
                     </div>
@@ -396,11 +416,13 @@ function FF_CreatePayment() {
             payment_date:    FF_localDate(),
             reference_number: '',
             bank_name:       '',
+            deposit_bank_account_id: '',
             check_number:    '',
             card_last_four:  '',
             notes:           '',
             internal_notes:  '',
         },
+        depositBanks: <?= json_encode($depositBanks, JSON_HEX_TAG) ?>,
         selectedInvoice: <?php
             $pre = $preselectedInvoiceId
                 ? array_filter($outstandingInvoices, fn($i) => $i['id'] == $preselectedInvoiceId)
@@ -575,6 +597,7 @@ function FF_CreatePayment() {
                 payment_date:    this.form.payment_date,
                 reference_number: this.form.reference_number || null,
                 bank_name:       this.form.bank_name || null,
+                deposit_bank_account_id: this.form.deposit_bank_account_id ? parseInt(this.form.deposit_bank_account_id, 10) : null,
                 check_number:    this.form.check_number || null,
                 card_last_four:  this.form.card_last_four || null,
                 notes:           this.form.notes || null,

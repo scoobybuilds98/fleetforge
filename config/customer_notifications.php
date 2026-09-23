@@ -43,6 +43,7 @@ declare(strict_types=1);
  * @see     lib/Notifications/CustomerReminders.php  (engine + gates)
  * @see     cron/customer_reminders.php              (scheduled senders)
  * @see     cron/compliance_alerts.php               (compliance sender)
+ * @see     cron/notification_digest.php             (dunning sender, 4c)
  * @see     app/admin/settings/customer_notifications.php (UI)
  */
 
@@ -132,6 +133,33 @@ return [
         'entity'          => 'customer',
         'template_slug'   => 'customer_statement',
         'handler'         => 'customer_reminders',
+    ],
+
+    // I22: dunning letters used to be emailed unconditionally — by the nightly
+    // digest (cron/notification_digest.php run_dunning_letters) AND by the
+    // Collections "Generate & Send" button — bypassing the master switch and
+    // the do-not-email list. They now go through
+    // CustomerReminders::mayEmailCustomer() + deliver(). Shipping this type
+    // OFF (policy: every customer email ships OFF) means the AUTOMATIC
+    // letters stop until an operator turns this on; the manual button ignores
+    // this toggle but still honours the master switch + do-not-email list.
+    // The stage schedule (30/60/90 days, one per stage per 30 days) is fixed
+    // in the digest, so the UI shows `fixed_schedule` instead of cadence
+    // inputs; the defaults below only describe that schedule.
+    'dunning' => [
+        'label'           => 'Dunning letters',
+        'category'        => 'Billing',
+        'description'     => 'Emails a formal overdue-account letter (with the list of overdue invoices) when a customer is 30, 60 and 90+ days overdue. The Collections page\'s manual "Generate & Send" ignores this switch but still honours the master switch and the do-not-email list.',
+        'timing'          => 'after',
+        'default_enabled' => '0',
+        'default_offset_days' => 30,       // first letter at 30 days overdue
+        'default_repeat_days' => 30,       // next stage 30 days later
+        'default_max_count'   => 3,        // reminder_30 → reminder_60 → warning_90
+        'default_channels'    => ['email'],
+        'fixed_schedule'  => 'Letters go out with the morning digest at 30, 60 and 90 days overdue — at most one letter per stage every 30 days. Email only; the subject follows the letter stage.',
+        'dedup_type'      => 'customer_dunning_letter', // notification_log type; stage dedup itself reads acc_dunning_letters
+        'entity'          => 'customer',
+        'handler'         => 'notification_digest',     // sent by cron/notification_digest.php (4c)
     ],
 
     // =====================================================================

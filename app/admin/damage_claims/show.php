@@ -532,6 +532,8 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="edit_actual_repair_cost">Actual Repair Cost</label>
                         <input type="number" min="0" id="edit_actual_repair_cost" name="actual_repair_cost" class="form-control" step="0.01" x-model="editForm.actual_repair_cost">
                         <div class="field-error" data-error-for="actual_repair_cost"></div>
+                        <?php // SOP I14 (by design): the claim records the figure; the ledger gets the cost from the shop's bill. ?>
+                        <div class="form-hint text-secondary text-sm">For reference only — the repair cost reaches the books when the repair shop's bill is approved (Payables → Bills, linked to the work order). Posting it here too would count it twice.</div>
                     </div>
                     <div class="form-group">
                         <label class="form-label" for="edit_customer_liable_amount">Liable Amount ($)</label>

@@ -37,6 +37,12 @@ $bankAccounts = db_select(
     "SELECT id, name FROM acc_bank_accounts WHERE is_active = 1 ORDER BY name",
     []
 );
+// SOP I15: the trailer/truck a bill's cost belongs to — tags the bill's
+// ledger lines so the Per-Unit P&L shows it as a direct cost.
+$billUnits = db_select(
+    "SELECT id, unit_number FROM equipment_units WHERE deleted_at IS NULL ORDER BY unit_number",
+    []
+);
 
 $canCreate = can('accounts_payable', 'create');
 $canEdit   = can('accounts_payable', 'edit');
@@ -232,6 +238,16 @@ require_once FF_ROOT . '/includes/header.php';
                             </template>
                         </select>
                         <div class="field-error" x-show="saveErrors.work_order_id" x-cloak x-text="saveErrors.work_order_id"></div>
+                    </div>
+                    <div>
+                        <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Unit <span style="font-weight:400;">(optional — trailer/truck)</span></label>
+                        <select x-model="form.equipment_unit_id" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                            <option value="">Not for one unit (or the work order's unit)</option>
+                            <?php foreach ($billUnits as $u): ?>
+                            <option value="<?= (int) $u['id'] ?>"><?= e($u['unit_number']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="text-xs text-secondary" style="margin-top:2px;">Counts this bill as that unit's cost on the Per-Unit P&amp;L.</div>
                     </div>
                     <div>
                         <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Notes</label>
@@ -688,7 +704,7 @@ function billsPage() {
         openCreate() {
             this.form = {
                 id: null, vendor_id: '', bill_date: FF_localDate(),
-                due_date: '', vendor_bill_number: '', work_order_id: '', notes: '',
+                due_date: '', vendor_bill_number: '', work_order_id: '', equipment_unit_id: '', notes: '',
                 lines: [this.newLine()],
             };
             this.vendorWorkOrders = [];
@@ -778,6 +794,7 @@ function billsPage() {
                 fd.append('due_date', this.form.due_date);
                 fd.append('vendor_bill_number', this.form.vendor_bill_number || '');
                 fd.append('work_order_id', this.form.work_order_id || '');
+                fd.append('equipment_unit_id', this.form.equipment_unit_id || ''); // SOP I15
                 fd.append('notes', this.form.notes || '');
                 fd.append('auto_approve', autoApprove ? '1' : '0');
                 fd.append('lines', JSON.stringify(this.form.lines));

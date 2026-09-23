@@ -40,8 +40,10 @@ $payment = db_row(
         p.notes, p.internal_notes,
         p.recorded_by, ru.name AS recorded_by_name,
         p.verified_by, vu.name AS verified_by_name, p.verified_at,
-        p.created_at, p.updated_at
+        p.created_at, p.updated_at,
+        p.origin, p.deposit_bank_account_id, dba.name AS deposit_bank_name
      FROM payments p
+     LEFT JOIN acc_bank_accounts dba ON dba.id = p.deposit_bank_account_id
      LEFT JOIN customers c ON c.id = p.customer_id AND c.deleted_at IS NULL
      LEFT JOIN users ru ON ru.id = p.recorded_by
      LEFT JOIN users vu ON vu.id = p.verified_by
@@ -266,9 +268,13 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                 <?php endif; ?>
 
                 <?php if ($payment['bank_name']): ?>
-                    <dt>Bank</dt>
+                    <dt>Customer's Bank</dt>
                     <dd><?= e($payment['bank_name']) ?></dd>
                 <?php endif; ?>
+
+                <?php // SOP I10: the FleetForge bank account the ledger entry debited. ?>
+                <dt>Deposited to</dt>
+                <dd><?= $payment['deposit_bank_name'] ? e($payment['deposit_bank_name']) : '<span class="text-secondary">Default cash account (Accounting settings)</span>' ?></dd>
 
                 <?php if ($payment['card_last_four']): ?>
                     <dt>Card Last 4</dt>
@@ -380,7 +386,15 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
 <!-- ============================================================
      Allocation table
      ============================================================ -->
-<div class="card" style="margin-bottom:24px;">
+<?php
+// SOP I17: an allocation can be moved to another open invoice of the same
+// customer (api/v1/payments/reallocate.php). Not for QuickBooks-owned
+// payments (re-applied in QuickBooks) or void/refunded ones.
+$canMoveAlloc = can('payments', 'edit')
+    && !in_array($payment['origin'] ?? 'ff_native', ['qbo_payments_webhook', 'qbo_other'], true)
+    && !in_array($payment['status'] ?? '', ['void', 'refunded', 'failed', 'returned'], true);
+?>
+<div class="card" style="margin-bottom:24px;" x-data="FF_PaymentMove()">
     <div class="card-header">
         <h3 class="card-title">Invoice Allocations</h3>
         <span class="badge badge-neutral"><?= count($allocations) ?> allocation<?= count($allocations) !== 1 ? 's' : '' ?></span>
@@ -403,6 +417,7 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                         <th>Invoice Status</th>
                         <th>Type</th>
                         <th>Allocated</th>
+                        <?php if ($canMoveAlloc): ?><th></th><?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -442,13 +457,105 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
                             <td class="font-mono" style="font-size:0.8rem; color:var(--text-muted);">
                                 <?= format_datetime($alloc['created_at']) ?>
                             </td>
+                            <?php if ($canMoveAlloc): ?>
+                            <td>
+                                <?php if (!in_array($alloc['invoice_status'], ['void', 'written_off'], true)): ?>
+                                <button class="btn btn-secondary btn-xs"
+                                        @click="openMove(<?= (int) $alloc['id'] ?>, <?= e(json_encode($alloc['invoice_number'])) ?>, <?= e(json_encode((string) $alloc['amount'])) ?>)">Move</button>
+                                <?php endif; ?>
+                            </td>
+                            <?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
         <?php endif; ?>
     </div>
+
+    <?php if ($canMoveAlloc): ?>
+    <template x-if="moveAllocId">
+        <div class="modal-backdrop" @click.self="moveAllocId = null">
+            <div class="modal modal-sm">
+                <div class="modal-header">
+                    <h3 class="modal-title">Move payment to another invoice</h3>
+                    <button class="modal-close-btn" aria-label="Close" @click="moveAllocId = null">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-sm text-secondary" style="margin-bottom:12px;">
+                        Moves money from <strong x-text="moveFrom"></strong> to another open invoice of this customer.
+                        No journal entry: both invoices are in the same receivable. QuickBooks is updated.
+                    </p>
+                    <label class="form-label">To invoice</label>
+                    <?php
+                    $pickerName   = 'movePicker';
+                    $pickerConfig = [
+                        'endpoint'    => '/api/v1/invoices/index.php',
+                        'searchParam' => 'q',
+                        'resultKey'   => 'items',
+                        'perPage'     => 15,
+                        'extraParams' => 'customer_id=' . (int) $payment['customer_id']
+                                       . '&statuses=sent,partially_paid,overdue&sort=due_date&dir=ASC',
+                        'placeholder' => 'Search this customer’s open invoices…',
+                        'mapResult'   => "r => ({ id: r.id, label: r.invoice_number, sublabel: [r.currency + ' ' + Number(r.balance_due || 0).toFixed(2) + ' due', r.due_date ? ('due ' + r.due_date) : ''].filter(Boolean).join(' · '), raw: r })",
+                    ];
+                    $pickerOnPicked  = 'moveTarget = $event.detail.raw';
+                    $pickerOnCleared = 'moveTarget = null';
+                    require FF_ROOT . '/includes/partials/record-picker.php';
+                    ?>
+                    <label class="form-label" style="margin-top:10px;">Amount</label>
+                    <input type="text" class="form-input font-mono" x-model="moveAmount">
+                    <p x-show="moveError" x-text="moveError" style="color:var(--color-danger); margin-top:8px;"></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" @click="moveAllocId = null">Cancel</button>
+                    <button class="btn btn-primary btn-sm" @click="submitMove()" :disabled="moving || !moveTarget">
+                        <span x-text="moving ? 'Moving…' : 'Move'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+    <?php endif; ?>
 </div>
+
+<script>
+// SOP I17: move an allocation to another invoice (api/v1/payments/reallocate.php).
+function FF_PaymentMove() {
+    return {
+        moveAllocId: null,
+        moveFrom:    '',
+        moveAmount:  '',
+        moveTarget:  null,
+        moving:      false,
+        moveError:   '',
+        openMove(allocId, invoiceNumber, amount) {
+            this.moveAllocId = allocId;
+            this.moveFrom    = invoiceNumber;
+            this.moveAmount  = amount;
+            this.moveTarget  = null;
+            this.moveError   = '';
+        },
+        async submitMove() {
+            if (!this.moveTarget) return;
+            this.moving = true;
+            this.moveError = '';
+            const r = await FF_Api.post('<?= base_url('api/v1/payments/reallocate.php') ?>', {
+                allocation_id: this.moveAllocId,
+                target_invoice_id: this.moveTarget.id,
+                amount: String(this.moveAmount || '')
+            });
+            this.moving = false;
+            if (r.success) {
+                FF_Toast.success('Moved to ' + r.data.to_invoice.number + '.');
+                setTimeout(() => location.reload(), 800);
+            } else {
+                const f = (r.error && r.error.fields) || {};
+                this.moveError = Object.values(f)[0] || (r.error && r.error.message) || 'Could not move the payment.';
+            }
+        },
+    };
+}
+</script>
 
 <!-- ============================================================
      Action buttons

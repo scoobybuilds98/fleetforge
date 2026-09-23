@@ -126,6 +126,12 @@ class JournalEntryPusher
         'damage_recovery',
         'damage_repair',
         'damage_writeoff',
+        // S-SOP-KNOWN-ISSUES: a bank opening balance (I8) is already in
+        // QuickBooks' bank register; a credit-note cash refund (I18) is a
+        // QuickBooks CreditMemo matter the accountant records there (the
+        // refund screen says so) — a JE would double both.
+        'bank_opening_balance',
+        'credit_note_refund',
     ];
 
     /**
@@ -890,7 +896,7 @@ class JournalEntryPusher
         }
 
         $remit = db_row(
-            "SELECT r.id, r.amount, r.payment_method, r.remittance_date,
+            "SELECT r.id, r.amount, r.direction, r.payment_method, r.remittance_date,
                     p.tax_type, p.period_start, p.period_end
                FROM acc_tax_remittances r
                LEFT JOIN acc_tax_filing_periods p ON p.id = r.filing_period_id
@@ -913,6 +919,9 @@ class JournalEntryPusher
         }
         $amount = number_format((float) ($remit['amount'] ?? 0), 2, '.', '');
         $parts[] = "amount=\${$amount}";
+        if (($remit['direction'] ?? 'payment') === 'refund') {
+            $parts[] = 'refund'; // SOP I4: a GST/HST refund received, not a payment
+        }
         $method = trim((string) ($remit['payment_method'] ?? ''));
         if ($method !== '') {
             $parts[] = "method={$method}";

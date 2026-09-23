@@ -175,7 +175,8 @@ require_once FF_ROOT . '/includes/header.php';
                         </button>
                         <?php endif; ?>
 
-                        <?php if (can('period_management', 'delete')): ?>
+                        <?php // lock.php / reopen.php are require_role('super_admin') — gate the buttons the same way. ?>
+                        <?php if (is_super_admin()): ?>
                         <button class="btn btn-danger btn-xs"
                                 x-show="period.status === 'closed'"
                                 @click="lockPeriod(period)"
@@ -183,10 +184,18 @@ require_once FF_ROOT . '/includes/header.php';
                             <span x-show="!period._acting">Lock Period</span>
                             <span x-show="period._acting">Locking...</span>
                         </button>
+                        <button class="btn btn-secondary btn-xs"
+                                x-show="period.status === 'closed'"
+                                @click="stepBack(period, 'reopen')"
+                                :disabled="period._acting">Reopen</button>
+                        <button class="btn btn-secondary btn-xs"
+                                x-show="period.status === 'locked'"
+                                @click="stepBack(period, 'unlock')"
+                                :disabled="period._acting">Unlock</button>
                         <?php endif; ?>
 
                         <span x-show="period.status === 'locked'" class="text-secondary text-sm" style="display:flex;align-items:center;">
-                            Permanently sealed
+                            Sealed
                         </span>
                     </div>
 
@@ -272,11 +281,46 @@ function FF_Periods() {
             });
         },
 
+        // ── Reopen (closed → open) / Unlock (locked → closed) ──
+        // SOP I6. Super Admin only; a reason is required and audit-logged.
+        // A year with an active year-end close is refused by the API.
+        async stepBack(period, action) {
+            const verb = action === 'reopen' ? 'Reopen' : 'Unlock';
+            const reason = await FF_Confirm.askText({
+                title: verb + ' ' + period.name,
+                message: action === 'reopen'
+                    ? 'Reopening lets entries post into ' + period.name + ' again. Close it again when the correction is done. Why is it being reopened?'
+                    : 'Unlocking returns ' + period.name + ' to Closed. Why is it being unlocked?',
+                confirmLabel: verb,
+                placeholder: 'Reason (required)',
+            });
+            if (reason === null) return;
+            if (reason.trim().length < 5) {
+                FF_Toast.error('Please give a reason (at least 5 characters).');
+                return;
+            }
+            period._acting = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/accounting/periods/reopen') ?>', {
+                    id: period.id, action: action, reason: reason.trim()
+                });
+                if (r.success) {
+                    FF_Toast.success(period.name + (action === 'reopen' ? ' reopened.' : ' unlocked.'));
+                    await this.load();
+                } else {
+                    FF_Toast.error(r.error?.message || ('Failed to ' + action + ' period.'));
+                }
+            } catch (e) {
+                FF_Toast.error('Network error. Please try again.');
+            }
+            period._acting = false;
+        },
+
         // ── Lock period action ─────────────────────────────────
         lockPeriod(period) {
             FF_Confirm.show({
                 title: 'Lock Period',
-                message: 'Lock ' + period.name + '? This is permanent and cannot be undone. The period will be permanently sealed.',
+                message: 'Lock ' + period.name + '? A locked period takes no entries at all, not even a year-end close. Only a Super Admin can unlock it.',
                 confirmLabel: 'Lock Period',
                 dangerMode: true,
                 onConfirm: async () => {

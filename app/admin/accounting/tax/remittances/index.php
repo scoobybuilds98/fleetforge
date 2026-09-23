@@ -53,7 +53,7 @@ $years = db_select(
 
 // Main list — newest first, with period + JE + filer joins.
 $rows = db_select(
-    "SELECT r.id, r.remittance_date, r.amount, r.payment_method,
+    "SELECT r.id, r.remittance_date, r.amount, r.direction, r.payment_method,
             r.reference_number, r.notes, r.created_at,
             p.id AS period_id, p.tax_type, p.period_start, p.period_end,
             p.status AS period_status,
@@ -73,7 +73,10 @@ $rows = db_select(
 // Summary tile — total $ remitted for the visible result set.
 $totalAmount = '0.00';
 foreach ($rows as $r) {
-    $totalAmount = bcadd($totalAmount, $r['amount'] ?? '0', 2);
+    // SOP I4: a GST/HST refund received nets against payments made.
+    $totalAmount = ($r['direction'] ?? 'payment') === 'refund'
+        ? bcsub($totalAmount, (string) ($r['amount'] ?? '0'), 2)
+        : bcadd($totalAmount, (string) ($r['amount'] ?? '0'), 2);
 }
 
 $formatTaxType = static function (string $t): string {
@@ -200,7 +203,7 @@ require_once FF_ROOT . '/includes/header.php';
                             </span>
                         </td>
                         <td class="text-sm"><?= e($r['remittance_date']) ?></td>
-                        <td class="text-right font-mono">$<?= number_format((float) $r['amount'], 2) ?></td>
+                        <td class="text-right font-mono"><?= ($r['direction'] ?? 'payment') === 'refund' ? '<span class="badge badge-info" title="Refund received from the CRA">Refund</span> −' : '' ?>$<?= number_format((float) $r['amount'], 2) ?></td>
                         <td class="text-sm"><?= e($formatMethod($r['payment_method'])) ?></td>
                         <td class="text-sm">
                             <?php if ($r['je_number']): ?>

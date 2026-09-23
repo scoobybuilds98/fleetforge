@@ -60,7 +60,7 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
 
     $invoice = db_row(
         "SELECT id, invoice_number, customer_id, balance_due, status, company_name_snapshot,
-                total_amount, amount_paid, credits_applied
+                total_amount, amount_paid, credits_applied, currency
          FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE",
         [$invoiceId]
     );
@@ -86,6 +86,16 @@ $result = db_transaction(function () use ($depositId, $invoiceId) {
         json_validation_error(
             ['invoice_id' => 'Deposit and invoice must belong to the same customer.'],
             'Deposit and invoice must belong to the same customer.'
+        );
+    }
+
+    // Same currency only (SOP I16 follow-on): the entry moves the deposit's
+    // amount out of AR unconverted; a CAD deposit on a USD invoice (or the
+    // reverse) would relieve AR by the wrong CAD figure.
+    if (($deposit['currency'] ?? 'CAD') !== ($invoice['currency'] ?? 'CAD')) {
+        json_validation_error(
+            ['invoice_id' => "The deposit is in {$deposit['currency']}; the invoice is in {$invoice['currency']}."],
+            'Deposit and invoice must be in the same currency.'
         );
     }
 

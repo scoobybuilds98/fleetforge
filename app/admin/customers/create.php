@@ -287,6 +287,18 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.billing_phone" maxlength="50">
                     </div>
 
+                    <!-- I12: without this field billing_address stayed NULL for every
+                         customer created in-app, so invoice PDF "Bill To" and the
+                         QuickBooks invoice BillAddr came out blank. Full-width row
+                         because it's multi-line. -->
+                    <div class="form-group" style="grid-column:1 / -1;">
+                        <label class="form-label" for="billing_address">Billing Address</label>
+                        <textarea id="billing_address" name="billing_address" class="form-control" rows="3"
+                                  x-model="form.billing_address" maxlength="5000"
+                                  placeholder="123 Main Street&#10;Surrey BC V3W 1A1&#10;Canada"></textarea>
+                        <div class="form-hint">Printed as "Bill To" on invoices. Leave blank to use the main address.</div>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label" for="invoice_email">Invoice Email</label>
                         <input type="email" id="invoice_email" name="invoice_email" class="form-control"
@@ -488,6 +500,7 @@ function FF_CustomerForm() {
             billing_contact_name:  '',
             billing_email:         '',
             billing_phone:         '',
+            billing_address:       '',   // I12: multi-line Bill To for invoices / QBO
             invoice_email:         '',
             invoice_delivery:      'email',
             po_required:           false,

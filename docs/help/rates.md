@@ -1,5 +1,5 @@
 ---
-description: Set standard rental pricing with rate cards and per-customer rate overrides — the rates that pre-fill new leases.
+description: Set rental pricing with rate cards — general cards for everyone and customer rate cards for negotiated pricing — the rates that pre-fill new leases.
 ---
 
 # Rates
@@ -8,16 +8,17 @@ Set the daily, weekly, monthly, and mileage rates FleetForge suggests when you c
 
 ## Reading the dashboard
 
-The Rates page shows three KPI tiles at the top:
+All pricing lives on **rate cards**. A card is either **general** (applies to every customer) or a **customer rate card** (applies to one customer only). The Rates page shows four tiles at the top — each counts rate lines (one per equipment type on a card):
 
-- **Rate Cards** — total rate cards in the system.
-- **Active Today** — rate cards whose effective date range covers today.
-- **Customer Overrides** — total custom rates set across all customers.
+- **Rate Cards** — total rate lines across all cards.
+- **Active Today** — lines on cards whose effective date range covers today.
+- **Customer Cards** — lines on customer rate cards. Click to jump to the customer section.
+- **Global Cards** — lines on general cards. Click to jump to the global section.
 
-Below the tiles are two tabs:
+Below the tiles:
 
-- **Rate Cards** — your reusable, standard price lists.
-- **Customer Overrides** — every customer-specific rate, listed in one place (read-only here; edit them on the customer's own page).
+- **Customer Rate Cards** — one tile per customer that has its own card(s). Use the search box to find a customer; click a tile to see that customer's rates, with **Edit** / **Delete** on each and **+ New Card** to add another.
+- **Global Rate Cards** — your general price lists. This section is hidden by default; flip its toggle to show it.
 
 ---
 
@@ -26,18 +27,19 @@ Below the tiles are two tabs:
 1. Click **+ New Rate Card** (top right of the Rates page).
 
 2. Fill in the **Rate Card Details** section:
-   - **Name** (required) — e.g. *Standard 2025 Rates*.
+   - **Card Name** (required) — e.g. *Standard 2025 Rates*.
+   - **Customer** (optional) — leave blank for a general card that applies to everyone, or pick a customer to make this that customer's own rate card.
    - **Effective From** (required) — the date this card starts applying.
    - **Effective To** — leave blank for open-ended (no expiry).
    - **Set as Default Rate Card** — tick this to make it the fallback card. A warning reminds you that setting a new default removes default status from the existing default card.
    - **Description** — optional notes.
 
-3. In the **Rate Items** section, click **+ Add Equipment Type** for each equipment type you want to price. One row starts open by default.
+3. In the **Rate Items** section, click **+ Add Rate** for each equipment type you want to price.
 
-4. For each row:
-   - Pick the **Equipment Type** from the dropdown (the list is your active equipment templates). Selecting one **pre-fills the rate columns from that template's default rates** — you can then edit any value.
-   - Enter **Daily ($)**, **Weekly ($)**, **Monthly ($)**, and **Mileage Rate** as needed. Any rate left blank is simply not set.
-   - Choose the **Unit** (*km* or *miles*) and **Currency** (*CAD* or *USD*).
+4. For each item:
+   - Pick the **Equipment Type** category from the dropdown (e.g. Dry Van, Reefer) and the **Currency** (*CAD* or *USD*).
+   - Optionally narrow it with **Specific Unit Type** — search for one Equipment Type (from **Equipment → Equipment Types**). Leave it blank and the rate applies to every unit in that category.
+   - Enter **Daily Rate**, **Weekly Rate**, **Monthly Rate**, and **Mileage Rate** (choose */ km* or */ mi*) as needed, plus **Hourly (reefer) $/hr**, **GPS $/day**, and **Min days** if they apply. Any rate left blank is simply not set.
 
 5. Click **Create Rate Card**.
 
@@ -49,17 +51,17 @@ Below the tiles are two tabs:
 
 ## Editing a rate card
 
-1. On the **Rate Cards** tab, click the card's **Name** (or its **Edit** button).
+1. On the Rates page, click **Edit** on the card (for a customer card, click the customer's tile first; for a general card, show **Global Rate Cards**).
 
 2. To change the header, click **Edit** in the **Card Details** panel, adjust the fields, then click **Save Changes**. Click **Cancel** to discard.
 
 3. To change pricing, use the **Rate Items** table:
-   - Click **+ Add Row** to add an equipment type.
+   - Click **+ Add Rate** to add an equipment type.
    - Click **Edit** on a row to change its values inline.
    - Click the **×** button to remove a row.
    - Click **Save All Items** (or **Save All**) to commit. All rows are saved together.
 
-> **Note:** If someone else edits the same card while you have it open, saving shows *"This rate card was modified by another user. Please reload this page and try again."* Reload and redo your change.
+> **Note:** If two people edit the same card at the same time, the last save wins. Reload the card before editing if someone else may have changed it.
 
 ---
 
@@ -74,7 +76,7 @@ Only one card can be the default at a time — setting a new one automatically c
 
 ## Deleting a rate card
 
-1. From the **Rate Cards** tab, click **Delete** on the card's row, or open the card and click **Delete This Rate Card**.
+1. On the Rates page, click **Delete** on the card, or open the card and click **Delete This Rate Card**.
 2. Confirm in the **Delete Rate Card** dialog by clicking **Delete**.
 
 > **Note:** The **default** card cannot be deleted — its Delete button is disabled. Make another card the default first. Deleting a card does not change rates already saved on existing leases ("Historical lease rates are unaffected").
@@ -83,18 +85,13 @@ Only one card can be the default at a time — setting a new one automatically c
 
 ## Setting a custom rate for one customer
 
-Customer-specific overrides are **not** created on the Rates page — they live on each customer's profile. The **Customer Overrides** tab here is a read-only roll-up of them all.
+A customer's negotiated pricing is simply a **customer rate card** — a rate card with that customer chosen in the **Customer** field. (The old per-customer "overrides" have been retired; any that existed were converted into customer rate cards.)
 
-1. Open the customer (**Customers → the customer → Rates** tab).
-2. Click **+ Add Override**.
-3. In the **Add Rate Override** dialog:
-   - Pick the **Equipment Type** (required).
-   - Set **Effective From** (required) and, optionally, **Effective To** (blank = open-ended).
-   - Enter any of **Daily Rate**, **Weekly Rate**, **Monthly Rate**, **Mileage Rate**, plus **Mileage Unit** and **Currency**.
-   - Add optional **Notes**.
-4. Click **Add Override**. To change one later, click **Edit Rate Override** (equipment type and effective-from are locked once created), then **Save Changes**.
+1. Click **+ New Rate Card** on the Rates page and pick the customer — or open the customer (**Customers → the customer → Rates** tab) and click **+ New Rate Card** there, which pre-selects them.
+2. Fill in the card exactly as in *Creating a rate card* above, adding an item for each equipment type the customer has special pricing on.
+3. Click **Create Rate Card**.
 
-> **Note:** A customer can have only one override per equipment type per effective-from date. Deleting an override removes the active custom rate but preserves rate history.
+The customer's **Rates** tab lists all of their cards. To change one, click **Edit** on it (or use its customer tile on the Rates page).
 
 → See the [Customers guide](/help/customers) for the full customer-page walkthrough.
 
@@ -106,11 +103,11 @@ When you choose a customer and an equipment unit on a new lease, FleetForge look
 
 | Priority | Source | Banner shown on the lease form |
 |----------|--------|-------------------------------|
-| 1 | **Customer override** — an active rate for that customer + equipment type | *Custom rates for {customer}* |
-| 2 | **Rate card** — an active card with a matching equipment-type item | *Rate card: {card name}* |
-| 3 | **Equipment template defaults** — the template's built-in default rates | *Default rates from template* |
+| 1 | **Customer rate card** — an active card for that customer with a matching equipment-type item | *Contracted rates — {type} rate · custom card "{card name}"* (rate fields locked; click **Unlock** to change them) |
+| 2 | **General rate card** — an active card for everyone with a matching item | *{type} rate · card "{card name}"* |
+| 3 | **Equipment type defaults** — the default rates set on the unit's Equipment Type | *{type} rate · template default* |
 
-If none match, the fields are left empty (*No rates configured for this equipment type*). A rate is only "active" when today falls within its **Effective From** / **Effective To** range. When two rate cards both match, the **default** card wins; otherwise the one with the latest **Effective From** wins.
+If none match, the fields are left empty (*No rates configured for {type}*). A rate is only "active" when today falls within its card's **Effective From** / **Effective To** range. Within a tier, an item set for the unit's **Specific Unit Type** beats a category-wide item; after that the **default** card wins, then the one with the latest **Effective From**.
 
 > **Tip:** Pre-filled rates are only a starting point — you can always type over them on the lease before saving.
 
@@ -119,15 +116,15 @@ If none match, the fields are left empty (*No rates configured for this equipmen
 <details>
 <summary>Under the hood — how it works technically</summary>
 
-- **Tables** — `rate_cards` (header + `is_default`, `effective_from`, `effective_to`, soft-deleted via `deleted_at`), `rate_card_items` (one row per equipment type: `daily_rate`, `weekly_rate`, `monthly_rate`, `mileage_rate`, `mileage_unit`, `currency`), and `customer_equipment_rates` (per-customer overrides, plus a `minimum_charge` column not yet exposed in the rate-card UI).
-- **Resolution lives in** `api/v1/leases/lookup_rates.php`. Order is strictly: customer override → active rate card (`is_default DESC, effective_from DESC`) → template defaults → none.
+- **Tables** — `rate_cards` (header + `is_default`, `effective_from`, `effective_to`, soft-deleted via `deleted_at`, and `customer_id` — NULL = general card), and `rate_card_items` (one row per equipment type: `equipment_type` category slug, optional `equipment_template_id`, `daily_rate`, `weekly_rate`, `monthly_rate`, `mileage_rate`, `mileage_unit`, `hourly_rate`, `gps_price`, `minimum_days`, `currency`). The retired `customer_equipment_rates` override table is kept but no longer read.
+- **Resolution lives in** `api/v1/leases/lookup_rates.php`. Order is strictly: active rate card, ordered `customer card first → template-specific item first → is_default DESC → effective_from DESC` → equipment-type (template) defaults → none.
 - **Active = date window** — every lookup filters `effective_from <= today AND (effective_to IS NULL OR effective_to >= today)`.
-- **Matching key is the template's `category`, not its name** — the lookup keys on the equipment template's category enum (`dry_van`, `reefer`, `flatbed`, etc.), so all templates sharing a category share one rate. The rate-card and override dropdowns currently submit template *names*; aligning the two is a known open item (`S-RATES-UI-CATEGORY-DEDUP`).
+- **Matching key is the equipment type's `category`** — the lookup keys on the category slug (`dry_van`, `reefer`, `flatbed`, etc.), so all Equipment Types sharing a category share one rate unless an item names a **Specific Unit Type** (`equipment_template_id`). The rate-card dropdowns store category slugs.
 - **Money is exact** — all rates are stored and validated as decimal strings (bcmath); the UI uses `step="0.01"` for daily/weekly/monthly and `step="0.0001"` for mileage. Negative values are rejected.
 - **Default is singular** — saving a card with default on clears `is_default` on every other card in the same transaction.
-- **Soft vs hard delete** — rate cards are soft-deleted (recoverable in data, hidden everywhere); customer overrides are hard-deleted, but every create / update / delete is written to `customer_rate_history` first, and all changes are written to the `audit_log` (module `rates`).
-- **Optimistic locking (D19)** — card and override edits send the row's `updated_at`; a mismatch returns `STALE_DATA` instead of silently overwriting a concurrent change.
-- **No retroactive repricing** — changing a card or override never alters rates already frozen on existing leases or sent invoices; new values apply only to leases created (or rates looked up) afterward.
+- **Soft delete** — rate cards are soft-deleted (recoverable in data, hidden everywhere), and all changes are written to the `audit_log` (module `rates`).
+- **Optimistic locking (D19)** — card edits send the row's `updated_at`; a `STALE_DATA` conflict is only raised when optimistic locking is switched on (it is currently off — last write wins).
+- **No retroactive repricing** — changing a card never alters rates already frozen on existing leases or sent invoices; new values apply only to leases created (or rates looked up) afterward.
 
 </details>
 

@@ -5,7 +5,8 @@ declare(strict_types=1);
  * api/v1/accounting/bank-accounts/create.php
  *
  * Create a new bank account linked to a GL cash account.
- * Validates GL account exists and is marked as bank account.
+ * Validates GL account exists and is active. A non-zero opening balance
+ * posts its opening journal entry (SOP I8, BankService::syncOpeningBalanceEntry).
  *
  * @method  POST
  * @body    name, gl_account_id, currency, account_type, institution?,
@@ -112,6 +113,14 @@ $newId = db_transaction(function () use (
         'notes'                => $notes,
         'created_by'           => $userId,
     ]);
+
+    // SOP I8: the opening balance reaches the ledger (DR bank / CR 3050).
+    // A refusal (closed month, no USD rate…) rolls the whole create back.
+    try {
+        \FleetForge\Accounting\BankService::syncOpeningBalanceEntry((int) $id, $userId);
+    } catch (\RuntimeException $e) {
+        json_validation_error(['opening_balance' => $e->getMessage()], $e->getMessage());
+    }
 
     db_insert('audit_log', [
         'user_id'     => $userId,

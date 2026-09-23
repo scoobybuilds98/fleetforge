@@ -86,6 +86,14 @@ class DunningLetterGenerator
      *                              acc_dunning_letters.sent_method.
      * @param int|null $createdBy   user_id who triggered generation, or null
      *                              for cron/system.
+     * @param string|null $sentToEmail Address the caller will email the letter
+     *                              to (I22: resolved by CustomerReminders::
+     *                              mayEmailCustomer — invoice/billing/main
+     *                              email). Recorded in sent_to_email. null →
+     *                              legacy fallback to customers.email. Ignored
+     *                              (recorded NULL) when $sentMethod is 'mail',
+     *                              so a letter that was not emailed never
+     *                              claims an email recipient.
      *
      * @return array{
      *   id:int,
@@ -110,7 +118,8 @@ class DunningLetterGenerator
         int $customerId,
         string $letterType,
         string $sentMethod = 'email',
-        ?int $createdBy = null
+        ?int $createdBy = null,
+        ?string $sentToEmail = null
     ): array {
         if (!in_array($letterType, self::LETTER_TYPES, true)) {
             throw new \InvalidArgumentException(
@@ -206,16 +215,27 @@ class DunningLetterGenerator
             'letter_type'   => $letterType,
             'sent_date'     => date('Y-m-d'),
             'sent_method'   => $sentMethod,
-            'sent_to_email' => $customer['email'],
+            // I22: the address actually emailed (not always customers.email);
+            // NULL for a mail-only letter.
+            'sent_to_email' => $sentMethod === 'mail' ? null : ($sentToEmail ?? $customer['email']),
             'total_overdue' => $totalOverdue,
             'invoice_count' => count($overdueInvoices),
             'pdf_path'      => $storageKey,
             'created_by'    => $createdBy,
         ]);
 
+        // audit_log.user_name is NOT NULL (default 'system'): the old
+        // `$createdBy ? null : 'system'` made every MANUAL letter (createdBy
+        // set) fail with SQLSTATE 1048 → the endpoint's GENERATION_FAILED 500.
+        // Found while verifying I22; resolve the user's name instead.
+        $userName = 'system';
+        if ($createdBy) {
+            $userRow  = \db_row("SELECT name FROM users WHERE id = ?", [$createdBy]);
+            $userName = (string) ($userRow['name'] ?? '') !== '' ? (string) $userRow['name'] : "user #{$createdBy}";
+        }
         \db_insert('audit_log', [
             'user_id'      => $createdBy,
-            'user_name'    => $createdBy ? null : 'system',
+            'user_name'    => $userName,
             'action'       => 'create',
             'module'       => 'accounting',
             'entity_type'  => 'dunning_letter',

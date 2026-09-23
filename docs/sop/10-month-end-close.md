@@ -23,9 +23,9 @@ The checklist below is **shared by the whole team**: tick a step when it is done
 - {je_drafts} Journal Entries → **Drafts & Pending** is empty: post or delete each draft. @/accounting/journal-entries
 - {recurring_current} Recurring JEs: no template shows **Overdue**. If one does, use **Catch up now**. @/accounting/recurring-entries
 - {depreciation_posted} Depreciation for the month is **Generated, checked and Posted**. @/accounting/depreciation
-- {asset_entries} Asset purchases, disposals and loan payments have their journal entries (asset creation posts nothing by itself). @/accounting/fixed-assets
-- {bank_moves} Any money deposited to a bank other than the default Cash / Bank account is moved with a journal entry. @/accounting/journal-entries
-- {itc_cleared} GST ITC clearing entry (DR 2030 / CR 1050) posted for any period filed this month. @/accounting/tax
+- {asset_entries} Every asset bought this month is on the Asset Register (adding it posts the purchase), disposals are recorded, and loan payments have their journal entries. @/accounting/fixed-assets
+- {bank_moves} Payments and deposits recorded this month show the bank they really went into (**Deposited to**); CAD ↔ USD moves were entered as **Transfers** with both amounts. @/payments
+- {itc_cleared} Every GST/HST period filed and paid (or refunded) this month is marked with **Remit** — that clears 2030 and 1050 for the period. @/accounting/tax
 ## C | Reconcile | Accountant
 - {bank_reconciled} **Bank reconciliation** for every bank account, Difference **0.00**, then **Complete**. @/accounting/bank-reconciliation
 - {ar_reconciled} **AR Aging → Check Reconciliation**: aging total equals account 1030. @/accounting/ar-aging
@@ -41,32 +41,30 @@ The checklist below is **shared by the whole team**: tick a step when it is done
 - {qbo_items} QuickBooks → **Items**: no item shows **Different** (until F85 is decided, rental revenue shows as fallback — [Open decisions](sop:open-decisions)). @/quickbooks/items
 - {qbo_closed} Close the month in QuickBooks too, with the closing date set in the accountant's QuickBooks settings. This is done by the accountant, not FleetForge.
 ## E | Close the period | Accountant
-- {period_closed} Accounting → **Periods**: find the month and press **Close Period** — never for December (see below). @/accounting/periods
+- {period_closed} Accounting → **Periods**: find the month and press **Close Period** (December too). Revalue USD balances first if you use FX revaluation. @/accounting/periods
 :::
 
 ## Closing the period
 
-:::callout danger Never close December from the Periods page
-December is closed by the year-end process below, which needs it open.
-:::
-
 - **Close Period** ({{Accounting › Periods @/accounting/periods}}): new entries dated in a closed month either move to the next open month (invoices, payments, credits, write-offs) or are refused (everything else).
-- **Lock** a period only after the accountant has signed off the month (super admin only). There is no reopen button: a mistake in a closed or locked month is fixed by a correcting entry in the current month.
+- **FX revaluation** (if used) goes in **before** the month is closed: it is dated the month's last day.
+- **Reopen** (Super Admin, reason required): a closed month goes back to open to post a late correction; close it again afterwards. The reason is kept on the period and in the audit log.
+- **Lock** a period only after the accountant has signed off the month (Super Admin). A locked month takes no entries at all. **Unlock** (Super Admin, with a reason) returns it to closed. A year that has been through the year-end close can't be reopened or unlocked month by month — reverse the year-end first.
 
 ## Year-end
 
-Once a year, after November is closed.
+Once a year, after December's month-end.
 
-1. Do the whole monthly checklist for December, but **do not close December**.
-2. {{Accounting › Year-End @/accounting/year-end}}: work through the checklist. When it offers **Close all periods**, tick it only for January–November (all already closed if you followed this SOP).
-3. Run the **pre-flight checks**. Every one must pass: balanced trial balance, no draft entries, depreciation posted for all 12 months, reconciliations complete.
+1. Do the whole monthly checklist for December. Closing December is fine; **don't Lock it**.
+2. {{Accounting › Year-End @/accounting/year-end}}: work through the checklist.
+3. Run the **pre-flight checks**. Every one must pass: all 12 months exist (December not locked), AR and AP tie out, no draft entries, checklist complete.
 4. Press **Start Year-End Close for YYYY**. FleetForge:
-   - closes revenue and expense accounts to 3020 Retained Earnings;
+   - closes revenue and expense accounts to 3020 Retained Earnings, in an entry dated December 31 (even with December closed);
    - locks all 12 periods;
    - creates next year's periods;
    - produces a **ZIP package** (trial balance, financial statements, ledger) for the accountant's year-end file.
 5. Download and keep the ZIP. Give a copy to the external accountant with the {{CCA Schedule 8 @/accounting/cca}} report for the tax return.
 
-:::callout warning If the year-end close refuses to start
-If it refuses because December is already closed, stop and call IT. Do not try to post around it ([Known issues](sop:known-issues)).
+:::callout warning Undoing a year-end close
+A Super Admin can reverse it on the Year-End page (with a reason). The closing entry is reversed on December 31 and the 12 months go back to Closed, so a correction can be made (Reopen the month), then the year closed again.
 :::

@@ -21,14 +21,15 @@ FleetForge keeps a complete general ledger in CAD, and most of it writes itself:
 All under {{Accounting › Settings @/accounting/settings}}.
 
 1. **GL Account Mapping** tab. Every field must hold an account, then press **Save GL Mappings**. A blank field makes the matching action fail with "accounting configuration incomplete".
-2. **Revenue Mapping** tab. **This tab does not change where revenue posts.** Posting reads a separate, hidden map, which sends rental, mileage usage, engine hours and service charges to 4110 Other Revenue. Until that is fixed (F85 and [Known issues](sop:known-issues)), check where revenue lands on {{QuickBooks › Items @/quickbooks/items}}.
+2. **Revenue Mapping** tab: where each kind of invoice line posts. Rental posts per equipment category (Chassis → 4010, Dry Van → 4020, Reefer → 4030, Flatbed → 4040, anything else → 4050) unless **Rental — every category** is set; mileage lines post to 4060; anything without its own account goes to **Everything not mapped above** (4110). Changes apply to invoices sent from then on. Compare with QuickBooks item accounts on {{QuickBooks › Items @/quickbooks/items}} (F85).
 3. **Depreciation** tab: **Samsara Daily Unit Cost (CAD)**. While it is 0.00, GPS revenue posts gross even for customers set to Net. The Default Method, Life and Salvage fields are not used by the asset form.
 4. **Tax Filing** tab: GST and PST filing frequency.
 5. **Chart of Accounts** ({{General Ledger › Chart of Accounts @/accounting/chart-of-accounts}}): add only accounts the accountant has agreed. Reports and the QuickBooks mapping depend on this list.
    - A header account cannot receive postings.
    - An account with a balance cannot be deactivated until the balance is moved.
-   - Choosing the "Expense" or "COGS" type in the Create Account form is refused ([Known issues](sop:known-issues)).
+   - Types: Asset, Liability, Equity, Revenue, Cost of Revenue, Operating Expense, Other Income, Other Expense.
 6. **Periods** ({{Accounting › Periods @/accounting/periods}}): months are created automatically, 12 months ahead. If a posting says "No open accounting period", ask IT to run the period job.
+7. **FX & Other** tab: turn on FX revaluation and pick its rate source (Bank of Canada, or a manual rate), and the Damage Recovery revenue account. The **Tax Filing** tab also holds the CRA business number and the GST Quick Method (only if the CRA approved it).
 
 The GL Account Mapping fields:
 
@@ -36,7 +37,7 @@ The GL Account Mapping fields:
 | --- | --- |
 | Accounts Receivable (AR) | 1030 |
 | Accounts Payable (AP) | 2010 |
-| Cash / Bank Account | 1010 — every customer payment lands here |
+| Cash / Bank Account | 1010 — used when a payment or deposit names no bank account |
 | GST Payable / PST Payable | 2030 / 2040 |
 | GST Receivable (ITC) | 1050 |
 | Bad Debt Expense | 6160 — needed for write-offs |
@@ -44,6 +45,7 @@ The GL Account Mapping fields:
 | Retained Earnings | 3020 |
 | Customer Deposits | 2050 |
 | Customer Credits | 2060 — needed for credit notes and overpayments |
+| Opening Balance Equity | 3050 — the other side of bank opening balances |
 
 ## What posts automatically
 
@@ -53,26 +55,33 @@ Each card is one automatic journal entry: what happens, the debit side, the cred
 Invoice sent | AR 1030 | Revenue per line type + GST Payable 2030 + PST Payable 2040 | Dated the invoice date
 GPS line, customer on Net | — | 4120 GPS Net (the margin) + 1055 Samsara Recoverable (the cost) | Instead of revenue; the AR side is the invoice's
 Invoice voided | — | — | Reverses the invoice's entry, dated today
-Customer payment received | Cash 1010 | AR 1030 | Any FX difference to 7030 / 7040
-Overpayment | Cash 1010 | AR 1030 + 2060 Customer Credits (the excess) |
+Customer payment received | The bank it was deposited to (default 1010) | AR 1030 | Any FX difference to 7030 / 7040
+Overpayment | The bank it was deposited to (default 1010) | AR 1030 + 2060 Customer Credits (the excess) |
 Credit note issued | Revenue | 2060 Customer Credits |
 Credit note applied | 2060 Customer Credits | AR 1030 |
 Bill approved | Each line's account + GST Receivable 1050 | AP 2010 | All PST goes to the first line
 Bill payment | AP 2010 | The chosen bank account | In FleetForge or copied from QuickBooks
-Vendor credit created | AP 2010 | The expense account you pick |
-Invoice written off (damage claim) | Bad Debt Expense 6160 | AR 1030 |
+Vendor credit created | AP 2010 | The expense account you pick | Applying it to a bill posts nothing more
+Invoice written off | Bad Debt Expense 6160 | AR 1030 | From the invoice's Write Off button or a damage claim
+Money recovered after a write-off | The bank | Bad Debt Expense 6160 |
+Credit refunded in cash | 2060 Customer Credits | The bank | Not sent to QuickBooks
+Asset added | The asset's cost account | Where it was paid from | Nothing for an opening-balance asset; a bill-bought asset moves the bill's cost
+Betterment | The asset's cost account | The bill line's account, or the account paid from |
+Bank opening balance | The bank account | 3050 Opening Balance Equity | Not sent to QuickBooks
+Bank transfer | The receiving bank (its CAD value) | The sending bank (its CAD value) | A USD side carries its USD amount; a rate spread goes to 7030 / 7040
 Depreciation run posted | Depreciation expense | Accumulated depreciation | Per asset account
 Asset disposed | Cash + accumulated depreciation + loss | Asset cost + gain | Loss or gain, whichever applies
 Asset impaired | 7020 | Accumulated depreciation |
-GST or PST remitted | 2030 or 2040 | The bank |
-Customer deposit received | Cash 1010 | 2050 Customer Deposits |
+GST/HST remitted | 2030 (the period's GST collected) | 1050 (its input tax credits) + the bank (the net) | A refund period debits the bank instead
+PST remitted | 2040 | The bank |
+Customer deposit received | The bank it went into (default 1010) | 2050 Customer Deposits |
 Customer deposit applied | 2050 Customer Deposits | AR 1030 |
 NSF processed | — | — | The payment is reversed; the fee goes to 6170 Bank Charges
 :::
 
 :::callout rule Two rules for automatic entries
-- **If the month is closed**, invoice, payment, credit and write-off entries move to the next open month. Everything else is refused until you post into an open month.
-- **Never reverse an automatic entry from the Journal Entries page.** Void or credit the invoice, payment or bill instead, or the ledger stops matching the documents.
+- **If the month is closed**, invoice, payment, credit and write-off entries move to the next open month. Everything else is refused until you post into an open month (a Super Admin can **Reopen** a closed month on Accounting → Periods, with a reason).
+- **Automatic entries are undone from their document.** The Journal Entries page shows them as *Automatic* with no Reverse button: void or credit the invoice, void the payment or bill, and so on — that reverses the entry and updates the document together.
 :::
 
 ## Journal entries
@@ -129,13 +138,13 @@ Bills the accountant pays in QuickBooks appear on {{Payables › Payments @/acco
 
 From {{Payables › Vendor Credits @/accounting/vendor-credits}} → **+ New Credit**:
 
-- **Always choose an Expense Account.** Leaving it on "Auto (from AP)" posts nothing useful, and payables drift once the credit is applied.
-- Apply it later with **Apply to Bill**.
+- **Choose the Expense Account** the original bill was charged to (required).
+- Apply it later with **Apply to Bill**. Deleting an unapplied credit reverses its entry.
 
 :::callout warning Bill rules
 - **Void** (the ✕ on a draft or approved bill) reverses its entry. A bill with payments cannot be voided.
 - **AP Aging** counts draft bills, which have no ledger entry. Approve or void every draft before month-end, or **Check Reconciliation** shows a difference.
-- The bill form has no equipment-unit field, so per-unit direct costs on the Per-Unit P&L show nothing yet. Link repairs through the work order and the asset for now ([Known issues](sop:known-issues)).
+- Pick the **Unit** (or a work order, which brings its unit) so the bill counts as that trailer's or truck's cost on the Per-Unit P&L.
 :::
 
 ## Receivables
@@ -146,8 +155,8 @@ From {{Payables › Vendor Credits @/accounting/vendor-credits}} → **+ New Cre
 - **Statements** ({{Receivables › Statements @/accounting/statements}}): pick the customer and date range, then email or print. Use them for any customer who disputes a balance.
 - **Collections** ({{Receivables › Collections @/accounting/collections}}): the follow-up list for overdue accounts. Log every call or email there, so the next person sees the history.
 - **Deposits** ({{Receivables › Deposits @/accounting/deposits}}) — money received before an invoice exists:
-  1. **+ New Deposit**: customer, amount, date, method. This posts DR Cash / CR 2050 Customer Deposits.
-  2. When the invoice is sent, press **Apply** on the deposit and enter the invoice's **internal ID**. This is the number in the invoice's web address, not the printed invoice number ([Known issues](sop:known-issues)).
+  1. **+ New Deposit**: customer, amount, date, type, **Deposited to**. This posts DR that bank / CR 2050 Customer Deposits. A refund comes out of the same bank.
+  2. When the invoice is sent, press **Apply** on the deposit and pick the invoice (the customer's open invoices are listed; one with a balance below the deposit, or in another currency, can't be picked).
 - **Customer credit** from an overpayment or credit note sits in 2060 until it is applied to an invoice.
 
 ## Banking and reconciliation
@@ -157,8 +166,8 @@ From {{Payables › Vendor Credits @/accounting/vendor-credits}} → **+ New Cre
 From {{Banking › Bank Accounts @/accounting/bank-accounts}}:
 
 - Each one is linked to a ledger cash account.
-- **Setting up an account**: the **Opening Balance** field does not post to the ledger. The accountant enters an opening journal entry (DR the bank account, CR the equity or clearing account they choose) dated the day before the first transaction.
-- Every customer payment lands in the single **Cash / Bank Account** from Settings, whichever bank it was really deposited to. If money goes into a second bank, move it with a manual journal entry.
+- **Setting up an account**: enter the **Opening Balance** from the statement and its date (the day before FleetForge's first transaction). It posts DR the bank / CR 3050 Opening Balance Equity; changing it later re-posts it. Once a reconciliation is completed it can't change. A USD account needs a USD→CAD rate on file for that date. When every opening balance is in, the accountant moves 3050 to Retained Earnings.
+- Customer payments and deposits post to the bank chosen in **Deposited to** (blank = the currency's default bank, then the Settings Cash / Bank Account). Payments copied from QuickBooks use the bank linked to QuickBooks' deposit account.
 
 ### Transactions
 
@@ -166,11 +175,7 @@ From {{Banking › Transactions @/accounting/bank-transactions}}:
 
 - Import the bank's CSV, or enter lines by hand.
 - Match each line to the payment, bill payment or journal entry it belongs to.
-- **Transfers between two CAD accounts** are fine.
-
-:::callout danger Never use Transfer between a CAD and a USD account
-It posts the same raw number on both sides and ignores the exchange rate. Enter a manual journal entry with the CAD amounts instead ([Known issues](sop:known-issues)).
-:::
+- **Transfer** between two accounts: same currency → one amount. CAD ↔ USD → enter the amount sent **and** the amount received; FleetForge books the USD side at its CAD value (the rate the two amounts imply, or the day's rate if you enter one — then the bank's spread goes to FX gain/loss).
 
 ### Reconciliation
 
@@ -178,20 +183,18 @@ From {{Banking › Reconciliation @/accounting/bank-reconciliation}}, once a mon
 
 1. **+ New Reconciliation**: bank account, **statement end date**, **statement ending balance** from the bank statement.
 2. Tick every transaction that appears on the statement. Leave items that have not cleared unticked.
-3. The page works out **Difference**. It must read **0.00**.
+3. The page works out **Difference = Statement − (Beginning + Cleared Deposits − Cleared Withdrawals)**. Beginning is last month's reconciled statement balance (or the opening balance). It must read **0.00**.
 4. Press **Complete**. A completed reconciliation is locked.
 
-:::callout warning If Difference looks doubled
-If Difference is exactly twice an amount, or has the wrong sign, stop and tell IT rather than forcing it with a journal entry: the direction of the formula has not been proven on real statements yet.
-:::
+Under the cards, the **book check** compares the ledger with the statement (less deposits in transit, plus uncleared cheques). A difference there is information: it usually means a receipt or payment posted in FleetForge has no bank line.
 
 ## Fixed assets and depreciation
 
 **Every trailer and truck is an asset.**
 
 1. **Add the asset** ({{Fixed Assets › Asset Register @/accounting/fixed-assets}} → **+ New Asset**) with cost, in-service date, depreciation method, useful life and salvage value. Link it to the equipment unit.
-2. **Record the purchase in the ledger yourself.** Creating the asset, recording a betterment or approving a CapEx request **does not post a journal entry**. The accountant enters one: DR the asset cost account, CR the bank, the loan or AP ([Known issues](sop:known-issues)).
-3. Historical assets imported at go-live must be flagged **opening balance**, so their cost is not treated as spending in the go-live month.
+2. **How was it paid for?** (required): *Paid from an account* (bank, loan… → posts DR the asset account / CR that account); *Bought on a supplier bill* (pick the approved bill — its cost already posted, and any line not coded to the asset account is moved into it); or *Owned before FleetForge* (opening balance — posts nothing). Approving a CapEx request posts nothing; completing it with a new asset asks where it was paid from.
+3. Historical assets imported at go-live are **opening balance** assets, so no purchase is posted for them.
 
 ### Depreciation, every month
 
@@ -205,29 +208,30 @@ If Difference is exactly twice an amount, or has the wrong sign, stop and tell I
 - **Impairment Tests** ({{Fixed Assets › Impairment Tests @/accounting/impairment}}): record a write-down the accountant has decided. It posts DR 7020 / CR accumulated depreciation.
 - **CCA Schedule 8** ({{Fixed Assets › CCA Schedule 8 @/accounting/cca}}) is the tax-depreciation (capital cost allowance) schedule for the corporate tax return. It does not post anything.
 - **Payoff Report** ({{Fixed Assets › Payoff Report @/accounting/fixed-assets/payoff-report}}) shows loan payoff amounts on financed units.
-- **CapEx Requests** ({{Fixed Assets › CapEx Requests @/accounting/capex}}) are approvals only. After buying, add the asset and its journal entry as above.
+- **CapEx Requests** ({{Fixed Assets › CapEx Requests @/accounting/capex}}) are approvals. **Complete** with a new asset posts its purchase from the account you choose. **Capitalize** a flagged work order moves its approved bills' costs into the asset.
+- **Betterments** (from a bill line on the bill's page): the line's cost moves into the asset. On a draft bill it happens when the bill is approved.
 
 ## GST/HST and PST
 
 1. {{Tax › GST/HST Filing @/accounting/tax}}: choose the period. The page adds up GST collected on sent invoices (2030) and GST paid on approved bills (1050, input tax credits).
 2. Compare it with the ledger balances of 2030 and 1050 for the same dates. File with the CRA using these numbers.
-3. When paid, record it under {{Tax › Remittances @/accounting/tax/remittances}}: period, amount, bank, date. This posts DR 2030 / CR bank.
-4. **Clear the input tax credits.** The remittance does not touch 1050, so ITCs build up there forever. After each filing, the accountant posts DR 2030 / CR 1050 for that period's ITCs (to be confirmed by the accountant; [Known issues](sop:known-issues)).
-5. **Refund periods** (more ITC than GST collected) cannot be entered as a remittance. Record the refund with a manual journal entry when the CRA pays it.
+3. When paid, press **Remit** on the filed period: date, amount (must equal the return's net tax), method, bank. This posts DR 2030 (the period's GST collected) / CR 1050 (its input tax credits) / CR the bank (the net) — both accounts are cleared for the period.
+4. **Refund periods** (more ITC than GST collected): the same **Remit** button records the refund received: DR 2030 / DR the bank / CR 1050. A nil return is recorded with amount 0.
+5. Interest or penalties are separate journal entries.
 6. PST follows the same steps with 2040, and PST has no input credit.
 
 ## Write-offs and bad debt
 
 - **Damage claims**: when a claim's invoice will never be paid, change the claim to **Written off**. FleetForge posts DR Bad Debt Expense / CR AR, closes the invoice, and sends a credit memo to QuickBooks.
-- **Any other invoice**: there is **no Write Off button** on an ordinary invoice, and no screen to record money recovered after a write-off. Until one is added, ask IT to run the write-off; do not use a credit note, which reduces revenue instead of booking bad debt ([Known issues](sop:known-issues)).
+- **Any other invoice**: **Write Off** on the invoice (reason required). Money received later: **Record Recovery** on the invoice (DR the bank / CR Bad Debt Expense; sent to QuickBooks). Never use a credit note for bad debt — it reduces revenue instead.
 - A written-off invoice is excluded from revenue and from AR everywhere.
-- **Damage repairs**: approve the repair shop's bill as usual. The damage module itself posts no repair cost entry ([Known issues](sop:known-issues)).
+- **Damage repairs**: approve the repair shop's bill as usual — that is where the repair cost posts. The claim's repair cost is a reference figure only, so the cost is never counted twice.
 
 ## Foreign currency
 
 - **Every report is in CAD.** A USD invoice is converted at the rate frozen on the invoice when it is sent.
 - When the customer pays, the difference between the invoice rate and the payment rate posts automatically to 7030 FX Gain or 7040 FX Loss.
-- **FX Revaluation** ({{Accounting › FX Revaluation @/accounting/fx-revaluations}}; month-end revaluation of open USD balances) only posts into a closed period and is not reliable yet. Leave it until the accountant asks. They can record the revaluation as an **Adjusting** journal entry instead ([Known issues](sop:known-issues)).
+- **FX Revaluation** ({{Accounting › FX Revaluation @/accounting/fx-revaluations}}; month-end revaluation of open USD balances): turn it on under Settings → FX & Other. Revalue a month **after it ends and before it is closed** — the entry is dated the month's last day and reverses itself on the 1st of the next month. The monthly job does this on the 1st when the month is still open.
 
 ## Reports
 
@@ -239,7 +243,7 @@ If Difference is exactly twice an amount, or has the wrong sign, stop and tell I
 | {{Cash Flow @/accounting/reports/cash-flow}} | Built from the ledger. It always ties: a tie difference other than zero is a bug, report it to IT. |
 | {{General Ledger @/accounting/ledger}} | Every posting to one account, with a link to its source document. |
 | {{AR Aging @/accounting/ar-aging}} / {{AP Aging @/accounting/ap-aging}} | Who owes us, and whom we owe. Use **Check Reconciliation**. |
-| {{Per-Unit P&L @/accounting/reports/per-unit-pnl}} | Revenue by trailer or truck. Direct costs show near zero until bill lines carry a unit ([Known issues](sop:known-issues)). |
+| {{Per-Unit P&L @/accounting/reports/per-unit-pnl}} | Revenue and direct costs by trailer or truck. Costs count when the bill names the unit (or its work order). |
 | {{Budgets @/accounting/budgets}} | Budget vs actual, once a budget is entered under Accounting → Budgets. |
 
 Revenue in every report excludes draft, void and written-off invoices. A month with invoices still in draft therefore shows low revenue: send them.

@@ -52,6 +52,7 @@ $transactions = db_select(
      WHERE bt.bank_account_id = ?
        AND (bt.reconciliation_id = ? OR (bt.reconciliation_id IS NULL AND bt.is_cleared = 0))
        AND bt.status != 'excluded'
+       AND bt.is_readonly = 0   -- SOP I11: QuickBooks-mirrored rows are not statement lines
      ORDER BY bt.transaction_date ASC, bt.id ASC",
     [(int) $recon['bank_account_id'], $id]
 );

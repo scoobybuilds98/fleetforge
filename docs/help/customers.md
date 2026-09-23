@@ -24,7 +24,7 @@ When you open **Customers** in the sidebar, four tiles give you an instant snaps
 3. Fill in the **Primary Contact Name**, **Email**, and **Phone** as you have them.
 4. Set **Status** (defaults to Active) and **Risk Level** (Low / Medium / High).
 5. Choose **Currency** (CAD or USD) and **Billing Cycle**:
-   - *Monthly* — invoices generate automatically each month.
+   - *Monthly* — the customer's leases are billed month by month. Each month's invoices are created from **Invoices → Batch Invoicing** (or **Generate Invoice** on a lease) — nothing is invoiced automatically.
    - *On Close Only* — invoices only generate when a lease is manually closed.
 6. Under **Commercial**, set **Payment Terms** (e.g. Net 30) and **Credit Limit** if applicable.
 7. If the customer is tax-exempt, check **GST Exempt** or **PST Exempt** and enter the exemption certificate number and expiry date.
@@ -94,7 +94,7 @@ Open a customer to see their profile. Use the tabs to navigate:
 - **Invoices** — all invoices with status, due date, and balance due. Filter and sort to find what you need.
 - **Damage Claims** — claims filed against equipment this customer had on lease.
 - **Mileage Logs** — GPS sync and manual odometer records for their leased units.
-- **Rates** — any custom rate overrides negotiated for this customer.
+- **Rates** — the customer-specific rate cards that hold this customer's negotiated pricing.
 - **Documents** — uploaded files like tax exemption certificates or credit agreements.
 - **Email History** — every email sent to this customer from FleetForge, with the body and status.
 
@@ -123,16 +123,18 @@ Notes are internal only and never visible to the customer.
 
 ---
 
-## Setting custom rate overrides
+## Setting custom pricing for a customer
 
-If a customer has negotiated special pricing on specific equipment types:
+Customer-specific pricing lives on a **customer rate card** (the old per-customer "overrides" have been retired). If a customer has negotiated special pricing on specific equipment types:
 
 1. Open the customer profile and click the **Rates** tab.
-2. Click **+ Add Override**.
-3. Select the equipment type, set the effective date range, and enter the custom rates (daily, weekly, monthly, and/or per-km mileage).
-4. Click **Add Override**.
+2. Click **+ New Rate Card** — the new card opens with this customer already selected.
+3. Name the card, set the **Effective From** / **Effective To** dates, and add a rate for each equipment type (daily, weekly, monthly, and/or mileage).
+4. Click **Create Rate Card**.
 
-Rate overrides apply automatically when invoices are generated for this customer's leases — no manual adjustment needed.
+You can also start from **Rates → + New Rate Card** and pick the customer there. When a new lease is created for this customer, their card's rates pre-fill the lease (ahead of any general rate card) and are frozen on the lease from then on.
+
+→ See the [Rates guide](/help/rates) for the full rate-card walkthrough.
 
 ---
 
@@ -205,4 +207,4 @@ Tags are a predefined set: vip, preferred, owner-operator, fleet, net-30, net-45
 - [Leases](/help/leases)
 - [Invoices](/help/invoices)
 - [Payments](/help/payments)
-- [QuickBooks Sync](/help/quickbooks)
+- [Standard Operating Procedures](/sop) — QuickBooks chapters

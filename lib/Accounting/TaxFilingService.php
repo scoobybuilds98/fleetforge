@@ -355,9 +355,12 @@ class TaxFilingService
             throw new \RuntimeException('remittance_date must be a valid Y-m-d date.');
         }
 
+        // SOP I4: zero is allowed (a nil GST/HST return still clears 2030
+        // against 1050); the exact amount is checked against the filed
+        // return inside the transaction.
         $amount = (string) ($data['amount'] ?? '');
-        if (!is_numeric($amount) || bccomp($amount, '0', 2) <= 0) {
-            throw new \RuntimeException('amount must be a positive number.');
+        if (!is_numeric($amount) || bccomp($amount, '0', 2) < 0) {
+            throw new \RuntimeException('amount must be zero or a positive number.');
         }
         // Normalize to 2dp string for bcmath consistency
         $amount = bcadd($amount, '0', 2);
@@ -398,9 +401,6 @@ class TaxFilingService
             $taxType = $period['tax_type'];
 
             // ── Resolve account IDs for the JE ──────────────
-            // DR side = the relevant tax payable account.
-            // CR side = the selected bank account's gl_account_id, or
-            //           1010 Cash if no bank was selected (rare).
             $payableAccountId = self::accountIdByCode(
                 $taxType === 'gst_hst' ? self::ACCT_CODE_GST_PAYABLE : self::ACCT_CODE_PST_PAYABLE
             );
@@ -415,67 +415,121 @@ class TaxFilingService
                 throw new \RuntimeException('Cash GL account not seeded — check chart of accounts.');
             }
 
+            // ── What this remittance clears (SOP I4) ────────
+            // GST/HST: the filed return nets tax collected (C, sitting in
+            // 2030) against input tax credits (I, sitting in 1050). The
+            // remittance clears BOTH: DR 2030 C / CR 1050 I, and the bank
+            // takes the difference N = C − I — paid (CR bank) when N > 0,
+            // received as a refund (DR bank) when N < 0, nothing on a nil
+            // return. It used to post DR 2030 / CR bank for the amount only,
+            // so 1050 grew forever and 2030 kept a credit equal to the ITCs;
+            // refund periods could not be entered at all.
+            // PST: no input credits — DR 2040 / CR bank for the amount.
+            $direction      = 'payment';
+            $collectedClear = $amount;
+            $itcClear       = '0.00';
+            $itcAccountId   = null;
+            if ($taxType === 'gst_hst') {
+                $collectedClear = bcadd((string) $period['total_tax_collected'], '0', 2);
+                $itcClear       = bcadd((string) $period['total_itc'], '0', 2);
+                $net            = bcsub($collectedClear, $itcClear, 2);
+                $expected       = bccomp($net, '0', 2) < 0 ? bcmul($net, '-1', 2) : $net;
+                $direction      = bccomp($net, '0', 2) < 0 ? 'refund' : 'payment';
+                if (bccomp($amount, $expected, 2) !== 0) {
+                    throw new \RuntimeException(
+                        "The amount must equal the net tax on the filed return: \${$expected} "
+                        . ($direction === 'refund' ? 'to be refunded by' : 'to pay to') . ' the CRA. '
+                        . 'If the return changed, recalculate the period and file it again. '
+                        . 'Record interest or penalties as a separate journal entry.'
+                    );
+                }
+                $itcAccountId = self::accountIdByCode(self::ACCT_CODE_GST_ITC);
+                if (!$itcAccountId) {
+                    throw new \RuntimeException('GST ITC GL account 1050 not seeded — check chart of accounts.');
+                }
+            } elseif (bccomp($amount, '0', 2) <= 0) {
+                throw new \RuntimeException('amount must be a positive number.');
+            }
+
             // ── §16 closed-period redirect ─────────────────
             // The remittance JE date should normally equal the calendar
             // date the cheque cleared (remittance_date). But if that
             // period is closed/locked, the JE cannot land there and
-            // would otherwise crash. Instead we silently redirect to
-            // the earliest open period and log the discrepancy, the
-            // same way AutoEntryBridge::resolvePeriod() does.
+            // would otherwise crash. Instead we redirect to the earliest
+            // open period ON OR AFTER that date and log the discrepancy,
+            // the same way AutoEntryBridge::resolvePeriod() does.
             $entryDate = self::resolveOpenEntryDate($remitDate, $userId);
 
             // ── Insert remittance row (stub the JE id, set later) ──
             $remittanceId = \db_insert('acc_tax_remittances', [
-                'filing_period_id'  => $periodId,
-                'remittance_date'   => $remitDate,
-                'amount'            => $amount,
-                'payment_method'    => $paymentMethod,
-                'reference_number'  => $data['reference_number'] ?? null,
-                'bank_account_id'   => $bankAccountId,
-                'journal_entry_id'  => null,
-                'notes'             => $data['notes'] ?? null,
-                'created_by'        => $userId,
+                'filing_period_id'      => $periodId,
+                'remittance_date'       => $remitDate,
+                'amount'                => $amount,
+                'direction'             => $direction,
+                'tax_collected_cleared' => $collectedClear,
+                'itc_cleared'           => $itcClear,
+                'payment_method'        => $paymentMethod,
+                'reference_number'      => $data['reference_number'] ?? null,
+                'bank_account_id'       => $bankAccountId,
+                'journal_entry_id'      => null,
+                'notes'                 => $data['notes'] ?? null,
+                'created_by'            => $userId,
             ]);
 
             // ── Build and post the JE ──────────────────────
-            // Two-line entry: DR payable / CR cash. JournalEntryService
-            // validates balance and refuses to post into a closed period
-            // (we already redirected via resolveOpenEntryDate above).
+            // Each leg is a signed amount: positive = debit, negative =
+            // credit; zero legs are dropped. Legs always sum to zero
+            // (C − I − N = 0), and JournalEntryService re-checks balance.
             $taxLabel = ($taxType === 'gst_hst') ? 'GST/HST' : strtoupper(str_replace('_', ' ', $taxType));
             $bankLabel = $bankAccount ? $bankAccount['name'] : 'Cash';
-            $jeDescription = "Tax remittance — {$taxLabel} {$period['period_start']} to {$period['period_end']}";
+            $jeDescription = "Tax " . ($direction === 'refund' ? 'refund' : 'remittance')
+                . " — {$taxLabel} {$period['period_start']} to {$period['period_end']}";
 
-            $entry = JournalEntryService::create(
-                [
-                    'entry_date'       => $entryDate,
-                    'description'      => $jeDescription,
-                    'entry_type'       => 'system',
-                    'reference'        => "TAX-REMIT-{$remittanceId}",
-                    'source_type'      => 'tax_remittance',
-                    'source_id'        => $remittanceId,
-                    'post_immediately' => true,
-                ],
-                [
+            $bankSigned = $taxType === 'gst_hst'
+                ? bcsub($itcClear, $collectedClear, 2)      // −N: credit when paying, debit on a refund
+                : bcmul($amount, '-1', 2);
+            $legs = [
+                [$payableAccountId, $collectedClear, "{$taxLabel} collected cleared"],
+                [$itcAccountId, bcmul($itcClear, '-1', 2), 'Input tax credits cleared'],
+                [$cashAccountId, $bankSigned, ($direction === 'refund' ? 'Refund received into ' : 'Paid from ') . $bankLabel],
+            ];
+            $jeLines = [];
+            foreach ($legs as [$acctId, $signed, $desc]) {
+                if ($acctId === null || bccomp($signed, '0', 2) === 0) continue;
+                $isDebit = bccomp($signed, '0', 2) > 0;
+                $abs     = $isDebit ? $signed : bcmul($signed, '-1', 2);
+                $jeLines[] = [
+                    'account_id'  => (int) $acctId,
+                    'debit'       => $isDebit ? $abs : '0.00',
+                    'credit'      => $isDebit ? '0.00' : $abs,
+                    'description' => $desc,
+                ];
+            }
+
+            // A nil return with nothing collected and no ITCs has nothing to post.
+            $entry = null;
+            if (count($jeLines) >= 2) {
+                $entry = JournalEntryService::create(
                     [
-                        'account_id'  => $payableAccountId,
-                        'debit'       => $amount,
-                        'credit'      => '0.00',
-                        'description' => "{$taxLabel} remittance",
+                        'entry_date'       => $entryDate,
+                        'description'      => $jeDescription,
+                        'entry_type'       => 'system',
+                        'reference'        => "TAX-REMIT-{$remittanceId}",
+                        'source_type'      => 'tax_remittance',
+                        'source_id'        => $remittanceId,
+                        'post_immediately' => true,
                     ],
-                    [
-                        'account_id'  => $cashAccountId,
-                        'debit'       => '0.00',
-                        'credit'      => $amount,
-                        'description' => "Paid from {$bankLabel}",
-                    ],
-                ],
-                $userId
-            );
+                    $jeLines,
+                    $userId
+                );
+            }
 
             // Link the remittance row back to the JE
-            \db_update('acc_tax_remittances', [
-                'journal_entry_id' => $entry['id'],
-            ], 'id = ?', [$remittanceId]);
+            if ($entry) {
+                \db_update('acc_tax_remittances', [
+                    'journal_entry_id' => $entry['id'],
+                ], 'id = ?', [$remittanceId]);
+            }
 
             // Flip period status filed → remitted
             \db_update('acc_tax_filing_periods', [
@@ -487,14 +541,15 @@ class TaxFilingService
                 'status_change',
                 $periodId,
                 "Tax period #{$periodId} ({$taxType})",
-                "Remitted \${$amount} on {$remitDate} (JE #{$entry['id']}, ref TAX-REMIT-{$remittanceId})",
+                ($direction === 'refund' ? 'Refund received' : 'Remitted') . " \${$amount} on {$remitDate} "
+                    . "(cleared collected {$collectedClear} / ITC {$itcClear}; JE #" . ($entry['id'] ?? 'none') . ", ref TAX-REMIT-{$remittanceId})",
                 ['status' => 'filed'],
-                ['status' => 'remitted', 'remittance_id' => $remittanceId, 'je_id' => $entry['id']]
+                ['status' => 'remitted', 'remittance_id' => $remittanceId, 'je_id' => $entry['id'] ?? null]
             );
 
             return [
                 'remittance'        => \db_row("SELECT * FROM acc_tax_remittances WHERE id = ?", [$remittanceId]),
-                'journal_entry_id'  => (int) $entry['id'],
+                'journal_entry_id'  => $entry ? (int) $entry['id'] : null,
             ];
         });
     }
@@ -613,8 +668,8 @@ class TaxFilingService
     // ============================================================
 
     /**
-     * Sum of GL credit lines posted to the tax payable account in
-     * [start,end]. For PST tax types, results are filtered to invoices
+     * Tax collected on the payable account in [start,end]. GST/HST: net
+     * movement of 2030 (see below). PST: credit lines filtered to invoices
      * whose customer.province matches the tax type's province (since
      * 2040 is shared across all PST jurisdictions in the COA).
      *
@@ -645,14 +700,20 @@ class TaxFilingService
                 [$taxAccountId, $start, $end, $province]
             );
         } else {
+            // SOP I4: GST/HST collected = the NET movement of 2030 in the
+            // period (credits − debits), excluding the remittance entries
+            // themselves. Net, so a credit note's GST, a voided invoice's
+            // reversal (in any later period) and a vendor-side correction
+            // all reduce it — the remittance then clears exactly what the
+            // ledger holds for the period. Reversed originals stay on the
+            // books offset by their reversal (LEDGER_STATUSES_SQL).
             $row = \db_row(
-                "SELECT COALESCE(SUM(jel.credit), 0) AS total
+                "SELECT COALESCE(SUM(jel.credit - jel.debit), 0) AS total
                  FROM acc_journal_entry_lines jel
                  JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
                  WHERE jel.account_id = ?
-                   AND jel.credit > 0
-                   AND je.status = 'posted'
-                   AND je.is_reversal = 0
+                   AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+                   AND (je.source_type IS NULL OR je.source_type <> 'tax_remittance')
                    AND je.entry_date BETWEEN ? AND ?",
                 [$taxAccountId, $start, $end]
             );
@@ -661,19 +722,19 @@ class TaxFilingService
     }
 
     /**
-     * Sum of GL debit lines posted to the GST ITC account 1050 in
-     * [start,end]. Used only for gst_hst — PST has no ITC.
+     * Input tax credits for the period on the GST ITC account 1050 — the
+     * NET movement (debits − credits), excluding remittance entries (which
+     * clear 1050). Used only for gst_hst — PST has no ITC. SOP I4.
      */
     private static function sumItc(int $itcAccountId, string $start, string $end): string
     {
         $row = \db_row(
-            "SELECT COALESCE(SUM(jel.debit), 0) AS total
+            "SELECT COALESCE(SUM(jel.debit - jel.credit), 0) AS total
              FROM acc_journal_entry_lines jel
              JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
              WHERE jel.account_id = ?
-               AND jel.debit > 0
-               AND je.status = 'posted'
-               AND je.is_reversal = 0
+               AND je.status IN (" . AccountingService::LEDGER_STATUSES_SQL . ")
+               AND (je.source_type IS NULL OR je.source_type <> 'tax_remittance')
                AND je.entry_date BETWEEN ? AND ?",
             [$itcAccountId, $start, $end]
         );
@@ -790,7 +851,12 @@ class TaxFilingService
             return $date;
         }
 
-        $openPeriod = AccountingService::currentOpenPeriod();
+        // The earliest open period ON OR AFTER the date — currentOpenPeriod()
+        // is the globally earliest open month, possibly a stray one years back.
+        $openPeriod = \db_row(
+            "SELECT * FROM acc_periods WHERE status = 'open' AND end_date >= ? ORDER BY start_date ASC LIMIT 1",
+            [$date]
+        );
         if (!$openPeriod) {
             throw new \RuntimeException(
                 "No open accounting period available. Cannot post tax remittance JE for date {$date}. " .

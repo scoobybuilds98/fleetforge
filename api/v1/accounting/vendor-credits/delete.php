@@ -16,9 +16,10 @@ declare(strict_types=1);
  *   - status='fully_used' / 'partially_used' implies applications
  *     exist, so the application-count guard catches them first.
  *
- * The original posted JE is NOT auto-reversed. Operators should void
- * the credit first (which reverses the JE) before deleting. This
- * keeps the audit trail and ledger correct.
+ * The credit's posted JE (DR AP / CR expense) is REVERSED in the same
+ * transaction, dated today (SOP I3 follow-on: there is no void endpoint,
+ * and deleting used to leave the AP debit orphaned in the ledger). If the
+ * reversal cannot post (e.g. today's month is closed) nothing is deleted.
  *
  * @method  POST
  * @body    id (required)
@@ -61,13 +62,24 @@ $applicationCount = db_count(
 if ($applicationCount > 0 && $credit['status'] !== 'void') {
     json_error(
         'HAS_APPLICATIONS',
-        "Cannot delete a vendor credit with {$applicationCount} existing application(s). Void the credit first to reverse applications.",
+        "Cannot delete a vendor credit with {$applicationCount} existing application(s). Applied credits cannot be deleted.",
         422,
         ['fields' => ['_general' => "Cannot delete a vendor credit with {$applicationCount} existing application(s)."]]
     );
 }
 
+try {
 db_transaction(function () use ($id, $credit) {
+    // Reverse the credit's entry first — FK SET NULL / no link would otherwise
+    // leave a DR AP with no document behind it.
+    $jeId = (int) ($credit['journal_entry_id'] ?? 0);
+    if ($jeId > 0 && $credit['status'] !== 'void') {
+        $je = db_row("SELECT status, reversed_by_id FROM acc_journal_entries WHERE id = ?", [$jeId]);
+        if ($je && $je['status'] === 'posted' && empty($je['reversed_by_id'])) {
+            \FleetForge\Accounting\JournalEntryService::reverse($jeId, ff_today(), current_user_id());
+        }
+    }
+
     db_execute("DELETE FROM acc_vendor_credits WHERE id = ?", [$id]);
 
     db_insert('audit_log', [
@@ -82,5 +94,8 @@ db_transaction(function () use ($id, $credit) {
         'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 });
+} catch (\RuntimeException $e) {
+    json_error('REVERSAL_FAILED', 'Could not reverse the credit\'s journal entry: ' . $e->getMessage(), 422);
+}
 
 json_success(['id' => $id]);

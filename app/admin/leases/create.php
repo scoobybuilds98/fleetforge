@@ -252,7 +252,10 @@ require_once FF_ROOT . '/includes/header.php';
                         <label class="form-label" for="billing_cycle">Billing Cycle</label>
                         <select id="billing_cycle" class="form-control form-select"
                                 x-model="form.billing_cycle">
-                            <option value="monthly">Monthly (auto-invoice)</option>
+                            <?php /* WHY: not "(auto-invoice)" — the monthly invoice cron ships OFF;
+                                     monthly leases are billed via Invoices → Batch Invoicing
+                                     or the lease's Generate Invoice. */ ?>
+                            <option value="monthly">Monthly</option>
                             <option value="on_close_only">On Close Only</option>
                         </select>
                     </div>

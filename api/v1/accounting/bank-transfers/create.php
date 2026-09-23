@@ -54,9 +54,17 @@ if ($fromAmount === null || $fromAmount === '') {
 
 if (!$transferDate) $fields['transfer_date'] = 'Transfer date is required.';
 
-// Default to_amount = from_amount if same currency
-if (!$toAmount && $fromAmount) {
-    $toAmount = $fromAmount;
+// Default to_amount = from_amount — but ONLY between two accounts in the same
+// currency (SOP I5: a CAD→USD transfer defaulting to the same number was the
+// "same raw number on both sides" bug). Cross-currency needs both amounts.
+if (!$toAmount && $fromAmount && $fromAccountId && $toAccountId) {
+    $curs = db_select("SELECT id, currency FROM acc_bank_accounts WHERE id IN (?, ?)", [$fromAccountId, $toAccountId]);
+    $byId = array_column($curs, 'currency', 'id');
+    if (($byId[$fromAccountId] ?? null) !== null && ($byId[$fromAccountId] ?? null) === ($byId[$toAccountId] ?? null)) {
+        $toAmount = $fromAmount;
+    } else {
+        $fields['to_amount'] = 'The accounts are in different currencies — enter the amount received.';
+    }
 }
 
 if ($toAmount !== null && $toAmount !== '' && bccomp($toAmount, '0.00', 2) <= 0) {

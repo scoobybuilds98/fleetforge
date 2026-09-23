@@ -25,7 +25,7 @@ The page header shows a **Linked** count and an **Unlinked** count, plus the sub
 
 Each row in **Linked Units** shows:
 
-- **Unit** — unit number (links to the unit profile) plus its template/type.
+- **Unit** — unit number (links to the unit profile) plus its equipment type.
 - **Status** — the equipment status badge.
 - **Customer** — the customer on the unit's active lease, or `—`.
 - **Battery** — battery percentage, colored red below 20% and amber below 50%. Trailers report no battery, so this is `—`.

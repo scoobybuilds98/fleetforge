@@ -150,6 +150,12 @@ $data = [
     'location'                => clean_string($body['location'] ?? null, 255),
     'serial_number'           => clean_string($body['serial_number'] ?? null, 100),
     'notes'                   => clean_string($body['notes'] ?? null, 2000),
+    // SOP I2: how the asset was paid for — exactly one of these; the
+    // service posts DR asset / CR the paid-from account (or reclasses the
+    // purchase bill's lines), or nothing for an opening-balance asset.
+    'funding_account_id'      => clean_int($body['funding_account_id'] ?? null),
+    'acquisition_bill_id'     => clean_int($body['acquisition_bill_id'] ?? null),
+    'is_opening_balance'      => !empty($body['is_opening_balance']) ? 1 : 0,
 
     // ── PAYOFF-1: acquisition-detail breakdown ──────────────────
     // WHY: Total acquisition cost used by the payoff calculator
@@ -198,6 +204,7 @@ try {
     elseif (stripos($msg, 'useful_life') !== false)         $slot = 'useful_life_years';
     elseif (stripos($msg, 'cca') !== false || stripos($msg, 'declining') !== false) $slot = 'cra_cca_rate';
     elseif (stripos($msg, 'total_expected_units') !== false) $slot = 'total_expected_units';
+    elseif (stripos($msg, 'paid') !== false || stripos($msg, 'bill') !== false || stripos($msg, 'opening balance') !== false) $slot = 'funding_account_id';
     elseif (stripos($msg, 'depreciation_method') !== false) $slot = 'depreciation_method';
     json_validation_error([$slot => $msg], $msg);
 }

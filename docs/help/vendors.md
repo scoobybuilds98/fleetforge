@@ -73,4 +73,4 @@ A vendor with active work orders (open, in progress, or waiting parts) cannot be
 ## Related guides
 
 - [Maintenance](/help/maintenance)
-- [QuickBooks Sync](/help/quickbooks)
+- [Standard Operating Procedures](/sop) — QuickBooks chapters

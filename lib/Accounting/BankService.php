@@ -573,74 +573,94 @@ class BankService
             return ['error' => 'Bank account not found'];
         }
 
-        // Book balance = GL balance for the linked cash account
-        $bookBalance = AccountingService::accountBalance((int) $bankAccount['gl_account_id']);
+        $recon = \db_row("SELECT * FROM acc_bank_reconciliations WHERE id = ?", [$reconciliationId]);
+        $statementDate = $recon ? (string) $recon['statement_date'] : \ff_today();
 
-        // Outstanding deposits: uncleared positive transactions
-        $outDeposits = \db_row(
-            "SELECT COALESCE(SUM(amount), 0) AS total
-             FROM acc_bank_transactions
-             WHERE bank_account_id = ?
-               AND amount > 0
-               AND is_cleared = 0
-               AND status != 'excluded'",
-            [$bankAccountId]
-        );
+        // ── The reconciliation itself (SOP I11) ─────────────────────
+        // Statement-side, like QuickBooks:
+        //   beginning  = the previous completed reconciliation's statement
+        //                ending balance, else the account's opening balance
+        //   cleared    = beginning + ticked deposits − ticked withdrawals
+        //   difference = statement ending balance − cleared   (must be 0.00)
+        // The old formula added outstanding items to the BOOK balance
+        // (should subtract), so any uncleared item doubled the difference
+        // and a month with a cheque in transit could never complete.
+        // Rows mirrored from QuickBooks (is_readonly) are QuickBooks' own
+        // register, not statement lines — never part of a reconciliation.
+        $beginning = self::reconciliationBeginningBalance($bankAccountId, $reconciliationId, $statementDate);
 
-        // Outstanding checks/withdrawals: uncleared negative transactions (use absolute value)
-        $outChecks = \db_row(
-            "SELECT COALESCE(SUM(ABS(amount)), 0) AS total
-             FROM acc_bank_transactions
-             WHERE bank_account_id = ?
-               AND amount < 0
-               AND is_cleared = 0
-               AND status != 'excluded'",
-            [$bankAccountId]
-        );
-
-        $outstandingDeposits = $outDeposits['total'] ?? '0.00';
-        $outstandingChecks = $outChecks['total'] ?? '0.00';
-
-        // Adjusted book balance = book balance + outstanding deposits - outstanding checks
-        // WHY: Spec formula: Adjusted book balance = Book balance + deposits in transit - outstanding checks ± bank errors
-        $adjustedBookBalance = bcadd($bookBalance, $outstandingDeposits, 2);
-        $adjustedBookBalance = bcsub($adjustedBookBalance, $outstandingChecks, 2);
-
-        // Difference must be $0.00 to close
-        $difference = bcsub($adjustedBookBalance, $statementEndingBalance, 2);
-
-        // Cleared totals
-        $clearedDeposits = \db_row(
-            "SELECT COALESCE(SUM(amount), 0) AS total
-             FROM acc_bank_transactions
-             WHERE bank_account_id = ?
-               AND reconciliation_id = ?
-               AND amount > 0
-               AND is_cleared = 1",
+        $cleared = \db_row(
+            "SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS deposits,
+                    COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS withdrawals
+               FROM acc_bank_transactions
+              WHERE bank_account_id = ?
+                AND reconciliation_id = ?
+                AND is_cleared = 1
+                AND is_readonly = 0",
             [$bankAccountId, $reconciliationId]
         );
+        $clearedDeposits    = bcadd((string) ($cleared['deposits'] ?? '0'), '0', 2);
+        $clearedWithdrawals = bcadd((string) ($cleared['withdrawals'] ?? '0'), '0', 2);
+        $clearedBalance     = bcsub(bcadd($beginning, $clearedDeposits, 2), $clearedWithdrawals, 2);
+        $difference         = bcsub($statementEndingBalance, $clearedBalance, 2);
 
-        $clearedWithdrawals = \db_row(
-            "SELECT COALESCE(SUM(ABS(amount)), 0) AS total
-             FROM acc_bank_transactions
-             WHERE bank_account_id = ?
-               AND reconciliation_id = ?
-               AND amount < 0
-               AND is_cleared = 1",
-            [$bankAccountId, $reconciliationId]
+        // ── Book check (information only) ───────────────────────────
+        // The ledger balance on the statement date, less deposits in
+        // transit, plus cheques not yet cleared, should equal the
+        // statement. Receipts posted without a bank line (FleetForge
+        // payments are not bank lines) make this differ — it guides the
+        // search for a missing entry; it never blocks Complete.
+        $bookBalance = AccountingService::accountBalance((int) $bankAccount['gl_account_id'], $statementDate);
+        $outstanding = \db_row(
+            "SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS deposits,
+                    COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS checks
+               FROM acc_bank_transactions
+              WHERE bank_account_id = ?
+                AND is_cleared = 0
+                AND is_readonly = 0
+                AND status != 'excluded'
+                AND transaction_date <= ?",
+            [$bankAccountId, $statementDate]
         );
+        $outstandingDeposits = bcadd((string) ($outstanding['deposits'] ?? '0'), '0', 2);
+        $outstandingChecks   = bcadd((string) ($outstanding['checks'] ?? '0'), '0', 2);
+        $adjustedBookBalance = bcadd(bcsub($bookBalance, $outstandingDeposits, 2), $outstandingChecks, 2);
 
         return [
-            'book_balance'            => $bookBalance,
-            'statement_ending_balance'=> $statementEndingBalance,
-            'outstanding_deposits'    => $outstandingDeposits,
-            'outstanding_checks'      => $outstandingChecks,
-            'adjusted_book_balance'   => $adjustedBookBalance,
-            'difference'              => $difference,
-            'cleared_deposits'        => $clearedDeposits['total'] ?? '0.00',
-            'cleared_withdrawals'     => $clearedWithdrawals['total'] ?? '0.00',
-            'is_balanced'             => bccomp($difference, '0.00', 2) === 0,
+            'beginning_balance'        => $beginning,
+            'cleared_deposits'         => $clearedDeposits,
+            'cleared_withdrawals'      => $clearedWithdrawals,
+            'cleared_balance'          => $clearedBalance,
+            'statement_ending_balance' => $statementEndingBalance,
+            'difference'               => $difference,
+            'is_balanced'              => bccomp($difference, '0.00', 2) === 0,
+            'book_balance'             => $bookBalance,
+            'outstanding_deposits'     => $outstandingDeposits,
+            'outstanding_checks'       => $outstandingChecks,
+            'adjusted_book_balance'    => $adjustedBookBalance,
+            'book_difference'          => bcsub($adjustedBookBalance, $statementEndingBalance, 2),
         ];
+    }
+
+    /**
+     * Where a reconciliation starts (SOP I11): the latest earlier completed
+     * reconciliation's statement ending balance for this bank account, else
+     * the account's opening balance.
+     */
+    public static function reconciliationBeginningBalance(int $bankAccountId, int $reconciliationId, string $statementDate): string
+    {
+        $prev = \db_row(
+            "SELECT statement_ending_balance FROM acc_bank_reconciliations
+              WHERE bank_account_id = ? AND id <> ? AND status IN ('completed','locked')
+                AND statement_date < ?
+              ORDER BY statement_date DESC, id DESC LIMIT 1",
+            [$bankAccountId, $reconciliationId, $statementDate]
+        );
+        if ($prev) {
+            return bcadd((string) $prev['statement_ending_balance'], '0', 2);
+        }
+        $bank = \db_row("SELECT opening_balance FROM acc_bank_accounts WHERE id = ?", [$bankAccountId]);
+        return bcadd((string) ($bank['opening_balance'] ?? '0'), '0', 2);
     }
 
     // ============================================================
@@ -691,7 +711,13 @@ class BankService
             // Get GL account IDs
             $arAccountId = AccountingService::setting('accounting.ar_account_id');
             $bankChargeAccountId = self::glAccountIdByCode('6170'); // Bank Charges
-            $cashAccountId = (int) $bankAccount['gl_account_id'];
+            // SOP I10: the bounced money leaves the GL account the receipt
+            // DEBITED — the payment's own deposit bank, else the Settings cash
+            // account — not whichever bank is picked here, or both accounts
+            // end up wrong. ($bankAccount still owns the bank-transaction row.)
+            $cashAccountId = AutoEntryBridge::cashAccountForBank(
+                !empty($payment['deposit_bank_account_id']) ? (int) $payment['deposit_bank_account_id'] : null
+            );
 
             if (!$arAccountId) {
                 throw new \RuntimeException('AR account not configured in settings.');
@@ -1038,53 +1064,75 @@ class BankService
             $fromGlId = (int) $from['gl_account_id'];
             $toGlId = (int) $to['gl_account_id'];
 
-            // Build JE: DR destination / CR source
+            // ── CAD value of each leg (SOP I5) ─────────────────────
+            // The ledger is CAD. A USD leg is valued at the USD→CAD rate —
+            // the rate entered, else the rate the two amounts imply (the
+            // bank's own conversion) — and carries its USD figure as
+            // foreign_amount so FX revaluation sees the USD balance. Any
+            // difference between the two CAD legs is realized FX. This used
+            // to post the raw numbers on both sides (1,000 USD booked as
+            // 1,000 CAD, the rest a fake FX loss).
+            $fromCur = (string) $from['currency'];
+            $toCur   = (string) $to['currency'];
+            if ($fromCur === $toCur && bccomp($fromAmount, $toAmount, 2) !== 0) {
+                throw new \RuntimeException("Both accounts are {$fromCur}: the amount sent and the amount received must be the same.");
+            }
+            $rate = ($exchangeRate !== null && $exchangeRate !== '') ? $exchangeRate : null;
+            if ($fromCur !== $toCur && $rate === null) {
+                // USD→CAD rate implied by the transfer itself.
+                $rate = $fromCur === 'USD'
+                    ? bcdiv($toAmount, $fromAmount, 6)
+                    : bcdiv($fromAmount, $toAmount, 6);
+            }
+            if ($fromCur === 'USD' && $toCur === 'USD' && $rate === null) {
+                $rateRow = \db_row(
+                    "SELECT rate FROM exchange_rates WHERE rate_date <= ? ORDER BY rate_date DESC LIMIT 1",
+                    [$transferDate]
+                );
+                if (!$rateRow) {
+                    throw new \RuntimeException('No USD→CAD exchange rate on file for this date. Enter the exchange rate.');
+                }
+                $rate = (string) $rateRow['rate'];
+            }
+            $cadOf = static function (string $amount, string $currency) use ($rate): string {
+                return $currency === 'CAD' ? bcadd($amount, '0', 2) : bcround(bcmul($amount, (string) $rate, 6), 2);
+            };
+            $fromCad = $cadOf($fromAmount, $fromCur);
+            $toCad   = $cadOf($toAmount, $toCur);
+
+            // Build JE: DR destination / CR source (CAD), foreign figures on USD legs.
             $lines = [
                 [
                     'account_id'  => $toGlId,
-                    'debit'       => $toAmount,
+                    'debit'       => $toCad,
                     'credit'      => '0.00',
                     'description' => "Transfer from {$from['name']}",
-                ],
+                ] + AutoEntryBridge::foreignLeg($toCur, $toAmount, (string) $rate),
                 [
                     'account_id'  => $fromGlId,
                     'debit'       => '0.00',
-                    'credit'      => $fromAmount,
+                    'credit'      => $fromCad,
                     'description' => "Transfer to {$to['name']}",
-                ],
+                ] + AutoEntryBridge::foreignLeg($fromCur, $fromAmount, (string) $rate),
             ];
 
-            // FX gain/loss if amounts differ (cross-currency transfer)
-            $diff = bcsub($toAmount, $fromAmount, 2);
-            if (bccomp($diff, '0.00', 2) !== 0) {
-                $fxGainId = self::glAccountIdByCode('7030'); // FX Gain
-                $fxLossId = self::glAccountIdByCode('7040'); // FX Loss
-                if (bccomp($diff, '0.00', 2) > 0) {
-                    // Gain: debit amount > credit amount — need more credit
-                    $lines[1]['credit'] = $toAmount; // Match the debit side
-                    // Actually, for cross-currency: amounts differ, need FX line
-                    $lines = [
-                        ['account_id' => $toGlId, 'debit' => $toAmount, 'credit' => '0.00', 'description' => "Transfer from {$from['name']}"],
-                        ['account_id' => $fromGlId, 'debit' => '0.00', 'credit' => $fromAmount, 'description' => "Transfer to {$to['name']}"],
-                    ];
-                    $fxAmount = $diff;
-                    if ($fxGainId) {
-                        $lines[] = ['account_id' => $fxGainId, 'debit' => '0.00', 'credit' => $fxAmount, 'description' => 'FX gain on transfer'];
-                    }
-                } else {
-                    // Loss
-                    $fxAmount = bcmul($diff, '-1', 2);
-                    if ($fxLossId) {
-                        $lines[] = ['account_id' => $fxLossId, 'debit' => $fxAmount, 'credit' => '0.00', 'description' => 'FX loss on transfer'];
-                    }
-                }
+            // Realized FX: CAD received ≠ CAD given up.
+            $diff = bcsub($toCad, $fromCad, 2);
+            if (bccomp($diff, '0.00', 2) > 0) {
+                $fxGainId = self::glAccountIdByCode('7030');
+                if (!$fxGainId) throw new \RuntimeException('FX Gain account 7030 not found.');
+                $lines[] = ['account_id' => $fxGainId, 'debit' => '0.00', 'credit' => $diff, 'description' => 'FX gain on transfer'];
+            } elseif (bccomp($diff, '0.00', 2) < 0) {
+                $fxLossId = self::glAccountIdByCode('7040');
+                if (!$fxLossId) throw new \RuntimeException('FX Loss account 7040 not found.');
+                $lines[] = ['account_id' => $fxLossId, 'debit' => bcmul($diff, '-1', 2), 'credit' => '0.00', 'description' => 'FX loss on transfer'];
             }
 
             $je = JournalEntryService::create([
                 'entry_date'       => $transferDate,
                 'description'      => "Bank transfer: {$from['name']} → {$to['name']}",
                 'entry_type'       => 'system',
-                'source_type'      => 'bank_transaction',
+                'source_type'      => 'bank_transfer',
                 'reference'        => $reference,
                 'post_immediately' => true,
             ], $lines, $userId);
@@ -1126,13 +1174,17 @@ class BankService
                 'created_by'       => $userId,
             ]);
 
+            // Trace the JE to its source (the outgoing leg's bank transaction).
+            \db_update('acc_journal_entries', ['source_id' => $fromTxnId], 'id = ?', [(int) $je['id']]);
+
             \db_insert('audit_log', [
                 'user_id'     => $userId,
                 'action'      => 'create',
                 'module'      => 'accounting',
                 'entity_type' => 'bank_transfer',
                 'entity_id'   => $fromTxnId,
-                'notes'       => "Transfer: {$from['name']} ({$fromAmount}) → {$to['name']} ({$toAmount})",
+                'notes'       => "Transfer: {$from['name']} ({$fromAmount} {$fromCur}) → {$to['name']} ({$toAmount} {$toCur})"
+                                . ($fromCur !== $toCur || $fromCur === 'USD' ? " at {$rate} (CAD {$fromCad} → {$toCad})" : ''),
                 'ip_address'  => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
             ]);
 
@@ -1142,7 +1194,7 @@ class BankService
                 'to_transaction_id'   => $toTxnId,
                 'from_amount'       => $fromAmount,
                 'to_amount'         => $toAmount,
-                'exchange_rate'     => $exchangeRate,
+                'exchange_rate'     => $rate,
             ];
         });
     }
@@ -1150,6 +1202,143 @@ class BankService
     // ============================================================
     // GL ACCOUNT LOOKUP HELPER
     // ============================================================
+
+    /**
+     * Keep a bank account's opening-balance journal entry in step with its
+     * Opening Balance / date / GL account (SOP I8 — the field used to post
+     * nothing, so the ledger's bank balance started at zero and could never
+     * tie to the statement).
+     *
+     * Reverses the account's current opening entry (dated its own date) and,
+     * when the balance is non-zero, posts a new one dated the opening date:
+     * the bank GL account on its normal side (DR for a bank account, CR for a
+     * credit card / line of credit), 3050 Opening Balance Equity opposite. A
+     * USD account is valued at the USD→CAD rate on file for that date and
+     * carries the USD figure as foreign_amount. Not pushed to QuickBooks
+     * (bank_opening_balance is bridge-derived — QuickBooks has its own).
+     * Call inside the caller's transaction.
+     *
+     * @return int|null  the new JE id, or null when the balance is zero
+     * @throws \RuntimeException on a closed period, missing rate or setting
+     */
+    public static function syncOpeningBalanceEntry(int $bankAccountId, ?int $userId = null): ?int
+    {
+        $bank = \db_row("SELECT * FROM acc_bank_accounts WHERE id = ? FOR UPDATE", [$bankAccountId]);
+        if (!$bank) {
+            throw new \RuntimeException('Bank account not found.');
+        }
+
+        // 1. Undo the current opening entry, if any.
+        foreach (\db_select(
+            "SELECT id, entry_date FROM acc_journal_entries
+              WHERE source_type = 'bank_opening_balance' AND source_id = ?
+                AND status = 'posted' AND is_reversal = 0 AND reversed_by_id IS NULL",
+            [$bankAccountId]
+        ) as $old) {
+            JournalEntryService::reverse((int) $old['id'], (string) $old['entry_date'], $userId);
+        }
+
+        $balance = bcadd((string) $bank['opening_balance'], '0', 2);
+        if (bccomp($balance, '0', 2) === 0) {
+            return null;
+        }
+        $date = (string) ($bank['opening_balance_date'] ?? '');
+        if ($date === '') {
+            throw new \RuntimeException('An opening balance needs an opening balance date.');
+        }
+
+        $equityId = (int) AccountingService::setting('accounting.opening_balance_equity_account_id', 0);
+        if ($equityId <= 0) {
+            $equityId = (int) (self::glAccountIdByCode('3050') ?? 0);
+        }
+        if ($equityId <= 0) {
+            throw new \RuntimeException('Opening Balance Equity (3050) is not set up — see Accounting → Settings.');
+        }
+
+        $gl = \db_row("SELECT id, normal_balance FROM acc_accounts WHERE id = ?", [(int) $bank['gl_account_id']]);
+        if (!$gl) {
+            throw new \RuntimeException('The bank account\'s GL account was not found.');
+        }
+
+        // CAD value (USD accounts at the rate on file for the opening date).
+        $currency = (string) $bank['currency'];
+        $rate = '1';
+        $cad = $balance;
+        if ($currency !== 'CAD') {
+            $rateRow = \db_row(
+                "SELECT rate FROM exchange_rates WHERE from_currency = ? AND to_currency = 'CAD' AND rate_date <= ?
+                  ORDER BY rate_date DESC LIMIT 1",
+                [$currency, $date]
+            );
+            if (!$rateRow) {
+                throw new \RuntimeException("No {$currency}→CAD exchange rate on file on or before {$date} — add one before entering a {$currency} opening balance.");
+            }
+            $rate = (string) $rateRow['rate'];
+            $cad  = bcround(bcmul($balance, $rate, 6), 2);
+        }
+
+        // A positive balance sits on the account's normal side.
+        $bankDebit = (($gl['normal_balance'] ?? 'debit') === 'debit') === (bccomp($cad, '0', 2) > 0);
+        $abs = bccomp($cad, '0', 2) < 0 ? bcmul($cad, '-1', 2) : $cad;
+        $absForeign = bccomp($balance, '0', 2) < 0 ? bcmul($balance, '-1', 2) : $balance;
+
+        $je = JournalEntryService::create([
+            'entry_date'       => $date,
+            'description'      => "Opening balance — {$bank['name']}",
+            'entry_type'       => 'system',
+            'reference'        => "OPEN-BANK-{$bankAccountId}",
+            'source_type'      => 'bank_opening_balance',
+            'source_id'        => $bankAccountId,
+            'post_immediately' => true,
+        ], [
+            [
+                'account_id'  => (int) $gl['id'],
+                'debit'       => $bankDebit ? $abs : '0.00',
+                'credit'      => $bankDebit ? '0.00' : $abs,
+                'description' => "Opening balance {$balance} {$currency}",
+            ] + AutoEntryBridge::foreignLeg($currency, $absForeign, $rate),
+            [
+                'account_id'  => $equityId,
+                'debit'       => $bankDebit ? '0.00' : $abs,
+                'credit'      => $bankDebit ? $abs : '0.00',
+                'description' => "Opening balance — {$bank['name']}",
+            ],
+        ], $userId);
+
+        return (int) $je['id'];
+    }
+
+    /**
+     * The bank account money is received into (SOP I10), validated.
+     *
+     * An explicit id must be an active bank account in the same currency as
+     * the money. With none, the currency's default bank account (is_default)
+     * is used; with no default either, null — the posting then falls back to
+     * the Settings "Cash / Bank Account" (AutoEntryBridge::cashAccountForBank).
+     *
+     * @return array{id:?int, error:?string}
+     */
+    public static function resolveReceivingBank(?int $bankAccountId, string $currency): array
+    {
+        if ($bankAccountId) {
+            $bank = \db_row(
+                "SELECT id, name, currency, is_active FROM acc_bank_accounts WHERE id = ?",
+                [$bankAccountId]
+            );
+            if (!$bank || (int) $bank['is_active'] !== 1) {
+                return ['id' => null, 'error' => 'Choose an active bank account.'];
+            }
+            if ((string) $bank['currency'] !== $currency) {
+                return ['id' => null, 'error' => "{$bank['name']} is a {$bank['currency']} account; this money is in {$currency}."];
+            }
+            return ['id' => (int) $bank['id'], 'error' => null];
+        }
+        $default = \db_row(
+            "SELECT id FROM acc_bank_accounts WHERE is_active = 1 AND is_default = 1 AND currency = ? ORDER BY id LIMIT 1",
+            [$currency]
+        );
+        return ['id' => $default ? (int) $default['id'] : null, 'error' => null];
+    }
 
     /**
      * Get GL account ID by account code.

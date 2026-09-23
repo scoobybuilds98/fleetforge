@@ -68,6 +68,9 @@ if (!empty($body['asset_data']) && is_array($body['asset_data'])) {
         'serial_number'           => clean_string($ad['serial_number'] ?? null, 100),
         'location'                => clean_string($ad['location'] ?? null, 255),
         'notes'                   => clean_string($ad['notes'] ?? null, 2000),
+        // SOP I2: how it was paid (see FixedAssetService::create()).
+        'funding_account_id'      => clean_int($ad['funding_account_id'] ?? null),
+        'acquisition_bill_id'     => clean_int($ad['acquisition_bill_id'] ?? null),
     ];
 }
 

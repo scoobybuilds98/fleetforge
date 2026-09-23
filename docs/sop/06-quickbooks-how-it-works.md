@@ -23,7 +23,7 @@ Sending an invoice, approving a bill or saving a credit note adds a job to {{Qui
 
 When a customer pays through the QuickBooks pay link or portal, or the accountant records a deposit against a FleetForge invoice, QuickBooks notifies FleetForge. FleetForge records the payment, marks the invoice paid and posts its own books. Bill payments the accountant makes against FleetForge bills come back the same way.
 
-If a notification is missed, FleetForge notices by itself: every 10 minutes it asks QuickBooks for payment changes and brings in any it hasn't seen. **Check QuickBooks for payments** ({{QuickBooks › Invoices @/quickbooks/invoices}}) does the same for every open invoice at once, on demand.
+If a notification is missed, FleetForge notices by itself: every 10 minutes it asks QuickBooks for payment changes and brings in any it hasn't seen. A notification that arrived but failed to process (a payment, a bill payment, an invoice or credit memo change) is retried every 15 minutes for 24 hours. **Check QuickBooks for payments** ({{QuickBooks › Invoices @/quickbooks/invoices}}) does the same for every open invoice at once, on demand.
 
 ## What a QuickBooks invoice carries
 

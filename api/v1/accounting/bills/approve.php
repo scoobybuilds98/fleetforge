@@ -79,6 +79,9 @@ $result = db_transaction(function () use ($id) {
             'credit'      => '0.00',
             'description' => $line['description'],
             'vendor_id'   => (int) $bill['vendor_id'],
+            // SOP I15: the line's unit, else the bill's — for the Per-Unit P&L.
+            'equipment_unit_id' => !empty($line['equipment_unit_id']) ? (int) $line['equipment_unit_id']
+                : (!empty($bill['equipment_unit_id']) ? (int) $bill['equipment_unit_id'] : null),
         ];
     }
 

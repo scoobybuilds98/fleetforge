@@ -824,9 +824,25 @@ class PaymentWebhookHandler
         $amountInCad = $exchangeRateToCad !== null
             ? bcround(bcmul($amount, (string) $exchangeRateToCad, 6), 2)
             : ($currency === 'CAD' ? bcround($amount, 2) : null);
+        // SOP I10: the QuickBooks deposit account → the mapped FleetForge bank
+        // account, so FF's ledger debits the right bank. Undeposited Funds or
+        // an unmapped account has no FF bank → the Settings cash account.
+        $depositBankId = null;
+        $qboDepositAcct = (string) ($qboPayment['DepositToAccountRef']['value'] ?? '');
+        if ($qboDepositAcct !== '') {
+            $bankMap = db_row(
+                "SELECT m.ff_bank_account_id
+                   FROM acc_qbo_bank_account_map m
+                   JOIN acc_bank_accounts b ON b.id = m.ff_bank_account_id AND b.is_active = 1 AND b.currency = ?
+                  WHERE m.qbo_bank_account_id = ? AND m.mapping_status = 'mapped'",
+                [$currency, $qboDepositAcct]
+            );
+            $depositBankId = $bankMap ? (int) $bankMap['ff_bank_account_id'] : null;
+        }
         $ffPaymentId = db_insert('payments', [
             'payment_number'       => $paymentNumber,
             'customer_id'          => (int) $lead['customer_id'],
+            'deposit_bank_account_id' => $depositBankId,
             'amount'               => $amount,
             'exchange_rate_to_cad' => $exchangeRateToCad,
             'amount_in_cad'        => $amountInCad,

@@ -16,6 +16,7 @@ declare(strict_types=1);
  *                                'mapResult'   => "r => ({ id: r.id, label: r.company_name, sublabel: r.city + ', ' + r.province })",
  *                                'placeholder' => 'Search customers…',
  *                                'extraParams' => 'status=active', // optional
+ *                                'extraParamsExpr' => "'customer_id=' + dep.customer_id", // optional raw JS; overrides extraParams
  *                                'initialId'   => 0,               // edit mode
  *                                'initialLabel'=> '',              // edit mode
  *                             ]
@@ -47,6 +48,15 @@ foreach (['endpoint','searchParam','resultKey','perPage','extraParams','minChars
     }
 }
 $_cfgKeys[] = 'mapResult: ' . $_mapResult;
+// Optional 'extraParamsExpr': a RAW JS expression (evaluated in the enclosing
+// Alpine scope, like mapResult) that overrides the static 'extraParams'. For
+// pickers whose scope is only known client-side — e.g. the deposit Apply
+// modal (I16) scopes to the clicked deposit's customer:
+//   'extraParamsExpr' => "'customer_id=' + applyDep.customer_id + '&statuses=…'"
+// Render such a picker inside <template x-if> so it's rebuilt per record.
+if (!empty($_pickerConfig['extraParamsExpr'])) {
+    $_cfgKeys[] = 'extraParams: ' . $_pickerConfig['extraParamsExpr'];
+}
 $_xData     = 'FF_RecordPicker({ ' . implode(', ', $_cfgKeys) . ' })';
 
 $_name       = $pickerName       ?? 'picker';

@@ -18,8 +18,11 @@ require_permission('accounts_payable', 'view');
 $vendors = db_select(
     "SELECT id, name FROM vendors WHERE deleted_at IS NULL ORDER BY name", []
 );
+// SOP I3: the AP control account is never offered — crediting AP against the
+// DR AP the credit already posts nets to nothing and AP drifts once applied.
+$apAcctId   = (int) \FleetForge\Accounting\AccountingService::setting('accounting.ap_account_id', 0);
 $glAccounts = db_select(
-    "SELECT id, code, name FROM acc_accounts WHERE is_active = 1 AND is_header = 0 ORDER BY code", []
+    "SELECT id, code, name FROM acc_accounts WHERE is_active = 1 AND is_header = 0 AND id <> ? ORDER BY code", [$apAcctId]
 );
 
 $canCreate = can('accounts_payable', 'create');
@@ -113,9 +116,9 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div>
-                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Expense Account (credit reversal)</label>
+                    <label class="form-label" style="display:block;font-size:0.75rem;font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Expense Account *</label>
                     <select x-model="createForm.expense_account_id" :class="createErrors.expense_account_id ? 'is-invalid' : ''" @change="createErrors.expense_account_id = ''" class="form-input" style="width:100%;padding:8px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
-                        <option value="">Auto (from AP)</option>
+                        <option value="">Select the account the original bill was charged to…</option>
                         <?php foreach ($glAccounts as $a): ?>
                         <option value="<?= (int)$a['id'] ?>"><?= e($a['code'] . ' — ' . $a['name']) ?></option>
                         <?php endforeach; ?>
@@ -307,6 +310,10 @@ function vendorCreditsPage() {
             }
             if (!this.createForm.reason || this.createForm.reason.trim() === '') {
                 this.createErrors.reason = 'Reason is required.';
+                ok = false;
+            }
+            if (!this.createForm.expense_account_id) {
+                this.createErrors.expense_account_id = 'Choose the account the credit reverses (usually the account on the original bill).';
                 ok = false;
             }
             return ok;

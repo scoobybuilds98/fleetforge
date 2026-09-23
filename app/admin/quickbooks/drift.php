@@ -451,7 +451,10 @@ function qboDrift(opts) {
                     resolution_note: this.actionNote.trim(),
                 });
                 if (j.success) {
-                    this.flash = { message: 'Drift event #' + this.actionTarget.id + ' ' + this.actionTitle().toLowerCase() + 'd.', type: 'success' };
+                    // WHY: explicit past-tense map — appending 'd' to the title
+                    // produced "acceptd" / "suppressd" / "reopend".
+                    const pastTense = { resolve:'resolved', accept:'accepted', suppress:'suppressed', reopen:'reopened' }[this.actionType] || 'updated';
+                    this.flash = { message: 'Drift event #' + this.actionTarget.id + ' ' + pastTense + '.', type: 'success' };
                     this.closeActionModal();
                     await this.reload();
                 } else {

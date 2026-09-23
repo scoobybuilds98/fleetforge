@@ -286,6 +286,11 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" x-show="accountErrors.opening_balance_date" x-cloak x-text="accountErrors.opening_balance_date"></div>
                     </div>
                 </div>
+                <?php // SOP I8: the opening balance now posts to the ledger. ?>
+                <div class="text-secondary text-sm" style="margin-top:-4px;">
+                    The balance on the statement the day before FleetForge's first transaction. It posts an opening entry dated that day
+                    (DR this bank's GL account / CR 3050 Opening Balance Equity), and moves it if you change it later. Fixed once a reconciliation is completed.
+                </div>
                 <div>
                     <label style="display:flex;align-items:center;gap:8px;">
                         <input type="checkbox" x-model="accountForm.is_default" :true-value="1" :false-value="0">
@@ -525,10 +530,17 @@ require_once FF_ROOT . '/includes/header.php';
                         <div class="field-error" x-show="transferErrors.from_amount" x-cloak x-text="transferErrors.from_amount"></div>
                     </div>
                     <div>
-                        <label class="form-label">Amount To</label>
-                        <input type="text" class="form-input font-mono" :class="transferErrors.to_amount ? 'is-invalid' : ''" x-model="transferForm.to_amount" @input="transferErrors.to_amount = ''" placeholder="Same if same currency">
+                        <label class="form-label" x-text="transferCrossCurrency() ? 'Amount Received *' : 'Amount To'">Amount To</label>
+                        <input type="text" class="form-input font-mono" :class="transferErrors.to_amount ? 'is-invalid' : ''" x-model="transferForm.to_amount" @input="transferErrors.to_amount = ''" :placeholder="transferCrossCurrency() ? 'In the destination currency' : 'Same if same currency'">
                         <div class="field-error" x-show="transferErrors.to_amount" x-cloak x-text="transferErrors.to_amount"></div>
                     </div>
+                </div>
+                <?php // SOP I5: a CAD↔USD transfer posts each leg at its CAD value. ?>
+                <div x-show="transferCrossCurrency()" x-cloak>
+                    <label class="form-label">USD → CAD rate (optional)</label>
+                    <input type="text" class="form-input font-mono" :class="transferErrors.exchange_rate ? 'is-invalid' : ''" x-model="transferForm.exchange_rate" @input="transferErrors.exchange_rate = ''" placeholder="Blank = the rate the two amounts imply">
+                    <div class="field-error" x-show="transferErrors.exchange_rate" x-cloak x-text="transferErrors.exchange_rate"></div>
+                    <div class="text-secondary text-sm" style="margin-top:4px;">The USD side is booked at its CAD value with this rate. Enter the day's rate to book the bank's conversion spread as FX gain/loss; leave blank to use the rate implied by the two amounts.</div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     <div>
@@ -610,7 +622,7 @@ function bankAccountsPage() {
         importSelected: [],
         importResult: {},
         manualTxnForm: { transaction_date: FF_localDate(), description: '', amount: '', transaction_type: 'bank_charge', reference: '', expense_account_id: '' },
-        transferForm: { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: FF_localDate(), reference: '' },
+        transferForm: { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', exchange_rate: '', transfer_date: FF_localDate(), reference: '' },
         nsfForm: { payment_id: '', nsf_fee: '0.00' },
 
         // Per-form error state
@@ -950,7 +962,7 @@ function bankAccountsPage() {
         },
 
         openTransferModal() {
-            this.transferForm = { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', transfer_date: FF_localDate(), reference: '' };
+            this.transferForm = { from_account_id: '', to_account_id: '', from_amount: '', to_amount: '', exchange_rate: '', transfer_date: FF_localDate(), reference: '' };
             this._clearErrors(this.transferErrors, 'transferFormError');
             this.showTransferModal = true;
         },
@@ -995,6 +1007,13 @@ function bankAccountsPage() {
                 ok = false;
             }
             return ok;
+        },
+
+        // True when the two chosen accounts are in different currencies (SOP I5).
+        transferCrossCurrency() {
+            const from = this.accounts.find(a => String(a.id) === String(this.transferForm.from_account_id));
+            const to   = this.accounts.find(a => String(a.id) === String(this.transferForm.to_account_id));
+            return !!(from && to && from.currency !== to.currency);
         },
 
         async saveTransfer() {

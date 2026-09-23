@@ -139,7 +139,10 @@ class JournalEntryService
         }
 
         if ($postImmediately) {
-            $periodError = AccountingService::validatePeriodForPosting($period['id']);
+            // SOP I6: only year-end closing entries may land in a CLOSED
+            // (never a locked) period — see validatePeriodForPosting().
+            $allowClosed = !empty($header['allow_closed_period']) && $entryType === 'year_end';
+            $periodError = AccountingService::validatePeriodForPosting((int) $period['id'], $allowClosed);
             if ($periodError) {
                 throw new \RuntimeException($periodError);
             }
@@ -320,21 +323,80 @@ class JournalEntryService
     }
 
     /**
+     * Why a person may NOT reverse this entry from the Journal Entries page,
+     * or null when they may (SOP I9).
+     *
+     * An automatic entry belongs to a document — invoice, payment, bill,
+     * deposit, depreciation run… Reversing only the entry left the document
+     * saying one thing and the ledger another. Those are undone from the
+     * document, whose own action reverses the entry AND updates the
+     * document. Manual and recurring-template entries stay reversible here.
+     * Program callers (void flows, crons) call reverse() directly and are
+     * unaffected.
+     *
+     * @param array $je  Row with source_type, entry_type, is_reversal
+     */
+    public static function manualReversalBlockReason(array $je): ?string
+    {
+        if ((int) ($je['is_reversal'] ?? 0) === 1) {
+            return 'This entry is itself a reversal. Enter a new journal entry instead of reversing a reversal.';
+        }
+        $source = (string) ($je['source_type'] ?? '');
+        if ($source === '' || in_array($source, ['manual', 'recurring'], true)) {
+            // Hand-entered. entry_type 'system' + source 'manual' is the
+            // vendor-credit entry — undone by deleting the credit.
+            if (($je['entry_type'] ?? '') === 'system') {
+                return 'This is an automatic entry (vendor credit). Delete the vendor credit on Payables → Vendor Credits instead.';
+            }
+            return null;
+        }
+        $where = [
+            'invoice'                   => 'void the invoice or issue a credit note',
+            'payment'                   => 'void the payment (or process it as NSF)',
+            'credit_note'               => 'void the credit note',
+            'credit_note_refund'        => 'contact IT — a cash refund of a credit note cannot be undone from here',
+            'ap_bill'                   => 'void the bill',
+            'ap_payment'                => 'void the bill payment',
+            'customer_deposit'          => 'refund or forfeit the deposit on Receivables → Deposits',
+            'depreciation'              => 'reverse the depreciation run on Fixed Assets → Depreciation',
+            'asset_disposal'            => 'contact IT to undo the disposal',
+            'asset_acquisition'         => 'correct the asset on the Asset Register',
+            'asset_betterment'          => 'correct the asset on the Asset Register',
+            'impairment'                => 'reverse it on Fixed Assets → Impairment Tests',
+            'fx_revaluation'            => 'reverse it on Accounting → FX Revaluation',
+            'year_end'                  => 'reverse the year-end close on Accounting → Year-End',
+            'tax_remittance'            => 'contact IT — tax remittances are tied to a filed period',
+            'bank_transaction'          => 'undo it from Banking → Transactions or the reconciliation',
+            'bank_transfer'             => 'undo it from Banking → Transactions',
+            'bank_opening_balance'      => "change the bank account's opening balance on Banking → Bank Accounts",
+            'bad_debt_recovery'         => 'contact IT — the recovery is tied to the write-off',
+            'damage_recovery'           => 'change the damage claim',
+            'damage_repair'             => 'change the damage claim',
+            'damage_writeoff'           => 'change the damage claim',
+        ];
+        $how = $where[$source] ?? 'undo it from the document that created it';
+        return "This entry was posted automatically ({$source}). Reversing it here would leave the document unchanged — {$how}.";
+    }
+
+    /**
      * Reverse a posted journal entry.
      * Creates a new entry with debits and credits swapped.
      * Links the two entries via reversal_of_id / reversed_by_id.
      *
      * @param int         $entryId   Original entry to reverse
-     * @param string|null $reversalDate  Date for the reversal (defaults to today)
+     * @param string|null $reversalDate  Date for the reversal (defaults to business-local today)
      * @param int|null    $userId
+     * @param bool        $allowClosedPeriod  Year-end reversal only (SOP I6): a
+     *                    closed (never locked) period may take a reversal of a
+     *                    'year_end' entry. Ignored for every other entry type.
      * @return array      The new reversal entry row
      * @throws \RuntimeException
      */
-    public static function reverse(int $entryId, ?string $reversalDate = null, ?int $userId = null): array
+    public static function reverse(int $entryId, ?string $reversalDate = null, ?int $userId = null, bool $allowClosedPeriod = false): array
     {
-        $reversalDate = $reversalDate ?? date('Y-m-d');
+        $reversalDate = $reversalDate ?? \ff_today();
 
-        $result = \db_transaction(function () use ($entryId, $reversalDate, $userId) {
+        $result = \db_transaction(function () use ($entryId, $reversalDate, $userId, $allowClosedPeriod) {
             $original = \db_row(
                 "SELECT * FROM acc_journal_entries WHERE id = ? FOR UPDATE",
                 [$entryId]
@@ -355,7 +417,12 @@ class JournalEntryService
             if (!$period) {
                 throw new \RuntimeException("No accounting period found for date {$reversalDate}.");
             }
-            $periodError = AccountingService::validatePeriodForPosting($period['id']);
+            // $allowClosedPeriod: only the year-end reversal (SOP I6) — its
+            // closing entry is undone on the same Dec 31, in a closed month.
+            $periodError = AccountingService::validatePeriodForPosting(
+                (int) $period['id'],
+                $allowClosedPeriod && ($original['entry_type'] ?? '') === 'year_end'
+            );
             if ($periodError) {
                 throw new \RuntimeException($periodError);
             }

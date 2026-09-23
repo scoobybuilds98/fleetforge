@@ -82,6 +82,15 @@ db_transaction(function () use ($id, $reason, $cnCheck, &$result) {
         );
     }
 
+    // SOP I18: money already paid back in cash cannot be un-paid by voiding.
+    if (db_count("SELECT COUNT(*) FROM credit_note_refunds WHERE credit_note_id = ?", [$id]) > 0) {
+        json_error(
+            'HAS_REFUNDS',
+            "Credit note {$cn['credit_note_number']} has been partly refunded in cash — it cannot be voided.",
+            409
+        );
+    }
+
     // S-UTC-STAMPS: voided_at is UTC (show page renders it via format_datetime);
     // also echoed in the JSON response as a UTC instant.
     $voidedAt = ff_now_utc();

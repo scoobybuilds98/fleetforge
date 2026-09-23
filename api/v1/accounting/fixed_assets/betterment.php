@@ -32,6 +32,8 @@ $assetId    = clean_int($body['asset_id'] ?? null);
 $amount     = clean_decimal($body['amount'] ?? null);
 $note       = is_string($body['note'] ?? null) ? trim($body['note']) : '';
 $billLineId = clean_int($body['bill_line_id'] ?? null);
+// SOP I2: without a bill line, the account the betterment was paid from.
+$fundingAccountId = clean_int($body['funding_account_id'] ?? null);
 
 $errors = [];
 if (!$assetId) $errors['asset_id'] = 'asset_id is required.';
@@ -49,7 +51,9 @@ if ($errors) {
 // touching anything (so we fail fast with a clean error).
 if ($billLineId !== null) {
     $line = db_row(
-        "SELECT id, asset_id FROM acc_bill_lines WHERE id = ?",
+        "SELECT bl.id, bl.asset_id, bl.capitalize, b.status AS bill_status
+           FROM acc_bill_lines bl JOIN acc_bills b ON b.id = bl.bill_id
+          WHERE bl.id = ?",
         [$billLineId]
     );
     if (!$line) {
@@ -61,6 +65,32 @@ if ($billLineId !== null) {
             'Bill line / asset mismatch.'
         );
     }
+    if ((int) $line['capitalize'] === 1) {
+        json_validation_error(
+            ['bill_line_id' => 'This bill line has already been capitalized.'],
+            'This bill line has already been capitalized.'
+        );
+    }
+    // SOP I2: a DRAFT bill has posted nothing yet. Just classify the line —
+    // bills/approve.php capitalizes it (with its reclass entry) on approval.
+    // Capitalizing now too was a double capitalization.
+    if ($line['bill_status'] === 'draft') {
+        db_update('acc_bill_lines', [
+            'capitalize'      => 1,
+            'asset_id'        => $assetId,
+            'betterment_note' => $note,
+        ], 'id = ?', [$billLineId]);
+        json_success([
+            'deferred' => true,
+            'message'  => 'Classified as a betterment — it is added to the asset when the bill is approved.',
+            'asset'    => db_row("SELECT * FROM acc_fixed_assets WHERE id = ?", [$assetId]),
+        ]);
+    }
+} elseif (!$fundingAccountId) {
+    json_validation_error(
+        ['funding_account_id' => 'Choose the account the betterment was paid from.'],
+        'Choose the account the betterment was paid from.'
+    );
 }
 
 try {
@@ -69,7 +99,8 @@ try {
         $amount,
         current_user_id(),
         $note,
-        $billLineId
+        $billLineId,
+        $billLineId === null ? $fundingAccountId : null
     );
 } catch (\RuntimeException $e) {
     $msg = $e->getMessage();

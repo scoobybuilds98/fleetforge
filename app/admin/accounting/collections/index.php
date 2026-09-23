@@ -634,7 +634,17 @@ function collectionsPage() {
                 if (j.success) {
                     this._clearErrors(this.dunningErrors, 'dunningFormError');
                     this.loadAll();
-                    FF_Toast.success('Dunning letter generated.');
+                    // I22: the email is gated (master switch / do-not-email list /
+                    // bounced address) and can fail — say what actually happened.
+                    // Envelope nests under data.
+                    const d = j.data || {};
+                    if (!d.email_requested) {
+                        FF_Toast.success('Letter generated — ready to mail.');
+                    } else if (d.email_sent) {
+                        FF_Toast.success('Letter generated — email sent' + (d.email_to ? ' to ' + d.email_to : '') + '.');
+                    } else {
+                        FF_Toast.warning('Letter generated — NOT emailed', (d.email_skipped_reason || d.email_error || 'The email could not be sent.') + ' Print the PDF to mail it instead.', 10000);
+                    }
                 } else {
                     this._paintErrors(this.dunningErrors, 'dunningFormError', j, 'Failed to generate dunning letter.');
                 }

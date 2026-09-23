@@ -496,6 +496,13 @@ $isOverdue = (!in_array($invoice['status'], ['draft', 'paid', 'void', 'written_o
 $isDraft      = ($invoice['status'] === 'draft');
 $isVoid       = ($invoice['status'] === 'void');
 $isWrittenOff = ($invoice['status'] === 'written_off');
+// SOP I13: the write-off record (for Record Recovery) + banks the money can go into.
+$writeoffRow = $isWrittenOff
+    ? db_row("SELECT id, amount, recovered, recovered_amount, recovered_date FROM acc_bad_debt_writeoffs WHERE invoice_id = ? ORDER BY id DESC LIMIT 1", [$invoiceId])
+    : null;
+$recoveryBanks = $writeoffRow && !(int) $writeoffRow['recovered']
+    ? db_select("SELECT id, name, is_default FROM acc_bank_accounts WHERE is_active = 1 AND currency = ? ORDER BY is_default DESC, name", [$invoice['currency'] ?? 'CAD'])
+    : [];
 $isPaid       = ($invoice['status'] === 'paid');
 $canRecordPayment = in_array($invoice['status'], ['sent', 'partially_paid', 'overdue']);
 // WHY: super_admin role can edit/delete invoices of any status — all other roles are draft-only (D12)
@@ -1498,6 +1505,10 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
         <?php if (in_array($invoice['status'], ['draft', 'sent']) && can('invoices', 'edit')): ?>
             <button class="btn btn-danger btn-sm" @click="showVoidModal = true">Void</button>
         <?php endif; ?>
+        <?php // SOP I13: an uncollectable invoice is written off (bad debt), not credited. Same gate as the endpoint. ?>
+        <?php if (in_array($invoice['status'], ['sent', 'overdue', 'partially_paid'], true) && (float) $invoice['balance_due'] > 0 && can('journal_entries', 'create')): ?>
+            <button class="btn btn-secondary btn-sm" @click="showWriteOffModal = true">Write Off</button>
+        <?php endif; ?>
         <?php if ($canDelete): ?>
             <button class="btn btn-danger btn-sm" @click="showDeleteModal = true">Delete</button>
         <?php endif; ?>
@@ -1558,6 +1569,76 @@ if (preg_match('/(\d{3,})$/', $heroMark, $hm)) { $heroMark = $hm[1]; }
             </div>
         </div>
     </template>
+
+    <!-- Write-off modal (SOP I13) -->
+    <template x-if="showWriteOffModal">
+        <div class="modal-overlay" @click.self="showWriteOffModal = false">
+            <div class="modal modal-sm">
+                <div class="modal-header">
+                    <h3 class="modal-title">Write Off as Bad Debt</h3>
+                    <button class="modal-close-btn" aria-label="Close" @click="showWriteOffModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-sm text-secondary" style="margin-bottom:12px;">
+                        Writes off the unpaid balance of <strong><?= e($invoice['invoice_number']) ?></strong>
+                        (<?= e(($invoice['currency'] ?? 'CAD') . ' ' . number_format((float) $invoice['balance_due'], 2)) ?>):
+                        posts DR Bad Debt Expense / CR Accounts Receivable, closes the invoice and, when QuickBooks is connected,
+                        sends a credit memo. Revenue is not reduced — use a credit note for a billing mistake instead.
+                        If the customer pays later, use <em>Record Recovery</em> on this invoice.
+                    </p>
+                    <label class="form-label">Reason <span class="text-danger">*</span></label>
+                    <textarea class="form-control" x-model="writeOffReason" rows="3"
+                              placeholder="Why is this debt uncollectable?"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" @click="showWriteOffModal = false">Cancel</button>
+                    <button class="btn btn-danger btn-sm" @click="writeOffInvoice()" :disabled="writingOff || writeOffReason.trim().length < 5">
+                        <span x-show="!writingOff">Write Off</span>
+                        <span x-show="writingOff">Writing off…</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <?php if ($writeoffRow && !(int) $writeoffRow['recovered']): ?>
+    <!-- Record recovery modal (SOP I13) -->
+    <template x-if="showRecoveryModal">
+        <div class="modal-overlay" @click.self="showRecoveryModal = false">
+            <div class="modal modal-sm">
+                <div class="modal-header">
+                    <h3 class="modal-title">Record Recovery</h3>
+                    <button class="modal-close-btn" aria-label="Close" @click="showRecoveryModal = false">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-sm text-secondary" style="margin-bottom:12px;">
+                        Money received after the write-off. Posts DR the bank / CR Bad Debt Expense. The invoice stays written off.
+                    </p>
+                    <label class="form-label">Amount received (<?= e($invoice['currency'] ?? 'CAD') ?>) <span class="text-danger">*</span></label>
+                    <input type="number" step="0.01" min="0.01" max="<?= e((string) $writeoffRow['amount']) ?>" class="form-control font-mono" x-model="recovery.amount">
+                    <label class="form-label" style="margin-top:10px;">Date received <span class="text-danger">*</span></label>
+                    <input type="date" class="form-control" x-model="recovery.date">
+                    <?php if ($recoveryBanks): ?>
+                    <label class="form-label" style="margin-top:10px;">Deposited to</label>
+                    <select class="form-control" x-model="recovery.bank_account_id">
+                        <option value="">Default bank account</option>
+                        <?php foreach ($recoveryBanks as $b): ?>
+                        <option value="<?= (int) $b['id'] ?>"><?= e($b['name']) ?><?= $b['is_default'] ? ' (default)' : '' ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <?php endif; ?>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary btn-sm" @click="showRecoveryModal = false">Cancel</button>
+                    <button class="btn btn-primary btn-sm" @click="recordRecovery()" :disabled="recovering || !(parseFloat(recovery.amount) > 0) || !recovery.date">
+                        <span x-show="!recovering">Record Recovery</span>
+                        <span x-show="recovering">Saving…</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </template>
+    <?php endif; ?>
 
     <!-- Delete confirmation modal -->
     <template x-if="showDeleteModal">
@@ -3140,6 +3221,13 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
                         by <?= e($userNames[(int)$invoice['written_off_by']]) ?>
                     <?php endif; ?>
                 </div>
+                <?php if ($writeoffRow && (int) $writeoffRow['recovered']): ?>
+                    <div class="text-sm" style="margin-top:6px;color:var(--color-success);">
+                        Recovered <?= e(number_format((float) $writeoffRow['recovered_amount'], 2)) ?> on <?= e(format_date($writeoffRow['recovered_date'] ?? '')) ?>.
+                    </div>
+                <?php elseif ($writeoffRow && can('journal_entries', 'create')): ?>
+                    <button class="btn btn-secondary btn-xs" style="margin-top:8px;" @click="showRecoveryModal = true">Record Recovery</button>
+                <?php endif; ?>
             </div>
         </div>
         <?php endif; ?>
@@ -3444,6 +3532,13 @@ function FF_InvoiceShow() {
         /* ── Modal states ───────────────────────────────────── */
         showVoidModal:  false,
         voidReason:     '',
+        // SOP I13: write-off + recovery
+        showWriteOffModal: false,
+        writeOffReason:    '',
+        writingOff:        false,
+        showRecoveryModal: false,
+        recovering:        false,
+        recovery: { amount: <?= json_encode($writeoffRow ? (string) $writeoffRow['amount'] : '') ?>, date: FF_localDate(), bank_account_id: '' },
         showDeleteModal: false,
 
         /* ── Inline edit (draft only) ───────────────────────── */
@@ -3530,6 +3625,50 @@ function FF_InvoiceShow() {
                 this.showToast('Network error', 'error');
             }
             this.voiding = false;
+        },
+
+        /* ── Write off as bad debt (SOP I13) ─────────────────── */
+        async writeOffInvoice() {
+            this.writingOff = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/accounting/ar/bad_debt_writeoff') ?>', {
+                    invoice_id: <?= (int)$invoiceId ?>,
+                    reason: this.writeOffReason.trim()
+                });
+                if (r.success) {
+                    this.showToast('Invoice written off', 'success');
+                    this.showWriteOffModal = false;
+                    setTimeout(() => location.reload(), 1200);
+                } else {
+                    this.showToast(r.error?.message || 'Failed to write off', 'error');
+                }
+            } catch (e) {
+                this.showToast('Network error', 'error');
+            }
+            this.writingOff = false;
+        },
+
+        /* ── Money received after a write-off (SOP I13) ─────── */
+        async recordRecovery() {
+            this.recovering = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/accounting/ar/bad_debt_recovery') ?>', {
+                    writeoff_id: <?= (int) ($writeoffRow['id'] ?? 0) ?>,
+                    recovered_amount: String(this.recovery.amount),
+                    recovered_date: this.recovery.date,
+                    bank_account_id: this.recovery.bank_account_id || null
+                });
+                if (r.success) {
+                    this.showToast('Recovery recorded', 'success');
+                    this.showRecoveryModal = false;
+                    setTimeout(() => location.reload(), 1200);
+                } else {
+                    this.showToast(r.error?.message || 'Failed to record the recovery', 'error');
+                }
+            } catch (e) {
+                this.showToast('Network error', 'error');
+            }
+            this.recovering = false;
         },
 
         /* ── Delete Invoice (draft only) ────────────────────── */

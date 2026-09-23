@@ -9,16 +9,18 @@ declare(strict_types=1);
  *
  * Behavior:
  *   1. Exit silently if accounting.fx_revaluation_enabled = '0'.
- *   2. Find the most recently closed period for the prior month.
- *      If none: log a warning and exit 0 (operator must close the period
- *      before the engine will post). This is NOT an error.
+ *   2. Find the prior month's period. It must still be OPEN — the JE is
+ *      dated the period end and posts immediately, so a closed period can
+ *      never take it (SOP I7: this cron used to look for CLOSED periods
+ *      only, so it could never post). If the month is already closed: log
+ *      and exit 0 — the accountant revalues by adjusting entry instead.
  *   3. Skip if a 'posted' revaluation already exists for that period.
  *   4. Fetch the closing rate (Bank of Canada or manual per setting).
  *   5. Call FxRevaluationService::post().
  *   6. Audit-log the result.
  *
  * Exit codes:
- *   0 = success or "nothing to do" (disabled, no closed period, already run)
+ *   0 = success or "nothing to do" (disabled, month already closed, already run)
  *   1 = exception thrown — error logged to error_log + audit_log
  *
  * Spec ref: FLEETFORGE_ACCOUNTING_SPEC.md §22.1 (FX revaluation cron).
@@ -45,29 +47,30 @@ try {
         exit(0);
     }
 
-    // 2. Find the most recently closed period for the prior calendar month.
-    // The cron runs on the 1st of month M; we want the period whose end_date
-    // is in month M-1 and status='closed'.
-    $today = date('Y-m-d');
-    $priorMonthEnd = date('Y-m-t', strtotime($today . ' -1 month'));
+    // 2. The prior calendar month's period, which must still be open.
+    // The cron runs on the 1st of month M; we want the period ending on the
+    // last day of M-1. Business-local today (ff_today), not server date().
+    $today = ff_today();
+    $priorMonthEnd = date('Y-m-t', strtotime(substr($today, 0, 7) . '-01 -1 month'));
     $period = db_row(
         "SELECT id, name, start_date, end_date, status
            FROM acc_periods
-          WHERE end_date <= ?
-            AND status = 'closed'
-          ORDER BY end_date DESC
+          WHERE end_date = ?
           LIMIT 1",
         [$priorMonthEnd]
     );
-    if (!$period) {
-        error_log('cron/accounting_fx_revaluation: no closed period found prior to ' . $priorMonthEnd . ' — exiting.');
+    if (!$period || (string) $period['status'] !== 'open') {
+        $why = $period
+            ? "period {$period['name']} is already {$period['status']} — revalue it with an Adjusting journal entry, or revalue before closing next time"
+            : "no accounting period ends on {$priorMonthEnd}";
+        error_log("cron/accounting_fx_revaluation: skipped — {$why}.");
         db_insert('audit_log', [
             'user_id'     => null,
             'user_name'   => 'system',
             'action'     => 'cron',
             'module'     => 'accounting',
             'entity_type'=> 'fx_revaluation',
-            'notes'      => "FX revaluation cron: no closed period available prior to {$priorMonthEnd}. Operator must close the period before revaluation can post.",
+            'notes'      => "FX revaluation cron skipped: {$why}.",
             'ip_address' => '127.0.0.1',
         ]);
         db_execute("SELECT RELEASE_LOCK('ff_cron_accounting_fx_revaluation')", []);

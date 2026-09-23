@@ -27,6 +27,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/app.php';
 
+use FleetForge\Accounting\AccountingService;
 use FleetForge\Accounting\JournalEntryService;
 
 $lock = db_row("SELECT GET_LOCK('ff_acct_auto_reverse', 10) AS ok", []);
@@ -40,7 +41,7 @@ $failed   = 0;
 $failureMessages = [];
 
 try {
-    $today = date('Y-m-d');
+    $today = ff_today(); // business-local day, not server date()
 
     // System user = oldest active super_admin (same pattern as accounting_fx_revaluation.php)
     $systemUser = db_row(
@@ -57,7 +58,7 @@ try {
         "SELECT id, entry_number, entry_date, description, auto_reverse_date
            FROM acc_journal_entries
           WHERE auto_reverse = 1
-            AND auto_reverse_date = ?
+            AND auto_reverse_date <= ?
             AND reversed_by_id IS NULL
             AND status = 'posted'
           ORDER BY id ASC",
@@ -66,7 +67,17 @@ try {
 
     foreach ($candidates as $je) {
         try {
-            $result = JournalEntryService::reverse((int) $je['id'], $today, $systemUserId);
+            // SOP I7: `<= today`, not `= today` — an entry posted AFTER its
+            // reversal date (a month-end FX revaluation posted on the 3rd with
+            // auto_reverse_date = the 1st) was never reversed. Date the
+            // reversal on its intended day while that month is still open;
+            // otherwise today.
+            $reverseOn = (string) $je['auto_reverse_date'];
+            $revPeriod = AccountingService::periodForDate($reverseOn);
+            if (!$revPeriod || AccountingService::validatePeriodForPosting((int) $revPeriod['id']) !== null) {
+                $reverseOn = $today;
+            }
+            $result = JournalEntryService::reverse((int) $je['id'], $reverseOn, $systemUserId);
             $reversed++;
             echo sprintf(
                 "REVERSED  je_id=%d %s  ->  reversal_je=%s\n",

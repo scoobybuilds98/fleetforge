@@ -33,7 +33,7 @@ Use the three tabs to filter: **Active & Pending**, **Closed**, or **All**.
    - Set the **Start Date**.
    - Set an **End Date** (or leave blank for an open-ended lease).
    - Set a **Minimum End Date** if an early return fee applies before that date.
-   - Choose **Billing Cycle**: *Monthly (auto-invoice)* generates invoices automatically each month; *On Close Only* generates one invoice when the lease is closed.
+   - Choose **Billing Cycle**: *Monthly* bills the lease month by month — each month's invoice is created from **Invoices → Batch Invoicing** or the lease's **Generate Invoice** (nothing is invoiced automatically); *On Close Only* generates one invoice when the lease is closed.
 
 4. **Rental Rates** section:
    - Enter **Daily Rate**, **Weekly Rate**, and **Monthly Rate**. At least one must be greater than zero. For monthly billing, all three must be filled in.
@@ -123,7 +123,7 @@ All amendments are logged in the **Amendments** tab.
 2. In the close modal, enter the **Actual Return Date**.
 3. Capture the **Closing Odometer** reading — enter manually or fetch from Samsara.
 4. The actual mileage is auto-calculated from the odometer readings. Adjust if needed.
-5. If the lease has a mileage precharge balance remaining, select the **Precharge Refund** method (Credit Note, Cheque, Account Credit, or Waive).
+5. If the lease has a mileage precharge balance remaining, choose how to return it under **Precharge Refund**: **Apply as Credit** (a credit note on the customer's account, usable against any future invoice) or **Cash Refund**. For a cash refund, come back to the closed lease and click **Mark Refund Settled** once the cheque or EFT has actually gone out.
 6. Confirm. The lease moves to **Completed**, the unit returns to *Available*, and a final invoice is queued if any balance is outstanding.
 
 ---
@@ -151,7 +151,7 @@ Creating a lease sets the equipment unit to `reserved`. Activating changes it to
 Auto-generated as `{prefix}-XXXXXX-YYYY` (prefix from Settings, default "CN"). Numbers are de-duplicated.
 
 **Snapshots frozen at creation**
-Customer name, unit number, and template name are snapshotted on the lease record. These persist even if the customer or unit is later soft-deleted.
+Customer name, unit number, and equipment type (template) name are snapshotted on the lease record. These persist even if the customer or unit is later soft-deleted.
 
 **Rate validation**
 At least one rate (daily, weekly, monthly, or mileage) must be > 0. For monthly billing, all three rental tiers (daily, weekly, monthly) must be filled in together.

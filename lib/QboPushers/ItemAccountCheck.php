@@ -66,14 +66,16 @@ final class ItemAccountCheck
                 }
             }
         }
-        $map = AccountingService::setting('accounting.revenue_account_map', []);
-        if (is_string($map)) {
-            $map = json_decode($map, true) ?? [];
-        }
+        // SOP I1: one resolver decides (and reports fallback) — rental lines
+        // resolve per equipment category, so a QuickBooks item (one per line
+        // type) can only be compared with the category-less answer; say so.
+        $detail = AutoEntryBridge::resolveRevenueAccountDetail($itemType);
         return [
-            'account_id' => AutoEntryBridge::revenueAccountForLineType($itemType),
-            'fallback'   => !isset($map[$itemType]),
-            'note'       => null,
+            'account_id' => $detail['account_id'],
+            'fallback'   => $detail['fallback'],
+            'note'       => $itemType === 'base_rental'
+                ? 'Rental revenue books per equipment category (base_rental_<category> in Revenue Mapping); shown here: the account used when the category has no entry of its own.'
+                : null,
         ];
     }
 

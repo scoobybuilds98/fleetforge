@@ -303,7 +303,8 @@ function classifyLine(lineId, assetId, amount) {
                         note: m.note.trim(), bill_line_id: this.lineId,
                     });
                     if (r.success) {
-                        FF_Toast.success('Betterment capitalized.');
+                        // SOP I2: a draft bill's line is capitalized on approval.
+                        FF_Toast.success(r.data && r.data.deferred ? r.data.message : 'Betterment capitalized — cost moved into the asset account.');
                         window.location.reload();
                     } else {
                         m.error = (r.error && (r.error.message || JSON.stringify(r.error.fields || {}))) || 'Save failed.';

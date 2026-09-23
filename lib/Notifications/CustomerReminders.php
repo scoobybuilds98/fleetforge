@@ -11,7 +11,9 @@ use FleetForge\Email\EmailService;
  * Engine + gate for the customer-facing email / reminder system surfaced in
  * Settings → Customer Emails. This is the runtime half of the registry in
  * config/customer_notifications.php: every sender (the customer_reminders cron,
- * the compliance_alerts cron, the "send test" endpoint) resolves a reminder
+ * the compliance_alerts cron, the "send test" endpoint, and — via
+ * mayEmailCustomer() — the dunning letters from the notification_digest cron
+ * and the Collections "Generate & Send" endpoint, I22) resolves a reminder
  * type's config, decides who is in scope, and dispatches through HERE so the
  * gating, audience rules, dedup, and logging live in exactly one place.
  *
@@ -337,6 +339,97 @@ final class CustomerReminders
     }
 
     /**
+     * mayEmailCustomer() — the ONE gate for a customer email that is sent
+     * outside cron/customer_reminders.php (I22: dunning letters, both the
+     * manual "Generate & Send" and the nightly digest). Before this, those
+     * paths called Mailer::send() directly and ignored the Customer Emails
+     * master switch and the do-not-email list.
+     *
+     * Checks, in order (first failure wins, reason is operator-readable):
+     *   1. Master switch (customer_notifications.master_enabled).
+     *   2. The type's own toggle — only when $requireTypeEnabled (automatic
+     *      sends). A manual operator action skips it: the operator IS the
+     *      decision, but still may not override the master switch or the
+     *      do-not-email list.
+     *   3. Global do-not-email list ('*' exclude rows) — always.
+     *   4. Per-type audience + portal opt-out (customerAllowed) — automatic
+     *      sends only, for the same reason as 2.
+     *   5. Recipient: invoice_email → billing_email → email (the same
+     *      precedence invoices use); the main email is skipped when
+     *      customers.email_disabled=1 (hard bounce / complaint).
+     *
+     * @param  string $key                Registry key (e.g. 'dunning').
+     * @param  int    $customerId         customers.id
+     * @param  bool   $requireTypeEnabled true for automatic/cron sends.
+     * @return array{ok:bool, reason:string, to:?string, to_name:string}
+     */
+    public static function mayEmailCustomer(string $key, int $customerId, bool $requireTypeEnabled): array
+    {
+        $deny = static fn(string $reason): array => ['ok' => false, 'reason' => $reason, 'to' => null, 'to_name' => ''];
+
+        if (!self::masterEnabled()) {
+            return $deny('Customer emails are switched off (Settings → Customer Emails master switch).');
+        }
+        if ($requireTypeEnabled && !self::typeEnabled($key)) {
+            $label = (string) (self::meta($key)['label'] ?? $key);
+            return $deny("\"{$label}\" emails are switched off in Settings → Customer Emails.");
+        }
+
+        $customer = \db_row(
+            "SELECT c.id, c.company_name, c.contact_name, c.billing_contact_name,
+                    c.email, c.billing_email, c.invoice_email, c.email_disabled,
+                    pu.notification_preferences
+               FROM customers c
+               LEFT JOIN portal_users pu
+                      ON pu.customer_id = c.id AND pu.is_primary = 1 AND pu.status = 'active'
+              WHERE c.id = ? AND c.deleted_at IS NULL
+              LIMIT 1",
+            [$customerId]
+        );
+        if ($customer === null) {
+            return $deny('Customer not found.');
+        }
+
+        // Global do-not-email list applies to EVERY send, manual included.
+        $sets = self::audienceSets($key);
+        if (!empty($sets['suppressed'][$customerId])) {
+            return $deny('Customer is on the do-not-email list (Settings → Customer Emails).');
+        }
+        // Per-type audience + portal opt-out: automatic sends only. The global
+        // list was checked above, so a false here is audience/opt-out.
+        if ($requireTypeEnabled && !self::customerAllowed(
+            $key, $customerId, $customer['notification_preferences'] ?? null, $sets
+        )) {
+            return $deny('Customer is outside this email\'s audience or opted out in the portal.');
+        }
+
+        // Recipient — first VALID address wins; a bounced main address is skipped.
+        $mainDisabled = (int) ($customer['email_disabled'] ?? 0) === 1;
+        $to = null;
+        foreach (['invoice_email', 'billing_email', 'email'] as $col) {
+            $candidate = trim((string) ($customer[$col] ?? ''));
+            if ($col === 'email' && $mainDisabled) {
+                continue;
+            }
+            if ($candidate !== '' && filter_var($candidate, FILTER_VALIDATE_EMAIL) !== false) {
+                $to = $candidate;
+                break;
+            }
+        }
+        if ($to === null) {
+            return $deny($mainDisabled && trim((string) ($customer['email'] ?? '')) !== ''
+                ? 'The customer\'s email address is disabled after a bounce or complaint, and no invoice/billing email is set.'
+                : 'No valid email address on file (invoice, billing or main email).');
+        }
+
+        $name = trim((string) ($customer['billing_contact_name'] ?? ''))
+            ?: trim((string) ($customer['contact_name'] ?? ''))
+            ?: trim((string) ($customer['company_name'] ?? ''));
+
+        return ['ok' => true, 'reason' => '', 'to' => $to, 'to_name' => $name];
+    }
+
+    /**
      * portalPrefKey() — map a reminder key to the portal-preference key.
      * compliance_expiry keeps the legacy 'compliance_expiring' key already shown
      * in the portal UI; every other type uses its own registry key.
@@ -424,6 +517,9 @@ final class CustomerReminders
      *   entity_type:string, entity_id:?int, channels:string[],
      *   to_email:string, to_name:string, subject:string, body_html:string,
      *   log_summary?:string,
+     *   raw_html?:bool,   // true = body_html is already a complete letter
+     *                     // (e.g. a dunning letter with its own letterhead);
+     *                     // skip the branded EmailService shell.
      *   in_app?:array{type:string,title:string,message:string,url:string,severity?:string},
      *   sms?:array{phone:string,body:string}
      * }
@@ -454,7 +550,9 @@ final class CustomerReminders
             if (filter_var($toEmail, FILTER_VALIDATE_EMAIL) === false) {
                 $err = 'No deliverable email address.';
             } else {
-                $wrapped = EmailService::renderEmailHtml($bodyFrag);
+                // I22: a dunning letter carries its own letterhead + styles;
+                // wrapping it in the branded shell would double the header.
+                $wrapped = !empty($a['raw_html']) ? $bodyFrag : EmailService::renderEmailHtml($bodyFrag);
                 $replyTo = self::replyTo();
                 $replyToArr = ($replyTo !== '' && filter_var($replyTo, FILTER_VALIDATE_EMAIL))
                     ? [['email' => $replyTo, 'name' => '']]

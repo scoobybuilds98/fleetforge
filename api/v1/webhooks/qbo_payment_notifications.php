@@ -167,41 +167,14 @@ if (function_exists('fastcgi_finish_request')) {
     fastcgi_finish_request();
 }
 
-// ── 10. Process each Payment event ────────────────────────────────
-$lastResult = null;
-$lastError  = null;
-foreach ($events as $ev) {
-    if ($ev['entity_id'] === '') {
-        continue;
-    }
-    // S-QBO-GOLIVE-AUDIT: Invoice / CreditMemo events for documents FF
-    // pushed — a void / delete / edit made in QuickBooks becomes a drift
-    // event instead of an invisible disagreement. Other entities are ignored.
-    // S-QBO-BILLPAY-MIRROR: BillPayment events (a bill the accountant paid
-    // in QuickBooks) mirror into FF's AP. Intuit names the entity
-    // "BillPayment" (legacy envelope) / "Billpayment" (CloudEvents type
-    // qbo.billpayment.*) — compared case-insensitively.
-    $isPayment     = strcasecmp($ev['name'], 'Payment') === 0;
-    $isBillPayment = strcasecmp($ev['name'], 'BillPayment') === 0;
-    if (!$isPayment && !$isBillPayment && !\FleetForge\QboPushers\DocumentWebhookHandler::handles($ev['name'])) {
-        continue;
-    }
-
-    try {
-        if ($isPayment) {
-            $res = PaymentWebhookHandler::handle($ev['entity_id'], $ev['operation'], $ev['realm_id'], $webhookEventId);
-        } elseif ($isBillPayment) {
-            $res = \FleetForge\QboPushers\BillPaymentWebhookHandler::handle($ev['entity_id'], $ev['operation'], $ev['realm_id'], $webhookEventId);
-        } else {
-            $res = \FleetForge\QboPushers\DocumentWebhookHandler::handle($ev['name'], $ev['entity_id'], $ev['operation'], $ev['realm_id']);
-        }
-        $lastResult = (string) ($res['result'] ?? 'unknown');
-    } catch (\Throwable $e) {
-        $lastResult = 'error';
-        $lastError  = $e->getMessage();
-        error_log("[qbo_payment_webhook] {$ev['name']} handler threw: " . $e->getMessage());
-    }
-}
+// ── 10. Process the events ────────────────────────────────────────
+// Payment → payment mirror; BillPayment → AP mirror (S-QBO-BILLPAY-MIRROR);
+// Invoice / CreditMemo → drift events (S-QBO-GOLIVE-AUDIT). The loop lives
+// in WebhookReplay::dispatch() so cron/qbo_sync_worker.php can re-run a
+// delivery that errored or never finished (SOP I25).
+$dispatch   = \FleetForge\QboPushers\WebhookReplay::dispatch($events, $webhookEventId);
+$lastResult = $dispatch['result'];
+$lastError  = $dispatch['error'];
 
 // ── 11. UPDATE webhook event row with outcome ─────────────────────
 try {

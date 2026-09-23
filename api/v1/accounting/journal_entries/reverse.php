@@ -7,7 +7,9 @@
  * swapped, marks the original as 'reversed', and links the two via
  * reversal_of_id / reversed_by_id.
  *
- * Delegates all logic to JournalEntryService::reverse().
+ * Delegates all logic to JournalEntryService::reverse(). Automatic entries
+ * (JournalEntryService::manualReversalBlockReason) are refused with 422
+ * AUTOMATIC_ENTRY — they are undone from their source document (SOP I9).
  *
  * @method  POST
  * @body    JSON: id (required), reversal_date (optional — defaults to today)
@@ -35,6 +37,18 @@ if (!$id) {
 }
 if ($fields) {
     json_validation_error($fields);
+}
+
+// SOP I9: automatic entries are undone from their document, never here —
+// reversing only the entry left the invoice/payment/bill disagreeing with
+// the ledger. JournalEntryService::reverse() itself stays open for the
+// program callers (void flows, crons) that DO update the document.
+$je = db_row("SELECT id, source_type, entry_type, is_reversal FROM acc_journal_entries WHERE id = ?", [$id]);
+if (!$je) {
+    json_error('NOT_FOUND', 'Journal entry not found.', 404);
+}
+if ($blocked = JournalEntryService::manualReversalBlockReason($je)) {
+    json_error('AUTOMATIC_ENTRY', $blocked, 422, ['fields' => ['id' => $blocked]]);
 }
 
 try {

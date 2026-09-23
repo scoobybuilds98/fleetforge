@@ -426,8 +426,12 @@ try {
     $ev = PaymentWebhookHandler::normalizeEvents(['eventNotifications' => [['realmId' => $realm, 'dataChangeEvent' => ['entities' => [
         ['name' => 'BillPayment', 'id' => '9011', 'operation' => 'Void']]]]]]);
     if (strcasecmp($ev[0]['name'] ?? '', 'BillPayment') !== 0 || ($ev[0]['operation'] ?? '') !== 'Void') { $e[] = 'legacy ' . json_encode($ev); }
-    $src = (string) file_get_contents(FF_ROOT . '/api/v1/webhooks/qbo_payment_notifications.php');
-    if (!str_contains($src, "strcasecmp(\$ev['name'], 'BillPayment')") || !str_contains($src, 'BillPaymentWebhookHandler::handle(')) { $e[] = 'receiver does not route BillPayment'; }
+    // S-SOP-KNOWN-ISSUES: the event loop moved into WebhookReplay::dispatch()
+    // (shared with the replay in cron/qbo_sync_worker.php); the receiver calls it.
+    $src  = (string) file_get_contents(FF_ROOT . '/api/v1/webhooks/qbo_payment_notifications.php');
+    $loop = (string) file_get_contents(FF_ROOT . '/lib/QboPushers/WebhookReplay.php');
+    if (!str_contains($src, 'WebhookReplay::dispatch(')) { $e[] = 'receiver does not call WebhookReplay::dispatch'; }
+    if (!str_contains($loop, "strcasecmp(\$ev['name'], 'BillPayment')") || !str_contains($loop, 'BillPaymentWebhookHandler::handle(')) { $e[] = 'dispatch does not route BillPayment'; }
     ff_bpm_check('C19', 'webhook receiver routes BillPayment events (legacy + CloudEvents names)', $e);
 } catch (\Throwable $fatal) {
     echo "FATAL " . get_class($fatal) . ': ' . $fatal->getMessage() . ' @ ' . $fatal->getFile() . ':' . $fatal->getLine() . "\n";

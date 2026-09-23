@@ -49,20 +49,64 @@ $glAccounts = db_select(
     []
 );
 
-// ── Load invoice line types for revenue mapping ────────────────
-// WHY: Pull distinct item_type from invoice_line_items so the
-// Revenue Mapping dropdown lists every category the billing engine
-// actually emits (base_rental, mileage_*, late_fee, damage, …).
-$lineTypes = [];
+// ── Revenue mapping rows (SOP I1) ──────────────────────────────
+// WHY: this tab edits accounting.revenue_account_map — the ONE map invoice
+// posting reads (AutoEntryBridge::resolveRevenueAccountDetail), line-type
+// key → account CODE. It used to save separate accounting.revenue_mapping.*
+// rows nothing read, and listed only line types already on some invoice.
+// The rows are the fixed set of keys the resolver consults: rental lines
+// book per equipment category (base_rental_<slug>), everything unmapped
+// falls to 'other'.
+$revenueMapRaw = $settings['revenue_account_map'] ?? '{}';
+$revenueMapCurrent = is_string($revenueMapRaw) ? (json_decode($revenueMapRaw, true) ?? []) : (array) $revenueMapRaw;
+$revenueRows = [];
+$revenueRows[] = ['key' => 'base_rental', 'group' => 'Rental', 'label' => 'Rental — every category',
+                  'hint' => 'Leave blank to split rental by equipment category (rows below).'];
 try {
-    $lineTypes = db_select(
-        "SELECT DISTINCT item_type AS line_type FROM invoice_line_items WHERE item_type IS NOT NULL ORDER BY item_type",
-        []
-    );
+    foreach (db_select("SELECT slug, label FROM equipment_categories WHERE deleted_at IS NULL ORDER BY sort_order, label", []) as $cat) {
+        if ($cat['slug'] === 'other') continue;
+        $revenueRows[] = ['key' => 'base_rental_' . $cat['slug'], 'group' => 'Rental',
+                          'label' => 'Rental — ' . $cat['label'], 'hint' => ''];
+    }
 } catch (\Throwable $e) {
-    // Table may not exist yet — that's OK, revenue mapping will be empty
-    $lineTypes = [];
+    // equipment_categories missing (very old DB) — the seeded keys still show via the stored map below.
 }
+$revenueRows[] = ['key' => 'base_rental_other', 'group' => 'Rental', 'label' => 'Rental — any other category',
+                  'hint' => 'Used for a rental line whose category has no row of its own.'];
+$fixedRevenueRows = [
+    ['mileage_estimate',  'Usage', 'Mileage — estimated (monthly)'],
+    ['mileage_usage',     'Usage', 'Mileage — actual usage'],
+    ['mileage',           'Usage', 'Mileage — at lease close'],
+    ['mileage_precharge', 'Usage', 'Mileage — precharge'],
+    ['mileage_adjustment','Usage', 'Mileage — true-up'],
+    ['mileage_credit',    'Usage', 'Mileage — credit'],
+    ['mileage_drawdown_credit', 'Usage', 'Mileage — drawdown credit'],
+    ['hourly_usage',      'Usage', 'Engine / reefer hours — actual'],
+    ['hours_estimate',    'Usage', 'Engine / reefer hours — estimated'],
+    ['hours_adjustment',  'Usage', 'Engine / reefer hours — true-up'],
+    ['hours_credit',      'Usage', 'Engine / reefer hours — credit'],
+    ['cartage',           'Services', 'Cartage'],
+    ['sweep',             'Services', 'Sweep'],
+    ['wash',              'Services', 'Wash'],
+    ['fuel',              'Services', 'Fuel'],
+    ['insurance',         'Other charges', 'Insurance'],
+    ['warranty',          'Other charges', 'Warranty'],
+    ['late_fee',          'Other charges', 'Late fees'],
+    ['damage',            'Other charges', 'Damage recovery'],
+    ['manual_adjustment', 'Other charges', 'Manual adjustment'],
+];
+foreach ($fixedRevenueRows as [$k, $g, $l]) {
+    $revenueRows[] = ['key' => $k, 'group' => $g, 'label' => $l, 'hint' => ''];
+}
+// Keys already in the stored map but not listed above stay visible (and saved).
+$listed = array_column($revenueRows, 'key');
+foreach ($revenueMapCurrent as $k => $_v) {
+    if ($k !== 'other' && !in_array($k, $listed, true)) {
+        $revenueRows[] = ['key' => (string) $k, 'group' => 'Other charges', 'label' => (string) $k, 'hint' => ''];
+    }
+}
+$revenueRows[] = ['key' => 'other', 'group' => 'Catch-all', 'label' => 'Everything not mapped above',
+                  'hint' => 'Required. Any line type without its own account posts here.'];
 
 $pageTitle = 'Accounting Settings';
 require_once FF_ROOT . '/includes/header.php';
@@ -109,6 +153,10 @@ require_once FF_ROOT . '/includes/header.php';
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'tax_filing' }"
                 @click="activeTab = 'tax_filing'" role="tab">
             Tax Filing
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'other' }"
+                @click="activeTab = 'other'" role="tab">
+            FX &amp; Other
         </button>
     </div>
 
@@ -200,44 +248,39 @@ require_once FF_ROOT . '/includes/header.php';
          ============================================================ -->
     <div x-show="activeTab === 'revenue_mapping'" class="card" style="padding:24px;">
         <h3 class="h6" style="margin:0 0 4px;">Revenue Account Mapping</h3>
-        <p class="text-secondary text-sm" style="margin:0 0 16px;">Map each invoice line type to the GL revenue account it should post to.</p>
+        <p class="text-secondary text-sm" style="margin:0 0 16px;">Where each kind of invoice line posts when the invoice is sent. Rental splits by the unit's equipment category unless "Rental — every category" is set. Changes apply to invoices sent from now on; past entries stay where they are. QuickBooks item accounts are compared with this on QuickBooks → Items.</p>
 
         <div x-show="messages.revenue_mapping && messages.revenue_mapping.type === 'success'" class="alert alert-success"
              x-text="messages.revenue_mapping ? messages.revenue_mapping.text : ''" style="margin-bottom:16px;"></div>
         <div class="form-error-banner" x-show="formErrors.revenue_mapping" x-cloak x-text="formErrors.revenue_mapping" style="margin-bottom:16px;"></div>
 
-        <template x-if="lineTypes.length === 0">
-            <div class="empty-state" style="padding:24px;">
-                <p class="empty-state-title">No line types found</p>
-                <p class="empty-state-text">Invoice line types will appear here once invoices are created.</p>
-            </div>
-        </template>
-
-        <template x-if="lineTypes.length > 0">
-            <div>
-                <div class="table-responsive">
+        <div class="table-responsive">
 <table class="table" aria-label="Revenue mapping">
                     <thead>
                         <tr>
-                            <th scope="col">Invoice Line Type</th>
+                            <th scope="col">Kind of revenue</th>
                             <th scope="col">GL Revenue Account</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <template x-for="lt in lineTypes" :key="lt">
+                        <template x-for="row in revenueRows" :key="row.key">
                             <tr>
                                 <td>
-                                    <span class="badge badge-no-dot badge-neutral" x-text="lt"></span>
+                                    <div class="text-sm" x-text="row.label"></div>
+                                    <div class="text-secondary" style="font-size:0.72rem;">
+                                        <span x-text="row.group"></span> · <code x-text="row.key"></code>
+                                        <template x-if="row.hint"><span> — <span x-text="row.hint"></span></span></template>
+                                    </div>
                                 </td>
                                 <td>
                                     <select class="form-select form-control-sm"
-                                            x-model="revenue_mapping[lt]"
+                                            x-model="revenue_mapping[row.key]"
                                             style="max-width:400px;">
-                                        <option value="">-- Not Mapped --</option>
-                                        <!-- :selected — same boot-order fix as the GL Mapping selects above. -->
+                                        <option value="" x-text="row.key === 'other' ? '-- Choose an account --' : '-- Not mapped (uses the fallback) --'"></option>
+                                        <!-- value = account CODE: the map stores codes. :selected — same boot-order fix as the GL Mapping selects above. -->
                                         <template x-for="acct in revenueAccounts" :key="acct.id">
-                                            <option :value="acct.id"
-                                                    :selected="String(acct.id) === String(revenue_mapping[lt] ?? '')"
+                                            <option :value="acct.code"
+                                                    :selected="String(acct.code) === String(revenue_mapping[row.key] ?? '')"
                                                     x-text="acct.code + ' — ' + acct.name"></option>
                                         </template>
                                     </select>
@@ -254,8 +297,6 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-show="saving.revenue_mapping">Saving...</span>
                     </button>
                 </div>
-            </div>
-        </template>
     </div>
 
     <!-- ============================================================
@@ -394,6 +435,22 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
 
+        <!-- SOP I20: GST/HST return settings read by the GST34 page (no screen before). -->
+        <div class="form-row" style="max-width:600px;margin-top:12px;">
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">CRA Business Number</label>
+                <input type="text" class="form-input font-mono" x-model="tax_filing.cra_business_number" maxlength="20" placeholder="123456789 RT0001">
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label class="form-label" style="display:flex;align-items:center;gap:8px;">
+                    <input type="checkbox" x-model="tax_filing.gst_quick_method_enabled"> GST Quick Method
+                </label>
+                <input type="number" step="0.01" min="0" max="20" class="form-input font-mono" x-model="tax_filing.gst_quick_method_rate"
+                       :disabled="!tax_filing.gst_quick_method_enabled" placeholder="Quick Method rate %">
+                <div class="text-secondary" style="font-size:0.72rem;margin-top:3px;">Only if the CRA approved the Quick Method for this business. The rate is the remittance %.</div>
+            </div>
+        </div>
+
         <!-- S-ACCT-CCA-2: AIIP proposed reinstatement toggle. -->
         <div style="margin-top:20px;padding:14px;border:1px solid var(--border-default);border-radius:6px;background:var(--bg-subtle);">
             <label style="display:flex;align-items:center;gap:8px;font-weight:600;">
@@ -416,6 +473,58 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ============================================================
+         TAB: FX & Other (SOP I20 — settings the code reads that had no screen)
+         ============================================================ -->
+    <div x-show="activeTab === 'other'" class="card" style="padding:24px;">
+        <h3 class="h6" style="margin:0 0 4px;">FX Revaluation</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 16px;">Month-end revaluation of USD balances (Accounting → FX Revaluation). Revalue a month before closing it.</p>
+
+        <div x-show="messages.other && messages.other.type === 'success'" class="alert alert-success"
+             x-text="messages.other ? messages.other.text : ''" style="margin-bottom:16px;"></div>
+        <div class="form-error-banner" x-show="formErrors.other" x-cloak x-text="formErrors.other" style="margin-bottom:16px;"></div>
+
+        <div class="form-row" style="max-width:720px;">
+            <div class="form-group" style="flex:1;">
+                <label class="form-label" style="display:flex;align-items:center;gap:8px;">
+                    <input type="checkbox" x-model="other.fx_revaluation_enabled"> Enable FX revaluation
+                </label>
+            </div>
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Rate source</label>
+                <select class="form-select" x-model="other.fx_rate_source">
+                    <option value="bank_of_canada">Bank of Canada (daily)</option>
+                    <option value="manual">Manual rate</option>
+                </select>
+            </div>
+            <div class="form-group" style="flex:1;" x-show="other.fx_rate_source === 'manual'">
+                <label class="form-label">Manual USD → CAD rate</label>
+                <input type="text" class="form-input font-mono" x-model="other.fx_manual_rate" placeholder="1.3650">
+            </div>
+        </div>
+
+        <h3 class="h6" style="margin:20px 0 4px;">Damage claims</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 12px;">Where damage-recovery invoices book their revenue.</p>
+        <div class="form-row" style="max-width:720px;">
+            <div class="form-group" style="flex:1;">
+                <label class="form-label">Damage Recovery Revenue</label>
+                <select class="form-select" x-model="other.damage_recovery_revenue_account_id">
+                    <option value="">-- Not mapped --</option>
+                    <template x-for="acct in revenueAccounts" :key="acct.id">
+                        <option :value="acct.id" :selected="String(acct.id) === String(other.damage_recovery_revenue_account_id)" x-text="acct.code + ' — ' + acct.name"></option>
+                    </template>
+                </select>
+            </div>
+        </div>
+
+        <div style="margin-top:20px;">
+            <button class="btn btn-primary btn-sm" @click="saveOther()" :disabled="saving.other">
+                <span x-show="!saving.other">Save</span>
+                <span x-show="saving.other">Saving...</span>
+            </button>
+        </div>
+    </div>
+
 </div><!-- /x-data -->
 
 <script>
@@ -425,7 +534,7 @@ function FF_AcctSettings() {
 
         // ── GL accounts for dropdowns (server-rendered) ────────
         glAccounts: <?= json_encode($glAccounts, JSON_HEX_TAG) ?>,
-        lineTypes:  <?= json_encode(array_column($lineTypes, 'line_type'), JSON_HEX_TAG) ?>,
+        revenueRows: <?= json_encode($revenueRows, JSON_HEX_TAG) ?>,
 
         // ── Tab form data ──────────────────────────────────────
         // WHY: JS property names MUST match the DB key (minus 'accounting.' prefix).
@@ -448,21 +557,12 @@ function FF_AcctSettings() {
             retained_earnings_account_id:   <?= json_encode($settings['retained_earnings_account_id'] ?? '') ?>,
             current_year_ni_account_id:     <?= json_encode($settings['current_year_ni_account_id'] ?? '') ?>,
             customer_deposits_account_id:   <?= json_encode($settings['customer_deposits_account_id'] ?? '') ?>,
-            customer_credits_account_id:    <?= json_encode($settings['customer_credits_account_id'] ?? '') ?>
+            customer_credits_account_id:    <?= json_encode($settings['customer_credits_account_id'] ?? '') ?>,
+            opening_balance_equity_account_id: <?= json_encode($settings['opening_balance_equity_account_id'] ?? '') ?>
         },
 
-        revenue_mapping: <?= json_encode(
-            (function() use ($settings) {
-                $map = [];
-                foreach ($settings as $k => $v) {
-                    if (str_starts_with($k, 'revenue_mapping.')) {
-                        $map[substr($k, 16)] = $v;
-                    }
-                }
-                return (object)$map;
-            })(),
-            JSON_HEX_TAG | JSON_FORCE_OBJECT
-        ) ?>,
+        // SOP I1: line-type key → account CODE, straight from accounting.revenue_account_map.
+        revenue_mapping: <?= json_encode((object) $revenueMapCurrent, JSON_HEX_TAG | JSON_FORCE_OBJECT) ?>,
 
         // WHY: DB keys are accounting.default_depreciation_method, etc.
         // Stripped prefix = default_depreciation_method, default_useful_life_years, default_salvage_pct.
@@ -480,17 +580,29 @@ function FF_AcctSettings() {
         tax_filing: {
             gst_filing_frequency:  <?= json_encode($settings['gst_filing_frequency'] ?? 'quarterly') ?>,
             pst_filing_frequency:  <?= json_encode($settings['pst_filing_frequency'] ?? 'quarterly') ?>,
-            aiip_proposed_reinstatement_enabled: <?= json_encode(($settings['aiip_proposed_reinstatement_enabled'] ?? '0') === '1') ?>
+            aiip_proposed_reinstatement_enabled: <?= json_encode(($settings['aiip_proposed_reinstatement_enabled'] ?? '0') === '1') ?>,
+            // SOP I20: GST34 inputs (booleans stored '1'/'0', as Gst34Service reads them)
+            cra_business_number:      <?= json_encode($settings['cra_business_number'] ?? '') ?>,
+            gst_quick_method_enabled: <?= json_encode(($settings['gst_quick_method_enabled'] ?? '0') === '1') ?>,
+            gst_quick_method_rate:    <?= json_encode($settings['gst_quick_method_rate'] ?? '3.6') ?>
+        },
+
+        // SOP I20: FX revaluation + damage revenue (read by FxRevaluationService / AutoEntryBridge).
+        other: {
+            fx_revaluation_enabled: <?= json_encode(($settings['fx_revaluation_enabled'] ?? '0') === '1') ?>,
+            fx_rate_source:         <?= json_encode($settings['fx_rate_source'] ?? 'bank_of_canada') ?>,
+            fx_manual_rate:         <?= json_encode($settings['fx_manual_rate'] ?? '') ?>,
+            damage_recovery_revenue_account_id: <?= json_encode($settings['damage_recovery_revenue_account_id'] ?? '') ?>
         },
 
         // ── Saving state per tab ───────────────────────────────
-        saving: { general: false, gl_mapping: false, revenue_mapping: false, depreciation: false, tax_filing: false },
+        saving: { general: false, gl_mapping: false, revenue_mapping: false, depreciation: false, tax_filing: false, other: false },
 
         // ── Success messages per tab (errors now shown via form-error-banner + field-errors) ─
-        messages: { general: null, gl_mapping: null, revenue_mapping: null, depreciation: null, tax_filing: null },
+        messages: { general: null, gl_mapping: null, revenue_mapping: null, depreciation: null, tax_filing: null, other: null },
 
         // ── VALID-2: Per-tab banner errors and per-field errors ───
-        formErrors: { general: '', gl_mapping: '', revenue_mapping: '', depreciation: '', tax_filing: '' },
+        formErrors: { general: '', gl_mapping: '', revenue_mapping: '', depreciation: '', tax_filing: '', other: '' },
         errors: {
             // general
             capex_threshold_cad: '',
@@ -635,7 +747,8 @@ function FF_AcctSettings() {
             { key: 'retained_earnings_account_id', label: 'Retained Earnings',             types: ['equity'],    hint: 'Accumulated net income from prior years' },
             { key: 'current_year_ni_account_id',   label: 'Current Year Net Income',       types: ['equity'],    hint: 'Current fiscal year earnings' },
             { key: 'customer_deposits_account_id', label: 'Customer Deposits',             types: ['liability'], hint: 'Deposits received from customers' },
-            { key: 'customer_credits_account_id',  label: 'Customer Credits',              types: ['liability'], hint: 'Credit notes applied to customer accounts' }
+            { key: 'customer_credits_account_id',  label: 'Customer Credits',              types: ['liability'], hint: 'Credit notes applied to customer accounts' },
+            { key: 'opening_balance_equity_account_id', label: 'Opening Balance Equity',   types: ['equity'],    hint: 'Offset for bank opening balances (3050); move to Retained Earnings once all are in' }
         ],
 
         // ── Computed: revenue-type accounts ────────────────────
@@ -651,7 +764,7 @@ function FF_AcctSettings() {
             // x-for re-runs the filter on every reactive tick).
             this.glMappings.forEach(m => { m.accounts = this.glAccountsByType(m.types); });
 
-            const _tabs = ['general','gl_mapping','revenue_mapping','depreciation','tax_filing'];
+            const _tabs = ['general','gl_mapping','revenue_mapping','depreciation','tax_filing','other'];
             const _initTab = FF_TabHash.init(_tabs, 'general');
             this.activeTab = _initTab;
             FF_TabHash.write(_initTab);
@@ -717,11 +830,18 @@ function FF_AcctSettings() {
 
         saveRevenueMapping() {
             this._clearErrorsForTab('revenue_mapping');
-            const data = {};
-            for (const lt of this.lineTypes) {
-                data['accounting.revenue_mapping.' + lt] = String(this.revenue_mapping[lt] || '');
+            // SOP I1: save the ONE map posting reads — blank rows are left out
+            // so the resolver falls back (category → base_rental_other → other).
+            if (!this.revenue_mapping['other']) {
+                this.formErrors.revenue_mapping = 'Choose an account for "Everything not mapped above" — unmapped lines post there.';
+                return;
             }
-            this._save('revenue_mapping', data);
+            const map = {};
+            for (const row of this.revenueRows) {
+                const code = String(this.revenue_mapping[row.key] || '');
+                if (code !== '') map[row.key] = code;
+            }
+            this._save('revenue_mapping', { 'accounting.revenue_account_map': map });
         },
 
         saveDepreciation() {
@@ -740,7 +860,26 @@ function FF_AcctSettings() {
             this._save('tax_filing', {
                 'accounting.gst_filing_frequency':  this.tax_filing.gst_filing_frequency,
                 'accounting.pst_filing_frequency':  this.tax_filing.pst_filing_frequency,
-                'accounting.aiip_proposed_reinstatement_enabled': this.tax_filing.aiip_proposed_reinstatement_enabled ? '1' : '0'
+                'accounting.aiip_proposed_reinstatement_enabled': this.tax_filing.aiip_proposed_reinstatement_enabled ? '1' : '0',
+                'accounting.cra_business_number':      String(this.tax_filing.cra_business_number || '').trim(),
+                'accounting.gst_quick_method_enabled': this.tax_filing.gst_quick_method_enabled ? '1' : '0',
+                'accounting.gst_quick_method_rate':    String(this.tax_filing.gst_quick_method_rate || '3.6')
+            });
+        },
+
+        // SOP I20: FX revaluation + damage revenue account.
+        saveOther() {
+            this.formErrors.other = '';
+            const o = this.other;
+            if (o.fx_rate_source === 'manual' && !(parseFloat(o.fx_manual_rate) > 0)) {
+                this.formErrors.other = 'Enter the manual USD → CAD rate (e.g. 1.3650).';
+                return;
+            }
+            this._save('other', {
+                'accounting.fx_revaluation_enabled': o.fx_revaluation_enabled ? '1' : '0',
+                'accounting.fx_rate_source':         o.fx_rate_source,
+                'accounting.fx_manual_rate':         String(o.fx_manual_rate || ''),
+                'accounting.damage_recovery_revenue_account_id': String(o.damage_recovery_revenue_account_id || '')
             });
         }
     };

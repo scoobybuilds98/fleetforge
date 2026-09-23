@@ -72,6 +72,12 @@ class JournalEntryEnqueuer
         'damage_recovery',
         'damage_repair',
         'damage_writeoff',
+        // S-SOP-KNOWN-ISSUES: a bank opening balance (I8) is already in
+        // QuickBooks' bank register; a credit-note cash refund (I18) is a
+        // QuickBooks CreditMemo matter the accountant records there (the
+        // refund screen says so) — a JE would double both.
+        'bank_opening_balance',
+        'credit_note_refund',
     ];
 
     /**

@@ -67,6 +67,17 @@ $leaseId  = clean_int($input['lease_id'] ?? null);
 $notes    = clean_string($input['notes'] ?? null, 2000);
 $currency = clean_string($input['currency'] ?? null) ?? 'CAD';
 
+// SOP I10: the bank account the deposit went into (its GL account takes the
+// debit). Blank → the currency's default bank → the Settings cash account.
+$receivingBank = \FleetForge\Accounting\BankService::resolveReceivingBank(
+    clean_int($input['bank_account_id'] ?? null),
+    $currency
+);
+if ($receivingBank['error'] !== null) {
+    json_validation_error(['bank_account_id' => $receivingBank['error']]);
+}
+$bankAccountId = $receivingBank['id'];
+
 if ($leaseId) {
     if (!db_exists('leases', 'id = ? AND customer_id = ? AND deleted_at IS NULL', [$leaseId, $customerId])) {
         json_error('NOT_FOUND', 'Lease not found for this customer.', 404, [
@@ -75,10 +86,14 @@ if ($leaseId) {
     }
 }
 
-$result = db_transaction(function () use ($customerId, $amount, $receivedDate, $depositType, $leaseId, $notes, $currency, $customer) {
+$result = db_transaction(function () use ($customerId, $amount, $receivedDate, $depositType, $leaseId, $notes, $currency, $customer, $bankAccountId) {
     $depNumber = AccountingService::nextDepositNumber(substr($receivedDate, 0, 4));
 
-    $cashAccountId    = AccountingService::setting('accounting.default_cash_account_id');
+    try {
+        $cashAccountId = \FleetForge\Accounting\AutoEntryBridge::cashAccountForBank($bankAccountId); // SOP I10
+    } catch (\RuntimeException $e) {
+        $cashAccountId = null; // reported as ACCOUNTING_CONFIG_INCOMPLETE below
+    }
     $depositAccountId = AccountingService::setting('accounting.customer_deposits_account_id');
 
     // S-AUDIT-BILLING-ENGINE-1 #10: HARD BLOCK on missing mappings (§16) —
@@ -101,6 +116,7 @@ $result = db_transaction(function () use ($customerId, $amount, $receivedDate, $
         'amount'               => $amount,
         'currency'             => $currency,
         'received_date'        => $receivedDate,
+        'bank_account_id'      => $bankAccountId,
         'status'               => 'held',
         'journal_entry_id'     => null,
         'liability_account_id' => (int)$depositAccountId,

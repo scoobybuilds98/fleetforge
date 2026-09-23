@@ -16,12 +16,18 @@
  *      reach the HTML.
  *   3. Master Controls — sync_enabled + dry_run_mode + payments_enabled
  *      kill-switches. super_admin only.
+ *   4. Sync & monitoring (I20 / I23) — bank-feed CDC on/off + lookback,
+ *      nightly drift check + GL-balance layer, Refund Receipt deposit
+ *      account / payment method Ids, and the per-entity sync modes as
+ *      editable selects. super_admin only; saved through
+ *      api/v1/quickbooks/save_sync_controls.php. Everyone else sees the
+ *      sync modes as a read-only table.
  *
  * Permission gate:
  *   - require_permission('quickbooks', 'view') — page-level access
  *   - can('quickbooks', 'edit_credentials') — Card 2 + Disconnect /
  *     Connect actions
- *   - is_super_admin()                       — Card 3 visibility
+ *   - is_super_admin()                       — Card 3 + Card 4 (edit) visibility
  *
  * Spec ref: FLEETFORGE_QUICKBOOKS_SPEC.md §5.1, §5.2, §5.5
  * Session:  S-QBO-1
@@ -106,6 +112,60 @@ if (!empty($refreshExpiresAt)) {
 
 $connectionStatus = $qbo['connection_status'] ?? 'disconnected';
 $environment      = $qbo['environment'] ?? 'sandbox';
+
+// ── Per-entity sync modes (I20 / I23) ──────────────────────────
+// WHY one list here: the editable selects (super_admin) and the read-only
+// table (everyone else) render from the same rows. Only entities whose
+// quickbooks.sync_mode.<entity> is actually read by an Enqueuer/Pusher are
+// listed — the endpoint whitelists the same set. 'default' mirrors the
+// fallback each reader passes to settings_get() when the row is absent.
+$syncModeEntities = [
+    'customer'           => ['label' => 'Customers',                   'default' => 'sync',  'note' => null],
+    'vendor'             => ['label' => 'Vendors',                     'default' => 'sync',  'note' => null],
+    'invoice'            => ['label' => 'Invoices',                    'default' => 'sync',  'note' => null],
+    'payment'            => ['label' => 'Customer payments',           'default' => 'queue', 'note' => 'Payments received in QuickBooks are still copied to FleetForge.'],
+    'credit_memo'        => ['label' => 'Credit notes (credit memos)', 'default' => 'sync',  'note' => null],
+    'credit_application' => ['label' => 'Credit-note applications',    'default' => 'sync',
+        'note' => 'FleetForge pushes credit-note applications it records. QuickBooks-side applications are NOT copied back — they raise a drift item. Apply credits in FleetForge (default), or set Disabled and apply them in QuickBooks, then apply the same credit note in FleetForge by hand.'],
+    'refund_receipt'     => ['label' => 'Customer refunds (refund receipts)', 'default' => 'sync', 'note' => 'Needs the refund deposit account and payment method below.'],
+    'invoice_writeoff'   => ['label' => 'Invoice write-offs',          'default' => 'queue', 'note' => 'Sent as a credit memo applied to the invoice.'],
+    'bill'               => ['label' => 'Vendor bills',                'default' => 'queue', 'note' => null],
+    'bill_payment'       => ['label' => 'Bill payments',               'default' => 'queue', 'note' => null],
+    'journal_entry'      => ['label' => 'Journal entries',             'default' => 'queue', 'note' => 'Also governs fixed-asset (depreciation / disposal / impairment) and GST remittance entries.'],
+];
+// Values the readers honour: every Enqueuer/Pusher refuses the push on
+// 'disabled' or 'qbo_to_ff'; anything else pushes via the queue worker.
+$syncModeOptions = [
+    'sync'      => 'Push to QuickBooks',
+    'queue'     => 'Push to QuickBooks (queue)',
+    'disabled'  => 'Disabled — don\'t push',
+    'qbo_to_ff' => 'QuickBooks → FleetForge only (don\'t push)',
+];
+$syncModesCurrent = [];
+foreach ($syncModeEntities as $entityKey => $meta) {
+    $syncModesCurrent[$entityKey] = (string) ($qbo['sync_mode.' . $entityKey] ?? $meta['default']);
+}
+
+// Refund deposit account suggestions — the QuickBooks Bank accounts already
+// pulled into acc_qbo_account_map (Accounts mapping page). Offered through a
+// <datalist> so the field still accepts a typed Id when nothing is pulled yet.
+$refundAccountOptions = [];
+if ($isSuperAdmin) {
+    try {
+        $refundAccountOptions = db_select(
+            "SELECT DISTINCT qbo_account_id, COALESCE(qbo_fully_qualified_name, qbo_name) AS qbo_name
+               FROM acc_qbo_account_map
+              WHERE qbo_account_type = 'Bank'
+                AND qbo_account_id IS NOT NULL
+                AND COALESCE(qbo_active, 1) = 1
+              ORDER BY qbo_name",
+            []
+        );
+    } catch (\Throwable $e) {
+        // Suggestions are a convenience — a failed lookup leaves a plain Id input.
+        $refundAccountOptions = [];
+    }
+}
 
 $pageTitle = 'QuickBooks Settings';
 require_once FF_ROOT . '/includes/header.php';
@@ -525,66 +585,176 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 
     <!-- ============================================================
-         CARD 4 — Sync Modes (read-only entity-by-entity)
+         CARD 4 — Sync & monitoring (I20 / I23)
          ============================================================
-         S-QBO-22 / D-QBO-22-3 — surfaces the per-entity sync_mode.*
-         settings so operator can see which entity types are queued,
-         synced live, or disabled — including the FA marker that
-         documents Fixed Asset JEs inherit from journal_entry sync_mode.
-         No edit UI here yet — operator changes via DB or future
-         dedicated settings session. Pure documentation/visibility tile.
+         Settings the crons + pushers read that previously had no screen
+         (operators had to edit the settings table): bank-feed CDC, the
+         nightly drift check, the Refund Receipt QBO references, and the
+         per-entity sync modes. super_admin edits them (same gate as Master
+         Controls — they change what reaches the books); everyone else gets
+         the read-only sync-mode table in the else-branch below.
+         Saved via api/v1/quickbooks/save_sync_controls.php (whitelisted).
          ============================================================ -->
+    <?php if ($isSuperAdmin): ?>
     <div class="card" style="padding:20px;margin-bottom:16px;">
-        <h3 class="h6" style="margin:0 0 4px;">Per-Entity Sync Modes (read-only)</h3>
+        <h3 class="h6" style="margin:0 0 4px;">Sync &amp; monitoring</h3>
         <p class="text-secondary text-sm" style="margin:0 0 14px;">
-            How each entity type behaves when the master sync kill-switch is ON. `queue` = enqueued for the worker; `sync` = immediate; `qbo_to_ff` = pull-only direction; `disabled` = skip; `inherit_je` = follows journal_entry mode (S-QBO-22 marker for FA-derived JEs per spec §8.13).
+            Background jobs and per-record-type push behaviour. These only matter while the Master Sync switch above is on.
+            Visible to super_admin only.
+        </p>
+
+        <!-- Bank feed + drift toggles -->
+        <div style="display:flex;flex-direction:column;gap:14px;">
+            <label style="display:flex;align-items:flex-start;gap:10px;">
+                <input type="checkbox" x-model="syncCtl.cdc_enabled" style="margin-top:3px;">
+                <span>
+                    <strong>Bank transaction feed (nightly)</strong>
+                    <p class="text-secondary text-sm" style="margin:2px 0 0;">Copies new and changed bank transactions from QuickBooks every night (02:30), and powers "Run CDC Now" on the Bank Accounts page. Turn off to stop pulling bank activity.</p>
+                </span>
+            </label>
+            <div style="padding-left:24px;">
+                <label class="form-label" for="qbo-cdc-lookback">First-run lookback (days)</label>
+                <input type="number" class="form-control" id="qbo-cdc-lookback" x-model="syncCtl.cdc_lookback_days"
+                       min="1" max="365" step="1" style="max-width:160px;">
+                <p class="text-secondary text-sm" style="margin:4px 0 0;">1–365. How far back the very first pull reaches; later runs continue from the last successful pull.</p>
+            </div>
+
+            <label style="display:flex;align-items:flex-start;gap:10px;">
+                <input type="checkbox" x-model="syncCtl.drift_enabled" style="margin-top:3px;">
+                <span>
+                    <strong>Nightly drift check</strong>
+                    <p class="text-secondary text-sm" style="margin:2px 0 0;">Compares FleetForge records with QuickBooks every night and lists differences on the Drift page. Turn off only while investigating a noisy run.</p>
+                </span>
+            </label>
+
+            <label style="display:flex;align-items:flex-start;gap:10px;">
+                <input type="checkbox" x-model="syncCtl.drift_gl_balance_enabled" style="margin-top:3px;">
+                <span>
+                    <strong>Include account-balance comparison</strong>
+                    <p class="text-secondary text-sm" style="margin:2px 0 0;">Also compares each mapped account's balance with QuickBooks. Off by default — balances legitimately differ mid-month, so turn it on once your accountant has set a reconciliation routine.</p>
+                </span>
+            </label>
+        </div>
+
+        <!-- Refund Receipt references -->
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border-default);">
+            <h4 class="text-sm" style="margin:0 0 4px;font-weight:600;">Customer refunds</h4>
+            <p class="text-secondary text-sm" style="margin:0 0 12px;">
+                Refunds are sent to QuickBooks as Refund Receipts, which need the bank account the money leaves from and a payment method.
+                Until both are set, refunds wait on the Refund Receipts page with a "not configured" reason.
+            </p>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;">
+                <div>
+                    <label class="form-label" for="qbo-refund-account">Refund bank account (QuickBooks Account Id)</label>
+                    <input type="text" class="form-control" id="qbo-refund-account" list="qbo-refund-account-options"
+                           inputmode="numeric" x-model="syncCtl.refund_deposit_account_id" placeholder="e.g. 35">
+                    <datalist id="qbo-refund-account-options">
+                        <?php foreach ($refundAccountOptions as $opt): ?>
+                            <option value="<?= e((string) $opt['qbo_account_id']) ?>"><?= e((string) $opt['qbo_name']) ?></option>
+                        <?php endforeach; ?>
+                    </datalist>
+                    <p class="text-secondary text-sm" style="margin:4px 0 0;">
+                        <?php if ($refundAccountOptions !== []): ?>
+                            Pick one of your QuickBooks bank accounts from the suggestions, or type its Id.
+                        <?php else: ?>
+                            No QuickBooks bank accounts pulled yet — pull them on the Accounts mapping page, or type the Id.
+                        <?php endif; ?>
+                    </p>
+                </div>
+                <div>
+                    <label class="form-label" for="qbo-refund-method">Refund payment method (QuickBooks PaymentMethod Id)</label>
+                    <input type="text" class="form-control" id="qbo-refund-method" inputmode="numeric"
+                           x-model="syncCtl.refund_payment_method_id" placeholder="e.g. 2">
+                    <p class="text-secondary text-sm" style="margin:4px 0 0;">Usually your "Cheque" payment method. Find the Id in QuickBooks under Lists → Payment methods.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-entity sync modes -->
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border-default);">
+            <h4 class="text-sm" style="margin:0 0 4px;font-weight:600;">Per-record-type sync</h4>
+            <p class="text-secondary text-sm" style="margin:0 0 12px;">
+                Whether FleetForge sends each kind of record to QuickBooks. "Push to QuickBooks" and "Push (queue)" behave the same today —
+                the change is queued and the background worker sends it within a minute. "Disabled" and "QuickBooks → FleetForge only" both
+                stop FleetForge from sending that record type; neither changes what FleetForge reads from QuickBooks.
+            </p>
+            <table class="table table-striped" style="margin:0;font-size:0.875rem;">
+                <thead>
+                    <tr>
+                        <th>Record type</th>
+                        <th style="width:380px;">Mode</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($syncModeEntities as $entityKey => $meta): ?>
+                    <tr>
+                        <td>
+                            <strong><?= e($meta['label']) ?></strong>
+                            <?php if ($meta['note'] !== null): ?>
+                                <p class="text-secondary text-sm" style="margin:2px 0 0;"><?= e($meta['note']) ?></p>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <select class="form-select" x-model="syncCtl.modes.<?= e($entityKey) ?>" aria-label="<?= e($meta['label']) ?> sync mode">
+                                <?php foreach ($syncModeOptions as $optValue => $optLabel): ?>
+                                    <option value="<?= e($optValue) ?>"><?= e($optLabel) ?></option>
+                                <?php endforeach; ?>
+                                <?php if (!isset($syncModeOptions[$syncModesCurrent[$entityKey]])): ?>
+                                    <!-- Stored value outside the honoured set (e.g. legacy 'off'): shown so the
+                                         select doesn't silently misreport it; only sent if the operator changes it. -->
+                                    <option value="<?= e($syncModesCurrent[$entityKey]) ?>"><?= e($syncModesCurrent[$entityKey]) ?> (current — not a supported mode)</option>
+                                <?php endif; ?>
+                            </select>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <p class="text-secondary text-xs" style="margin:10px 0 0;">
+                Items are created from the Items page and have no sync mode. Fixed-asset and GST remittance entries follow Journal entries.
+            </p>
+        </div>
+
+        <div style="margin-top:18px;">
+            <button class="btn btn-primary btn-sm" @click="saveSyncControls()" :disabled="savingSync">
+                <span x-show="!savingSync">Save Sync &amp; Monitoring</span>
+                <span x-show="savingSync" x-cloak>Saving…</span>
+            </button>
+        </div>
+    </div>
+    <?php else: ?>
+    <div class="card" style="padding:20px;margin-bottom:16px;">
+        <h3 class="h6" style="margin:0 0 4px;">Per-Record-Type Sync (read-only)</h3>
+        <p class="text-secondary text-sm" style="margin:0 0 14px;">
+            Whether FleetForge sends each kind of record to QuickBooks while master sync is on.
+            <code>sync</code> / <code>queue</code> = pushed (via the background worker); <code>disabled</code> / <code>qbo_to_ff</code> = not pushed.
         </p>
         <table class="table table-striped" style="margin:0;font-size:0.875rem;">
             <thead>
                 <tr>
-                    <th>Entity</th>
+                    <th>Record type</th>
                     <th>Mode</th>
                     <th class="text-secondary">Notes</th>
                 </tr>
             </thead>
             <tbody>
-                <?php
-                $syncModeEntities = [
-                    'customer'        => ['Customer push', null],
-                    'vendor'          => ['Vendor push', null],
-                    'invoice'         => ['Invoice push', 'tax-override per D-QBO-CORE-6'],
-                    'payment'         => ['Payment push (FF → QBO)', 'bidirectional with webhook puller'],
-                    'credit_memo'     => ['Credit memo push', 'Phase QBO-7 pending'],
-                    'bill'            => ['Bill push', 'D-CPA-5 workflow shift'],
-                    'bill_payment'    => ['Bill payment push', null],
-                    'journal_entry'   => ['Journal entry push', 'catch-all per spec §8.10'],
-                    'fixed_asset'     => ['Fixed asset (depreciation/disposal/impairment)', 'D-QBO-22-3 marker — actual gating via journal_entry mode above'],
-                    'tax_remittance'  => ['Tax remittance (GST34 JE)', 'D-QBO-23-3 marker — actual gating via journal_entry mode above'],
-                    'item'            => ['Item push', 'operator-confirmed authoring per D-QBO-10-4'],
-                    'invoice_writeoff' => ['Invoice write-off (credit memo applied to the invoice)', 'S-QBO-INVOICE-WRITEOFF — default queue'],
-                ];
-                foreach ($syncModeEntities as $key => [$label, $note]):
-                    $mode = $qbo['sync_mode.' . $key] ?? '—';
-                    $modeColor = match ($mode) {
-                        'queue', 'sync'  => 'badge-success',
-                        'qbo_to_ff'      => 'badge-info',
-                        'disabled'       => 'badge-secondary',
-                        'inherit_je'     => 'badge-info',
-                        default          => 'badge-secondary',
-                    };
+                <?php foreach ($syncModeEntities as $entityKey => $meta):
+                    $mode = $syncModesCurrent[$entityKey];
+                    $modeColor = in_array($mode, ['disabled', 'qbo_to_ff'], true) ? 'badge-neutral' : 'badge-success';
                 ?>
                 <tr>
-                    <td><strong><?= e($label) ?></strong></td>
+                    <td><strong><?= e($meta['label']) ?></strong></td>
                     <td><span class="badge <?= $modeColor ?>"><?= e($mode) ?></span></td>
-                    <td class="text-secondary text-sm"><?= $note ? e($note) : '—' ?></td>
+                    <td class="text-secondary text-sm"><?= $meta['note'] !== null ? e($meta['note']) : '—' ?></td>
                 </tr>
                 <?php endforeach; ?>
             </tbody>
         </table>
         <p class="text-secondary text-xs" style="margin:14px 0 0;">
-            To change a mode, update <code>quickbooks.sync_mode.&lt;entity&gt;</code> in the settings table directly. Dedicated edit UI deferred to a future session.
+            A super admin can change these under Sync &amp; monitoring on this page.
         </p>
     </div>
+    <?php endif; ?>
 
 </div>
 
@@ -633,6 +803,23 @@ function qboSettings() {
             cancel_url:      '<?= e($qbo['payments.cancel_url'] ?? 'portal/payments/payment_cancel') ?>',
             url_ttl_minutes: '<?= e($qbo['payments.url_ttl_minutes'] ?? '30') ?>',
         },
+
+        // I20 / I23 — Sync & monitoring card (super_admin). Booleans held as
+        // real booleans for the checkboxes and serialised to '1'/'0' on save.
+        savingSync: false,
+        syncCtl: {
+            cdc_enabled:              <?= ($qbo['banking.cdc_enabled'] ?? '1') === '1' ? 'true' : 'false' ?>,
+            cdc_lookback_days:        <?= json_encode((string) ($qbo['banking.cdc_lookback_days'] ?? '90')) ?>,
+            drift_enabled:            <?= ($qbo['drift.enabled'] ?? '1') === '1' ? 'true' : 'false' ?>,
+            drift_gl_balance_enabled: <?= ($qbo['drift.gl_balance_enabled'] ?? '0') === '1' ? 'true' : 'false' ?>,
+            refund_deposit_account_id: <?= json_encode((string) ($qbo['refund.deposit_account_id'] ?? '')) ?>,
+            refund_payment_method_id:  <?= json_encode((string) ($qbo['refund.payment_method_id'] ?? '')) ?>,
+            modes: <?= json_encode((object) $syncModesCurrent, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
+        },
+        // Modes as loaded — only CHANGED modes are sent, so a legacy stored
+        // value outside the endpoint's whitelist (e.g. 'off') never blocks a
+        // save of the other fields just by being displayed.
+        syncModesSaved: <?= json_encode((object) $syncModesCurrent, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
 
         // ── Lifecycle ─────────────────────────────────────────
         init() {
@@ -794,6 +981,42 @@ function qboSettings() {
                 this.flash = { message: e.message || 'Network error', type: 'error' };
             } finally {
                 this.savingMasters = false;
+            }
+        },
+
+        // I20 / I23 — save the Sync & monitoring card. The endpoint validates
+        // every key against its whitelist; FF_Api.post RESOLVES on a 422, so
+        // success is gated on r.success and field errors are surfaced.
+        async saveSyncControls() {
+            this.savingSync = true;
+            try {
+                const settings = {
+                    'banking.cdc_enabled':        this.syncCtl.cdc_enabled ? '1' : '0',
+                    'banking.cdc_lookback_days':  String(this.syncCtl.cdc_lookback_days ?? '').trim(),
+                    'drift.enabled':              this.syncCtl.drift_enabled ? '1' : '0',
+                    'drift.gl_balance_enabled':   this.syncCtl.drift_gl_balance_enabled ? '1' : '0',
+                    'refund.deposit_account_id':  String(this.syncCtl.refund_deposit_account_id ?? '').trim(),
+                    'refund.payment_method_id':   String(this.syncCtl.refund_payment_method_id ?? '').trim(),
+                };
+                for (const [entity, mode] of Object.entries(this.syncCtl.modes)) {
+                    if (mode !== this.syncModesSaved[entity]) {
+                        settings['sync_mode.' + entity] = mode;
+                    }
+                }
+                const r = await FF_Api.post(FF_Api.url('/api/v1/quickbooks/save_sync_controls.php'), { settings });
+                if (r.success) {
+                    // New baseline so the next save only sends later changes.
+                    this.syncModesSaved = Object.assign({}, this.syncCtl.modes);
+                    this.flash = { message: 'Sync & monitoring settings saved.', type: 'success' };
+                } else {
+                    const fields = r.error && r.error.fields;
+                    const detail = fields ? Object.entries(fields).map(([k, v]) => k + ': ' + v).join(' ') : '';
+                    this.flash = { message: detail || (r.error && r.error.message) || 'Save failed.', type: 'error' };
+                }
+            } catch (e) {
+                this.flash = { message: e.message || 'Network error', type: 'error' };
+            } finally {
+                this.savingSync = false;
             }
         },
 

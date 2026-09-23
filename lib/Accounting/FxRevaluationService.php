@@ -150,6 +150,14 @@ class FxRevaluationService
         if (!$period) {
             throw new \RuntimeException("Period #{$periodId} not found.");
         }
+        // SOP I7: the JE is dated the period's last day and posts immediately,
+        // so a closed/locked period can never take it. Say so up front instead
+        // of letting the preview succeed and the post fail.
+        if ((string) $period['status'] !== 'open') {
+            throw new \RuntimeException(
+                "Period {$period['name']} is {$period['status']}. Revalue a month before closing it."
+            );
+        }
         $periodEnd = (string) $period['end_date'];
 
         // Rate resolution
@@ -478,7 +486,7 @@ class FxRevaluationService
             if (!empty($row['journal_entry_id'])) {
                 $reversalJe = JournalEntryService::reverse(
                     (int) $row['journal_entry_id'],
-                    date('Y-m-d'),
+                    \ff_today(),
                     $userId
                 );
             }

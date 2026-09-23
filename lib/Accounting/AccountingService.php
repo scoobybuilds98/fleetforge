@@ -145,10 +145,16 @@ class AccountingService
      * Validate that a period is open for posting.
      * Returns error string if posting is blocked, null if OK.
      *
-     * @param int $periodId
+     * $allowClosed lets a CLOSED (never a locked) period take the entry. Only
+     * the year-end close and its reversal pass it (SOP I6): their entries are
+     * dated Dec 31 by definition, and December is normally closed by then —
+     * the year-end used to be impossible once December was closed.
+     *
+     * @param int  $periodId
+     * @param bool $allowClosed
      * @return string|null Error message or null
      */
-    public static function validatePeriodForPosting(int $periodId): ?string
+    public static function validatePeriodForPosting(int $periodId, bool $allowClosed = false): ?string
     {
         $period = \db_row("SELECT * FROM acc_periods WHERE id = ?", [$periodId]);
         if (!$period) return 'Period not found.';
@@ -157,11 +163,11 @@ class AccountingService
             return "Period {$period['name']} is locked. No entries can be posted.";
         }
 
-        if ($period['status'] === 'closed') {
-            return "Period {$period['name']} is closed. Only Super Admin adjusting entries allowed.";
+        if ($period['status'] === 'closed' && !$allowClosed) {
+            return "Period {$period['name']} is closed. Post into an open month, or ask a Super Admin to reopen the period (Accounting → Periods).";
         }
 
-        return null; // open — OK to post
+        return null; // open (or closed and explicitly allowed) — OK to post
     }
 
     // ============================================================
@@ -504,35 +510,8 @@ class AccountingService
      */
     public static function revenueAccountId(string $lineType): ?int
     {
-        static $mapCache = null;
-        static $codeToIdCache = [];
-
-        // Load and cache the JSON map
-        if ($mapCache === null) {
-            $mapCache = self::setting('accounting.revenue_account_map', []);
-            if (is_string($mapCache)) {
-                $mapCache = json_decode($mapCache, true) ?? [];
-            }
-        }
-
-        // Look up account code for this line type
-        $accountCode = $mapCache[$lineType] ?? $mapCache['other'] ?? null;
-        if (!$accountCode) return null;
-
-        $accountCode = (string) $accountCode;
-
-        // Resolve code → id (cached)
-        if (isset($codeToIdCache[$accountCode])) {
-            return $codeToIdCache[$accountCode];
-        }
-
-        $account = \db_row(
-            "SELECT id FROM acc_accounts WHERE code = ? AND is_active = 1",
-            [$accountCode]
-        );
-
-        $codeToIdCache[$accountCode] = $account ? (int) $account['id'] : null;
-        return $codeToIdCache[$accountCode];
+        // SOP I1: one resolver for the whole app (rental → per category).
+        return AutoEntryBridge::revenueAccountForLineType($lineType);
     }
 
     /**
@@ -546,16 +525,11 @@ class AccountingService
      */
     public static function revenueAccountCode(string $lineType): ?string
     {
-        static $mapCache = null;
-
-        if ($mapCache === null) {
-            $mapCache = self::setting('accounting.revenue_account_map', []);
-            if (is_string($mapCache)) {
-                $mapCache = json_decode($mapCache, true) ?? [];
-            }
-        }
-
-        return isset($mapCache[$lineType]) ? (string) $mapCache[$lineType] : ($mapCache['other'] ?? null);
+        // SOP I1: delegate to the one resolver, then read the code back.
+        $id = AutoEntryBridge::revenueAccountForLineType($lineType);
+        if ($id === null) return null;
+        $row = \db_row("SELECT code FROM acc_accounts WHERE id = ?", [$id]);
+        return $row ? (string) $row['code'] : null;
     }
 
     // ============================================================
@@ -620,7 +594,17 @@ class AccountingService
              WHERE status NOT IN ('paid','void')",
             []
         );
-        $subledgerBalance = $row['total'] ?? '0.00';
+        // SOP I3: a vendor credit debits AP when it is CREATED; applying it
+        // later only moves the balance between bills. So until it is applied,
+        // its unused remainder already sits in GL AP — net it off here, or
+        // every open credit shows as drift.
+        $credits = \db_row(
+            "SELECT COALESCE(SUM(amount_remaining), 0) AS total
+             FROM acc_vendor_credits
+             WHERE status IN ('active','partially_used')",
+            []
+        );
+        $subledgerBalance = bcsub((string) ($row['total'] ?? '0.00'), (string) ($credits['total'] ?? '0.00'), 2);
         $difference = bcsub($glBalance, $subledgerBalance, 2);
 
         return [

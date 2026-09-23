@@ -85,6 +85,9 @@ if ($fields) {
 // Optional metadata
 $referenceNumber = clean_string($body['reference_number'] ?? null, 100);
 $bankName        = clean_string($body['bank_name'] ?? null, 100);
+// SOP I10: which FleetForge bank account the money went into (posting debits
+// its GL account). Blank → the currency's default bank → the Settings cash account.
+$depositBankIdIn = clean_int($body['deposit_bank_account_id'] ?? null);
 $checkNumber     = clean_string($body['check_number'] ?? null, 50);
 $cardLastFour    = clean_string($body['card_last_four'] ?? null, 4);
 $notes           = clean_string($body['notes'] ?? null, 2000);
@@ -115,6 +118,12 @@ if ($currency !== $invoiceCheck['currency']) {
     $crossFieldErrors['currency'] =
         "Payment currency must match invoice currency ({$invoiceCheck['currency']}).";
 }
+
+$receivingBank = \FleetForge\Accounting\BankService::resolveReceivingBank($depositBankIdIn, $currency);
+if ($receivingBank['error'] !== null) {
+    $crossFieldErrors['deposit_bank_account_id'] = $receivingBank['error'];
+}
+$depositBankId = $receivingBank['id'];
 
 // Cannot pay a void invoice
 if ($invoiceCheck['status'] === 'void') {
@@ -164,7 +173,7 @@ $result = null;
 
 db_transaction(function () use (
     $invoiceId, $amountRaw, $currency, $paymentMethod, $paymentDate,
-    $referenceNumber, $bankName, $checkNumber, $cardLastFour, $notes,
+    $referenceNumber, $bankName, $depositBankId, $checkNumber, $cardLastFour, $notes,
     $internalNotes, $invoiceCheck, &$result,
     $paymentExchangeRate, $paymentMarkupPct, $paymentAmountInCad
 ) {
@@ -248,6 +257,7 @@ db_transaction(function () use (
         'payment_method'   => $paymentMethod,
         'reference_number' => $referenceNumber,
         'bank_name'        => $bankName,
+        'deposit_bank_account_id' => $depositBankId,
         'check_number'     => $checkNumber,
         'card_last_four'   => $cardLastFour,
         'payment_date'     => $paymentDate,

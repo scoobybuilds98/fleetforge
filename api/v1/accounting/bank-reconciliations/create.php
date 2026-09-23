@@ -74,12 +74,15 @@ if (!$period) {
 
 $userId = current_user_id();
 
-// Compute initial balances
-$bookBalance = AccountingService::accountBalance((int) $bankAccount['gl_account_id']);
+// Compute initial balances (SOP I11): the ledger balance ON the statement
+// date, and where the statement starts — the previous completed
+// reconciliation's ending balance, else the account's opening balance.
+$bookBalance = AccountingService::accountBalance((int) $bankAccount['gl_account_id'], $statementDate);
+$beginningBalance = \FleetForge\Accounting\BankService::reconciliationBeginningBalance($bankAccountId, 0, $statementDate);
 
 $newId = db_transaction(function () use (
     $bankAccountId, $statementDate, $statementEndingBalance,
-    $period, $bookBalance, $userId
+    $period, $bookBalance, $beginningBalance, $userId
 ) {
     // D20: FOR UPDATE on bank account during reconciliation
     db_row("SELECT id FROM acc_bank_accounts WHERE id = ? FOR UPDATE", [$bankAccountId]);
@@ -89,11 +92,14 @@ $newId = db_transaction(function () use (
         'period_id'               => $period['id'],
         'statement_date'          => $statementDate,
         'statement_ending_balance'=> $statementEndingBalance,
+        'beginning_balance'       => $beginningBalance,
+        'cleared_balance'         => $beginningBalance,
         'book_balance'            => $bookBalance,
         'outstanding_deposits'    => '0.00',
         'outstanding_checks'      => '0.00',
         'adjusted_book_balance'   => $bookBalance,
-        'difference'              => bcsub($bookBalance, $statementEndingBalance, 2),
+        // Nothing ticked yet: statement − beginning.
+        'difference'              => bcsub($statementEndingBalance, $beginningBalance, 2),
         'status'                  => 'in_progress',
         'created_by'              => $userId,
     ]);

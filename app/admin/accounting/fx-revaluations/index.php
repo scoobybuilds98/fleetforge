@@ -24,13 +24,16 @@ $canEdit   = can('journal_entries', 'edit');
 $fxEnabled  = (string) AccountingService::setting('accounting.fx_revaluation_enabled', '0') === '1';
 $rateSource = (string) AccountingService::setting('accounting.fx_rate_source', 'bank_of_canada');
 
-// Closed periods drive the dropdown — open periods cannot be revalued.
-$closedPeriods = db_select(
+// SOP I7: a revaluation posts a JE dated the period's last day, so the
+// period must still be OPEN (posting into a closed period is refused). Only
+// months that have already ended are offered — revalue, then close the month.
+$revaluablePeriods = db_select(
     "SELECT id, name, end_date, status FROM acc_periods
-      WHERE status = 'closed'
+      WHERE status = 'open'
+        AND end_date < ?
       ORDER BY end_date DESC
       LIMIT 36",
-    []
+    [ff_today()]
 );
 
 $pageTitle = 'FX Revaluation';
@@ -54,8 +57,7 @@ require_once FF_ROOT . '/includes/header.php';
 <?php if (!$fxEnabled): ?>
 <div class="alert alert-warning" style="margin-bottom:14px;font-size:0.85rem;">
     <strong>FX Revaluation is disabled.</strong>
-    Enable it by setting <code>accounting.fx_revaluation_enabled = 1</code> in
-    <a href="<?= base_url('accounting/settings') ?>">Accounting Settings</a>.
+    Turn it on under <a href="<?= base_url('accounting/settings') ?>#other">Accounting Settings → FX &amp; Other</a>.
 </div>
 <?php endif; ?>
 
@@ -67,12 +69,12 @@ require_once FF_ROOT . '/includes/header.php';
 
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px;">
             <div>
-                <label style="display:block;font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:3px;">Period (closed only)</label>
+                <label style="display:block;font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:3px;">Period (open, month ended)</label>
                 <select x-model.number="form.period_id" class="form-input"
                         style="width:100%;padding:7px 9px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;"
                         <?= !$fxEnabled ? 'disabled' : '' ?>>
-                    <option value="">— Select a closed period —</option>
-                    <?php foreach ($closedPeriods as $p): ?>
+                    <option value="">— Select a finished, open month —</option>
+                    <?php foreach ($revaluablePeriods as $p): ?>
                         <option value="<?= (int) $p['id'] ?>"><?= e($p['name']) ?> (ends <?= e($p['end_date']) ?>)</option>
                     <?php endforeach; ?>
                 </select>

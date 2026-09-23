@@ -55,6 +55,9 @@ foreach ($cnRegistry as $key => $meta) {
         'repeat_days' => $cfg['repeat_days'], 'max_count' => $cfg['max_count'],
         'send_day' => $cfg['send_day'], 'audience_mode' => $cfg['audience_mode'],
         'subject' => $cfg['subject'], 'docs' => (object) $cfg['docs'],
+        // I22: a type whose sender has a fixed cadence/channel (dunning) shows
+        // this note instead of timing + channel inputs its sender ignores.
+        'fixed_schedule' => (string) ($meta['fixed_schedule'] ?? ''),
     ];
 }
 
@@ -268,6 +271,13 @@ $cnCategoryOrder = array_keys($cnCategories);
             <div x-show="types[k].enabled" x-cloak style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-default);">
                 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px 24px;">
 
+                    <?php if ($t['fixed_schedule'] !== ''): ?>
+                    <!-- Fixed schedule (I22 dunning): cadence + channel are set by the sender -->
+                    <div class="form-group" style="margin-bottom:0;grid-column:1/-1;">
+                        <label class="form-label">Schedule</label>
+                        <p class="text-muted" style="font-size:0.78rem;margin:0;"><?= e($t['fixed_schedule']) ?></p>
+                    </div>
+                    <?php else: ?>
                     <!-- Channels -->
                     <div class="form-group" style="margin-bottom:0;">
                         <label class="form-label">Channels</label>
@@ -319,6 +329,7 @@ $cnCategoryOrder = array_keys($cnCategories);
                         <label class="form-label">Subject line (leave blank for the default)</label>
                         <input type="text" class="form-control" x-model="types[k].subject" maxlength="300" :disabled="!canEdit" @input="dirty=true" placeholder="Use the standard subject">
                     </div>
+                    <?php endif; /* fixed_schedule */ ?>
                 </div>
 
                 <!-- Per-document toggles (compliance) -->

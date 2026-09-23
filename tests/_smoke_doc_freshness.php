@@ -305,6 +305,11 @@ if (!is_readable($currentSessionsPath)) {
 
     // Collect ALL ### IN-FLIGHT blocks (global). Concurrent sessions may register
     // in separate blocks separated by ---; preg_match would miss all but the first.
+    // The lazy (.*?) + multiline lookahead backtracks once per character; the
+    // block (SHIPPED entries accumulate in it) outgrew PCRE's default 1,000,000
+    // backtrack limit on 2026-09-24 and preg_match_all silently returned false
+    // ("Backtrack limit exhausted" → C4 red with nothing wrong). Raise it here.
+    ini_set('pcre.backtrack_limit', '20000000');
     $allInFlightContent = '';
     if (preg_match_all('/^### IN-FLIGHT\s*\n(.*?)(?=^###\s|^---\s*$|\z)/ms', $raw, $allBlockMatches)) {
         $allInFlightContent = implode("\n", $allBlockMatches[1]);

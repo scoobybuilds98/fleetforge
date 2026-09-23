@@ -5,7 +5,9 @@ declare(strict_types=1);
  * api/v1/accounting/vendor-credits/apply.php
  *
  * Apply a vendor credit to an existing bill — reduces bill balance_due.
- * Posts JE: DR Expense / CR AP (reverses the credit's AP debit against the bill's AP credit).
+ * Posts NO journal entry, deliberately: the credit already debited AP when it
+ * was created, so applying it only moves that reduction onto one bill
+ * (AccountingService::apReconciliationCheck nets unapplied credits off).
  * Uses FOR UPDATE on both credit and bill rows.
  *
  * @method  POST

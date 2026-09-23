@@ -95,6 +95,12 @@ $data = [
     'depr_expense_account_id' => clean_int($body['depr_expense_account_id'] ?? null),
     'total_expected_units'    => clean_int($body['total_expected_units'] ?? null),
     'notes'                   => clean_string($body['notes'] ?? null, 2000),
+    // SOP I2: how the asset was paid for — exactly one of these; the
+    // service posts DR asset / CR the paid-from account (or reclasses the
+    // purchase bill's lines), or nothing for an opening-balance asset.
+    'funding_account_id'      => clean_int($body['funding_account_id'] ?? null),
+    'acquisition_bill_id'     => clean_int($body['acquisition_bill_id'] ?? null),
+    'is_opening_balance'      => !empty($body['is_opening_balance']) ? 1 : 0,
 ];
 
 try {

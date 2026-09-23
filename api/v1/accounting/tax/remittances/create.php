@@ -55,11 +55,16 @@ if (!$remittanceDate) $fields['remittance_date']  = 'Remittance date is required
 
 if ($amount === null || $amount === '') {
     $fields['amount'] = 'Remittance amount is required.';
-} elseif (bccomp($amount, '0', 2) <= 0) {
-    $fields['amount'] = 'Remittance amount must be greater than zero.';
+} elseif (bccomp($amount, '0', 2) < 0) {
+    // SOP I4: zero is valid for a nil GST/HST return and a refund is entered
+    // as a positive "refund received" amount; TaxFilingService checks the
+    // exact figure against the filed return.
+    $fields['amount'] = 'Remittance amount cannot be negative.';
 }
 
-$validMethods = ['eft', 'wire', 'check', 'online_banking', 'credit_card', 'other'];
+// Must match TaxFilingService + the acc_tax_remittances.payment_method ENUM
+// (eft / credit_card used to pass here and then fail in the service).
+$validMethods = ['online_banking', 'check', 'wire', 'other'];
 if (!$paymentMethod) {
     $fields['payment_method'] = 'Please select a payment method.';
 } elseif (!in_array($paymentMethod, $validMethods, true)) {

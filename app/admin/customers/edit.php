@@ -320,6 +320,19 @@ require_once FF_ROOT . '/includes/header.php';
                                x-model="form.billing_phone" maxlength="50">
                     </div>
 
+                    <!-- I12: billing_address had no form field, so it could only come
+                         from an import — invoice PDF "Bill To" and the QuickBooks
+                         invoice BillAddr were blank for everyone else. Full-width row
+                         because it's multi-line. Clearing it sends '' which update.php
+                         stores as NULL (Bill To then falls back to the main address). -->
+                    <div class="form-group" style="grid-column:1 / -1;">
+                        <label class="form-label" for="billing_address">Billing Address</label>
+                        <textarea id="billing_address" name="billing_address" class="form-control" rows="3"
+                                  x-model="form.billing_address" maxlength="5000"
+                                  placeholder="123 Main Street&#10;Surrey BC V3W 1A1&#10;Canada"></textarea>
+                        <div class="form-hint">Printed as "Bill To" on invoices. Leave blank to use the main address.</div>
+                    </div>
+
                     <div class="form-group">
                         <label class="form-label" for="invoice_email">Invoice Email</label>
                         <input type="email" id="invoice_email" name="invoice_email" class="form-control"
@@ -490,6 +503,7 @@ function FF_CustomerEditForm() {
         'billing_contact_name'  =>          $customerRow['billing_contact_name'],
         'billing_email'         =>          $customerRow['billing_email'],
         'billing_phone'         =>          $customerRow['billing_phone'],
+        'billing_address'       =>          $customerRow['billing_address'] ?? '',  // I12
         'invoice_email'         =>          $customerRow['invoice_email'],
         'invoice_delivery'      =>          $customerRow['invoice_delivery'],
         'po_required'           => (bool)   $customerRow['po_required'],

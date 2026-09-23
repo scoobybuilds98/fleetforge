@@ -102,6 +102,17 @@ class FixedAssetService
      *                          salvage_value, cra_class, cra_cca_rate,
      *                          total_expected_units, vendor_id, location,
      *                          serial_number, notes, depreciation_start_date.
+     *                          How it was paid — exactly one (SOP I2):
+     *                            is_opening_balance = 1  (predates FleetForge:
+     *                              no purchase entry),
+     *                            acquisition_bill_id     (bought on an approved
+     *                              bill; lines not already coded to the asset
+     *                              account are reclassed into it),
+     *                            funding_account_id      (bank / loan / other
+     *                              account the money came from: posts
+     *                              DR asset account / CR that account),
+     *                            reclass_lines           (internal: work-order
+     *                              capitalization — [[account_id, amount]…]).
      * @param int|null $userId
      */
     public static function create(array $data, ?int $userId = null): array
@@ -149,7 +160,11 @@ class FixedAssetService
             throw new \RuntimeException('total_expected_units is required for units_of_production.');
         }
 
-        return \db_transaction(function () use ($data, $cost, $salvage, $depreciableCost, $method, $userId) {
+        // SOP I2: the purchase reaches the ledger. Work out the credit side
+        // BEFORE inserting anything, so a bad choice fails cleanly.
+        $acquisitionCredits = self::acquisitionCredits($data, $cost);
+
+        return \db_transaction(function () use ($data, $cost, $salvage, $depreciableCost, $method, $userId, $acquisitionCredits) {
             $year   = substr((string) $data['acquisition_date'], 0, 4);
             $number = self::nextAssetNumber($year);
 
@@ -214,6 +229,19 @@ class FixedAssetService
                 'created_by'               => $userId,
             ]);
 
+            $je = self::postAssetEntry(
+                'asset_acquisition',
+                (int) $insertId,
+                (int) $data['asset_account_id'],
+                $acquisitionCredits,
+                (string) $data['acquisition_date'],
+                "Asset purchase {$number} — {$data['name']}",
+                "ACQ-{$number}",
+                isset($data['vendor_id']) ? (int) $data['vendor_id'] : null,
+                isset($data['equipment_unit_id']) ? (int) $data['equipment_unit_id'] : null,
+                $userId
+            );
+
             self::audit(
                 $userId,
                 'create',
@@ -222,6 +250,7 @@ class FixedAssetService
                 "{$number} {$data['name']}",
                 "Created fixed asset: cost \${$cost}, method {$method}, " .
                 "salvage \${$salvage}, acquired {$data['acquisition_date']}"
+                . ($je ? "; purchase entry {$je['entry_number']}" : '; no purchase entry (' . self::acquisitionBasis($data) . ')')
             );
 
             return \db_row("SELECT * FROM acc_fixed_assets WHERE id = ?", [$insertId]);
@@ -1418,6 +1447,175 @@ class FixedAssetService
     // INTERNAL HELPERS
     // ============================================================
 
+    /**
+     * The credit side of an asset's purchase entry (SOP I2), as
+     * [[account_id, amount], …]; [] when no entry is due. Validates the
+     * "how was it paid" choice documented on create().
+     *
+     * @throws \RuntimeException when no (or more than one) basis is given
+     */
+    private static function acquisitionCredits(array $data, string $cost): array
+    {
+        $opening = !empty($data['is_opening_balance']);
+        $billId  = !empty($data['acquisition_bill_id']) ? (int) $data['acquisition_bill_id'] : null;
+        $funding = !empty($data['funding_account_id']) ? (int) $data['funding_account_id'] : null;
+        $reclass = $data['reclass_lines'] ?? null;
+
+        $given = (int) $opening + (int) ($billId !== null) + (int) ($funding !== null) + (int) (is_array($reclass));
+        if ($given === 0) {
+            throw new \RuntimeException(
+                'Say how the asset was paid for: the account it was paid from, the bill it was bought on, '
+                . 'or "opening balance" for an asset that predates FleetForge.'
+            );
+        }
+        if ($given > 1) {
+            throw new \RuntimeException('Choose only one of: paid-from account, bill, opening balance.');
+        }
+        if ($opening) {
+            return [];
+        }
+
+        $assetAcct = (int) $data['asset_account_id'];
+        if ($funding !== null) {
+            self::assertFundingAccount($funding);
+            if ($funding === $assetAcct) {
+                throw new \RuntimeException('The paid-from account cannot be the asset account itself.');
+            }
+            return [[$funding, $cost]];
+        }
+        if (is_array($reclass)) {
+            return $reclass;
+        }
+
+        // Bought on a bill: the approved bill already debited its lines.
+        // Lines coded to the asset account need nothing; the cost still
+        // sitting in other accounts (e.g. an expense) is reclassed, up to
+        // the asset's cost. A bill cannot fund two assets.
+        $bill = \db_row("SELECT id, status, bill_number FROM acc_bills WHERE id = ?", [$billId]);
+        if (!$bill) {
+            throw new \RuntimeException('Bill not found.');
+        }
+        if (!in_array($bill['status'], ['approved', 'partially_paid', 'paid'], true)) {
+            throw new \RuntimeException("Bill {$bill['bill_number']} is not approved yet — approve it first, then add the asset.");
+        }
+        $taken = \db_row(
+            "SELECT asset_number FROM acc_fixed_assets WHERE acquisition_bill_id = ? LIMIT 1",
+            [$billId]
+        );
+        if ($taken) {
+            throw new \RuntimeException("Bill {$bill['bill_number']} is already the purchase bill of asset {$taken['asset_number']}.");
+        }
+        $lines = \db_select(
+            "SELECT account_id, SUM(amount) AS amount FROM acc_bill_lines WHERE bill_id = ? GROUP BY account_id ORDER BY SUM(amount) DESC",
+            [$billId]
+        );
+        $onAsset = '0.00';
+        foreach ($lines as $l) {
+            if ((int) $l['account_id'] === $assetAcct) {
+                $onAsset = bcadd($onAsset, (string) $l['amount'], 2);
+            }
+        }
+        $toMove  = bcsub($cost, $onAsset, 2);
+        $credits = [];
+        foreach ($lines as $l) {
+            if (bccomp($toMove, '0', 2) <= 0) break;
+            if ((int) $l['account_id'] === $assetAcct) continue;
+            $take = bccomp((string) $l['amount'], $toMove, 2) < 0 ? bcadd((string) $l['amount'], '0', 2) : $toMove;
+            $credits[] = [(int) $l['account_id'], $take];
+            $toMove = bcsub($toMove, $take, 2);
+        }
+        if (bccomp($toMove, '0', 2) > 0) {
+            throw new \RuntimeException("The asset's cost is more than bill {$bill['bill_number']}'s lines — check the cost, or use a paid-from account for the difference.");
+        }
+        return $credits;
+    }
+
+    /** Human label of the purchase basis, for the audit note. */
+    private static function acquisitionBasis(array $data): string
+    {
+        if (!empty($data['is_opening_balance'])) return 'opening balance';
+        if (!empty($data['acquisition_bill_id'])) return 'bill already coded to the asset account';
+        return 'nothing to post';
+    }
+
+    /**
+     * An account money can come from for an asset: active, not a header,
+     * not the AR/AP control accounts (AP needs a vendor bill — use the bill
+     * instead), and a balance-sheet account.
+     */
+    private static function assertFundingAccount(int $accountId): void
+    {
+        $a = \db_row("SELECT id, account_type, is_header, is_active FROM acc_accounts WHERE id = ?", [$accountId]);
+        if (!$a || (int) $a['is_active'] !== 1 || (int) $a['is_header'] === 1) {
+            throw new \RuntimeException('The paid-from account must be an active, non-header account.');
+        }
+        if (!in_array($a['account_type'], ['asset', 'liability', 'equity'], true)) {
+            throw new \RuntimeException('The paid-from account must be a bank, loan or other balance-sheet account.');
+        }
+        $control = array_filter([
+            (int) AccountingService::setting('accounting.ap_account_id', 0),
+            (int) AccountingService::setting('accounting.ar_account_id', 0),
+        ]);
+        if (in_array($accountId, $control, true)) {
+            throw new \RuntimeException('Accounts Payable / Receivable cannot fund an asset directly — enter the supplier\'s bill and choose it as the purchase bill.');
+        }
+    }
+
+    /**
+     * Post DR asset account / CR each credit line (SOP I2). Returns the JE
+     * row, or null when there is nothing to post (all credits zero or on
+     * the asset account itself).
+     *
+     * @param array<int,array{0:int,1:string}> $credits
+     */
+    private static function postAssetEntry(
+        string $sourceType,
+        int $assetId,
+        int $assetAccountId,
+        array $credits,
+        string $entryDate,
+        string $description,
+        string $reference,
+        ?int $vendorId,
+        ?int $unitId,
+        ?int $userId
+    ): ?array {
+        $lines = [];
+        $total = '0.00';
+        foreach ($credits as [$acctId, $amt]) {
+            $amt = bcadd((string) $amt, '0', 2);
+            if ((int) $acctId === $assetAccountId || bccomp($amt, '0', 2) <= 0) continue;
+            $lines[] = [
+                'account_id'        => (int) $acctId,
+                'debit'             => '0.00',
+                'credit'            => $amt,
+                'description'       => $description,
+                'vendor_id'         => $vendorId,
+            ];
+            $total = bcadd($total, $amt, 2);
+        }
+        if (!$lines) {
+            return null;
+        }
+        array_unshift($lines, [
+            'account_id'        => $assetAccountId,
+            'debit'             => $total,
+            'credit'            => '0.00',
+            'description'       => $description,
+            'vendor_id'         => $vendorId,
+            'equipment_unit_id' => $unitId,
+        ]);
+        return JournalEntryService::create([
+            'entry_date'       => $entryDate,
+            'description'      => $description,
+            'entry_type'       => 'system',
+            'reference'        => $reference,
+            'source_type'      => $sourceType,
+            'source_id'        => $assetId,
+            'post_immediately' => true,
+        ], $lines, $userId);
+    }
+
     /** Normalize an incoming string/number to a 2-decimal bcmath string. */
     private static function money(mixed $v): string
     {
@@ -1577,6 +1775,10 @@ class FixedAssetService
             );
             if ($existing) throw new \RuntimeException("Work order already has CapEx review #{$existing['id']}.");
 
+            // reclass_lines is computed below from the work order's bills —
+            // never taken from the request.
+            unset($payload['reclass_lines']);
+
             // Build the asset row
             $assetData = array_merge([
                 'name'                  => $wo['title'] ?: ('WO ' . $wo['work_order_number']),
@@ -1590,6 +1792,34 @@ class FixedAssetService
                 'useful_life_years'     => 5,
                 'salvage_value'         => '0.00',
             ], $payload);
+
+            // SOP I2: the work order's cost was expensed by its approved
+            // bills (repairs, parts…). Capitalizing moves that cost into the
+            // asset: reclass each bill line's account, unless the caller
+            // named the account it was paid from. Refuse if the bills don't
+            // add up to the work order's cost — the accountant must say.
+            if (empty($assetData['funding_account_id']) && empty($assetData['is_opening_balance'])) {
+                $woLines = \db_select(
+                    "SELECT bl.account_id, SUM(bl.amount) AS amount
+                       FROM acc_bills b JOIN acc_bill_lines bl ON bl.bill_id = b.id
+                      WHERE b.work_order_id = ? AND b.status IN ('approved','partially_paid','paid')
+                      GROUP BY bl.account_id",
+                    [$woId]
+                );
+                $billed = '0.00';
+                $reclass = [];
+                foreach ($woLines as $l) {
+                    $billed = bcadd($billed, (string) $l['amount'], 2);
+                    $reclass[] = [(int) $l['account_id'], bcadd((string) $l['amount'], '0', 2)];
+                }
+                if (!$reclass || bccomp($billed, self::money($assetData['acquisition_cost']), 2) !== 0) {
+                    throw new \RuntimeException(
+                        "Work order {$wo['work_order_number']}'s approved bills total \${$billed}, not its cost \${$wo['total_cost']}. "
+                        . 'Choose the account the cost was paid from.'
+                    );
+                }
+                $assetData['reclass_lines'] = $reclass;
+            }
             $asset = self::create($assetData, $userId);
 
             // Create the capex row in completed state
@@ -1767,7 +1997,8 @@ class FixedAssetService
         string $amount,
         ?int $userId = null,
         string $note = '',
-        ?int $billLineId = null
+        ?int $billLineId = null,
+        ?int $creditAccountId = null
     ): array {
         $amount = self::money($amount);
         if (bccomp($amount, '0.00', 2) <= 0) {
@@ -1777,7 +2008,7 @@ class FixedAssetService
             throw new \RuntimeException('Betterment note is required (ASPE 3061.14 justification).');
         }
 
-        return \db_transaction(function () use ($assetId, $amount, $userId, $note, $billLineId) {
+        return \db_transaction(function () use ($assetId, $amount, $userId, $note, $billLineId, $creditAccountId) {
             $asset = \db_row("SELECT * FROM acc_fixed_assets WHERE id = ? FOR UPDATE", [$assetId]);
             if (!$asset) {
                 throw new \RuntimeException('Asset not found.');
@@ -1799,14 +2030,56 @@ class FixedAssetService
                 );
             }
 
+            // SOP I2: the betterment moves the cost into the asset account.
+            // From a bill line: the approved bill already debited the line's
+            // account (usually repairs) — reclass it: DR asset / CR that
+            // account. Otherwise the caller names the account paid from.
+            $entryDate = \ff_today();
+            if ($billLineId) {
+                $bl = \db_row(
+                    "SELECT bl.account_id, b.status, b.bill_date, b.bill_number
+                       FROM acc_bill_lines bl JOIN acc_bills b ON b.id = bl.bill_id
+                      WHERE bl.id = ?",
+                    [$billLineId]
+                );
+                if (!$bl) {
+                    throw new \RuntimeException('Bill line not found.');
+                }
+                if (!in_array($bl['status'], ['approved', 'partially_paid', 'paid'], true)) {
+                    throw new \RuntimeException('Approve the bill first — a draft bill is capitalized when it is approved.');
+                }
+                $credits = [[(int) $bl['account_id'], $amount]];
+                $entryDate = (string) $bl['bill_date'];
+            } elseif ($creditAccountId) {
+                self::assertFundingAccount($creditAccountId);
+                $credits = [[$creditAccountId, $amount]];
+            } else {
+                throw new \RuntimeException('Say where the betterment was paid from (a bill line or a funding account).');
+            }
+            $je = self::postAssetEntry(
+                'asset_betterment',
+                $assetId,
+                (int) $asset['asset_account_id'],
+                $credits,
+                $entryDate,
+                "Betterment {$asset['asset_number']} — {$asset['name']}",
+                "BET-{$asset['asset_number']}",
+                isset($asset['vendor_id']) ? (int) $asset['vendor_id'] : null,
+                isset($asset['equipment_unit_id']) ? (int) $asset['equipment_unit_id'] : null,
+                $userId
+            );
+
             \db_update('acc_fixed_assets', [
                 'acquisition_cost' => $newCost,
                 'depreciable_cost' => $newDeprBase,
+                // The added cost is not yet depreciated: NBV grows by it too.
+                'net_book_value'   => bcadd((string) $asset['net_book_value'], $amount, 2),
                 // S-LOCAL-DAY-TS: UTC, like ON UPDATE CURRENT_TIMESTAMP.
                 'updated_at'       => \ff_now_utc(),
             ], 'id = ?', [$assetId]);
 
-            $billRef = $billLineId ? " Bill line #{$billLineId}." : '';
+            $billRef = ($billLineId ? " Bill line #{$billLineId}." : '')
+                . ($je ? " Entry {$je['entry_number']}." : ' (bill line already coded to the asset account — no reclass).');
             self::audit(
                 $userId,
                 'update',

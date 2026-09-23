@@ -103,6 +103,9 @@ class AutoEntryBridge
         // initializers means the cache stays disabled if no GPS line surfaces.
         $gpsCache = null;
 
+        // SOP I1: rental lines book to base_rental_<category> of the unit.
+        $equipmentCategory = self::invoiceEquipmentCategory($invoiceId);
+
         // Build revenue lines grouped by GL account
         $revenueByAccount = [];
         foreach ($lineItems as $line) {
@@ -154,7 +157,7 @@ class AutoEntryBridge
                 // Final fallback — let original mapping path resolve (legacy 'gps' → mapped account).
             }
 
-            $accountId = self::resolveRevenueAccount($line['item_type']);
+            $accountId = self::resolveRevenueAccount($line['item_type'], $equipmentCategory);
             if (!$accountId) {
                 throw new \RuntimeException(
                     "Cannot post invoice JE — no GL revenue account mapped for line type '{$line['item_type']}'. " .
@@ -390,7 +393,8 @@ class AutoEntryBridge
         );
         if (!$invoice) return null;
 
-        $cashAccountId = self::requireAccountId('accounting.default_cash_account_id', 'Cash');
+        // SOP I10: the bank the money actually went into, not always the default.
+        $cashAccountId = self::cashAccountForBank(isset($payment['deposit_bank_account_id']) ? (int) $payment['deposit_bank_account_id'] : null);
         $arAccountId   = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
 
         // S-AUDIT-BILLING-ENGINE-1 #21: CAD-canonical. Cash converts at the
@@ -411,7 +415,7 @@ class AutoEntryBridge
                 'credit'      => '0.00',
                 'description' => "Cash received — {$payment['payment_number']}",
                 'customer_id' => $invoice['customer_id'],
-            ],
+            ] + self::foreignLeg($payment['currency'] ?? 'CAD', $allocatedAmount, $payFxRate),
             [
                 'account_id'  => $arAccountId,
                 'debit'       => '0.00',
@@ -491,7 +495,7 @@ class AutoEntryBridge
         );
         if (!$invoice) return null;
 
-        $cashAccountId        = self::requireAccountId('accounting.default_cash_account_id', 'Cash');
+        $cashAccountId        = self::cashAccountForBank(isset($payment['deposit_bank_account_id']) ? (int) $payment['deposit_bank_account_id'] : null); // SOP I10
         $arAccountId          = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
         $creditsLiabilityId   = self::requireAccountId(
             'accounting.customer_credits_account_id',
@@ -518,7 +522,7 @@ class AutoEntryBridge
                 'credit'      => '0.00',
                 'description' => "Cash received — {$payment['payment_number']} (incl. overpayment)",
                 'customer_id' => $invoice['customer_id'],
-            ],
+            ] + self::foreignLeg($payment['currency'] ?? 'CAD', $totalCash, $payFxRate),
         ];
 
         if (bccomp($arCad, '0', 2) > 0) {
@@ -601,7 +605,10 @@ class AutoEntryBridge
                 [$cn['source_invoice_id']]
             );
             if ($primaryLine) {
-                $mapped = self::resolveRevenueAccount($primaryLine['item_type']);
+                $mapped = self::resolveRevenueAccount(
+                    $primaryLine['item_type'],
+                    self::invoiceEquipmentCategory((int) $cn['source_invoice_id'])
+                );
                 if ($mapped) $revenueAccountId = $mapped;
             }
         }
@@ -1116,47 +1123,155 @@ class AutoEntryBridge
     }
 
     /**
+     * Line types that are rental — they resolve through the unit's
+     * equipment category (base_rental_<category>) when the map has no entry
+     * for the line type itself. SOP I1: nothing ever produced the seeded
+     * base_rental_<category> keys, so every rental line fell back to 4110.
+     */
+    private const RENTAL_LINE_TYPES = ['base_rental', 'base_rental_reconciliation_credit', 'early_return_credit'];
+
+    /**
      * Public read of the revenue account a line type books to — the same
-     * rule every invoice JE uses (map entry, else the 'other' fallback).
+     * rule every invoice JE uses (see resolveRevenueAccountDetail()).
      * Used by QuickBooks → Items to compare with each QuickBooks item's
      * income account (S-QBO-ITEM-ACCOUNT-CHECK).
      */
-    public static function revenueAccountForLineType(string $lineType): ?int
+    public static function revenueAccountForLineType(string $lineType, ?string $category = null): ?int
     {
-        return self::resolveRevenueAccount($lineType);
+        return self::resolveRevenueAccountDetail($lineType, $category)['account_id'];
     }
 
-    private static function resolveRevenueAccount(string $lineType): ?int
+    /**
+     * How a line type resolves in accounting.revenue_account_map (the ONE
+     * map: Accounting → Settings → Revenue Mapping edits it — SOP I1).
+     *
+     * Order: the line type's own key → for rental lines, base_rental_<unit
+     * category> then base_rental_other → 'other'. `fallback` is true only
+     * when the 'other' catch-all was used.
+     *
+     * @return array{account_id:?int, key:?string, fallback:bool}
+     */
+    public static function resolveRevenueAccountDetail(string $lineType, ?string $category = null): array
     {
-        static $mapCache = null;
-        static $codeToIdCache = [];
+        $map = self::revenueMap();
 
-        // Load and cache the JSON map
-        if ($mapCache === null) {
-            $mapCache = AccountingService::setting('accounting.revenue_account_map', []);
-            if (is_string($mapCache)) {
-                $mapCache = json_decode($mapCache, true) ?? [];
+        $candidates = [$lineType];
+        if (in_array($lineType, self::RENTAL_LINE_TYPES, true)) {
+            if ($category !== null && $category !== '') {
+                $candidates[] = 'base_rental_' . $category;
+            }
+            $candidates[] = 'base_rental_other';
+        }
+
+        foreach ($candidates as $key) {
+            if (!empty($map[$key])) {
+                return ['account_id' => self::accountIdForCode((string) $map[$key]), 'key' => $key, 'fallback' => false];
             }
         }
-
-        // Look up account code for this line type
-        $accountCode = $mapCache[$lineType] ?? $mapCache['other'] ?? null;
-        if (!$accountCode) return null;
-
-        $accountCode = (string) $accountCode;
-
-        // Resolve code → id (cached)
-        if (isset($codeToIdCache[$accountCode])) {
-            return $codeToIdCache[$accountCode];
+        if (!empty($map['other'])) {
+            return ['account_id' => self::accountIdForCode((string) $map['other']), 'key' => 'other', 'fallback' => true];
         }
+        return ['account_id' => null, 'key' => null, 'fallback' => true];
+    }
 
-        $account = \db_row(
-            "SELECT id FROM acc_accounts WHERE code = ? AND is_active = 1",
-            [$accountCode]
+    /**
+     * Equipment category slug of the unit an invoice bills (invoice → lease
+     * → unit → equipment type), or null. Drives base_rental_<category>.
+     */
+    public static function invoiceEquipmentCategory(int $invoiceId): ?string
+    {
+        $row = \db_row(
+            "SELECT et.category
+               FROM invoices i
+               JOIN leases l             ON l.id = i.lease_id
+               JOIN equipment_units u    ON u.id = l.equipment_unit_id
+               JOIN equipment_templates et ON et.id = u.template_id
+              WHERE i.id = ?",
+            [$invoiceId]
         );
+        $cat = $row ? trim((string) $row['category']) : '';
+        return $cat !== '' ? $cat : null;
+    }
 
-        $codeToIdCache[$accountCode] = $account ? (int) $account['id'] : null;
-        return $codeToIdCache[$accountCode];
+    /**
+     * Revenue account for a line type (null when nothing is mapped).
+     */
+    private static function resolveRevenueAccount(string $lineType, ?string $category = null): ?int
+    {
+        return self::resolveRevenueAccountDetail($lineType, $category)['account_id'];
+    }
+
+    /**
+     * accounting.revenue_account_map decoded (line-type key → account CODE).
+     * Read fresh each call: the settings page edits it, and a long-running
+     * worker must not keep posting to a stale map.
+     *
+     * @return array<string,string>
+     */
+    private static function revenueMap(): array
+    {
+        $map = AccountingService::setting('accounting.revenue_account_map', []);
+        if (is_string($map)) {
+            $map = json_decode($map, true) ?? [];
+        }
+        return is_array($map) ? $map : [];
+    }
+
+    /** Active account id for a code (per-request cache). */
+    private static function accountIdForCode(string $code): ?int
+    {
+        static $codeToIdCache = [];
+        if (array_key_exists($code, $codeToIdCache)) {
+            return $codeToIdCache[$code];
+        }
+        $account = \db_row(
+            "SELECT id FROM acc_accounts WHERE code = ? AND is_active = 1 AND is_header = 0",
+            [$code]
+        );
+        return $codeToIdCache[$code] = $account ? (int) $account['id'] : null;
+    }
+
+    /**
+     * foreign_amount / foreign_currency / exchange_rate for a cash line in a
+     * non-CAD currency, so a USD bank account's ledger carries its USD value
+     * for FX revaluation (which reads foreign_amount). Empty for CAD.
+     *
+     * @return array<string,string>
+     */
+    public static function foreignLeg(string $currency, string $foreignAmount, string $rate): array
+    {
+        if ($currency === 'CAD' || $currency === '') {
+            return [];
+        }
+        return [
+            'foreign_amount'   => $foreignAmount,
+            'foreign_currency' => $currency,
+            'exchange_rate'    => $rate,
+        ];
+    }
+
+    /**
+     * GL cash account for money received into a bank account (SOP I10).
+     *
+     * A payment or deposit may name the acc_bank_accounts row it was
+     * deposited to; its linked GL account takes the debit. With none (or an
+     * inactive/unknown one), the Settings "Cash / Bank Account" default —
+     * the only behaviour before I10, when every receipt landed there.
+     *
+     * @throws \RuntimeException when neither resolves
+     */
+    public static function cashAccountForBank(?int $bankAccountId): int
+    {
+        if ($bankAccountId) {
+            $bank = \db_row(
+                "SELECT gl_account_id FROM acc_bank_accounts WHERE id = ? AND is_active = 1",
+                [$bankAccountId]
+            );
+            if ($bank && (int) $bank['gl_account_id'] > 0) {
+                return (int) $bank['gl_account_id'];
+            }
+        }
+        return self::requireAccountId('accounting.default_cash_account_id', 'Cash');
     }
 
     // ============================================================

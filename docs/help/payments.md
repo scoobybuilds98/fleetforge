@@ -128,4 +128,4 @@ This soft-deletes the payment and reverses all of its invoice allocations. Each 
 
 - [Invoices](/help/invoices)
 - [Customers](/help/customers)
-- [QuickBooks Sync](/help/quickbooks)
+- [Standard Operating Procedures](/sop) — QuickBooks chapters
