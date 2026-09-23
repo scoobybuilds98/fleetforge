@@ -208,6 +208,7 @@ CREATE TABLE `acc_bad_debt_writeoffs` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `invoice_id` int unsigned NOT NULL,
   `customer_id` int unsigned NOT NULL,
+  `damage_claim_id` int unsigned DEFAULT NULL COMMENT 'S-QBO-INVOICE-WRITEOFF: damage claim written off (NULL = AR bad-debt write-off)',
   `writeoff_date` date NOT NULL,
   `amount` decimal(15,2) NOT NULL,
   `reason` text COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -224,11 +225,13 @@ CREATE TABLE `acc_bad_debt_writeoffs` (
   KEY `journal_entry_id` (`journal_entry_id`),
   KEY `recovery_journal_entry_id` (`recovery_journal_entry_id`),
   KEY `created_by` (`created_by`),
+  KEY `idx_damage_claim` (`damage_claim_id`),
   CONSTRAINT `acc_bad_debt_writeoffs_ibfk_1` FOREIGN KEY (`invoice_id`) REFERENCES `invoices` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_bad_debt_writeoffs_ibfk_2` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `acc_bad_debt_writeoffs_ibfk_3` FOREIGN KEY (`journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
   CONSTRAINT `acc_bad_debt_writeoffs_ibfk_4` FOREIGN KEY (`recovery_journal_entry_id`) REFERENCES `acc_journal_entries` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `acc_bad_debt_writeoffs_ibfk_5` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+  CONSTRAINT `acc_bad_debt_writeoffs_ibfk_5` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `acc_bad_debt_writeoffs_ibfk_6` FOREIGN KEY (`damage_claim_id`) REFERENCES `damage_claims` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_bank_accounts` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -1239,6 +1242,27 @@ CREATE TABLE `acc_qbo_credit_application_map` (
   KEY `idx_ff_credit_note` (`ff_credit_note_id_snapshot`) COMMENT 'List-by-parent-credit lookups for the credit_memos.php admin Applications section',
   CONSTRAINT `fk_qbo_credit_application_map_ff` FOREIGN KEY (`ff_credit_application_id`) REFERENCES `credit_note_applications` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-QBO-CREDIT-MEMO-APPLY: FF→QBO credit-application push state. One row per credit_note_applications row; pushes as a zero-dollar QBO Payment carrying 2 LinkedTxns (CreditMemo + Invoice).';
+CREATE TABLE `acc_qbo_invoice_writeoff_map` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `ff_writeoff_id` int unsigned NOT NULL COMMENT 'acc_bad_debt_writeoffs.id; one row per FF write-off; FK CASCADE',
+  `ff_invoice_id_snapshot` int unsigned NOT NULL COMMENT 'acc_bad_debt_writeoffs.invoice_id snapshot — forensic trail',
+  `qbo_credit_memo_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO CreditMemo.Id (Bad-debt item line); stored as soon as it is created',
+  `qbo_payment_id` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Payment.Id — the $0 Payment applying the CreditMemo to the invoice',
+  `qbo_invoice_id_ref` varchar(50) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'QBO Invoice.Id the credit was applied to',
+  `amount_snapshot` decimal(15,2) DEFAULT NULL COMMENT 'Amount written off, at push time',
+  `push_status` enum('pending','pushed','failed','failed_preflight','skipped_by_mode') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending' COMMENT 'pushed = CreditMemo created AND applied',
+  `push_error` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'Last error for failed/failed_preflight states',
+  `pushed_at` datetime DEFAULT NULL COMMENT 'UTC time the write-off was fully pushed',
+  `last_synced_at` datetime DEFAULT NULL COMMENT 'UTC time of the most recent state change',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_ff_writeoff` (`ff_writeoff_id`) COMMENT 'One mapping row per FF write-off; idempotency of pushCreate',
+  UNIQUE KEY `uq_qbo_writeoff_credit_memo` (`qbo_credit_memo_id`),
+  UNIQUE KEY `uq_qbo_writeoff_payment` (`qbo_payment_id`),
+  KEY `idx_status` (`push_status`),
+  CONSTRAINT `fk_qbo_invoice_writeoff_map_ff` FOREIGN KEY (`ff_writeoff_id`) REFERENCES `acc_bad_debt_writeoffs` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='S-QBO-INVOICE-WRITEOFF: FF invoice write-off → QBO CreditMemo (Bad-debt item) + $0 Payment applying it to the invoice.';
 CREATE TABLE `acc_qbo_refund_receipt_map` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `ff_lease_id` int unsigned NOT NULL COMMENT 'leases.id — the lease whose cash precharge refund this RefundReceipt mirrors. One cash refund per lease (D-QBO-17-5).',
@@ -1582,7 +1606,7 @@ CREATE TABLE `acc_qbo_sync_log` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `acc_qbo_sync_queue` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `entity_type` enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','credit_application') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `entity_type` enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','credit_application','invoice_writeoff') COLLATE utf8mb4_unicode_ci NOT NULL,
   `entity_id` int unsigned NOT NULL,
   `operation` enum('create','update','void','delete') COLLATE utf8mb4_unicode_ci NOT NULL,
   `status` enum('queued','processing','completed','failed','skipped') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'queued',

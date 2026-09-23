@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-INVOICE-WRITEOFF** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + D-QBO-INVOICE-WRITEOFF-1). **Writing off an invoice (bad debt, or a damage claim) now closes it everywhere: in FleetForge (the damage path used to leave the invoice open with its full balance) and in QuickBooks (a credit memo on the Bad Debt Write-off item applied to the invoice, instead of a journal entry that left the invoice open). Operator next: map FF's Bad Debt Expense account, then map/create the "Bad Debt Write-off" item on QuickBooks → Items.**
+
 **S-QBO-CUSTOMER-TERMS-ADDR** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + D-QBO-CUSTOMER-TERMS-ADDR-1). **Customers FleetForge creates in QuickBooks now get their payment terms (matched to a QuickBooks term) and billing address; customers linked to the accountant's records keep the accountant's terms and address — FF edits no longer overwrite them. Operator next: make sure QuickBooks has a term named like FF's (e.g. "Net 30").**
 
 **S-QBO-BILLPAY-MIRROR** — SHIPPED 2026-09-23 (see PROGRESS.md SESSION LOG row + D-QBO-BILLPAY-MIRROR-1). **Bills the accountant pays in QuickBooks now show paid in FleetForge (webhook + go-live link + "Check QuickBooks for payments"), with FF's AP / bank books posted the same way as the Bill Payments page (new `BillPaymentWebhookHandler` + shared `ApPaymentService`). QuickBooks-origin AP payments are never pushed back; what FF can't represent becomes one drift event. Operator next: subscribe the Intuit webhook to BillPayment (F81); link each QuickBooks bank / card account the accountant pays bills from to an FF bank account.**

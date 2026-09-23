@@ -25,6 +25,8 @@ declare(strict_types=1);
  *     'item'          → ItemPusher
  *     'account'       → AccountPusher
  *     'tax_code'      → TaxCodePusher
+ *     'credit_application' → CreditApplicationPusher
+ *     'invoice_writeoff'   → InvoiceWriteoffPusher (S-QBO-INVOICE-WRITEOFF)
  *
  *   operation → method name:
  *     'create' → pushCreate(int $entityId, ?array $payloadSnapshot = null): array

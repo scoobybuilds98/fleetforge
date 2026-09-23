@@ -398,8 +398,26 @@ class QboFixture
         ]);
     }
 
+    /**
+     * QuickBooks' response key for an entity. Pushers name the one-word
+     * endpoints Intuit uses ('creditmemo', 'billpayment', 'journalentry',
+     * 'refundreceipt'); the real API answers under the PascalCase entity
+     * name, so the fixture must too — 'Creditmemo' made every fixture
+     * credit-memo create look Id-less (S-QBO-INVOICE-WRITEOFF).
+     */
     private static function pascalEntity(string $entityType): string
     {
+        $endpointNames = [
+            'creditmemo'    => 'CreditMemo',
+            'billpayment'   => 'BillPayment',
+            'journalentry'  => 'JournalEntry',
+            'refundreceipt' => 'RefundReceipt',
+            'salesreceipt'  => 'SalesReceipt',
+            'vendorcredit'  => 'VendorCredit',
+        ];
+        if (isset($endpointNames[$entityType])) {
+            return $endpointNames[$entityType];
+        }
         // 'credit_memo' → 'CreditMemo', 'customer' → 'Customer'
         $parts = explode('_', $entityType);
         return implode('', array_map('ucfirst', $parts));

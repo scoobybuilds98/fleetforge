@@ -900,6 +900,10 @@ $pusherToAdminPage = [
     // not at a dedicated /quickbooks/credit_applications.php.
     'CreditApplicationPusher' => 'credit_memos.php', // S-QBO-CREDIT-MEMO-APPLY (shared surface)
     'RefundReceiptPusher'     => 'refund_receipts.php', // S-QBO-17 (CLOSES Phase QBO-7)
+    // S-QBO-INVOICE-WRITEOFF: a write-off pushes as a CreditMemo, so its
+    // "Invoice write-offs" section lives on the Credit Memos page (backed
+    // by api/v1/quickbooks/invoice_writeoffs/retry.php).
+    'InvoiceWriteoffPusher'   => 'credit_memos.php',
 ];
 
 $pushersDir = REPO_ROOT . '/lib/QboPushers';

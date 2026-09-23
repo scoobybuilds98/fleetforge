@@ -100,7 +100,9 @@ class ItemCreator
                 'value' => $incomeAccount['qbo_id'],
                 'name'  => $incomeAccount['qbo_name'],
             ],
-            'Taxable'          => true,
+            // The Bad-debt item writes off a balance that already includes
+            // its tax — the credit memo carries no tax of its own.
+            'Taxable'          => $itemType !== InvoiceWriteoffPusher::ITEM_TYPE,
         ];
 
         try {
@@ -175,6 +177,26 @@ class ItemCreator
             // override id didn't resolve — fall through to cascade
             // rather than failing hard; operator can re-author with
             // a different override
+        }
+
+        // Pass 1b (S-QBO-INVOICE-WRITEOFF): the Bad-debt item posts to Bad
+        // Debt Expense — Intuit's bad-debt recipe. Never fall through to a
+        // revenue account: a write-off would then reduce income instead.
+        if ($itemType === InvoiceWriteoffPusher::ITEM_TYPE) {
+            $bad = db_row(
+                "SELECT m.qbo_account_id, m.qbo_name
+                   FROM acc_qbo_account_map m
+                   JOIN settings s ON s.`key` = 'accounting.bad_debt_expense_account_id' AND m.ff_account_id = CAST(s.`value` AS UNSIGNED)
+                  WHERE m.mapping_status = 'mapped' AND m.qbo_account_id IS NOT NULL
+                  LIMIT 1"
+            );
+            if ($bad) {
+                return ['qbo_id' => (string) $bad['qbo_account_id'], 'qbo_name' => (string) ($bad['qbo_name'] ?? '')];
+            }
+            throw new ChartOfAccountsIncompleteException(
+                "Cannot create the QuickBooks \"Bad Debt Write-off\" item: FleetForge's Bad Debt Expense account "
+                . '(Accounting settings → accounting.bad_debt_expense_account_id) is not mapped to a QuickBooks account. Map it on QuickBooks → Accounts first.'
+            );
         }
 
         // Pass 2: critical revenue account from S-QBO-8 (the canonical

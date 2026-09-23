@@ -1808,7 +1808,7 @@ class AutoEntryBridge
         }
 
         $invoice = \db_row(
-            "SELECT id, invoice_number, customer_id, balance_due
+            "SELECT id, invoice_number, customer_id, balance_due, currency, exchange_rate_to_cad
                FROM invoices WHERE id = ? AND deleted_at IS NULL",
             [(int) $claim['invoice_id']]
         );
@@ -1826,6 +1826,13 @@ class AutoEntryBridge
 
         $badDebtAccountId = self::requireAccountId('accounting.bad_debt_expense_account_id', 'Bad Debt Expense');
         $arAccountId      = self::requireAccountId('accounting.ar_account_id', 'Accounts Receivable');
+
+        // S-QBO-INVOICE-WRITEOFF: write off the CAD-booked AR at the invoice's
+        // frozen rate — the same rule as onBadDebtWriteOff (#21). The damage
+        // path credited a USD invoice's face value as CAD.
+        $invRate        = self::fxRate($invoice['currency'] ?? 'CAD', $invoice['exchange_rate_to_cad'] ?? null,
+            "invoice {$invoice['invoice_number']}");
+        $writeOffAmount = self::toCad($writeOffAmount, $invRate);
 
         $jeLines = [
             [

@@ -56,6 +56,7 @@ class RealmGuard
         'acc_qbo_payment_map',
         'acc_qbo_credit_memo_map',
         'acc_qbo_credit_application_map',
+        'acc_qbo_invoice_writeoff_map',   // S-QBO-INVOICE-WRITEOFF
         'acc_qbo_refund_receipt_map',
         'acc_qbo_bill_map',
         'acc_qbo_bill_payment_map',

@@ -353,6 +353,28 @@ require_once FF_ROOT . '/includes/header.php';
                 <?php endif; ?>
             </div>
             <?php endif; ?>
+            <?php if (in_array('written_off', $nextStates, true)):
+                // S-QBO-INVOICE-WRITEOFF: say what "Written Off" does to the
+                // recovery invoice before the operator applies it.
+                $woInv = $claim['invoice_id']
+                    ? db_row("SELECT invoice_number, status, balance_due, currency FROM invoices WHERE id = ? AND deleted_at IS NULL", [(int) $claim['invoice_id']])
+                    : null;
+                $woWritable = $woInv && in_array($woInv['status'], \FleetForge\Accounting\InvoiceWriteOff::WRITABLE_STATUSES, true)
+                    && bccomp((string) $woInv['balance_due'], '0', 2) > 0;
+            ?>
+            <div class="form-group" style="min-width:320px;max-width:560px;" x-show="newStatus === 'written_off'" x-cloak>
+                <div class="form-hint">
+                    <?php if ($woWritable): ?>
+                    This also writes off the remaining balance of invoice <strong><?= e($woInv['invoice_number']) ?></strong><?= $canSeeMoney ? ' (' . e(format_currency($woInv['balance_due'], $woInv['currency'] === 'USD' ? 'US$' : '$')) . ')' : '' ?>
+                    as bad debt: the invoice is closed and the customer's balance goes down. When QuickBooks is connected, the invoice is closed there too.
+                    <?php elseif ($woInv): ?>
+                    Invoice <?= e($woInv['invoice_number']) ?> is <?= e(str_replace('_', ' ', $woInv['status'])) ?> — nothing is written off; only the claim's status changes.
+                    <?php else: ?>
+                    No recovery invoice is linked — only the claim's status changes.
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
             <button class="btn btn-primary"
                     :disabled="!newStatus || statusSaving || (newStatus === 'invoiced' && !statusInvoiceId)"
                     @click="changeStatus()">

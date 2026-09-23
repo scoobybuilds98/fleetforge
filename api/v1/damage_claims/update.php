@@ -53,7 +53,9 @@ declare(strict_types=1);
  *               customer_liable_amount?, insurance_claim_amount?,
  *               work_order_id?, invoice_id?
  * @auth    Session required; require_permission('maintenance','edit')
- * @returns 200 { id, claim_number, status, updated_at, gl_journal_entry? }
+ * @returns 200 { id, claim_number, status, updated_at, gl_journal_entry?, write_off_id? }
+ *          (write_off_id: the acc_bad_debt_writeoffs row when a 'written_off'
+ *          transition wrote off the recovery invoice — S-QBO-INVOICE-WRITEOFF)
  *
  * Decisions: D5 (soft delete), D16 (bcmath), D19 (optimistic lock), §6 (state machine)
  * Session: S012
@@ -329,50 +331,88 @@ if (empty($updates)) {
 // -----------------------------------------------------------------------
 $resultRow = null;
 
-db_transaction(function () use ($claimId, $claim, $updates, $newStatus, &$resultRow) {
-    db_update('damage_claims', $updates, 'id = ?', [$claimId]);
+// S-QBO-INVOICE-WRITEOFF: writing a claim off writes off its recovery
+// invoice's remaining balance IN the same transaction (InvoiceWriteOff —
+// GL entry, invoice closed, customer balance, the record QuickBooks gets).
+// It used to post only the GL entry, after the commit, and leave the FF
+// invoice open with its full balance. A claim with no invoice — or one that
+// is draft / paid / already written off — just changes status.
+$writeoffId = null;
+try {
+    db_transaction(function () use ($claimId, $claim, $updates, $newStatus, $effectiveInvoiceId, &$resultRow, &$writeoffId) {
+        db_update('damage_claims', $updates, 'id = ?', [$claimId]);
 
-    // Reload to get DB-stamped updated_at
-    $fresh = db_row(
-        "SELECT id, claim_number, status, updated_at FROM damage_claims WHERE id = ?",
-        [$claimId]
-    );
+        if ($newStatus === 'written_off' && $newStatus !== $claim['status'] && $effectiveInvoiceId) {
+            $inv = db_row("SELECT status, balance_due FROM invoices WHERE id = ? AND deleted_at IS NULL", [(int) $effectiveInvoiceId]);
+            if ($inv && in_array($inv['status'], \FleetForge\Accounting\InvoiceWriteOff::WRITABLE_STATUSES, true)
+                && bccomp((string) $inv['balance_due'], '0', 2) > 0) {
+                $w = \FleetForge\Accounting\InvoiceWriteOff::writeOff(
+                    (int) $effectiveInvoiceId,
+                    "Damage claim {$claim['claim_number']} written off",
+                    current_user_id(),
+                    $claimId
+                );
+                $writeoffId = $w['writeoff_id'];
+            }
+        }
 
-    $action = ($newStatus && $newStatus !== $claim['status']) ? 'status_change' : 'update';
-    $notes  = $action === 'status_change'
-        ? "Status changed from '{$claim['status']}' to '{$newStatus}' on claim {$claim['claim_number']}."
-        : "Damage claim {$claim['claim_number']} updated. Fields: " . implode(', ', array_keys($updates)) . '.';
-
-    db_insert('audit_log', [
-        'user_id'      => current_user_id(),
-        'user_name'    => current_user()['name'] ?? 'System',
-        'action'       => $action,
-        'module'       => 'maintenance',
-        'entity_type'  => 'damage_claim',
-        'entity_id'    => $claimId,
-        'entity_label' => $claim['claim_number'],
-        'old_values'   => json_encode(['status' => $claim['status']]),
-        'new_values'   => json_encode($updates),
-        'notes'        => $notes,
-        'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
-    ]);
-
-    $resultRow = $fresh;
-
-    // ── In-app notification (NOTIF-1) ──────────────────────────
-    try {
-        \FleetForge\Notifications\NotificationService::notify(
-            type:       'damage.updated',
-            title:      "Damage claim {$claim['claim_number']} updated",
-            message:    "Damage claim {$claim['claim_number']} updated",
-            entityType: 'damage_claim',
-            entityId:   $claimId,
-            url:        '/fleetforge/damage_claims/show?id=' . $claimId
+        // Reload to get DB-stamped updated_at
+        $fresh = db_row(
+            "SELECT id, claim_number, status, updated_at FROM damage_claims WHERE id = ?",
+            [$claimId]
         );
-    } catch (\Throwable $e) {
-        error_log('[NOTIF damage.updated] ' . $e->getMessage());
+
+        $action = ($newStatus && $newStatus !== $claim['status']) ? 'status_change' : 'update';
+        $notes  = $action === 'status_change'
+            ? "Status changed from '{$claim['status']}' to '{$newStatus}' on claim {$claim['claim_number']}."
+            : "Damage claim {$claim['claim_number']} updated. Fields: " . implode(', ', array_keys($updates)) . '.';
+
+        db_insert('audit_log', [
+            'user_id'      => current_user_id(),
+            'user_name'    => current_user()['name'] ?? 'System',
+            'action'       => $action,
+            'module'       => 'maintenance',
+            'entity_type'  => 'damage_claim',
+            'entity_id'    => $claimId,
+            'entity_label' => $claim['claim_number'],
+            'old_values'   => json_encode(['status' => $claim['status']]),
+            'new_values'   => json_encode($updates),
+            'notes'        => $notes,
+            'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+
+        $resultRow = $fresh;
+
+        // ── In-app notification (NOTIF-1) ──────────────────────────
+        try {
+            \FleetForge\Notifications\NotificationService::notify(
+                type:       'damage.updated',
+                title:      "Damage claim {$claim['claim_number']} updated",
+                message:    "Damage claim {$claim['claim_number']} updated",
+                entityType: 'damage_claim',
+                entityId:   $claimId,
+                url:        '/fleetforge/damage_claims/show?id=' . $claimId
+            );
+        } catch (\Throwable $e) {
+            error_log('[NOTIF damage.updated] ' . $e->getMessage());
+        }
+    });
+} catch (\DomainException | \RuntimeException $e) {
+    if ($newStatus !== 'written_off') {
+        throw $e;   // not a write-off problem — the normal error path
     }
-});
+    // Write-off refused (e.g. Bad Debt Expense account not configured, or the
+    // invoice changed under us) — nothing was saved; say why.
+    json_error('WRITE_OFF_FAILED', 'Could not write off the recovery invoice: ' . $e->getMessage(), 422,
+        ['fields' => ['status' => 'Could not write off the recovery invoice: ' . $e->getMessage()]]);
+}
+
+if ($writeoffId !== null) {
+    $resultRow['write_off_id'] = $writeoffId;
+    // QuickBooks: CreditMemo (Bad-debt item) applied to the invoice.
+    // Best-effort after commit (D-ENQUEUER-CONTRACT).
+    \FleetForge\QboPushers\InvoiceWriteoffEnqueuer::enqueue($writeoffId, 'create');
+}
 
 // ── S-ACCT-DMG: fire AutoEntryBridge on status transitions ─────────────
 // Runs OUTSIDE the db_transaction so a bridge failure logs + continues
@@ -397,18 +437,6 @@ if ($effectiveStatus === 'invoiced' && $effectiveInvoiceId && ($transitionInvoic
         }
     } catch (\Throwable $e) {
         error_log('[S-ACCT-DMG onDamageRecoveryBilled] ' . $e->getMessage());
-    }
-}
-
-if ($newStatus !== null && $newStatus !== $claim['status']) {
-    if ($newStatus === 'written_off') {
-        try {
-            \FleetForge\Accounting\AutoEntryBridge::onDamageWrittenOff(
-                $claimId, current_user_id()
-            );
-        } catch (\Throwable $e) {
-            error_log('[S-ACCT-DMG onDamageWrittenOff] ' . $e->getMessage());
-        }
     }
 }
 

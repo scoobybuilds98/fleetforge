@@ -33,8 +33,9 @@ declare(strict_types=1);
  *   - currency_mismatch     — payment currency ≠ invoice currency (D18)
  *   - invoice_void          — target FF invoice is voided
  *   - ff_origin_echo        — QBO echoing a Payment FF itself pushed (credit
- *                             application map hit, or PrivateNote carries an
- *                             FF id) — never re-imported (S-QBO-GOLIVE-AUDIT)
+ *                             application / write-off map hit, or PrivateNote
+ *                             carries an FF id) — never re-imported
+ *                             (S-QBO-GOLIVE-AUDIT; write-offs S-QBO-INVOICE-WRITEOFF)
  *   - zero_amount           — $0 Payment (credit-memo link, no money moved)
  *   - error                 — unexpected throw (Sentry-captured)
  *   - payment_created       — happy path; FF payment + allocations + map row + JEs
@@ -203,6 +204,22 @@ class PaymentWebhookHandler
             ];
         }
 
+        // 2b. S-QBO-INVOICE-WRITEOFF: the $0 Payment applying a write-off's
+        //     Bad-debt CreditMemo to its invoice (InvoiceWriteoffPusher) is
+        //     FF's own — its echo is not a credit applied inside QuickBooks.
+        $woEcho = db_row("SELECT ff_writeoff_id FROM acc_qbo_invoice_writeoff_map WHERE qbo_payment_id = ?", [$qboPaymentId]);
+        if ($woEcho) {
+            if (in_array($operation, ['Void', 'Delete'], true)) {
+                self::recordQboSideChange(
+                    'payment', null, $qboPaymentId,
+                    "The QuickBooks credit that closes a FleetForge bad-debt write-off (write-off #{$woEcho['ff_writeoff_id']}) was " . strtolower($operation)
+                    . "d in QuickBooks, so that invoice is open there again while FleetForge shows it written off. Re-apply the write-off credit memo in QuickBooks, or recover the write-off in FleetForge."
+                );
+                return ['result' => 'drift_recorded', 'detail' => "write-off #{$woEcho['ff_writeoff_id']} apply Payment {$operation} in QBO"];
+            }
+            return ['result' => 'ff_origin_echo', 'detail' => "qbo_payment_id={$qboPaymentId} applies FF write-off #{$woEcho['ff_writeoff_id']}"];
+        }
+
         // 3. Void / Delete in QuickBooks → void the FF copy.
         if (in_array($operation, ['Void', 'Delete'], true)) {
             return self::handleVoid($qboPaymentId, $operation);
@@ -236,7 +253,7 @@ class PaymentWebhookHandler
         //     webhook for FF's OWN push, possibly before the pusher persisted
         //     its map row. The stamp is authoritative either way.
         $note = json_decode((string) ($qboPayment['PrivateNote'] ?? ''), true);
-        if (is_array($note) && (isset($note['ff_payment_id']) || isset($note['ff_credit_application_id']))) {
+        if (is_array($note) && (isset($note['ff_payment_id']) || isset($note['ff_credit_application_id']) || isset($note['ff_writeoff_id']))) {
             return [
                 'result' => 'ff_origin_echo',
                 'detail' => "qbo_payment_id={$qboPaymentId} was pushed by FleetForge (PrivateNote carries its FF id)",

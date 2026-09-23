@@ -806,8 +806,9 @@ try {
         $c28Errors[] = "drift: Pusher=" . json_encode($pConst) . " Enqueuer=" . json_encode($eConst);
     } else {
         // Sanity: must match spec §8.10 verbatim (+ the two damage-claim
-        // retags added in S-QBO-GOLIVE-AUDIT — same invoice/bill JE renamed).
-        $expected = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment', 'damage_recovery', 'damage_repair'];
+        // retags added in S-QBO-GOLIVE-AUDIT — same invoice/bill JE renamed —
+        // and damage_writeoff, pushed as a CreditMemo since S-QBO-INVOICE-WRITEOFF).
+        $expected = ['invoice', 'payment', 'credit_note', 'ap_bill', 'ap_payment', 'damage_recovery', 'damage_repair', 'damage_writeoff'];
         if ($pConst !== $expected) {
             $c28Errors[] = "diverges from spec §8.10 canonical: got " . json_encode($pConst);
         }

@@ -2806,8 +2806,14 @@ AutoEntryBridge::onDamageRepairExpensed(int $claimId, int $billId, ?int $userId 
   // Called when a vendor bill is linked to a damage claim.
 
 AutoEntryBridge::onDamageWrittenOff(int $claimId, ?int $userId = null)
-  // DR Bad Debt Expense (6160) / CR AR
-  // Called when damage_claims.status → 'written_off' and the AR balance must be cleared.
+  // DR Bad Debt Expense (6160) / CR AR — CAD at the invoice's frozen rate
+  // Called via InvoiceWriteOff::writeOff() when damage_claims.status → 'written_off'
+  // and the recovery invoice (sent/overdue/partially_paid) still has a balance:
+  // the same transaction closes the invoice (status written_off, balance 0),
+  // reduces customers.outstanding_balance and records acc_bad_debt_writeoffs
+  // (S-QBO-INVOICE-WRITEOFF). QuickBooks receives it as a CreditMemo on the
+  // Bad-debt item applied to the invoice (InvoiceWriteoffPusher); the JE itself
+  // is bridge-derived and never pushed.
 Subledger view: app/admin/accounting/damage-claims/index.php lists all damage claims with: claim date, unit, customer, repair cost, recovery billed, recovery collected, net P&L impact.
 Net P&L impact per claim: recovery − repair = profit/loss on the claim (often planned to be neutral or modestly positive for full recovery cases; negative when customer disputes and AR is written off).
 

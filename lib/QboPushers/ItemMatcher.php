@@ -103,6 +103,9 @@ class ItemMatcher
         'discount'                         => 'Discount',
         'account_credit_applied'           => 'Account Credit Applied',
         'other'                            => 'Other',
+        // S-QBO-INVOICE-WRITEOFF: not an invoice line — the item on the
+        // CreditMemo that closes a written-off invoice in QuickBooks.
+        'bad_debt'                         => 'Bad Debt Write-off',
     ];
 
     /**
@@ -150,6 +153,9 @@ class ItemMatcher
             'early_return_credit',
             'account_credit_applied',
             'other',
+        ],
+        'Write-offs' => [
+            'bad_debt',
         ],
     ];
 
@@ -219,6 +225,12 @@ class ItemMatcher
             } else {
                 $out[] = ['ff_item_type' => $v, 'variant' => null];
             }
+        }
+        // S-QBO-INVOICE-WRITEOFF: the Bad-debt item isn't an invoice line
+        // type, but it is mapped (and created) on the same page — the
+        // InvoiceWriteoffPusher CreditMemo needs it.
+        if ($out !== []) {
+            $out[] = ['ff_item_type' => InvoiceWriteoffPusher::ITEM_TYPE, 'variant' => null];
         }
         return $out;
     }

@@ -60,6 +60,8 @@ class JournalEntryEnqueuer
      * in sync via smoke test (C28 verifies the two constants align).
      * S-QBO-GOLIVE-AUDIT: + damage_recovery / damage_repair (retagged
      * invoice / bill JEs — see JournalEntryPusher).
+     * S-QBO-INVOICE-WRITEOFF: + damage_writeoff (QuickBooks gets the
+     * write-off as a CreditMemo applied to the invoice — see JournalEntryPusher).
      */
     private const BRIDGE_DERIVED_SOURCE_TYPES = [
         'invoice',
@@ -69,6 +71,7 @@ class JournalEntryEnqueuer
         'ap_payment',
         'damage_recovery',
         'damage_repair',
+        'damage_writeoff',
     ];
 
     /**

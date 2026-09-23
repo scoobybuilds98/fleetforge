@@ -630,3 +630,5 @@ QUICKBOOKS_PROGRESS.md §2 SESSION LOG ends at S-QBO-MATCHER-GREEDY-FIX (2026-05
 *Next update trigger: next planning chat that re-sequences the build slate, OR after S-QBO-12 / S-QBO-13 / S-QBO-14 ship (one of the recommended next 5).*
 
 **Progress marker 2026-09-23 — S-QBO-CUSTOMER-TERMS-ADDR:** ✅ customer payment terms (`TermResolver` → `SalesTermRef`) + billing address on customers FF creates in QuickBooks; linked customers never overwritten (`acc_qbo_customer_map.ff_created_in_qbo`). Migration count +1 (`202609232200`). Smoke `_smoke_qbo_customer_terms_addr.php` 7/7.
+
+**Progress marker 2026-09-23 — S-QBO-INVOICE-WRITEOFF:** ✅ invoice write-offs (AR bad debt + damage claims) close the invoice in QuickBooks — CreditMemo on the Bad-debt item applied by a $0 Payment (`InvoiceWriteoffPusher`); FF write-offs unified (`InvoiceWriteOff`); `damage_writeoff` JE no longer pushed. Migration count +1 (`202609232300`). Smoke `_smoke_qbo_invoice_writeoff.php` 12/12.

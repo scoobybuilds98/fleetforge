@@ -465,6 +465,9 @@ class DriftChecker
         foreach (db_select("SELECT {$cfg['qbo_id']} AS qid FROM {$cfg['map']} WHERE {$cfg['qbo_id']} IS NOT NULL") as $m) {
             $mapped[(string) $m['qid']] = true;
         }
+        foreach (self::otherFfIds($entityType) as $qid) {
+            $mapped[$qid] = true;
+        }
 
         // S-QBO-GOLIVE-AUDIT: in a SHARED company file most unmapped QBO
         // records belong to the other businesses — only one that is
@@ -496,6 +499,26 @@ class DriftChecker
                 $stats['missing_in_ff']++;
             }
         }
+    }
+
+    /**
+     * QuickBooks ids FF created that live in a map OTHER than the entity's
+     * own (S-QBO-INVOICE-WRITEOFF): the $0 Payments that apply FF credit
+     * memos (credit applications, write-offs) and the write-off CreditMemos.
+     * They carry FF's customer / Class, so without this the live layer
+     * reported FF's own documents as missing_in_ff.
+     *
+     * @return list<string>
+     */
+    public static function otherFfIds(string $entityType): array
+    {
+        $sql = match ($entityType) {
+            'payment' => "SELECT qbo_payment_id AS q FROM acc_qbo_credit_application_map WHERE qbo_payment_id IS NOT NULL
+                          UNION SELECT qbo_payment_id FROM acc_qbo_invoice_writeoff_map WHERE qbo_payment_id IS NOT NULL",
+            'credit_memo' => "SELECT qbo_credit_memo_id AS q FROM acc_qbo_invoice_writeoff_map WHERE qbo_credit_memo_id IS NOT NULL",
+            default => null,
+        };
+        return $sql === null ? [] : array_map(static fn($r) => (string) $r['q'], db_select($sql));
     }
 
     /**

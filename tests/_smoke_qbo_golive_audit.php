@@ -431,9 +431,12 @@ try {
         foreach (['damage_recovery', 'damage_repair'] as $st) {
             if (!in_array($st, (array) $c, true)) { $e[] = "{$cls} lacks {$st}"; }
         }
-        if (in_array('damage_writeoff', (array) $c, true)) { $e[] = "{$cls} wrongly filters damage_writeoff"; }
+        // S-QBO-INVOICE-WRITEOFF: damage_writeoff reaches QuickBooks as a
+        // CreditMemo applied to the invoice (InvoiceWriteoffPusher) — the JE
+        // must NOT push as well.
+        if (!in_array('damage_writeoff', (array) $c, true)) { $e[] = "{$cls} lacks damage_writeoff"; }
     }
-    ff_ga_check('C27', 'retagged damage JEs are treated as bridge-derived (no double-post)', $e);
+    ff_ga_check('C27', 'retagged damage JEs + damage write-offs are treated as bridge-derived (no double-post)', $e);
 
     // ══ J — Drift live layer ══════════════════════════════════════════
     ff_ga_set('quickbooks.cutover_at', '2026-09-01T00:00:00+00:00');

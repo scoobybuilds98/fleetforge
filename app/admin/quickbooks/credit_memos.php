@@ -368,7 +368,114 @@ $canEditCredentials = can('quickbooks', 'edit_credentials');
     </div>
 </div>
 
+<?php
+/* ── Invoice write-offs (S-QBO-INVOICE-WRITEOFF) ─────────────────────────
+ * An FF write-off (AR bad debt, or a damage claim written off) reaches
+ * QuickBooks as a credit memo on the "Bad Debt Write-off" item applied to
+ * the invoice, so the invoice closes there too (InvoiceWriteoffPusher).
+ * Server-rendered: write-offs are rare, the newest 100 are enough. */
+$writeoffs = db_select(
+    "SELECT w.id, w.writeoff_date, w.amount, w.recovered, i.id AS invoice_id, i.invoice_number, i.currency,
+            c.company_name, dc.claim_number, m.push_status, m.push_error, m.qbo_credit_memo_id, m.qbo_payment_id, m.pushed_at
+       FROM acc_bad_debt_writeoffs w
+       JOIN invoices i ON i.id = w.invoice_id
+  LEFT JOIN customers c ON c.id = w.customer_id
+  LEFT JOIN damage_claims dc ON dc.id = w.damage_claim_id
+  LEFT JOIN acc_qbo_invoice_writeoff_map m ON m.ff_writeoff_id = w.id
+   ORDER BY w.id DESC
+      LIMIT 100"
+);
+$woStatus = static fn(?string $s): array => match ($s) {
+    'pushed'           => ['In QuickBooks', 'badge-success'],
+    'pending'          => ['Credit memo created, not yet applied', 'badge-warning'],
+    'failed'           => ['Failed', 'badge-danger'],
+    'failed_preflight' => ['Blocked', 'badge-warning'],
+    'skipped_by_mode'  => ['Skipped (sync mode)', 'badge-secondary'],
+    default            => ['Not sent', 'badge-secondary'],
+};
+?>
+<div style="margin-top:36px;" x-data="qboInvoiceWriteoffs(<?= $canEditCredentials ? 'true' : 'false' ?>)">
+    <h2 class="h5" style="margin:0 0 4px;">Invoice write-offs → QuickBooks credit memo</h2>
+    <div class="text-secondary text-sm" style="margin-bottom:12px;max-width:900px;">
+        A write-off (bad debt, or a damage claim written off) closes the invoice in QuickBooks with a credit memo on the
+        <strong>Bad Debt Write-off</strong> item (map it on QuickBooks → Items; its account should be Bad Debt Expense),
+        applied to the invoice. Only invoices that are in QuickBooks can be closed there.
+    </div>
+    <div x-show="flash.message" x-cloak :class="flash.type === 'success' ? 'alert alert-success' : 'alert alert-danger'"
+         style="margin-bottom:12px;" x-text="flash.message"></div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+        <table class="table" style="margin:0;font-size:0.875rem;">
+            <thead>
+                <tr>
+                    <th>Written off</th>
+                    <th>Invoice</th>
+                    <th>Customer</th>
+                    <th>Source</th>
+                    <th style="text-align:right;">Amount</th>
+                    <th>QuickBooks</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php if ($writeoffs === []): ?>
+                <tr><td colspan="7" class="text-secondary" style="padding:16px;">No invoices have been written off.</td></tr>
+            <?php endif; ?>
+            <?php foreach ($writeoffs as $w): [$label, $badge] = $woStatus($w['push_status']); ?>
+                <tr>
+                    <td class="font-mono"><?= e(format_date($w['writeoff_date'])) ?></td>
+                    <td><a href="<?= base_url('invoices/show?id=' . (int) $w['invoice_id']) ?>"><?= e($w['invoice_number']) ?></a></td>
+                    <td><?= e($w['company_name'] ?? '—') ?></td>
+                    <td class="text-sm"><?= $w['claim_number'] ? 'Damage claim ' . e($w['claim_number']) : 'Bad debt' ?></td>
+                    <td style="text-align:right;" class="font-mono"><?= e(format_currency($w['amount'], $w['currency'] === 'USD' ? 'US$' : '$')) ?></td>
+                    <td>
+                        <span class="badge <?= e($badge) ?>"><?= e($label) ?></span>
+                        <?php if ($w['recovered']): ?><span class="badge badge-secondary">Recovered</span><?php endif; ?>
+                        <?php if ($w['qbo_credit_memo_id']): ?><div class="text-xs text-secondary">Credit memo #<?= e($w['qbo_credit_memo_id']) ?></div><?php endif; ?>
+                        <?php if ($w['push_error'] && $w['push_status'] !== 'pushed'): ?><div class="text-xs text-danger" style="max-width:420px;white-space:normal;"><?= e($w['push_error']) ?></div><?php endif; ?>
+                    </td>
+                    <td>
+                        <?php if (!$w['recovered'] && in_array($w['push_status'], [null, 'failed', 'failed_preflight', 'skipped_by_mode'], true)): ?>
+                        <template x-if="canRetry">
+                            <button class="btn btn-secondary btn-xs" @click="retry(<?= (int) $w['id'] ?>)" :disabled="busy[<?= (int) $w['id'] ?>]">
+                                <?= $w['push_status'] === null ? 'Send' : 'Retry' ?>
+                            </button>
+                        </template>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <script>
+// S-QBO-INVOICE-WRITEOFF: queue a write-off's QuickBooks credit memo.
+function qboInvoiceWriteoffs(canEdit) {
+    return {
+        canRetry: canEdit,
+        busy: {},
+        flash: { type: '', message: '' },
+        async retry(writeoffId) {
+            this.busy[writeoffId] = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/quickbooks/invoice_writeoffs/retry') ?>', { writeoff_id: writeoffId });
+                if (r.success && (r.data || {}).action === 'enqueued') {
+                    this.flash = { type: 'success', message: 'Queued — the worker sends it to QuickBooks on its next run.' };
+                } else if (r.success) {
+                    this.flash = { type: 'danger', message: 'Not queued: ' + ((r.data || {}).reason || 'refused') };
+                } else {
+                    this.flash = { type: 'danger', message: (r.error && r.error.message) || 'Retry failed.' };
+                }
+            } catch (e) {
+                this.flash = { type: 'danger', message: 'Retry failed: ' + (e.message || e) };
+            } finally {
+                this.busy[writeoffId] = false;
+            }
+        },
+    };
+}
+
 function qboCreditMemosAdmin(canEdit) {
     return {
         canRetry: canEdit,

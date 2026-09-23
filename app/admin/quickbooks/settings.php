@@ -561,6 +561,7 @@ require_once FF_ROOT . '/includes/header.php';
                     'fixed_asset'     => ['Fixed asset (depreciation/disposal/impairment)', 'D-QBO-22-3 marker — actual gating via journal_entry mode above'],
                     'tax_remittance'  => ['Tax remittance (GST34 JE)', 'D-QBO-23-3 marker — actual gating via journal_entry mode above'],
                     'item'            => ['Item push', 'operator-confirmed authoring per D-QBO-10-4'],
+                    'invoice_writeoff' => ['Invoice write-off (credit memo applied to the invoice)', 'S-QBO-INVOICE-WRITEOFF — default queue'],
                 ];
                 foreach ($syncModeEntities as $key => [$label, $note]):
                     $mode = $qbo['sync_mode.' . $key] ?? '—';

@@ -110,7 +110,12 @@ class JournalEntryPusher
      * 'ap_bill' JE (and their fallback JEs book the same document). The
      * invoice / bill itself is pushed to QBO, so pushing the retagged JE —
      * or its reversal when the invoice is voided — double-posted it.
-     * (damage_writeoff is a genuine standalone entry and still pushes.)
+     *
+     * S-QBO-INVOICE-WRITEOFF: + damage_writeoff. A write-off now reaches
+     * QuickBooks as a CreditMemo on the Bad-debt item applied to the invoice
+     * (InvoiceWriteoffPusher), which closes the invoice there too; pushing the
+     * DR Bad Debt / CR A/R JE as well would credit A/R twice. (The AR bad-debt
+     * path's JE is source_type 'invoice' — already filtered.)
      */
     private const BRIDGE_DERIVED_SOURCE_TYPES = [
         'invoice',
@@ -120,6 +125,7 @@ class JournalEntryPusher
         'ap_payment',
         'damage_recovery',
         'damage_repair',
+        'damage_writeoff',
     ];
 
     /**

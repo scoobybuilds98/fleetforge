@@ -179,13 +179,15 @@ else { echo "FAIL C4 " . implode('; ', $c4Errors) . "\n"; $failures[] = 'C4'; }
 $c5Errors = [];
 try {
     $tuples = ItemMatcher::ffItemTypes();
-    if (count($tuples) !== 28) {
-        $c5Errors[] = 'expected 28 tuples (26 non-variant + 2 GPS variants), got ' . count($tuples);
+    // 29 = 26 invoice-line types + 2 GPS variants + the Bad-debt write-off
+    // item (S-QBO-INVOICE-WRITEOFF — mapped on the same page, not a line type).
+    if (count($tuples) !== 29) {
+        $c5Errors[] = 'expected 29 tuples (26 non-variant + 2 GPS variants + bad_debt), got ' . count($tuples);
     }
     // Verify a few canonical ENUM values are present (incl. the
     // service-charge + engine-hours additions, 2026-07-11).
     $itemTypes = array_column($tuples, 'ff_item_type');
-    foreach (['base_rental', 'base_rental_reconciliation_credit', 'gps', 'mileage_precharge', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit', 'hourly_usage', 'hours_estimate', 'hours_adjustment', 'hours_credit', 'cartage', 'sweep', 'wash', 'fuel', 'other'] as $expected) {
+    foreach (['base_rental', 'base_rental_reconciliation_credit', 'gps', 'mileage_precharge', 'mileage_credit', 'mileage_usage', 'mileage_drawdown_credit', 'hourly_usage', 'hours_estimate', 'hours_adjustment', 'hours_credit', 'cartage', 'sweep', 'wash', 'fuel', 'other', 'bad_debt'] as $expected) {
         if (!in_array($expected, $itemTypes, true)) {
             $c5Errors[] = "expected ff_item_type '{$expected}' in ffItemTypes() output";
         }
@@ -204,7 +206,7 @@ try {
 } catch (Throwable $e) {
     $c5Errors[] = 'exception: ' . $e->getMessage();
 }
-if (empty($c5Errors)) { echo "PASS C5 ffItemTypes() introspects ENUM and yields 28 tuples\n"; $pass++; }
+if (empty($c5Errors)) { echo "PASS C5 ffItemTypes() introspects ENUM (+ bad_debt) and yields 29 tuples\n"; $pass++; }
 else { echo "FAIL C5 " . implode('; ', $c5Errors) . "\n"; $failures[] = 'C5'; }
 
 // ── C6: displayNameFor mapping correctness ──────────────────
@@ -597,7 +599,7 @@ foreach ($enumTypes as $t) {
         $c18Errors[] = "item_type '{$t}' missing from UI_CATEGORIES";
     }
 }
-if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 27 ENUM values exactly once\n"; $pass++; }
+if (empty($c18Errors)) { echo "PASS C18 UI_CATEGORIES covers all 27 ENUM values + bad_debt exactly once\n"; $pass++; }
 else { echo "FAIL C18 " . implode('; ', $c18Errors) . "\n"; $failures[] = 'C18'; }
 
 // ── C19: S-QBO-MATCHER-WEDGE-RECOVERY — item wedge rescue ──
