@@ -58,17 +58,6 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Breadcrumb
-     ============================================================ -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('reservations') ?>">Reservations</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Reservation #<?= e($resId) ?></span>
-</nav>
-
-<!-- ============================================================
      RESERVATION SHOW — ALPINE COMPONENT
      ============================================================ -->
 <div x-data="FF_ReservationShow(<?= $resId ?>)">
@@ -84,9 +73,10 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="alert alert-danger"  x-show="actionError"   x-text="actionError"   style="margin-bottom:12px;" x-transition></div>
     <div class="alert alert-success" x-show="actionSuccess" x-text="actionSuccess" style="margin-bottom:12px;" x-transition></div>
 
-    <!-- ── Page header (status badge + action row) ─────────────── -->
-    <div class="page-header" style="align-items:flex-start;flex-wrap:wrap;gap:12px;">
-        <div>
+    <!-- ── Page header — entity hero (S-MODULE-CHROME). Title block,
+         live facts and action buttons are the page's own Alpine markup,
+         placed unchanged inside the hero. ─────────────────────────── -->
+<?php ob_start(); ?>
             <h1 class="page-header-title h4" style="display:flex;align-items:center;gap:10px;">
                 Reservation
                 <span class="font-mono" x-show="!loading" x-text="'#' + res.id"></span>
@@ -111,10 +101,14 @@ require_once FF_ROOT . '/includes/header.php';
                 <span class="font-medium" x-text="formatDate(res.pickup_date)"></span>
                 <span x-show="res.pickup_time" x-text="' at ' + (res.pickup_time ? res.pickup_time.substring(0,5) : '')"></span>
             </p>
-        </div>
-
-        <!-- Quick action buttons (header level) -->
-        <div class="page-header-actions" x-show="!loading" style="flex-wrap:wrap;gap:6px;">
+            <div class="ff-hero-facts" x-show="!loading" x-cloak>
+                <span class="ff-hero-fact" x-show="res.quantity"><?= \FleetForge\Sop\SopIcons::svg('truck') ?><span x-text="res.quantity + (Number(res.quantity) === 1 ? ' unit' : ' units')"></span></span>
+                <span class="ff-hero-fact" x-show="res.yard_location"><?= \FleetForge\Sop\SopIcons::svg('map-pin') ?><span x-text="res.yard_location"></span></span>
+                <span class="ff-hero-fact" x-show="res.contact_name"><?= \FleetForge\Sop\SopIcons::svg('users') ?><span x-text="res.contact_name"></span></span>
+            </div>
+<?php $heroOwn = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <div class="ff-contents" x-show="!loading">
             <?= help_button('reservations') ?>
             <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
             <button type="button" class="btn btn-secondary btn-sm no-print"
@@ -126,7 +120,6 @@ require_once FF_ROOT . '/includes/header.php';
                 AI Analysis
             </button>
             <?php endif; ?>
-            <a href="<?= base_url('reservations') ?>" class="btn btn-ghost btn-sm">← Back</a>
             <a href="<?= base_url('reservations/create') ?>" class="btn btn-ghost btn-sm">+ New</a>
             <?php if (can('reservations', 'edit')): ?>
             <button class="btn btn-secondary btn-sm"
@@ -144,7 +137,17 @@ require_once FF_ROOT . '/includes/header.php';
             </button>
             <?php endif; ?>
         </div>
-    </div>
+<?php $heroActions = ob_get_clean(); ?>
+    <?= \FleetForge\Ui\ModuleHero::render([
+        'entity'    => true,
+        'accent'    => 'info',
+        'icon'      => 'calendar',
+        'mark'      => '#' . $resId,
+        'crumbs'    => [['Dashboard', base_url('dashboard')], ['Reservations', base_url('reservations')], ['Reservation #' . $resId, null]],
+        'eyebrow'   => 'Reservation',
+        'main_html' => $heroOwn,
+        'actions'   => $heroActions,
+    ]) ?>
 
     <!-- ================================================================
          STATUS TIMELINE STEPPER

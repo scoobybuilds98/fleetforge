@@ -126,6 +126,8 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
 
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <link rel="stylesheet" href="<?= asset_url('assets/css/animations.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-MODULE-CHROME: embedded record pages (batch invoicing) render the same hero + KPI tiles -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/module-chrome.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
     <?php
     // Brand override — same as header.php, so an embedded invoice matches

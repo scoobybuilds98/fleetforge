@@ -108,17 +108,10 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — entity hero (S-MODULE-CHROME). The title block and
+     action buttons are the page's own markup, placed unchanged.
      ============================================================ -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('leases') ?>">Leases</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current"><?= e($lease['contract_number']) ?></span>
-</nav>
-<div class="page-header">
-    <div>
+<?php ob_start(); ?>
         <h1 class="page-header-title h4">
             <?= e($lease['contract_number']) ?>
             <span class="badge badge-no-dot <?= leaseBadgeClass($lease['status']) ?>"
@@ -133,8 +126,8 @@ require_once FF_ROOT . '/includes/header.php';
             &nbsp;·&nbsp; <?= e($lease['template_name_snapshot']) ?>
             <?php endif; ?>
         </div>
-    </div>
-    <div class="page-header-actions">
+<?php $heroOwn = ob_get_clean(); ?>
+<?php ob_start(); ?>
         <?= help_button('leases') ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_lease_<?= (int)$lease['id'] ?>_lease_summary_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
@@ -161,8 +154,31 @@ require_once FF_ROOT . '/includes/header.php';
         <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>
         <button class="btn btn-danger btn-sm" onclick="FF_Confirm.ask('Delete this pending lease? This cannot be undone.').then(function(ok){if(!ok)return;FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(function(r){if(r.success){window.location.href='<?= base_url('leases') ?>';}else{FF_Toast.error(r.error?.message||'Failed to delete');}});})">Delete</button>
         <?php endif; ?>
-    </div>
-</div>
+<?php $heroActions = ob_get_clean(); ?>
+<?php
+$heroFacts = [];
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . e(format_date($lease['start_date'])) . ' → ' . ($lease['end_date'] ? e(format_date($lease['end_date'])) : 'Open-ended');
+foreach ([['monthly_rate', 'month'], ['weekly_rate', 'week'], ['daily_rate', 'day']] as [$rk, $rl]) {
+    if (bccomp((string) ($lease[$rk] ?? '0'), '0', 2) > 0) {
+        $heroFacts[] = \FleetForge\Sop\SopIcons::svg('currency-dollar') . '<b>' . e(format_currency($lease[$rk])) . '</b> / ' . $rl . ' · ' . e($lease['currency']);
+        break;
+    }
+}
+if (!empty($lease['po_number'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('document-text') . 'PO ' . e($lease['po_number']);
+}
+?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'    => true,
+    'accent'    => 'warning',
+    'icon'      => 'calendar-days',
+    'mark'      => (string) $lease['contract_number'],
+    'crumbs'    => [['Dashboard', base_url('dashboard')], ['Leases', base_url('leases')], [(string) $lease['contract_number'], null]],
+    'eyebrow'   => 'Lease',
+    'main_html' => $heroOwn,
+    'facts'     => $heroFacts,
+    'actions'   => $heroActions,
+]) ?>
 
 <!-- ── AI Analysis Panel ─────────────────────────────────────── -->
 <?php
@@ -179,24 +195,26 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
      ============================================================ -->
 <!-- TILES-2: lease-level financial tiles now drill to invoices / payments
      filtered by this specific lease. Currency tile remains display-only. -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid ff-stats" style="margin-bottom:24px;">
 
     <?php /* L03: AR/payment-outcome tiles are hidden from roles without
              payments:view (dispatchers). Contract rates stay visible — the same
              role holds leases:create+edit and sets them. */ ?>
     <?php if (can_view_financials()): ?>
-    <a class="stat-card"
+    <a class="stat-card stat-card--blue"
        href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>"
        style="cursor:pointer;text-decoration:none"
        title="View all invoices for this lease">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Total Invoiced</div>
         <div class="stat-value currency"><?= e(format_currency($lease['total_invoiced'] ?? 0)) ?></div>
     </a>
 
-    <a class="stat-card"
+    <a class="stat-card stat-card--green"
        href="<?= base_url('payments') ?>?lease_id=<?= (int)$lease['id'] ?>"
        style="cursor:pointer;text-decoration:none"
        title="View all payments against this lease">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Total Paid</div>
         <div class="stat-value currency"><?= e(format_currency($lease['total_paid'] ?? 0)) ?></div>
     </a>
@@ -205,13 +223,15 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
        href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>&status=outstanding"
        style="cursor:pointer;text-decoration:none"
        title="View outstanding invoices for this lease">
+        <span class="stat-icon stat-icon--<?= bccomp((string) ($lease['outstanding_balance'] ?? '0'), '0', 2) > 0 ? 'red' : 'slate' ?>"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">Outstanding</div>
         <div class="stat-value currency"><?= e(format_currency($lease['outstanding_balance'] ?? 0)) ?></div>
     </a>
     <?php endif; ?>
 
     <!-- Currency is metadata, not a drill target — stays display-only -->
-    <div class="stat-card">
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-currency-dollar"/></svg></span>
         <div class="stat-label">Currency</div>
         <div class="stat-value"><?= e($lease['currency']) ?></div>
     </div>

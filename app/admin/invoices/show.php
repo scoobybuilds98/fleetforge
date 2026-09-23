@@ -1343,8 +1343,11 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
     </div>
 </div>
 
-<div class="page-header">
-    <div>
+<!-- ============================================================
+     Page header — entity hero (S-MODULE-CHROME). The title block and
+     action buttons are the page's own markup, placed unchanged.
+     ============================================================ -->
+<?php ob_start(); ?>
         <h1 class="page-header-title h4">
             <?= e($invoice['invoice_number']) ?>
             <span class="badge badge-no-dot <?= $statusBadgeClass ?>" style="vertical-align:middle; margin-left:8px;">
@@ -1387,11 +1390,8 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
                 <span class="badge badge-no-dot badge-warning" style="font-size:10px;"><?= e($invoice['currency']) ?></span>
             <?php endif; ?>
         </div>
-    </div>
-
-    <!-- Action Buttons — omitted entirely in embed mode (S-BATCH-INVOICING);
-         see $isEmbed docblock note near the top of this file. -->
-    <div class="page-header-actions">
+<?php $heroOwn = ob_get_clean(); ?>
+<?php ob_start(); ?>
     <?php if (!$isEmbed): ?>
         <?= help_button('invoices') ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
@@ -1502,8 +1502,30 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
             <button class="btn btn-danger btn-sm" @click="showDeleteModal = true">Delete</button>
         <?php endif; ?>
     <?php endif; // !$isEmbed ?>
-    </div>
-</div><!-- end .page-header -->
+<?php $heroActions = ob_get_clean(); ?>
+<?php
+$heroFacts = [];
+if (!empty($invoice['billing_period_start'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . 'Period ' . e(format_date($invoice['billing_period_start'])) . ' → ' . e(format_date(ff_invoice_display_period_end($invoice)));
+}
+if (!empty($invoice['po_number'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('document-text') . 'PO ' . e($invoice['po_number']);
+}
+$heroMark = (string) $invoice['invoice_number'];
+if (preg_match('/(\d{3,})$/', $heroMark, $hm)) { $heroMark = $hm[1]; }
+?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'    => true,
+    'accent'    => 'primary',
+    'icon'      => 'document-text',
+    'class'     => 'ff-print-hide',
+    'mark'      => $heroMark,
+    // No crumbs: the page keeps its own lease-scoped breadcrumb above.
+    'eyebrow'   => 'Invoice',
+    'main_html' => $heroOwn,
+    'facts'     => $heroFacts,
+    'actions'   => $heroActions,
+]) ?>
 
 <!-- ============================================================
      MODALS — Void, Delete
@@ -1635,14 +1657,16 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 
 
 <!-- ================================================================
-     KPI STAT CARDS
+     KPI STAT CARDS (S-MODULE-CHROME: ff-stats glow + icons, no top bar)
      ================================================================ -->
-<div class="stat-grid">
-    <div class="stat-card">
+<div class="stat-grid stat-grid--5 ff-stats">
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Invoice Date</div>
         <div class="stat-value stat-value--date font-mono"><?= format_date($invoice['invoice_date']) ?></div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card <?= $isOverdue ? 'stat-card--red' : 'stat-card--amber' ?>">
+        <span class="stat-icon <?= $isOverdue ? 'stat-icon--red' : 'stat-icon--amber' ?>"><svg><use href="#icon-clock"/></svg></span>
         <div class="stat-label">Due Date</div>
         <div class="stat-value stat-value--date font-mono" <?php if ($isOverdue): ?>style="color:var(--color-danger);"<?php endif; ?>>
             <?= format_date($invoice['due_date']) ?>
@@ -1656,7 +1680,8 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
             <?php endif; ?>
         </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-currency-dollar"/></svg></span>
         <div class="stat-label">Total Amount</div>
         <div class="stat-value font-mono"><?= format_currency($invoice['total_amount']) ?></div>
         <?php if ($invoice['currency'] !== 'CAD' && !empty($invoice['exchange_rate_to_cad'])): ?>
@@ -1677,10 +1702,11 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
     </div>
     <!-- TILES-2: Amount Paid drills to payments scoped to this invoice.
          Invoice Date / Due Date / Total Amount stay as display-only info. -->
-    <a class="stat-card"
+    <a class="stat-card stat-card--green"
        href="<?= base_url('payments') ?>?invoice_id=<?= (int)$invoice['id'] ?>"
        style="cursor:pointer;text-decoration:none"
        title="View payments applied to this invoice">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
         <div class="stat-label">Amount Paid</div>
         <div class="stat-value font-mono" style="<?= bccomp($invoice['amount_paid'], '0', 2) > 0 ? 'color:var(--color-success);' : '' ?>">
             <?= format_currency($invoice['amount_paid']) ?>
@@ -1691,17 +1717,19 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
          with this invoice when there's still an outstanding balance.
          When fully paid the tile stays as display-only (nothing to pay). -->
     <?php if (bccomp($invoice['balance_due'], '0', 2) > 0 && can('payments', 'create')): ?>
-    <a class="stat-card"
+    <a class="stat-card stat-card--red"
        href="<?= base_url('payments/create') ?>?invoice_id=<?= (int)$invoice['id'] ?>"
        style="cursor:pointer;text-decoration:none"
        title="Record a payment against this invoice">
+        <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
         <div class="stat-label">Balance Due</div>
         <div class="stat-value font-mono" style="color:var(--color-danger);">
             <?= format_currency($invoice['balance_due']) ?>
         </div>
     </a>
     <?php else: ?>
-    <div class="stat-card">
+    <div class="stat-card <?= $isPaid ? 'stat-card--green' : 'stat-card--slate' ?>">
+        <span class="stat-icon <?= $isPaid ? 'stat-icon--green' : 'stat-icon--slate' ?>"><svg><use href="#icon-<?= $isPaid ? 'check-circle' : 'credit-card' ?>"/></svg></span>
         <div class="stat-label">Balance Due</div>
         <div class="stat-value font-mono">
             <?= format_currency($invoice['balance_due']) ?>

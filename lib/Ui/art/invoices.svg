@@ -1,0 +1,30 @@
+<svg class="dg dg--art-invoices" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>From invoice to paid</title>
+  <!-- the stack -->
+  <rect class="dg-surface-2" x="64" y="34" width="124" height="152" rx="10" transform="rotate(-7 126 110)"/>
+  <rect class="dg-surface-2" x="72" y="30" width="124" height="152" rx="10" transform="rotate(-3 134 106)"/>
+  <g class="dg-float">
+    <rect class="dg-surface" x="84" y="24" width="128" height="156" rx="10"/>
+    <rect class="dg-acc" x="98" y="40" width="54" height="8" rx="4"/>
+    <text class="dg-t-xs dg-t-start" x="98" y="64">INVOICE</text>
+    <rect class="dg-ink" x="98" y="76" width="96" height="5" rx="2.5" opacity=".55"/>
+    <rect class="dg-ink" x="98" y="88" width="72" height="5" rx="2.5" opacity=".55"/>
+    <rect class="dg-ink" x="98" y="100" width="84" height="5" rx="2.5" opacity=".55"/>
+    <line class="dg-line-soft" x1="98" y1="116" x2="198" y2="116"/>
+    <rect class="dg-acc-soft" x="98" y="126" width="100" height="26" rx="7"/>
+    <text class="dg-acc-t" x="148" y="143" style="font-size:12.5px">$743.13</text>
+    <text class="dg-t-xs" x="148" y="168">DUE OCT 17</text>
+  </g>
+
+  <!-- Pay now → QuickBooks → paid -->
+  <path class="dg-acc-flow" d="M216,102 C250,102 262,102 300,102"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2s" repeatCount="indefinite" path="M216,102 C250,102 270,102 306,102"/></circle>
+  <rect class="dg-acc" x="226" y="68" width="68" height="24" rx="12"/>
+  <text class="dg-t-on-acc" x="260" y="84">Pay now</text>
+  <text class="dg-t-xs" x="260" y="126">QUICKBOOKS</text>
+
+  <circle class="dg-pulse dg-pulse--ok" cx="358" cy="102" r="34"/>
+  <circle class="dg-ok-soft" cx="358" cy="102" r="40"/>
+  <path class="dg-check" d="M340,102 l12,12 l22,-24"/>
+  <text class="dg-t-xs dg-t-xs--qbo" x="358" y="164">PAID · RECORDED</text>
+</svg>

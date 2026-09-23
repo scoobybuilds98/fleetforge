@@ -34,11 +34,9 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<div class="page-header">
-    <h1 class="page-header-title h4">Equipment</h1>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <?= help_button('equipment') ?>
         <a href="<?= base_url('equipment/templates') ?>" class="btn btn-secondary btn-sm">
             Equipment Type
@@ -48,8 +46,16 @@ require_once FF_ROOT . '/includes/header.php';
             + New Unit
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Equipment', null]],
+    'eyebrow'  => 'Fleet',
+    'icon'     => 'truck',
+    'accent'   => 'success',
+    'title'    => 'Equipment',
+    'subtitle' => 'Every trailer and truck — where it is, what it is doing, and when it is due for service.',
+    'art'      => 'equipment',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      EQUIPMENT ALPINE COMPONENT
@@ -58,7 +64,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- ── KPI TILES ────────────────────────────────────────── -->
     <!-- Spec §4.1: each tile drills down to filtered view -->
-    <div class="stat-grid">
+    <div class="stat-grid stat-grid--4 ff-stats">
 
         <div class="stat-card stat-card--link stat-card--green" style="cursor:pointer;"
              @click="drilldown('available')"

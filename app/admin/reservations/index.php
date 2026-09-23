@@ -35,24 +35,25 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Breadcrumb + Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Reservations</span>
-</nav>
-<div class="page-header">
-    <h1 class="page-header-title h4">Reservations</h1>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <?= help_button('reservations') ?>
         <?php if (can('reservations', 'create')): ?>
         <a href="<?= base_url('reservations/create') ?>" class="btn btn-primary btn-sm">
             + New Reservation
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Reservations', null]],
+    'eyebrow'  => 'Operations',
+    'icon'     => 'calendar',
+    'accent'   => 'info',
+    'title'    => 'Reservations',
+    'subtitle' => 'Upcoming rentals — holds, confirmations and today\'s pickups.',
+    'art'      => 'reservations',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      RESERVATIONS ALPINE COMPONENT
@@ -60,14 +61,15 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="FF_Reservations()">
 
     <!-- ── KPI TILES ─────────────────────────────────────────────── -->
-    <div class="stat-grid" style="--stat-cols:4;">
+    <div class="stat-grid stat-grid--4 ff-stats">
 
         <!-- TILES-1: every tile is now a drill-down filter. Pending/Confirmed
              use client-side quickStatus filter since the reservations list
              already merges both statuses via two server requests. -->
-        <div class="stat-card" style="cursor:pointer;"
+        <div class="stat-card stat-card--blue" style="cursor:pointer;"
              :class="{ 'ring-active': !quickStatus && !filters.pickup_date }"
              @click="quickStatus=''; filters.pickup_date=''; applyFilters()">
+            <span class="stat-icon stat-icon--blue"><svg><use href="#icon-clipboard"/></svg></span>
             <div class="stat-label">Total Active</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -80,9 +82,10 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card" style="cursor:pointer;"
+        <div class="stat-card stat-card--amber" style="cursor:pointer;"
              :class="{ 'ring-active': quickStatus === 'pending' }"
              @click="quickStatus = quickStatus === 'pending' ? '' : 'pending'">
+            <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
             <div class="stat-label">Pending</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.pending"></div>
@@ -92,9 +95,10 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card" style="cursor:pointer;"
+        <div class="stat-card stat-card--green" style="cursor:pointer;"
              :class="{ 'ring-active': quickStatus === 'confirmed' }"
              @click="quickStatus = quickStatus === 'confirmed' ? '' : 'confirmed'">
+            <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
             <div class="stat-label">Confirmed</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.confirmed"></div>
@@ -104,10 +108,11 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card"
+        <div class="stat-card stat-card--teal"
              style="cursor:pointer;"
              :class="{ 'ring-active': filters.pickup_date === todayDate() }"
              @click="filters.pickup_date = filters.pickup_date === todayDate() ? '' : todayDate(); applyFilters()">
+            <span class="stat-icon stat-icon--teal"><svg><use href="#icon-map-pin"/></svg></span>
             <div class="stat-label">Today's Pickups</div>
             <template x-if="kpisLoaded">
                 <div>

@@ -1,0 +1,44 @@
+<svg class="dg dg--art-leases" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A lease over time</title>
+  <!-- status chips -->
+  <rect class="dg-chip" x="24" y="14" width="78" height="22" rx="11"/>
+  <circle class="dg-dot--ok" cx="37" cy="25" r="4"/><text class="dg-t-sm dg-t-start" x="47" y="29">Active</text>
+  <rect class="dg-chip" x="110" y="14" width="138" height="22" rx="11"/>
+  <text class="dg-t-sm" x="179" y="29">Billed thru Aug 31</text>
+
+  <!-- months -->
+  <line class="dg-line" x1="30" y1="140" x2="410" y2="140"/>
+  <rect class="dg-acc-soft dg-grow" x="32" y="100" width="72" height="30" rx="8"/>
+  <rect class="dg-acc-soft dg-grow" x="108" y="100" width="72" height="30" rx="8" style="animation-delay:.25s"/>
+  <rect class="dg-acc-soft dg-grow" x="184" y="100" width="72" height="30" rx="8" style="animation-delay:.5s"/>
+  <rect class="dg-acc-faint dg-grow" x="260" y="100" width="44" height="30" rx="8" style="animation-delay:.75s"/>
+  <rect class="dg-line-soft" x="260" y="100" width="72" height="30" rx="8" stroke-dasharray="4 4"/>
+  <rect class="dg-line-soft" x="336" y="100" width="72" height="30" rx="8" stroke-dasharray="4 4"/>
+  <path class="dg-check" d="M60,115 l6,6 l12,-12" style="stroke-width:3"/>
+  <path class="dg-check" d="M136,115 l6,6 l12,-12" style="stroke-width:3"/>
+  <path class="dg-check" d="M212,115 l6,6 l12,-12" style="stroke-width:3"/>
+  <text class="dg-t-xs" x="68" y="160">JUN</text>
+  <text class="dg-t-xs" x="144" y="160">JUL</text>
+  <text class="dg-t-xs" x="220" y="160">AUG</text>
+  <text class="dg-t-xs" x="296" y="160">SEP</text>
+  <text class="dg-t-xs" x="372" y="160">OCT</text>
+
+  <!-- start / end -->
+  <circle class="dg-dot--ok" cx="32" cy="140" r="6"/>
+  <text class="dg-t-xs" x="32" y="182">START</text>
+  <circle class="dg-surface" cx="408" cy="140" r="6"/>
+  <text class="dg-t-xs" x="408" y="182">END</text>
+
+  <!-- today -->
+  <line class="dg-acc-line" x1="304" y1="66" x2="304" y2="140"/>
+  <circle class="dg-pulse" cx="304" cy="62" r="7"/>
+  <circle class="dg-acc" cx="304" cy="62" r="6"/>
+  <text class="dg-acc-t" x="304" y="50">TODAY</text>
+  <!-- trailer on rent -->
+  <g class="dg-float">
+    <rect class="dg-acc-soft" x="330" y="56" width="62" height="26" rx="5"/>
+    <circle class="dg-surface" cx="344" cy="86" r="6"/>
+    <circle class="dg-surface" cx="360" cy="86" r="6"/>
+    <circle class="dg-surface" cx="382" cy="86" r="6"/>
+  </g>
+</svg>

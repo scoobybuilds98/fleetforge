@@ -562,72 +562,14 @@ a.sop-stat:hover { border-color: var(--border-color-strong); transform: translat
 
 .sop-cl-static-stage { font-size: 15px; font-weight: 650; margin: 18px 0 4px; }
 
-/* ============================================================
-   DIAGRAMS (lib/Sop/diagrams/*.svg)
-   ============================================================ */
-.dg { font-family: var(--font-sans); overflow: visible; }
-.dg text { text-anchor: middle; }
-.dg .dg-t-start { text-anchor: start; }
-.dg-panel { fill: var(--bg-surface-2); stroke: var(--border-color-strong); stroke-width: 1; }
-.dg-panel--ff { fill: color-mix(in srgb, var(--color-primary) 10%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-primary) 55%, transparent); stroke-width: 1.4; }
-.dg-panel--qbo { fill: color-mix(in srgb, var(--color-success) 9%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-success) 55%, transparent); stroke-width: 1.4; }
-.dg-panel--qbo-soft { fill: color-mix(in srgb, var(--color-success) 7%, var(--bg-surface-2)); stroke: color-mix(in srgb, var(--color-success) 40%, transparent); }
-.dg-panel--info { fill: color-mix(in srgb, var(--color-info) 9%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-info) 50%, transparent); stroke-width: 1.2; }
-.dg-panel--warn { fill: color-mix(in srgb, var(--color-warning) 8%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-warning) 55%, transparent); stroke-dasharray: 5 4; stroke-width: 1.3; }
-.dg-panel--danger-soft { fill: color-mix(in srgb, var(--color-danger) 7%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-danger) 40%, transparent); stroke-dasharray: 5 4; }
-.dg-panel--muted { fill: var(--bg-surface-2); stroke: var(--border-color-strong); }
-.dg-panel--glow { filter: drop-shadow(0 6px 18px color-mix(in srgb, var(--color-primary) 30%, transparent)); }
-.dg-chip { fill: var(--bg-surface); stroke: var(--border-color); }
-.dg-t { fill: var(--text-primary); font-size: 13px; font-weight: 650; }
-.dg-t-lg { fill: var(--text-primary); font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
-.dg-t-chip { fill: var(--text-primary); font-size: 12.5px; font-weight: 550; }
-.dg-t-sm { fill: var(--text-secondary); font-size: 11.5px; }
-.dg-t-warn { fill: var(--color-warning-text); font-weight: 600; }
-.dg-t-xs { fill: var(--text-tertiary); font-size: 9.5px; font-weight: 600; letter-spacing: .08em; }
-.dg-t-xs--qbo, .dg-t-lane--qbo { fill: var(--color-success-text); }
-.dg-t-lane { fill: var(--color-primary); font-size: 11px; font-weight: 600; }
-.dg-num { fill: color-mix(in srgb, var(--color-primary) 16%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-primary) 50%, transparent); }
-.dg-num-t { fill: var(--color-primary); font-size: 12px; font-weight: 700; }
-.dg-edge { fill: none; stroke: var(--text-tertiary); stroke-width: 1.5; }
-.dg-edge--warn { stroke: var(--color-warning); stroke-dasharray: 5 5; }
-.dg-edge--muted { stroke: var(--border-color-strong); stroke-dasharray: 4 5; }
-.dg-flow { fill: none; stroke: var(--color-primary); stroke-width: 2; stroke-dasharray: 6 7; animation: dg-dash 1s linear infinite; }
-.dg-flow--qbo { stroke: var(--color-success); }
-.dg-flow--back { animation-direction: reverse; }
-.dg-head { stroke: none; }
-.dg-head--ff { fill: var(--color-primary); }
-.dg-head--qbo { fill: var(--color-success); }
-.dg-head--warn { fill: var(--color-warning); }
-.dg-head--muted { fill: var(--border-color-strong); }
-.dg-packet { fill: var(--color-primary); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-primary) 70%, transparent)); }
-.dg-packet--qbo { fill: var(--color-success); filter: drop-shadow(0 0 4px color-mix(in srgb, var(--color-success) 70%, transparent)); }
-.dg-orbit { fill: none; stroke: color-mix(in srgb, var(--color-primary) 45%, transparent); stroke-width: 1.5; stroke-dasharray: 3 9; animation: dg-dash-slow 3s linear infinite; }
-.dg-core { fill: color-mix(in srgb, var(--color-primary) 9%, var(--bg-surface)); stroke: color-mix(in srgb, var(--color-primary) 45%, transparent); stroke-width: 1.5; }
-.dg-axis { stroke: var(--border-color-strong); stroke-width: 1; }
-.dg-bar { stroke: color-mix(in srgb, var(--color-primary) 45%, transparent); stroke-width: 1; }
-.dg-bar--1 { fill: color-mix(in srgb, var(--color-primary) 8%, var(--bg-surface)); }
-.dg-bar--2 { fill: color-mix(in srgb, var(--color-primary) 14%, var(--bg-surface)); }
-.dg-bar--3 { fill: color-mix(in srgb, var(--color-primary) 21%, var(--bg-surface)); }
-.dg-bar--4 { fill: color-mix(in srgb, var(--color-primary) 30%, var(--bg-surface)); }
-.dg-chev { stroke: var(--bg-surface); stroke-width: 2; }
-.dg-chev--1 { fill: color-mix(in srgb, var(--color-info) 12%, var(--bg-surface-2)); }
-.dg-chev--2 { fill: color-mix(in srgb, var(--color-info) 18%, var(--bg-surface-2)); }
-.dg-chev--3 { fill: color-mix(in srgb, var(--color-info) 24%, var(--bg-surface-2)); }
-.dg-chev--4 { fill: color-mix(in srgb, var(--color-info) 30%, var(--bg-surface-2)); }
-.dg-chev--5 { fill: color-mix(in srgb, var(--color-warning) 26%, var(--bg-surface-2)); }
-.dg-chev--6 { fill: color-mix(in srgb, var(--color-success) 26%, var(--bg-surface-2)); }
-.dg-rail { stroke-width: 3; stroke-linecap: round; }
-.dg-rail--off { stroke: var(--border-color-strong); }
-.dg-rail--on { stroke: var(--color-success); }
+/* Diagram classes (dg-*) live in module-chrome.css — shared with the
+   module heroes (S-MODULE-CHROME); loaded on every admin page. */
 
 /* ── Motion ─────────────────────────────────────────────────── */
-@keyframes dg-dash { to { stroke-dashoffset: -13; } }
-@keyframes dg-dash-slow { to { stroke-dashoffset: -24; } }
 @keyframes sop-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes sop-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) {
-    .dg-flow, .dg-orbit, .sop-chapter-card, .sop-signal-dot { animation: none !important; }
-    .dg-packet { display: none; }
+    .sop-chapter-card, .sop-signal-dot { animation: none !important; }
 }
 
 /* ============================================================

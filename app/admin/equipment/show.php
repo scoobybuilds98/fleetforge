@@ -123,13 +123,11 @@ function complianceDelta(?int $days): string {
 ?>
 
 <!-- ============================================================
-     Page header — breadcrumb back to list
+     Page header — entity hero (S-MODULE-CHROME). The title block
+     (unit number, status, Samsara live/battery badges, subtitle) and
+     the action buttons are the page's own markup, placed unchanged.
      ============================================================ -->
-<div class="page-header">
-    <div>
-        <a href="<?= base_url('equipment') ?>" class="btn btn-ghost btn-sm" style="margin-bottom:0.5rem;">
-            ← Equipment
-        </a>
+<?php ob_start(); ?>
         <h1 class="page-header-title h4">
             <span class="font-mono"><?= e($unit['unit_number']) ?></span>
             <span class="badge <?= statusBadgeClass($unit['status']) ?>" style="margin-left:0.5rem;font-size:0.75rem;vertical-align:middle;">
@@ -184,8 +182,8 @@ function complianceDelta(?int $days): string {
                 · <span title="Last Samsara sync">Synced <?= e(format_datetime($unit['samsara_last_synced_at'])) ?></span>
             <?php endif; ?>
         </div>
-    </div>
-    <div class="page-header-actions">
+<?php $heroOwn = ob_get_clean(); ?>
+<?php ob_start(); ?>
         <?= help_button('equipment') ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_equipment_unit_<?= (int)$unit['id'] ?>_unit_analysis_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
@@ -229,8 +227,17 @@ function complianceDelta(?int $days): string {
         <?php if (can('equipment', 'delete') && $unit['status'] !== 'on_lease'): ?>
         <button class="btn btn-danger btn-sm" onclick="deleteUnit()">Delete Unit</button>
         <?php endif; ?>
-    </div>
-</div>
+<?php $heroActions = ob_get_clean(); ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'    => true,
+    'accent'    => 'success',
+    'icon'      => 'truck',
+    'mark'      => (string) $unit['unit_number'],
+    'crumbs'    => [['Dashboard', base_url('dashboard')], ['Equipment', base_url('equipment')], [(string) $unit['unit_number'], null]],
+    'eyebrow'   => 'Equipment unit',
+    'main_html' => $heroOwn,
+    'actions'   => $heroActions,
+]) ?>
 
 <!-- ── AI Analysis Panel ─────────────────────────────────────── -->
 <?php
@@ -260,7 +267,7 @@ $_showAiTile = function_exists('can') && can('ai', 'view')
     && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''));
 $_heroGridClass = $_showAiTile ? 'stat-grid--5' : 'stat-grid--4';
 ?>
-<div class="stat-grid <?= $_heroGridClass ?>" style="margin-bottom:1.5rem;">
+<div class="stat-grid ff-stats <?= $_heroGridClass ?>" style="margin-bottom:1.5rem;">
 
     <?php
     $_brandLabel = trim(($unit['template_brand'] ?? '') . ' ' . ($unit['template_model'] ?? ''));

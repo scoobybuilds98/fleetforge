@@ -35,24 +35,25 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Leases</span>
-</nav>
-<div class="page-header">
-    <h1 class="page-header-title h4">Leases</h1>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <?= help_button('leases') ?>
         <?php if (can('leases', 'create')): ?>
         <a href="<?= base_url('leases/create') ?>" class="btn btn-primary btn-sm">
             + New Lease
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Leases', null]],
+    'eyebrow'  => 'Operations',
+    'icon'     => 'calendar-days',
+    'accent'   => 'warning',
+    'title'    => 'Leases',
+    'subtitle' => 'Every rental from reservation to return — rates, mileage, billing and close-out.',
+    'art'      => 'leases',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      LEASES ALPINE COMPONENT
@@ -60,7 +61,7 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="FF_Leases()">
 
     <!-- ── KPI TILES ─────────────────────────────────────────────── -->
-    <div class="stat-grid">
+    <div class="stat-grid stat-grid--4 ff-stats">
 
         <div class="stat-card stat-card--green" style="cursor:pointer"
              :class="{ 'ring-active': filters.status === 'active' }"

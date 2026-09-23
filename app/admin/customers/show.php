@@ -118,19 +118,11 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — entity hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php).
+     The badges and action buttons below are the page's own markup,
+     captured and placed inside the hero unchanged.
      ============================================================ -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('customers') ?>">Customers</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current"><?= e($customer['company_name']) ?></span>
-</nav>
-<div class="page-header">
-    <div>
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <h1 class="page-header-title h4" style="margin:0;"><?= e($customer['company_name']) ?></h1>
+<?php ob_start(); ?>
             <span class="badge <?= $statusBadgeClass ?>">
                 <?= e(str_replace('_', ' ', $customer['status'])) ?>
             </span>
@@ -175,9 +167,8 @@ require_once FF_ROOT . '/includes/header.php';
                 <?= e($qm_label) ?>
             </a>
             <?php endif; ?>
-        </div>
-    </div>
-    <div class="page-header-actions">
+<?php $heroBadges = ob_get_clean(); ?>
+<?php ob_start(); ?>
         <?= help_button('customers') ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_customer_<?= (int)$customer['id'] ?>_customer_insights_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
@@ -214,8 +205,37 @@ require_once FF_ROOT . '/includes/header.php';
             Delete
         </button>
         <?php endif; ?>
-    </div>
-</div>
+<?php $heroActions = ob_get_clean(); ?>
+<?php
+$heroFacts = [];
+if (!empty($customer['contact_name'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('users') . e($customer['contact_name']);
+}
+$heroPlace = trim(implode(', ', array_filter([(string) ($customer['city'] ?? ''), (string) ($customer['province'] ?? '')])));
+if ($heroPlace !== '') {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('map-pin') . e($heroPlace);
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . e($customer['payment_terms'] ?: 'Net 30 (default)');
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('truck') . '<b>' . (int) $customer['active_lease_count'] . '</b> active lease' . ((int) $customer['active_lease_count'] === 1 ? '' : 's');
+if ($canSeeMoney) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('banknotes') . '<b>' . e(format_currency($customer['outstanding_balance'] ?? '0')) . '</b> ' . e($customer['currency'] ?? 'CAD') . ' owing';
+}
+if (!empty($customer['created_at'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . 'Customer since ' . e(format_date($customer['created_at']));
+}
+?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'purple',
+    'icon'       => 'user-group',
+    'avatar'     => \FleetForge\Ui\ModuleHero::initials((string) $customer['company_name']),
+    'mark'       => \FleetForge\Ui\ModuleHero::initials((string) $customer['company_name']),
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Customers', base_url('customers')], [(string) $customer['company_name'], null]],
+    'eyebrow'    => 'Customer',
+    'title_html' => e($customer['company_name']) . $heroBadges,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
 
 <!-- ── AI Analysis Panel ─────────────────────────────────────── -->
 <?php
@@ -238,22 +258,24 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 <!-- ============================================================
      STATS ROW — 4 clickable quick-stat tiles (TILES-2)
      ============================================================ -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="stat-grid ff-stats" style="margin-bottom:24px;">
 
-    <div class="stat-card" style="cursor:pointer"
+    <div class="stat-card stat-card--blue" style="cursor:pointer"
          :class="{ 'ring-active': activeTab === 'leases' }"
          @click="activeTab = 'leases'"
          title="View active leases for this customer">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-key"/></svg></span>
         <div class="stat-label">Active Leases</div>
         <div class="stat-value font-mono"><?= e($customer['active_lease_count']) ?></div>
         <div class="stat-delta text-secondary">of <?= e($customer['lease_count']) ?> total</div>
     </div>
 
     <?php if ($canSeeMoney): ?>
-    <div class="stat-card" style="cursor:pointer"
+    <div class="stat-card stat-card--amber" style="cursor:pointer"
          :class="{ 'ring-active': activeTab === 'invoices' }"
          @click="activeTab = 'invoices'"
          title="View outstanding invoices">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">Outstanding Balance</div>
         <div class="stat-value currency"><?= e(format_currency($customer['outstanding_balance'])) ?></div>
     </div>
@@ -261,18 +283,20 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     <!-- Total Revenue drills to the system-wide revenue report scoped to
          this customer so the user can see the full payment history, not
          just what's visible on the profile page. -->
-    <a class="stat-card"
+    <a class="stat-card stat-card--green"
        href="<?= base_url('reports') ?>?tab=customer&customer_id=<?= (int)$customer['id'] ?>"
        style="cursor:pointer;text-decoration:none"
        title="View this customer's revenue report">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-arrow-trending-up"/></svg></span>
         <div class="stat-label">Total Revenue</div>
         <div class="stat-value currency"><?= e(format_currency($customer['total_revenue'])) ?></div>
     </a>
 
-    <a class="stat-card"
+    <a class="stat-card stat-card--purple"
        href="<?= base_url('credit_notes') ?>?customer_id=<?= (int)$customer['id'] ?>"
        style="cursor:pointer;text-decoration:none"
        title="View credit notes for this customer">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-credit-card"/></svg></span>
         <div class="stat-label">Account Credit</div>
         <div class="stat-value currency"><?= e(format_currency($customer['account_credit_balance'])) ?></div>
     </a>

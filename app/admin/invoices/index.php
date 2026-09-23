@@ -51,16 +51,9 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Invoices</span>
-</nav>
-<div class="page-header">
-    <h1 class="page-header-title h4">Invoices</h1>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <?= help_button('invoices') ?>
         <a href="<?= base_url('invoices/batch') ?>" class="btn btn-primary btn-sm">
             <?= heroicon('document-duplicate', 'icon-sm') ?>
@@ -71,14 +64,22 @@ require_once FF_ROOT . '/includes/header.php';
             + New Invoice
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Invoices', null]],
+    'eyebrow'  => 'Billing',
+    'icon'     => 'document-text',
+    'accent'   => 'primary',
+    'title'    => 'Invoices',
+    'subtitle' => 'Every invoice from draft to paid — batch billing, sending, credits and aging.',
+    'art'      => 'invoices',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      AR Aging KPI Tiles
      ============================================================ -->
 <div x-data="invoicesKpis()" x-init="loadKpis()">
-<div class="stat-grid">
+<div class="stat-grid stat-grid--4 ff-stats">
 
     <!-- TILES-1: each aging tile now drills to the matching bucket via the
          new `aging` query param (current | ar30 | ar60 | ar90) so clicking

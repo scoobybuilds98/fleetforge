@@ -29,19 +29,25 @@ require_once FF_ROOT . '/includes/header.php';
 ?>
 
 <!-- ============================================================
-     Page header
+     Page header — module hero (S-MODULE-CHROME, lib/Ui/ModuleHero.php)
      ============================================================ -->
-<div class="page-header">
-    <h1 class="page-header-title h4">Customers</h1>
-    <div class="page-header-actions">
+<?php ob_start(); ?>
         <?= help_button('customers') ?>
         <?php if (can('customers', 'create')): ?>
         <a href="<?= base_url('customers/create') ?>" class="btn btn-primary btn-sm">
             + New Customer
         </a>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Customers', null]],
+    'eyebrow'  => 'Operations',
+    'icon'     => 'user-group',
+    'accent'   => 'purple',
+    'title'    => 'Customers',
+    'subtitle' => 'Every company you rent to — contacts, payment terms, credit and what they owe.',
+    'art'      => 'customers',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <!-- ============================================================
      CUSTOMERS ALPINE COMPONENT
@@ -49,11 +55,12 @@ require_once FF_ROOT . '/includes/header.php';
 <div x-data="FF_Customers()">
 
     <!-- ── KPI TILES — all clickable drill-down filters (TILES-1) ── -->
-    <div class="stat-grid">
+    <div class="stat-grid stat-grid--4 ff-stats">
 
-        <div class="stat-card" style="cursor:pointer"
+        <div class="stat-card stat-card--purple" style="cursor:pointer"
              :class="{ 'ring-active': !filters.status }"
              @click="filters.status = ''; resetPage()">
+            <span class="stat-icon stat-icon--purple"><svg><use href="#icon-building"/></svg></span>
             <div class="stat-label">Total Customers</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.total"></div>
@@ -63,9 +70,10 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </div>
 
-        <div class="stat-card" style="cursor:pointer"
+        <div class="stat-card stat-card--green" style="cursor:pointer"
              :class="{ 'ring-active': filters.status === 'active' }"
              @click="filters.status = filters.status === 'active' ? '' : 'active'; resetPage()">
+            <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
             <div class="stat-label">Active</div>
             <template x-if="kpisLoaded">
                 <div>
@@ -82,8 +90,9 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- Overdue Balance drills into /invoices?status=overdue since the
              overdue AR lives on invoices, not customers. -->
-        <a class="stat-card" :href="'<?= base_url('invoices') ?>?status=overdue'"
+        <a class="stat-card stat-card--red" :href="'<?= base_url('invoices') ?>?status=overdue'"
            style="cursor:pointer;text-decoration:none">
+            <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
             <div class="stat-label">Overdue Balance</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value currency"
@@ -95,9 +104,10 @@ require_once FF_ROOT . '/includes/header.php';
             </template>
         </a>
 
-        <div class="stat-card" style="cursor:pointer"
+        <div class="stat-card stat-card--amber" style="cursor:pointer"
              :class="{ 'ring-active': filters.status === 'credit_hold' }"
              @click="filters.status = filters.status === 'credit_hold' ? '' : 'credit_hold'; resetPage()">
+            <span class="stat-icon stat-icon--amber"><svg><use href="#icon-shield-check"/></svg></span>
             <div class="stat-label">Credit Hold</div>
             <template x-if="kpisLoaded">
                 <div class="stat-value font-mono" x-text="kpis.credit_hold"></div>
