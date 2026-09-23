@@ -660,7 +660,7 @@ class JournalEntryPusher
             }
 
             $postingType = $debitPositive ? 'Debit' : 'Credit';
-            $amount      = $debitPositive ? (float) $debit : (float) $credit;
+            $amount      = QboMoney::amount($debitPositive ? $debit : $credit);
 
             $payloadLine = [
                 'Amount'     => $amount,

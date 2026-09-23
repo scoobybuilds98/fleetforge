@@ -601,10 +601,10 @@ class CreditApplicationPusher
                     continue;
                 }
             }
-            $out[] = ['Amount' => (float) $amt, 'LinkedTxn' => $linked];
+            $out[] = ['Amount' => QboMoney::amount($amt), 'LinkedTxn' => $linked];
         }
         if (!$done && bccomp($delta, '0', 2) > 0) {
-            $out[] = ['Amount' => (float) $delta, 'LinkedTxn' => [['TxnId' => $qboInvoiceId, 'TxnType' => 'Invoice']]];
+            $out[] = ['Amount' => QboMoney::amount($delta), 'LinkedTxn' => [['TxnId' => $qboInvoiceId, 'TxnType' => 'Invoice']]];
         }
         return $out;
     }

@@ -51,7 +51,7 @@
 - ~~Customer/vendor updates still send DisplayName~~ — fixed in the third pass (updates keep the accountant's DisplayName; CompanyName still follows FF).
 - ~~**Write-offs.** `damage_writeoff` pushes as a JE crediting A/R for the customer; the QBO invoice itself stays open (aging shows open invoice + unapplied JE credit). AR total is right; invoice-level aging is not.~~ **Fixed by S-QBO-INVOICE-WRITEOFF** (see the follow-up section at the end).
 - **Invoice update** is enqueued on PO-number / billing-email edits, but the payload carries neither field (harmless no-op re-send).
-- **Money as float** in Payment / Credit-application JSON (`(float)` casts) — exact under PHP's default `serialize_precision=-1`; inconsistent with the bcmath rule but not a live bug.
+- ~~**Money as float** in Payment / Credit-application JSON (`(float)` casts) — exact under PHP's default `serialize_precision=-1`; inconsistent with the bcmath rule but not a live bug.~~ **Fixed by S-QBO-MONEY-JSON** (see the follow-up section at the end).
 - **JE to GST/HST payable** (tax-remittance JE) — QBO Canada restricts JEs on its sales-tax accounts; verify under F80.
 - HistoricalPuller / BankTransactionPuller were reviewed for safety only (both gated / read-only); not exercised live. HistoricalPuller is now refused outright for a shared company file — **S-QBO-HISTPULL-SHARED** (see the follow-up section at the end).
 
@@ -160,3 +160,7 @@ Operator decision: add " (Vendor)" / " (Customer)" automatically. `lib/QboPusher
 ## Follow-up — S-QBO-HISTPULL-SHARED (2026-09-24): no historical import from a shared file
 
 `HistoricalPuller::sharedFileBlockReason()` — on whenever `quickbooks.shared_company_file` = '1' (the go-live default) — now refuses the live gate (`assertLiveAllowed`, so `startRun('live')` and the F29 row writer) and the transactional pull (`pullTransactional`, even in dry-run and before any QuickBooks query). Reference pulls and the dry-run AR-drift report are unaffected. QuickBooks → Manual Sync shows the reason via `historical_pull/status.php` `shared_file_block`. Smoke `tests/_smoke_qbo_historical_pull.php` 24/24; D-QBO-HISTPULL-SHARED-1.
+
+## Follow-up — S-QBO-MONEY-JSON (2026-09-24): money as float in QuickBooks JSON
+
+Read-only check first: production's PHP (FPM and CLI) has `serialize_precision = -1`, so no wrong amount has been sent. The dependency is removed anyway: `lib/QboPushers/QboMoney.php` rounds every outgoing amount to cents in bcmath (half-up away from zero) and is the only place a float appears; `QuickBooksClient::encodeBody()` encodes request bodies with `serialize_precision` pinned to -1 and restores it. All 18 `(float)` payload casts (payments, bill payments, bills, credit memos, credit applications, refund receipts, per-rate invoice tax, JE lines) now go through `QboMoney`. Smoke `tests/_smoke_qbo_money_json.php` 4/4; every money pusher's smoke green.

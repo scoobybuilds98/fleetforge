@@ -823,7 +823,7 @@ class PaymentPusher
 
         $payload = [
             'CustomerRef' => ['value' => (string) $customerMap['qbo_customer_id']],
-            'TotalAmt'    => (float) $ff['amount'],
+            'TotalAmt'    => QboMoney::amount($ff['amount']),
             'TxnDate'     => (string) $ff['payment_date'],
             'DepositToAccountRef' => ['value' => (string) $ufRow['qbo_account_id']],
         ];
@@ -886,7 +886,7 @@ class PaymentPusher
                 );
             }
             $payloadLines[] = [
-                'Amount'    => (float) $alloc['amount'],
+                'Amount'    => QboMoney::amount($alloc['amount']),
                 'LinkedTxn' => [
                     [
                         'TxnId'   => (string) $invMap['qbo_invoice_id'],
@@ -913,7 +913,7 @@ class PaymentPusher
             $merged = false;
             foreach ($payloadLines as &$pl) {
                 if ((string) $pl['LinkedTxn'][0]['TxnId'] === (string) $oa['qbo_invoice_id']) {
-                    $pl['Amount'] = (float) bcadd((string) $pl['Amount'], (string) $oa['amount_applied'], 2);
+                    $pl['Amount'] = QboMoney::amount(bcadd(QboMoney::decimal($pl['Amount']), (string) $oa['amount_applied'], 2));
                     $merged = true;
                     break;
                 }
@@ -921,7 +921,7 @@ class PaymentPusher
             unset($pl);
             if (!$merged) {
                 $payloadLines[] = [
-                    'Amount'    => (float) $oa['amount_applied'],
+                    'Amount'    => QboMoney::amount($oa['amount_applied']),
                     'LinkedTxn' => [['TxnId' => (string) $oa['qbo_invoice_id'], 'TxnType' => 'Invoice']],
                 ];
             }

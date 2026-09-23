@@ -707,7 +707,7 @@ class BillPaymentPusher
 
         $payload = [
             'VendorRef'  => ['value' => (string) $vendorMap['qbo_vendor_id']],
-            'TotalAmt'   => (float) $ff['amount'],
+            'TotalAmt'   => QboMoney::amount($ff['amount']),
             'TxnDate'    => (string) $ff['payment_date'],
             'PayType'    => $payType,
         ];
@@ -782,7 +782,7 @@ class BillPaymentPusher
                 );
             }
             $payloadLines[] = [
-                'Amount'    => (float) $alloc['amount_applied'],
+                'Amount'    => QboMoney::amount($alloc['amount_applied']),
                 'LinkedTxn' => [
                     [
                         'TxnId'   => (string) $billMap['qbo_bill_id'],

@@ -675,7 +675,7 @@ class BillPusher
             }
             $payloadLines[] = [
                 'Description' => self::lineDescription($line, $billUnit),
-                'Amount'      => (float) $line['amount'],
+                'Amount'      => QboMoney::amount($line['amount']),
                 'DetailType'  => 'AccountBasedExpenseLineDetail',
                 'AccountBasedExpenseLineDetail' => [
                     'AccountRef'  => ['value' => (string) $acctMap['qbo_account_id']],
@@ -747,7 +747,7 @@ class BillPusher
             'hst' => (string) ($ff['tax_hst_amount'] ?? '0.00'),
         ];
         $taxTotal = bcadd(bcadd($components['gst'], $components['pst'], 2), $components['hst'], 2);
-        $override = ['TotalTax' => (float) $taxTotal];
+        $override = ['TotalTax' => QboMoney::amount($taxTotal)];
 
         $mode = (string) settings_get('quickbooks.bill.tax_mode', 'override');
         if ($mode !== 'per_rate') {
@@ -768,7 +768,7 @@ class BillPusher
                 return $override;
             }
             $taxLines[] = [
-                'Amount'        => (float) $amount,
+                'Amount'        => QboMoney::amount($amount),
                 'DetailType'    => 'TaxLineDetail',
                 'TaxLineDetail' => [
                     'TaxRateRef'  => ['value' => $rateId],
@@ -781,7 +781,7 @@ class BillPusher
             return $override; // no taxable components → plain TotalTax
         }
         return [
-            'TotalTax' => (float) $taxTotal,
+            'TotalTax' => QboMoney::amount($taxTotal),
             'TaxLine'  => $taxLines,
         ];
     }

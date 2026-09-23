@@ -930,6 +930,31 @@ class QuickBooksClient
     }
 
     /**
+     * JSON request body with every number printed exactly (S-QBO-MONEY-JSON).
+     *
+     * Money reaches payloads as floats (QboMoney::amount — QuickBooks wants
+     * JSON numbers). json_encode prints a float using serialize_precision;
+     * only the PHP default (-1, shortest exact form) prints 1234.56 as
+     * 1234.56 — a php.ini with 17 sends 1234.5599999999999 to the books.
+     * Pin -1 for the encode, whatever the server's ini says.
+     *
+     * @param array<mixed> $json
+     * @return string|false json_encode's result (false on an unencodable value, as before)
+     */
+    public static function encodeBody(array $json): string|false
+    {
+        $previous = ini_get('serialize_precision');
+        ini_set('serialize_precision', '-1');
+        try {
+            return json_encode($json);
+        } finally {
+            if ($previous !== false) {
+                ini_set('serialize_precision', $previous);
+            }
+        }
+    }
+
+    /**
      * buildRequestId — the QBO `requestid` (≤50 chars, unique per company)
      * for one logical write.
      *
@@ -1179,7 +1204,7 @@ class QuickBooksClient
         ];
         $bodyJson = null;
         if (isset($opts['json'])) {
-            $bodyJson = json_encode($opts['json']);
+            $bodyJson = self::encodeBody($opts['json']);
             $headers[] = 'Content-Type: application/json';
         }
 
@@ -1309,7 +1334,7 @@ class QuickBooksClient
         }
         $bodyJson = null;
         if (isset($opts['json'])) {
-            $bodyJson = json_encode($opts['json']);
+            $bodyJson = self::encodeBody($opts['json']);
         }
 
         $startMs    = microtime(true);

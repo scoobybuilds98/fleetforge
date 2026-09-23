@@ -636,3 +636,5 @@ QUICKBOOKS_PROGRESS.md §2 SESSION LOG ends at S-QBO-MATCHER-GREEDY-FIX (2026-05
 **Progress marker 2026-09-24 — S-QBO-NAME-CLASH:** ✅ QuickBooks 6240 name clashes on customer/vendor create handled (`DisplayNameClash`: different-kind holder → " (Vendor)"/" (Customer)" suffix, same-kind → link). No migration. Smoke `_smoke_qbo_name_clash.php` 7/7.
 
 **Progress marker 2026-09-24 — S-QBO-HISTPULL-SHARED:** ✅ historical pull (S-QBO-27 machinery) refused for a shared company file — live gate + transactional pull, even in dry-run; reference pulls unaffected. No migration. `_smoke_qbo_historical_pull.php` 24/24.
+
+**Progress marker 2026-09-24 — S-QBO-MONEY-JSON:** ✅ outgoing QuickBooks money via `QboMoney` + exact `encodeBody()` (18 float casts removed). No migration. `_smoke_qbo_money_json.php` 4/4.

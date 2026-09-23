@@ -155,15 +155,15 @@ class InvoiceTaxPerRate
                 return null;
             }
             $lines[] = [
-                'Amount'        => (float) $amount,
+                'Amount'        => QboMoney::amount($amount),
                 'DetailType'    => 'TaxLineDetail',
                 'TaxLineDetail' => [
                     'TaxRateRef'       => ['value' => (string) array_key_first($hits)],
                     'PercentBased'     => true,
-                    'NetAmountTaxable' => (float) $base,
+                    'NetAmountTaxable' => QboMoney::amount($base),
                 ],
             ];
         }
-        return $lines === [] ? null : ['TotalTax' => (float) $totalTax, 'TaxLine' => $lines];
+        return $lines === [] ? null : ['TotalTax' => QboMoney::amount($totalTax), 'TaxLine' => $lines];
     }
 }

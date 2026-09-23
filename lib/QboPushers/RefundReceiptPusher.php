@@ -356,12 +356,12 @@ class RefundReceiptPusher
             'Line'                => [
                 [
                     'Description'         => $desc,
-                    'Amount'              => (float) $amount,
+                    'Amount'              => QboMoney::amount($amount),
                     'DetailType'          => 'SalesItemLineDetail',
                     'SalesItemLineDetail' => [
                         'ItemRef'    => ['value' => $qboItemId],
                         'Qty'        => 1,
-                        'UnitPrice'  => (float) $amount,
+                        'UnitPrice'  => QboMoney::amount($amount),
                         'TaxCodeRef' => ['value' => $qboTaxCodeId],
                     ],
                 ],

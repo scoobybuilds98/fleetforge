@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-QBO-MONEY-JSON** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Every amount FleetForge sends to QuickBooks is now rounded to cents in exact decimal math and printed exactly, independent of server settings (production was already safe; this removes the dependency).**
+
 **S-QBO-HISTPULL-SHARED** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-HISTPULL-SHARED-1). **The historical QuickBooks import is switched off for a company file shared with other businesses (it would pull their history into FleetForge); QuickBooks → Manual Sync says so. Go-live history is linked instead.**
 
 **S-QBO-NAME-CLASH** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-QBO-NAME-CLASH-1). **When a customer's or vendor's name is already used in QuickBooks by the other kind of record (e.g. a company that both rents from us and supplies us), FleetForge now creates it as "ACME (Vendor)" / "ACME (Customer)" instead of failing — company and cheque name stay "ACME". If QuickBooks already has the same kind of record with that name, FleetForge asks for a link instead of making a duplicate.**
