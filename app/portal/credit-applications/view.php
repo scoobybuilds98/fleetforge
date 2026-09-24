@@ -57,20 +57,13 @@ if (!in_array($app['status'], ['submitted', 'reviewed'], true)) {
     exit;
 }
 
-// ── PDF signed download URL (Trap 7: file_path never sent to client) ─────────
+// ── PDF link (Trap 7: file_path never sent to client) ────────────────────────
+// S-PDF-LETTERHEAD: the portal endpoint serves the stored PDF or rebuilds it
+// from the frozen snapshot — the old presigned URL 404'd once storage lost
+// the file.
 $pdfUrl = null;
-if (!empty($app['generated_pdf_document_id'])) {
-    $docRow = db_row(
-        "SELECT file_path FROM documents WHERE id = ? AND deleted_at IS NULL",
-        [(int) $app['generated_pdf_document_id']]
-    );
-    if ($docRow && !empty($docRow['file_path'])) {
-        try {
-            $pdfUrl = StorageClient::url((string) $docRow['file_path'], 3600);
-        } catch (\Throwable $e) {
-            error_log('[portal CCA view] PDF URL failed for app ' . $appId . ': ' . $e->getMessage());
-        }
-    }
+if ((string) ($app['rendered_html'] ?? '') !== '' || !empty($app['generated_pdf_document_id'])) {
+    $pdfUrl = base_url('api/v1/portal/credit_applications/pdf') . '?id=' . (int) $appId;
 }
 
 $isApproved = $app['status'] === 'reviewed' && $app['review_outcome'] === 'approved';

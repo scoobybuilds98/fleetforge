@@ -30,6 +30,8 @@ declare(strict_types=1);
 
 namespace FleetForge\Accounting;
 
+use FleetForge\Pdf\PdfKit;
+
 use FleetForge\Storage\StorageClient;
 
 class YearEndService
@@ -493,20 +495,18 @@ class YearEndService
         $writeReport = static function (string $filename, callable $renderHtml, string $orientation = 'P') use ($dir, &$manifest): void {
             $path = $dir . '/' . $filename;
             try {
-                $tmpDir = defined('FF_ROOT') ? FF_ROOT . '/storage/tmp' : sys_get_temp_dir();
-                if (!is_dir($tmpDir)) @mkdir($tmpDir, 0755, true);
-                $mpdf = new \Mpdf\Mpdf([
-                    'mode'         => 'utf-8',
-                    'format'       => 'A4-' . $orientation,
-                    'margin_top'   => 12,
-                    'margin_bottom'=> 12,
-                    'margin_left'  => 12,
-                    'margin_right' => 12,
-                    'default_font' => 'dejavusans',
-                    'tempDir'      => $tmpDir,
+                // S-PDF-LETTERHEAD: same letterhead + table styling as the
+                // live report exports (ReportPdfRenderer), via PdfKit.
+                $doc   = $renderHtml();
+                $bytes = PdfKit::render($doc['body'], [
+                    'title'       => $doc['title'],
+                    'reference'   => $doc['subtitle'],
+                    'variant'     => 'report',
+                    'orientation' => $orientation,
                 ]);
-                $mpdf->WriteHTML($renderHtml());
-                $mpdf->Output($path, \Mpdf\Output\Destination::FILE);
+                if (file_put_contents($path, $bytes) === false) {
+                    throw new \RuntimeException('could not write ' . $path);
+                }
                 $manifest['files'][] = [
                     'file'   => $filename,
                     'hash'   => hash_file('sha256', $path),
@@ -529,22 +529,22 @@ class YearEndService
         // 02 — P&L
         $writeReport('02_profit_loss.pdf', function () use ($yearStart, $yearEnd, $fiscalYear) {
             $r = ReportingService::profitAndLoss($yearStart, $yearEnd);
-            return self::wrapHtml("Profit & Loss — FY {$fiscalYear}", $yearStart . ' to ' . $yearEnd, self::renderPLBody($r));
+            return self::wrapHtml("Profit & Loss — FY {$fiscalYear}", PdfKit::period($yearStart, $yearEnd), self::renderPLBody($r));
         }, 'L');
         // 03 — Balance Sheet
         $writeReport('03_balance_sheet.pdf', function () use ($yearEnd, $fiscalYear) {
             $r = ReportingService::balanceSheet($yearEnd);
-            return self::wrapHtml("Balance Sheet — FY {$fiscalYear}", 'As of ' . $yearEnd, self::renderBSBody($r));
+            return self::wrapHtml("Balance Sheet — FY {$fiscalYear}", 'As of ' . PdfKit::date($yearEnd), self::renderBSBody($r));
         }, 'P');
         // 04 — Cash Flow
         $writeReport('04_cash_flow.pdf', function () use ($yearStart, $yearEnd, $fiscalYear) {
             $r = ReportingService::cashFlow($yearStart, $yearEnd);
-            return self::wrapHtml("Cash Flow Statement — FY {$fiscalYear}", $yearStart . ' to ' . $yearEnd, self::renderCFBody($r));
+            return self::wrapHtml("Cash Flow Statement — FY {$fiscalYear}", PdfKit::period($yearStart, $yearEnd), self::renderCFBody($r));
         }, 'P');
         // 05 — Asset Schedule
         $writeReport('05_asset_schedule.pdf', function () use ($yearEnd, $fiscalYear) {
             $r = ReportingService::assetSchedule($yearEnd);
-            return self::wrapHtml("Fixed Asset Schedule — FY {$fiscalYear}", 'As of ' . $yearEnd, self::renderASBody($r));
+            return self::wrapHtml("Fixed Asset Schedule — FY {$fiscalYear}", 'As of ' . PdfKit::date($yearEnd), self::renderASBody($r));
         }, 'L');
         // 06 — AR Aging
         $writeReport('06_ar_aging.pdf', fn() => self::renderArAgingHtml($yearEnd, $fiscalYear), 'P');
@@ -601,42 +601,25 @@ class YearEndService
 
     // ── PDF rendering helpers ────────────────────────────────────────────
 
-    private static function wrapHtml(string $title, string $subtitle, string $body): string
+    /**
+     * The parts of one package report: title + subtitle for the PdfKit
+     * letterhead, and the table body (S-PDF-LETTERHEAD — was a hand-built
+     * header + stylesheet per file).
+     *
+     * @return array{title:string, subtitle:string, body:string}
+     */
+    private static function wrapHtml(string $title, string $subtitle, string $body): array
     {
-        $company = function_exists('settings_get') ? (\settings_get('company.name') ?: 'FleetForge') : 'FleetForge';
-        $now     = date('Y-m-d H:i');
-        return <<<HTML
-<style>
-body { font-family: 'dejavusans', sans-serif; font-size: 9pt; color: #1d1d1f; }
-.hdr { border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; margin-bottom: 10px; }
-.hdr .co { font-size: 14pt; font-weight: 700; }
-.hdr .ti { font-size: 11pt; margin-top: 2px; }
-.hdr .pe { font-size: 9pt; color: #555; }
-table.rpt { width: 100%; border-collapse: collapse; }
-table.rpt th { background: #f0f0f0; padding: 5px 7px; text-align: left; border-bottom: 1px solid #1d1d1f; font-size: 8.5pt; }
-table.rpt td { padding: 3px 7px; border-bottom: 1px solid #eee; vertical-align: top; }
-table.rpt td.amt { text-align: right; font-family: 'dejavusansmono', monospace; }
-table.rpt tr.total td { background: #f7f9fc; font-weight: 600; }
-table.rpt tr.group td { background: #e8f0fe; font-weight: 600; }
-</style>
-<div class="hdr">
-    <div class="co">{$company}</div>
-    <div class="ti">{$title}</div>
-    <div class="pe">{$subtitle}</div>
-    <div class="pe" style="font-size:7.5pt;color:#888;">Generated {$now}</div>
-</div>
-{$body}
-HTML;
+        return ['title' => $title, 'subtitle' => $subtitle, 'body' => $body];
     }
 
+    /** bcmath money for the package PDFs (D16 — was number_format((float)…)). */
     private static function money(string $val): string
     {
-        $sign = bccomp($val, '0', 2) < 0 ? '-' : '';
-        $abs  = ltrim($val, '-');
-        return $sign . '$' . number_format((float) $abs, 2, '.', ',');
+        return PdfKit::money($val);
     }
 
-    private static function renderTrialBalanceHtml(string $asOf, int $fiscalYear): string
+    private static function renderTrialBalanceHtml(string $asOf, int $fiscalYear): array
     {
         $balances = AccountingService::allAccountBalances($asOf);
         $accounts = \db_select(
@@ -674,7 +657,7 @@ HTML;
         $html .= '<td class="amt">' . self::money($totalDr) . '</td>';
         $html .= '<td class="amt">' . self::money($totalCr) . '</td></tr>';
         $html .= '</tbody></table>';
-        return self::wrapHtml("Trial Balance — FY {$fiscalYear}", "As of {$asOf}", $html);
+        return self::wrapHtml("Trial Balance — FY {$fiscalYear}", 'As of ' . PdfKit::date($asOf), $html);
     }
 
     private static function renderPLBody(array $r): string
@@ -792,7 +775,7 @@ HTML;
      * @param int    $fiscalYear
      * @return string HTML document
      */
-    private static function renderArAgingHtml(string $asOf, int $fiscalYear): string
+    private static function renderArAgingHtml(string $asOf, int $fiscalYear): array
     {
         $aging = \FleetForge\Reports\ArAging::asOf($asOf);
         $h = '<table class="rpt"><thead><tr>';
@@ -810,10 +793,10 @@ HTML;
         }
         $h .= '<tr class="total"><td colspan="3">Total Outstanding AR (CAD)</td><td class="amt">' . self::money((string) $aging['totals']['total']) . '</td><td></td></tr>';
         $h .= '</tbody></table>';
-        return self::wrapHtml("AR Aging — FY {$fiscalYear}", "As of {$asOf} · CAD", $h);
+        return self::wrapHtml("AR Aging — FY {$fiscalYear}", 'As of ' . PdfKit::date($asOf) . ' · CAD', $h);
     }
 
-    private static function renderApAgingHtml(string $asOf, int $fiscalYear): string
+    private static function renderApAgingHtml(string $asOf, int $fiscalYear): array
     {
         $rows = \db_select(
             "SELECT v.name AS vendor_name, b.bill_number, b.bill_date, b.due_date, b.balance_due,
@@ -840,10 +823,10 @@ HTML;
         }
         $h .= '<tr class="total"><td colspan="3">Total Outstanding AP</td><td class="amt">' . self::money($total) . '</td><td></td></tr>';
         $h .= '</tbody></table>';
-        return self::wrapHtml("AP Aging — FY {$fiscalYear}", "As of {$asOf}", $h);
+        return self::wrapHtml("AP Aging — FY {$fiscalYear}", 'As of ' . PdfKit::date($asOf), $h);
     }
 
-    private static function renderFxSummaryHtml(int $fiscalYear): string
+    private static function renderFxSummaryHtml(int $fiscalYear): array
     {
         $rows = \db_select(
             "SELECT r.revaluation_date, p.name AS period_name, r.exchange_rate_used,

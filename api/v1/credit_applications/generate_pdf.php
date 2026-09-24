@@ -36,8 +36,7 @@ require_once FF_ROOT . '/includes/partials/credit_application_render.php';
 require_once FF_ROOT . '/vendor/autoload.php';
 
 use FleetForge\Storage\StorageClient;
-use Mpdf\Mpdf;
-use Mpdf\Output\Destination;
+use FleetForge\Pdf\CreditApplicationPdf;
 
 require_method('POST');
 require_auth_api();
@@ -85,27 +84,17 @@ if (!is_dir($tmpDir)) {
 }
 
 try {
-    $mpdf = new Mpdf([
-        'mode'          => 'utf-8',
-        'format'        => 'A4',
-        'margin_top'    => 12,
-        'margin_bottom' => 12,
-        'margin_left'   => 12,
-        'margin_right'  => 12,
-        'default_font'  => 'dejavusans',
-        'tempDir'       => $tmpDir,
-    ]);
-    // S-UTC-STAMPS: fallback is the company-local business day, not server-local.
+    // S-PDF-LETTERHEAD: same builder as the submit path and the PDF endpoints.
     $submittedDateLabel = $app['signed_date'] ?: ff_today();
-    $mpdf->SetTitle('Credit Application — ' . ($app['customer_company_name'] ?? '') . ' ' . $submittedDateLabel);
-    $mpdf->SetAuthor((string)(settings_get('company.name') ?: 'FleetForge'));
-    $mpdf->WriteHTML($renderedHtml);
-    $pdfBytes = $mpdf->Output('', Destination::STRING_RETURN);
+    $pdfBytes = CreditApplicationPdf::fromSnapshot($renderedHtml, [
+        'id'           => $appId,
+        'company'      => (string) ($app['customer_company_name'] ?? ''),
+        'submitted_at' => $app['submitted_at'] ?? null,
+    ]);
 } catch (\Throwable $e) {
     error_log('[S-CCA-3] generate_pdf regeneration mPDF error for app ' . $appId . ': ' . $e->getMessage());
     json_error('PDF_GEN_FAILED', 'PDF generation failed: ' . $e->getMessage(), 500);
 }
-
 if ($pdfBytes === '') {
     json_error('PDF_GEN_FAILED', 'mPDF produced an empty PDF.', 500);
 }
@@ -117,7 +106,7 @@ if ($tmpPdf === false) {
 
 try {
     file_put_contents($tmpPdf, $pdfBytes);
-    $pdfPath = 'credit_applications/' . $appId . '/credit_application_' . date('Ymd') . '_regen.pdf';
+    $pdfPath = CreditApplicationPdf::layoutKey($appId);
     StorageClient::upload($tmpPdf, $pdfPath);
 
     $docTitle = 'Credit Application — '

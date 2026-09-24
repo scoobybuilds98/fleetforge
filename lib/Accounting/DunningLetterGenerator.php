@@ -4,8 +4,7 @@ declare(strict_types=1);
 namespace FleetForge\Accounting;
 
 use FleetForge\Storage\StorageClient;
-use Mpdf\Mpdf;
-use Mpdf\Output\Destination;
+use FleetForge\Pdf\PdfKit;
 use RuntimeException;
 
 /**
@@ -177,17 +176,28 @@ class DunningLetterGenerator
         $tmpPdfPath  = $tmpDir . '/' . $pdfFilename;
 
         try {
-            $mpdf = new Mpdf([
-                'margin_top'    => 12,
-                'margin_bottom' => 15,
-                'margin_left'   => 15,
-                'margin_right'  => 15,
-                'default_font'  => 'dejavusans',
-                'tempDir'       => $tmpDir,
-            ]);
-            $mpdf->SetTitle($letterContent['subject']);
-            $mpdf->WriteHTML($html);
-            $mpdf->Output($tmpPdfPath, Destination::FILE);
+            // S-PDF-LETTERHEAD: the PDF is a proper letter on the shared
+            // letterhead; $html (above) stays the EMAIL body, whose inline
+            // styles suit mail clients rather than print.
+            $pdfBytes = PdfKit::render(
+                self::renderPdfBody($customer, $overdueInvoices, $letterContent, $totalOverdue),
+                [
+                    'title'     => $letterContent['heading'],
+                    'reference' => (string) $customer['company_name'],
+                    'meta'      => [
+                        'Date'           => PdfKit::date(\ff_today()),
+                        'Account no.'    => (string) $customer['id'],
+                        'Amount overdue' => PdfKit::money($totalOverdue),
+                    ],
+                    'status'    => [
+                        'label' => in_array($letterType, ['warning_90', 'final_notice'], true) ? 'Final notice' : 'Past due',
+                        'tone'  => in_array($letterType, ['warning_90', 'final_notice'], true) ? 'bad' : 'warn',
+                    ],
+                ]
+            );
+            if (file_put_contents($tmpPdfPath, $pdfBytes) === false) {
+                throw new RuntimeException('could not write ' . $tmpPdfPath);
+            }
         } catch (\Throwable $e) {
             throw new RuntimeException(
                 "Dunning PDF generation failed for customer {$customerId}: " . $e->getMessage(),
@@ -384,6 +394,77 @@ class DunningLetterGenerator
     ' . \e($companyName) . ' | ' . \e($companyAddress) . ', ' . \e($companyCity) . ', ' . \e($companyProvince) . ' ' . \e($companyPostal) . '
     <br>This is an automatically generated letter. | Powered by FleetForge
 </div>';
+
+        return $html;
+    }
+
+    /**
+     * renderPdfBody() — the printed letter (S-PDF-LETTERHEAD). Same wording,
+     * invoices and pay links as renderHtml() (the email body); the logo,
+     * company block, date and page numbers come from PdfKit.
+     *
+     * @param array<string,mixed> $customer
+     * @param array<int,array<string,mixed>> $invoices
+     * @param array{subject:string,heading:string,body:string,closing:string} $content
+     */
+    private static function renderPdfBody(
+        array $customer,
+        array $invoices,
+        array $content,
+        string $totalOverdue
+    ): string {
+        $e = static fn ($v): string => \e((string) $v);
+        $companyName = PdfKit::brand()['name'];
+
+        $payUrls = [];
+        foreach ($invoices as $inv) {
+            $payUrls[(int) $inv['id']] = \FleetForge\QboPushers\PayLink::payableUrl((int) $inv['id']);
+        }
+        $hasPay = array_filter($payUrls) !== [];
+
+        // Recipient block, as it would sit in a window envelope.
+        $addr = trim((string) ($customer['billing_address'] ?: ($customer['address'] ?? '')));
+        $to = '<strong>' . $e($customer['company_name']) . '</strong>';
+        if (!empty($customer['contact_name'])) {
+            $to .= '<br>Attn: ' . $e($customer['contact_name']);
+        }
+        if ($addr !== '') {
+            $to .= '<br>' . nl2br($e($addr));
+        }
+        if (!$customer['billing_address'] && !empty($customer['city'])) {
+            $to .= '<br>' . $e(trim($customer['city'] . ', ' . ($customer['province'] ?? '') . ' ' . ($customer['postal_code'] ?? '')));
+        }
+
+        $html = '<table class="ff-panels"><tr><td class="ff-panel" width="55%"><div class="ff-panel-label">To</div>' . $to . '</td>'
+            . '<td width="45%"></td></tr></table>'
+            . '<p style="margin-top:6mm;">Dear ' . $e($customer['contact_name'] ?: $customer['company_name']) . ',</p>'
+            . '<p>' . $e($content['body']) . '</p>';
+
+        $html .= '<table class="ff-grid" style="margin-top:3mm;"><thead><tr>'
+            . '<th>Invoice</th><th>Invoice date</th><th>Due date</th><th class="num">Days overdue</th><th class="num">Amount due</th>'
+            . ($hasPay ? '<th>Pay online</th>' : '')
+            . '</tr></thead><tbody>';
+        foreach ($invoices as $inv) {
+            $daysOverdue = (int) ((new \DateTime(\ff_today()))->diff(new \DateTime($inv['due_date']))->days);
+            $payUrl = $payUrls[(int) $inv['id']] ?? '';
+            $html .= '<tr>'
+                . '<td class="nw">' . $e($inv['invoice_number']) . '</td>'
+                . '<td class="nw">' . $e(PdfKit::date($inv['invoice_date'])) . '</td>'
+                . '<td class="nw">' . $e(PdfKit::date($inv['due_date'])) . '</td>'
+                . '<td class="num">' . $daysOverdue . '</td>'
+                . '<td class="num">' . $e(PdfKit::money((string) $inv['balance_due'])) . '</td>'
+                . ($hasPay ? '<td>' . ($payUrl !== '' ? '<a href="' . $e($payUrl) . '"><strong>Pay now</strong></a>' : '') . '</td>' : '')
+                . '</tr>';
+        }
+        $html .= '<tr class="ff-sum"><td colspan="4">Total overdue</td><td class="num">' . $e(PdfKit::money($totalOverdue)) . '</td>'
+            . ($hasPay ? '<td></td>' : '') . '</tr></tbody></table>';
+
+        if ($hasPay) {
+            $html .= '<p class="muted" style="font-size:8.5pt;">Pay any invoice above online with its <strong>Pay now</strong> link — secure payment through QuickBooks, recorded on your account automatically.</p>';
+        }
+
+        $html .= '<p style="margin-top:5mm;">' . $e($content['closing']) . '</p>'
+            . '<p style="margin-top:6mm;">Sincerely,<br><br><strong>' . $e($companyName) . '</strong><br>Accounts Receivable</p>';
 
         return $html;
     }

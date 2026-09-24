@@ -291,6 +291,7 @@ require_once FF_ROOT . '/includes/header.php';
                                 <th style="padding:10px 12px;text-align:right;font-weight:600;color:var(--text-secondary);">Total Overdue</th>
                                 <th style="padding:10px 12px;text-align:right;font-weight:600;color:var(--text-secondary);">Invoices</th>
                                 <th style="padding:10px 12px;text-align:left;font-weight:600;color:var(--text-secondary);">Sent To</th>
+                                <th style="padding:10px 12px;text-align:right;font-weight:600;color:var(--text-secondary);">Letter</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -304,6 +305,11 @@ require_once FF_ROOT . '/includes/header.php';
                                     <td class="font-mono" style="padding:8px 12px;text-align:right;" x-text="'$' + Number(d.total_overdue).toFixed(2)"></td>
                                     <td style="padding:8px 12px;text-align:right;" x-text="d.invoice_count"></td>
                                     <td style="padding:8px 12px;" x-text="d.sent_to_email || '—'"></td>
+                                    <?php /* S-PDF-LETTERHEAD: the page says "print the PDF to mail it" — this is where. */ ?>
+                                    <td style="padding:8px 12px;text-align:right;white-space:nowrap;">
+                                        <a class="btn btn-ghost btn-sm" target="_blank" rel="noopener"
+                                           :href="FF_Api.url('/api/v1/accounting/ar/dunning_letters/pdf.php?id=' + d.id)">View PDF</a>
+                                    </td>
                                 </tr>
                             </template>
                         </tbody>

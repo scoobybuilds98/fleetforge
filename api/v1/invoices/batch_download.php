@@ -25,7 +25,7 @@ declare(strict_types=1);
  * @returns 200 application/zip | application/pdf (binary stream)
  *          422 on validation, 500 PDF_GENERATION_FAILED
  *
- * @depends lib/Billing/InvoicePdfGenerator.php, lib/Storage/StorageClient.php
+ * @depends lib/Billing/InvoicePdfGenerator.php, lib/Pdf/PdfKit.php
  * @session S-BATCH-INVOICING-2
  */
 
@@ -36,7 +36,6 @@ require_auth_api();
 require_permission('invoices', 'view');
 
 use FleetForge\Billing\InvoicePdfGenerator;
-use FleetForge\Storage\StorageClient;
 
 $body = json_body();
 
@@ -81,13 +80,10 @@ $failed = [];
 foreach ($invoices as $inv) {
     $invId = (int) $inv['id'];
     try {
-        $pdf   = InvoicePdfGenerator::generate($invId);
-        $bytes = StorageClient::read($pdf['pdf_path']);
-        if ($bytes === null || $bytes === '') {
-            $failed[] = $inv['invoice_number'];
-            continue;
-        }
-        $files[(string) $inv['invoice_number']] = $bytes;
+        // S-PDF-LETTERHEAD: pdfBytes() generates/stores as needed and falls
+        // back to an in-memory render if storage lost the file.
+        $pdf = InvoicePdfGenerator::pdfBytes($invId);
+        $files[(string) $inv['invoice_number']] = $pdf['bytes'];
     } catch (\Throwable $e) {
         $failed[] = $inv['invoice_number'];
         error_log("[batch_download] Invoice #{$invId}: " . $e->getMessage());
@@ -147,9 +143,11 @@ if ($format === 'zip') {
 // mPDF imports each source PDF page-by-page via its FPDI integration.
 require_once FF_ROOT . '/vendor/autoload.php';
 try {
+    // Same paper as every invoice PDF (PdfKit::PAPER) — importing Letter
+    // pages onto A4 cropped/shifted every page of the merged file.
     $mpdf = new \Mpdf\Mpdf([
         'mode'    => 'utf-8',
-        'format'  => 'A4',
+        'format'  => \FleetForge\Pdf\PdfKit::PAPER,
         'tempDir' => $tmpDir,
         'margin_top' => 0, 'margin_bottom' => 0, 'margin_left' => 0, 'margin_right' => 0,
     ]);

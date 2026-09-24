@@ -36,8 +36,7 @@ require_once FF_ROOT . '/vendor/autoload.php';
 use FleetForge\Storage\StorageClient;
 use FleetForge\Security\RateLimiter;
 use FleetForge\Notifications\NotificationService;
-use Mpdf\Mpdf;
-use Mpdf\Output\Destination;
+use FleetForge\Pdf\CreditApplicationPdf;
 
 // ── Brand / company settings ─────────────────────────────────────────────────
 $companyName  = (string)(settings_get('company.name') ?: 'FleetForge');
@@ -527,29 +526,23 @@ if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminP
                     if (!is_dir($tmpDir)) {
                         @mkdir($tmpDir, 0755, true);
                     }
-                    $mpdf = new Mpdf([
-                        'mode'          => 'utf-8',
-                        'format'        => 'A4',
-                        'margin_top'    => 12,
-                        'margin_bottom' => 12,
-                        'margin_left'   => 12,
-                        'margin_right'  => 12,
-                        'default_font'  => 'dejavusans',
-                        'tempDir'       => $tmpDir,
-                    ]);
                     // Business-local date fallback (signed_date is the applicant's local date).
                     $submittedDateLabel = $signed_date ?: ff_today();
-                    $mpdf->SetTitle('Credit Application — ' . ($app['customer_company_name'] ?? '') . ' ' . $submittedDateLabel);
-                    $mpdf->SetAuthor((string)(settings_get('company.name') ?: 'FleetForge'));
-                    $mpdf->WriteHTML($renderedHtml);
-                    $pdfBytes = $mpdf->Output('', Destination::STRING_RETURN);
+                    // S-PDF-LETTERHEAD: the snapshot on the shared letterhead
+                    // (logo band, page numbers) — same builder the PDF endpoints
+                    // use to rebuild a lost file, so both copies look alike.
+                    $pdfBytes = CreditApplicationPdf::fromSnapshot($renderedHtml, [
+                        'id'           => (int) $app['id'],
+                        'company'      => (string) ($app['customer_company_name'] ?? ''),
+                        'submitted_at' => $now,
+                    ]);
 
                     if ($pdfBytes !== '') {
                         $tmpPdf = tempnam(sys_get_temp_dir(), 'ff_cca_');
                         if ($tmpPdf !== false) {
                             file_put_contents($tmpPdf, $pdfBytes);
                             try {
-                                $pdfPath = 'credit_applications/' . $app['id'] . '/credit_application_' . date('Ymd') . '.pdf';
+                                $pdfPath = CreditApplicationPdf::layoutKey((int) $app['id']);
                                 StorageClient::upload($tmpPdf, $pdfPath);
 
                                 // D-CCA-3-D: title from FF customer record + submitted date

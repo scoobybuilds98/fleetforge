@@ -105,9 +105,13 @@ If you do record one here: {{Payments › Record Payment @/payments/create}} →
    - **Collection Notes** — each call or email, with a follow-up date;
    - **Promise to Pay**;
    - **Dunning Letters** — 30/60/90-day and final notices.
-   - **Generate & Send** always makes the letter; it emails it only when customer emails are on (the master switch in {{Settings › Customer Emails @/settings?tab=customer_notifications}}) and the customer is not on the do-not-email list. The message says which happened — print and mail the letter when it was not emailed.
+   - **Generate & Send** always makes the letter; it emails it only when customer emails are on (the master switch in {{Settings › Customer Emails @/settings?tab=customer_notifications}}) and the customer is not on the do-not-email list. The message says which happened — print and mail the letter when it was not emailed: **View PDF** on the letter's row opens it.
    - The nightly automatic dunning letters follow the **Dunning letters** reminder in Customer Emails, which ships OFF.
 3. **Statements**: {{Receivables › Statements @/accounting/statements}} → customer → **Generate PDF**.
+
+:::callout info What every PDF looks like
+Invoices, statements, dunning letters, credit applications and the accounting reports all print on one letterhead: the logo from {{Settings › Design @/settings?tab=design}} in a band across the top, the company name, address and contact details, and page numbers. The **PDF documents** card there turns the logo off (the company name prints instead), sets the accent colour and the invoice footer line. A draft invoice's PDF is stamped **DRAFT** and a void one **VOID**. **View PDF** (or **Preview PDF** on a draft) on an invoice opens it in a new tab; the customer portal's **Download PDF** works the same way.
+:::
 4. **Automatic reminders** ({{Settings › Customer Emails @/settings?tab=customer_notifications}}): every reminder ships OFF. A reminder sends only when all three are on: the master switch, that reminder's own tick, and the dispatcher job. Use **Send me a sample** before turning one on.
 5. **Writing off a bad debt**: on the invoice, **Write Off** → reason → **Write Off** (sent, overdue or partly paid invoices; needs journal-entry permission). It posts DR Bad Debt Expense / CR AR, closes the invoice and sends QuickBooks a credit memo. Don't use a credit note — that reduces revenue instead. Damage-claim invoices are written off from the claim ([Daily operations](sop:daily-operations#damage-claims)).
 6. **Money received after a write-off**: on the written-off invoice, **Record Recovery** → amount, date, bank → it posts DR the bank / CR Bad Debt Expense and the invoice stays written off. The entry is sent to QuickBooks as a journal entry, so don't record the same money there again.

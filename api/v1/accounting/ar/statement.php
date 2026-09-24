@@ -15,10 +15,12 @@ declare(strict_types=1);
  *
  * Decisions: A9 (AR subledger is FleetForge billing)
  * Spec ref: FLEETFORGE_ACCOUNTING_SPEC.md §5 (Customer statements)
- * Session: S031
+ * Session: S031, S-PDF-LETTERHEAD (letterhead + layout via FleetForge\Pdf\PdfKit)
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
+
+use FleetForge\Pdf\PdfKit;
 
 require_method('GET');
 require_auth_api();
@@ -46,16 +48,6 @@ $customer = db_row(
 );
 if (!$customer) json_error('NOT_FOUND', 'Customer not found.', 404);
 
-// Fetch company settings for PDF header
-$companyName    = settings_get('company.name', 'FleetForge');
-$companyAddress = settings_get('company.address', '');
-$companyCity    = settings_get('company.city', '');
-$companyProvince = settings_get('company.province', '');
-$companyPostal  = settings_get('company.postal_code', '');
-$companyPhone   = settings_get('company.phone', '');
-$companyEmail   = settings_get('company.email', '');
-$currencySymbol = settings_get('company.currency_symbol', '$');
-$companyGst     = settings_get('company.gst_number', '');
 $companyPst     = settings_get('company.pst_number', '');
 
 // ── Opening balance: sum of all open invoice balances BEFORE date_from ─���
@@ -240,195 +232,109 @@ foreach ($agingInvoices as $ai) {
 $agingTotal = '0.00';
 foreach ($aging as $v) $agingTotal = bcadd($agingTotal, $v, 2);
 
-// ── Generate PDF via mPDF ──
-// WHY: tempDir must exist before mPDF constructor runs
-$tmpDir = FF_ROOT . '/storage/tmp';
-if (!is_dir($tmpDir)) {
-    @mkdir($tmpDir, 0755, true);
+// ── Render (S-PDF-LETTERHEAD) ──────────────────────────────────────────────
+// The letterhead (logo, company block, page numbers) comes from PdfKit so a
+// statement matches the invoices it lists. Money prints via PdfKit::money
+// (bcmath, D16) — the old number_format((float)…) was a float leak.
+$m = static fn (string $v): string => e(PdfKit::money($v));
+
+// Customer block: billing address when set (same rule as invoices), else the
+// main address + its city line — without doubling a city already in it.
+$custLines = [];
+$addr = trim((string) ($customer['billing_address'] ?: $customer['address'] ?? ''));
+if ($addr !== '') {
+    $custLines = array_values(array_filter(array_map('trim', preg_split('/\R/', $addr) ?: [])));
+}
+if (!$customer['billing_address']) {
+    $cityLine = trim((string) $customer['city']
+        . (!empty($customer['province']) ? ((string) $customer['city'] !== '' ? ', ' : '') . $customer['province'] : '')
+        . (!empty($customer['postal_code']) ? ' ' . $customer['postal_code'] : ''));
+    $norm = static fn (string $v): string => strtolower((string) preg_replace('/[^a-z0-9]/i', '', $v));
+    if ($cityLine !== '' && !str_contains($norm($addr), $norm((string) ($customer['postal_code'] ?: $customer['city'])))) {
+        $custLines[] = $cityLine;
+    }
 }
 
-$mpdf = new \Mpdf\Mpdf([
-    'margin_top'    => 10,
-    'margin_bottom' => 15,
-    'margin_left'   => 12,
-    'margin_right'  => 12,
-    'default_font'  => 'dejavusans',
-    'tempDir'       => $tmpDir,
-]);
+$totalCharges = '0.00';
+$totalCredits = '0.00';
+foreach ($transactions as $t) {
+    $totalCharges = bcadd($totalCharges, $t['debit'], 2);
+    $totalCredits = bcadd($totalCredits, $t['credit'], 2);
+}
 
-$mpdf->SetTitle("Statement — {$customer['company_name']}");
-$mpdf->SetAuthor($companyName);
+$html = '<table class="ff-panels"><tr>'
+    . '<td class="ff-panel" width="48%"><div class="ff-panel-label">Statement for</div>'
+    . '<strong>' . e($customer['company_name']) . '</strong><br>'
+    . ($customer['contact_name'] ? 'Attn: ' . e($customer['contact_name']) . '<br>' : '')
+    . implode('<br>', array_map('e', $custLines))
+    . ($customer['email'] ? '<br><span class="muted">' . e($customer['email']) . '</span>' : '')
+    . '</td><td class="ff-gap"></td>'
+    . '<td class="ff-panel" width="48%"><div class="ff-panel-label">Account summary</div>'
+    . '<table class="ff-kv" width="100%">'
+    . '<tr><td class="k">Opening balance</td><td class="num">' . $m($openingBalance) . '</td></tr>'
+    . '<tr><td class="k">Charges this period</td><td class="num">' . $m($totalCharges) . '</td></tr>'
+    . '<tr><td class="k">Payments &amp; credits</td><td class="num">-' . $m($totalCredits) . '</td></tr>'
+    . '</table>'
+    . '<table width="100%" style="margin-top:2mm;"><tr>'
+    . '<td style="background-color:' . e(PdfKit::brand()['accent']) . ';color:#ffffff;font-weight:bold;padding:2mm 2.5mm;">Balance due</td>'
+    . '<td style="background-color:' . e(PdfKit::brand()['accent']) . ';color:#ffffff;font-weight:bold;font-size:11pt;text-align:right;padding:2mm 2.5mm;">' . $m($closingBalance) . '</td>'
+    . '</tr></table>'
+    . '</td></tr></table>';
 
-// Helper for formatting currency in PDF
-$fmt = fn(string $val) => $currencySymbol . number_format((float)$val, 2);
-$fmtDate = fn(string $d) => date('M j, Y', strtotime($d));
-
-// Build HTML
-$html = '
-<style>
-    body { font-family: DejaVu Sans, sans-serif; font-size: 9pt; color: #222; }
-    h1 { font-size: 18pt; margin: 0 0 2px; }
-    .header-table { width: 100%; margin-bottom: 14px; }
-    .header-table td { vertical-align: top; padding: 0; }
-    .company-info { font-size: 8pt; color: #555; line-height: 1.5; }
-    .customer-box { border: 1px solid #ccc; padding: 10px; border-radius: 4px; background: #f9f9f9; }
-    .customer-box strong { font-size: 10pt; }
-    .summary-row { margin: 12px 0; }
-    .summary-row td { padding: 6px 10px; font-size: 9pt; }
-    .txn-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    .txn-table th { background: #2563eb; color: #fff; font-size: 8pt; padding: 6px 8px; text-align: left; }
-    .txn-table th.amt { text-align: right; }
-    .txn-table td { padding: 5px 8px; border-bottom: 1px solid #e5e5e5; font-size: 8.5pt; }
-    .txn-table td.amt { text-align: right; font-family: DejaVu Sans Mono, monospace; }
-    .txn-table tr.alt { background: #f7f7f7; }
-    .aging-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    .aging-table th { background: #f3f4f6; font-size: 8pt; padding: 6px 8px; text-align: right; border-bottom: 2px solid #ccc; }
-    .aging-table th:first-child { text-align: left; }
-    .aging-table td { padding: 5px 8px; text-align: right; font-family: DejaVu Sans Mono, monospace; font-size: 8.5pt; border-bottom: 1px solid #e5e5e5; }
-    .aging-table td:first-child { text-align: left; font-family: DejaVu Sans, sans-serif; }
-    .total-row td { font-weight: bold; border-top: 2px solid #333; }
-    .footer { font-size: 7pt; color: #999; text-align: center; margin-top: 20px; }
-</style>
-
-<table class="header-table">
-<tr>
-    <td style="width:55%;">
-        <h1>' . e($companyName) . '</h1>
-        <div class="company-info">
-            ' . e($companyAddress) . '<br>
-            ' . e($companyCity) . ', ' . e($companyProvince) . ' ' . e($companyPostal) . '<br>
-            ' . ($companyPhone ? 'Tel: ' . e($companyPhone) . '<br>' : '') . '
-            ' . ($companyEmail ? e($companyEmail) . '<br>' : '') . '
-            ' . ($companyGst ? 'GST#: ' . e($companyGst) . '<br>' : '') . '
-            ' . ($companyPst ? 'PST#: ' . e($companyPst) : '') . '
-        </div>
-    </td>
-    <td style="width:45%;text-align:right;">
-        <div style="font-size:14pt;font-weight:bold;color:#2563eb;margin-bottom:8px;">STATEMENT</div>
-        <div style="font-size:8.5pt;color:#555;">
-            Statement Date: <strong>' . e($fmtDate($dateTo)) . '</strong><br>
-            Period: ' . e($fmtDate($dateFrom)) . ' — ' . e($fmtDate($dateTo)) . '<br>
-            Customer ID: ' . e((string)$customer['id']) . '
-        </div>
-    </td>
-</tr>
-</table>
-
-<div class="customer-box">
-    <strong>' . e($customer['company_name']) . '</strong><br>
-    ' . ($customer['contact_name'] ? e($customer['contact_name']) . '<br>' : '') . '
-    ' . ($customer['billing_address'] ? e($customer['billing_address']) . '<br>' : ($customer['address'] ? e($customer['address']) . '<br>' : '')) . '
-    ' . ($customer['city'] ? e($customer['city']) . ', ' . e($customer['province'] ?? '') . ' ' . e($customer['postal_code'] ?? '') : '') . '
-</div>
-
-<table style="width:100%;margin-top:14px;">
-<tr>
-    <td style="width:50%;padding:8px 12px;background:#f0f0f0;border-radius:4px;">
-        <span style="font-size:8pt;color:#666;">Opening Balance</span><br>
-        <span style="font-size:12pt;font-weight:bold;">' . e($fmt($openingBalance)) . '</span>
-    </td>
-    <td style="width:50%;padding:8px 12px;background:' . (bccomp($closingBalance, '0', 2) > 0 ? '#fee2e2' : '#dcfce7') . ';border-radius:4px;text-align:right;">
-        <span style="font-size:8pt;color:#666;">Balance Due</span><br>
-        <span style="font-size:12pt;font-weight:bold;">' . e($fmt($closingBalance)) . '</span>
-    </td>
-</tr>
-</table>';
-
-// Transaction table
+$html .= '<div class="ff-h">Account activity</div>';
 if (count($transactions) > 0) {
-    $html .= '
-<table class="txn-table">
-<thead>
-<tr>
-    <th style="width:12%;">Date</th>
-    <th style="width:10%;">Type</th>
-    <th style="width:14%;">Reference</th>
-    <th style="width:28%;">Description</th>
-    <th class="amt" style="width:12%;">Charges</th>
-    <th class="amt" style="width:12%;">Credits</th>
-    <th class="amt" style="width:12%;">Balance</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-    <td colspan="4" style="font-weight:bold;font-size:8pt;color:#666;">Brought Forward</td>
-    <td class="amt"></td>
-    <td class="amt"></td>
-    <td class="amt" style="font-weight:bold;">' . e($fmt($openingBalance)) . '</td>
-</tr>';
-
-    foreach ($transactions as $i => $txn) {
-        $altClass = $i % 2 === 0 ? '' : ' class="alt"';
-        $html .= "
-<tr{$altClass}>
-    <td>" . e($fmtDate($txn['date'])) . "</td>
-    <td>" . e($txn['type']) . "</td>
-    <td>" . e($txn['reference']) . "</td>
-    <td>" . e($txn['description']) . "</td>
-    <td class=\"amt\">" . (bccomp($txn['debit'], '0', 2) > 0 ? e($fmt($txn['debit'])) : '') . "</td>
-    <td class=\"amt\">" . (bccomp($txn['credit'], '0', 2) > 0 ? e($fmt($txn['credit'])) : '') . "</td>
-    <td class=\"amt\">" . e($fmt($txn['balance'])) . "</td>
-</tr>";
+    $html .= '<table class="ff-grid"><thead><tr>'
+        . '<th width="13%">Date</th><th width="9%">Type</th><th width="17%">Reference</th><th>Description</th>'
+        . '<th class="num" width="12%">Charges</th><th class="num" width="12%">Credits</th><th class="num" width="12%">Balance</th>'
+        . '</tr></thead><tbody>'
+        . '<tr><td colspan="4" class="muted"><em>Balance brought forward</em></td><td></td><td></td>'
+        . '<td class="num"><strong>' . $m($openingBalance) . '</strong></td></tr>';
+    foreach ($transactions as $txn) {
+        $html .= '<tr>'
+            . '<td class="nw">' . e(PdfKit::date($txn['date'])) . '</td>'
+            . '<td>' . e($txn['type']) . '</td>'
+            . '<td class="nw">' . e($txn['reference']) . '</td>'
+            . '<td>' . e($txn['description']) . '</td>'
+            . '<td class="num">' . (bccomp($txn['debit'], '0', 2) > 0 ? $m($txn['debit']) : '') . '</td>'
+            . '<td class="num">' . (bccomp($txn['credit'], '0', 2) > 0 ? $m($txn['credit']) : '') . '</td>'
+            . '<td class="num">' . $m($txn['balance']) . '</td>'
+            . '</tr>';
     }
-
-    $totalCharges = '0.00';
-    $totalCredits = '0.00';
-    foreach ($transactions as $t) {
-        $totalCharges = bcadd($totalCharges, $t['debit'], 2);
-        $totalCredits = bcadd($totalCredits, $t['credit'], 2);
-    }
-
-    $html .= '
-<tr class="total-row">
-    <td colspan="4" style="font-weight:bold;">Period Totals</td>
-    <td class="amt">' . e($fmt($totalCharges)) . '</td>
-    <td class="amt">' . e($fmt($totalCredits)) . '</td>
-    <td class="amt">' . e($fmt($closingBalance)) . '</td>
-</tr>
-</tbody>
-</table>';
+    $html .= '<tr class="ff-sum"><td colspan="4">Period totals</td>'
+        . '<td class="num">' . $m($totalCharges) . '</td><td class="num">' . $m($totalCredits) . '</td>'
+        . '<td class="num">' . $m($closingBalance) . '</td></tr>'
+        . '</tbody></table>';
 } else {
-    $html .= '<div style="text-align:center;padding:30px;color:#999;font-size:10pt;">No transactions in this period.</div>';
+    $html .= '<div class="ff-panel-label" style="text-align:center;padding:6mm 0;">No transactions in this period.</div>';
 }
 
-// Aging summary
-$html .= '
-<div style="margin-top:20px;">
-    <div style="font-size:10pt;font-weight:bold;margin-bottom:6px;">Aged Balance Summary</div>
-    <table class="aging-table">
-    <thead>
-    <tr>
-        <th style="text-align:left;">Current</th>
-        <th>1–30 Days</th>
-        <th>31–60 Days</th>
-        <th>61–90 Days</th>
-        <th>90+ Days</th>
-        <th>Total</th>
-    </tr>
-    </thead>
-    <tbody>
-    <tr>
-        <td style="text-align:right;">' . e($fmt($aging['current'])) . '</td>
-        <td>' . e($fmt($aging['days_1_30'])) . '</td>
-        <td>' . e($fmt($aging['days_31_60'])) . '</td>
-        <td>' . e($fmt($aging['days_61_90'])) . '</td>
-        <td>' . e($fmt($aging['days_90_plus'])) . '</td>
-        <td style="font-weight:bold;">' . e($fmt($agingTotal)) . '</td>
-    </tr>
-    </tbody>
-    </table>
-</div>
+$html .= '<div class="ff-h">Aged balance</div>'
+    . '<table class="ff-grid"><thead><tr>'
+    . '<th class="num">Current</th><th class="num">1–30 days</th><th class="num">31–60 days</th>'
+    . '<th class="num">61–90 days</th><th class="num">90+ days</th><th class="num">Total owing</th>'
+    . '</tr></thead><tbody><tr>'
+    . '<td class="num">' . $m($aging['current']) . '</td>'
+    . '<td class="num">' . $m($aging['days_1_30']) . '</td>'
+    . '<td class="num">' . $m($aging['days_31_60']) . '</td>'
+    . '<td class="num">' . $m($aging['days_61_90']) . '</td>'
+    . '<td class="num">' . $m($aging['days_90_plus']) . '</td>'
+    . '<td class="num"><strong>' . $m($agingTotal) . '</strong></td>'
+    . '</tr></tbody></table>';
 
-<div class="footer">
-    <br>' . e($companyName) . ' | ' . e($companyAddress) . ', ' . e($companyCity) . ', ' . e($companyProvince) . ' ' . e($companyPostal) . '
-    ' . ($companyPhone ? ' | ' . e($companyPhone) : '') . '
-    <br>Generated ' . date('M j, Y g:i A') . ' | Powered by FleetForge
-</div>';
+try {
+    $bytes = PdfKit::render($html, [
+        'title'     => 'Statement',
+        'reference' => (string) $customer['company_name'],
+        'meta'      => [
+            'Statement date' => PdfKit::date($dateTo),
+            'Period'         => PdfKit::period($dateFrom, $dateTo),
+            'Account no.'    => (string) $customer['id'],
+        ],
+        'footer_note' => 'Please contact us with any questions about your account.',
+    ]);
+} catch (\Throwable $e) {
+    error_log('[ar/statement] customer ' . $customerId . ': ' . $e->getMessage());
+    json_error('PDF_GENERATION_FAILED', 'Could not produce the statement PDF. Please try again.', 500);
+}
 
-$mpdf->WriteHTML($html);
-
-// Output PDF
-header('Content-Type: application/pdf');
-header('Content-Disposition: inline; filename="statement_' . $customer['id'] . '_' . $dateTo . '.pdf"');
-$mpdf->Output('', \Mpdf\Output\Destination::INLINE);
-exit;
+PdfKit::stream($bytes, 'statement_' . $customer['id'] . '_' . $dateTo);

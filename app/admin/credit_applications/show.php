@@ -34,7 +34,9 @@ declare(strict_types=1);
  * Trap 7: rendered_html is rendered server-side as-is (already sanitised at
  * submit time from validated form fields + trusted settings HTML), served by
  * snapshot.php. NO token_hash, signature_path, or file_path exposed to client —
- * PDF + attachments go out as short-lived signed URLs (StorageClient::url).
+ * the PDF goes through api/v1/credit_applications/pdf (stored copy, or rebuilt
+ * from the snapshot — S-PDF-LETTERHEAD); attachments go out as short-lived
+ * signed URLs (StorageClient::url).
  *
  * form_data nests the applicant's figure at credit.credit_requested (see
  * app/admin/credit-application.php); the old page read a top-level key that
@@ -94,20 +96,14 @@ if (!$app) {
     exit;
 }
 
-// ── Signed URL for the PDF download (Trap 7 — no file_path to client) ─────
+// ── PDF link (Trap 7 — no file_path to client) ─────────────────────────────
+// S-PDF-LETTERHEAD: the streaming endpoint serves the stored PDF, or rebuilds
+// it from the frozen snapshot when storage has lost the file. The old direct
+// presigned URL was a dead S3 link on prod for exactly that reason.
 $pdfUrl = null;
-if ($app['generated_pdf_document_id'] !== null) {
-    $docRow = db_row(
-        "SELECT file_path FROM documents WHERE id = ? AND deleted_at IS NULL",
-        [(int)$app['generated_pdf_document_id']]
-    );
-    if ($docRow && $docRow['file_path'] !== null) {
-        try {
-            $pdfUrl = StorageClient::url((string)$docRow['file_path'], 3600);
-        } catch (\Throwable $e) {
-            error_log('[S-CCA-3] PDF URL generation failed for app ' . $appId . ': ' . $e->getMessage());
-        }
-    }
+if (in_array($app['status'], ['submitted', 'reviewed'], true)
+    && ((string) ($app['rendered_html'] ?? '') !== '' || $app['generated_pdf_document_id'] !== null)) {
+    $pdfUrl = base_url('api/v1/credit_applications/pdf') . '?id=' . (int) $appId;
 }
 
 // ── Files the applicant uploaded with the form (S-CCA-2 stores them as
@@ -425,13 +421,13 @@ $heroCrumbs = $fromCustomer
     </a>
 
     <?php if ($pdfUrl): ?>
-    <a class="stat-card stat-card--green" href="<?= e($pdfUrl) ?>" target="_blank" rel="noopener" title="Download the stored PDF">
+    <a class="stat-card stat-card--green" href="<?= e($pdfUrl) ?>" target="_blank" rel="noopener" title="Open the PDF">
     <?php else: ?>
     <div class="stat-card stat-card--slate">
     <?php endif; ?>
         <span class="stat-icon <?= $pdfUrl ? 'stat-icon--green' : 'stat-icon--slate' ?>"><svg><use href="#icon-document-text"/></svg></span>
         <div class="stat-label">PDF</div>
-        <div class="stat-value"><?= $pdfUrl ? 'Stored' : 'Not yet' ?></div>
+        <div class="stat-value"><?= $pdfUrl ? 'Ready' : 'Not yet' ?></div>
     <?= $pdfUrl ? '</a>' : '</div>' ?>
     <?php endif; ?>
 

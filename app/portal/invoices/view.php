@@ -135,11 +135,12 @@ require_once dirname(__DIR__) . '/includes/header.php';
             </button>
             <div x-show="error" x-cloak class="text-danger text-xs" style="margin-top:4px;max-width:240px;" x-text="error"></div>
         <?php endif; ?>
-        <?php if ($inv['pdf_path']): ?>
-            <a href="<?= e(base_url('api/v1/invoices/download.php?id=' . $invoiceId)) ?>" class="btn btn-primary btn-sm" target="_blank">
-                Download PDF
-            </a>
-        <?php endif; ?>
+        <?php /* S-PDF-LETTERHEAD: was api/v1/invoices/download.php — a file that never
+                 existed — and hidden until a PDF had been stored. The portal
+                 endpoint generates on demand, so the button is always offered. */ ?>
+        <a href="<?= e(base_url('api/v1/portal/invoices/pdf') . '?id=' . $invoiceId) ?>" class="btn btn-primary btn-sm" target="_blank" rel="noopener">
+            Download PDF
+        </a>
     </div>
 </div>
 

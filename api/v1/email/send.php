@@ -73,7 +73,7 @@ if (!empty($errors)) {
 // ── Resolve attachments ──────────────────────────────────────
 // Each attachment may be one of:
 //   {document_id: int}        → resolve from documents table
-//   {invoice_id:  int}        → resolve invoice PDF (build pdf if missing — out of scope: skip if no pdf_path)
+//   {invoice_id:  int}        → resolve invoice PDF (generated/refreshed on the spot — S-PDF-LETTERHEAD)
 //   {upload_path, name, ...}  → freshly uploaded file
 $attachments = [];
 foreach ($rawAttachments as $a) {
@@ -109,7 +109,18 @@ foreach ($rawAttachments as $a) {
              WHERE id = ? AND deleted_at IS NULL",
             [$invId]
         );
-        if (!$inv || empty($inv['pdf_path'])) continue;
+        if (!$inv) continue;
+        // S-PDF-LETTERHEAD: make sure the stored PDF exists and is current
+        // before attaching it. generate() reuses a good copy and rebuilds a
+        // missing / older-layout one (a draft always re-renders). Attaching
+        // the raw pdf_path sent emails that failed closed whenever storage
+        // had lost the file.
+        try {
+            $inv['pdf_path'] = \FleetForge\Billing\InvoicePdfGenerator::generate($invId)['pdf_path'];
+        } catch (\Throwable $e) {
+            error_log("[email/send] invoice #{$invId} PDF could not be prepared: " . $e->getMessage());
+        }
+        if (empty($inv['pdf_path'])) continue;
         $attachments[] = [
             'path'        => (string)$inv['pdf_path'],
             'name'        => $inv['invoice_number'] . '.pdf',

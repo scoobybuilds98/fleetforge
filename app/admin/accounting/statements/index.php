@@ -168,8 +168,14 @@ function statementsPage() {
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(blob);
                 link.download = 'statement_' + this.customerId + '_' + this.dateTo + '.pdf';
+                // S-PDF-LETTERHEAD: Firefox only follows a download link that is
+                // in the document, and revoking the blob URL in the same tick
+                // as click() can cancel the download in Safari/Firefox — so
+                // attach it, and revoke once the browser has taken the file.
+                document.body.appendChild(link);
                 link.click();
-                URL.revokeObjectURL(link.href);
+                link.remove();
+                setTimeout(() => URL.revokeObjectURL(link.href), 60000);
                 FF_Toast.success('Statement generated.');
             } catch (e) {
                 this.formError = 'Network error. Please try again.';

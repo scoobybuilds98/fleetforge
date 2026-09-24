@@ -22,7 +22,7 @@ declare(strict_types=1);
  *                pdf_generated_at: string, pdf_version: int }
  *          404 NOT_FOUND, 500 PDF_GENERATION_FAILED
  *
- * @depends lib/Billing/InvoicePdfGenerator.php, lib/Storage/StorageClient.php
+ * @depends lib/Billing/InvoicePdfGenerator.php
  * @session S-INVOICE-PDF
  */
 
@@ -33,7 +33,6 @@ require_auth_api();
 require_permission('invoices', 'edit');
 
 use FleetForge\Billing\InvoicePdfGenerator;
-use FleetForge\Storage\StorageClient;
 
 $body = json_body();
 
@@ -77,7 +76,9 @@ if ($result['regenerated']) {
 
 json_success([
     'pdf_path_exists'  => true,
-    'download_url'     => StorageClient::url($result['pdf_path'], 900),
+    // S-PDF-LETTERHEAD: the streaming endpoint, not a presigned storage URL
+    // (those were dead links once storage lost a file).
+    'download_url'     => base_url('api/v1/invoices/pdf') . '?id=' . $invoiceId,
     'regenerated'       => $result['regenerated'],
     'pdf_generated_at' => $result['pdf_generated_at'],
     'pdf_version'       => $result['pdf_version'],

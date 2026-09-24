@@ -4,21 +4,23 @@ declare(strict_types=1);
 /**
  * lib/Accounting/ReportPdfRenderer.php
  *
- * mPDF rendering for the 4 S036 financial reports. Inline HTML + CSS
- * matches the on-screen layouts. The branded header reads from the
- * `company.*` and `brand.*` settings populated by S-DESIGN-SETTINGS-
- * FOOTER-LOGIN.
+ * mPDF rendering for the accounting reports (P&L, balance sheet, cash
+ * flow, working trial balance, per-unit P&L, asset schedule, book-tax
+ * differences, GST34, CCA Schedule 8, disclosure notes). Each method builds
+ * the report BODY; the letterhead (logo band, company, period, generated
+ * time in the company timezone), page numbers and table styling come from
+ * FleetForge\Pdf\PdfKit (S-PDF-LETTERHEAD) so every report matches every
+ * other PDF the app produces.
  *
  * Each public method emits the PDF directly to the response body and
  * sets Content-Type — the caller must NOT json_success() after invoking.
  *
- * Session: S036
+ * Session: S036, S-PDF-LETTERHEAD
  */
 
 namespace FleetForge\Accounting;
 
-use Mpdf\Mpdf;
-use Mpdf\Output\Destination;
+use FleetForge\Pdf\PdfKit;
 
 class ReportPdfRenderer
 {
@@ -28,18 +30,18 @@ class ReportPdfRenderer
     public static function profitAndLoss(array $report): void
     {
         $title  = 'Profit & Loss';
-        $period = $report['period']['from'] . ' to ' . $report['period']['to'];
+        $period = PdfKit::period($report['period']['from'], $report['period']['to']);
 
         $hasCompare = $report['compare_mode'] !== 'none' && !empty($report['compare_total']);
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
         $html .= '<table class="rpt">';
 
         $renderGroup = static function (string $label, array $rows, string $total) use ($hasCompare) {
             $colCount = $hasCompare ? 4 : 2;
             $h  = '<tr class="group"><td colspan="' . $colCount . '"><strong>' . htmlspecialchars($label) . '</strong></td></tr>';
             foreach ($rows as $r) {
-                $h .= '<tr><td class="acct">' . htmlspecialchars($r['code'] . ' &mdash; ' . $r['name']) . '</td>';
+                $h .= '<tr><td class="acct">' . htmlspecialchars($r['code'] . ' — ' . $r['name']) . '</td>';
                 $h .= '<td class="amt">' . self::money($r['amount']) . '</td>';
                 if ($hasCompare) {
                     $h .= '<td class="amt">' . self::money($r['compare_amount'] ?? '0.00') . '</td>';
@@ -82,7 +84,7 @@ class ReportPdfRenderer
         $html .= '</tr>';
         $html .= '</table>';
 
-        self::emit($html, $title, 'A4', 'L');
+        self::emit($html, $title, $period, 'P');
     }
 
     /**
@@ -97,7 +99,7 @@ class ReportPdfRenderer
             $period .= ' — PY as of ' . $report['py_period']['end_date'];
         }
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
 
         if (!$report['is_balanced']) {
             $diff = bcsub($report['totals']['debits'], $report['totals']['credits'], 2);
@@ -155,7 +157,7 @@ class ReportPdfRenderer
 
         $html .= '</tbody></table>';
 
-        self::emit($html, $title, 'A4', 'L');
+        self::emit($html, $title, $period, 'L');
     }
 
     /**
@@ -167,7 +169,7 @@ class ReportPdfRenderer
         $title  = 'CCA Schedule 8';
         $period = 'Fiscal Year ' . $schedule['fiscal_year'];
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
 
         $rows = $schedule['rows'] ?? [];
         if (!$rows) {
@@ -245,7 +247,7 @@ class ReportPdfRenderer
                . 'and the proposed 2024 FES reinstatement rules are implemented '
                . 'in S-ACCT-CCA-2.</p>';
 
-        self::emit($html, $title, 'A4', 'L');
+        self::emit($html, $title, $period, 'L');
     }
 
     /**
@@ -257,7 +259,7 @@ class ReportPdfRenderer
         $title  = 'Book vs Tax — Temporary Differences';
         $period = 'Fiscal Year ' . $report['fiscal_year'];
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
 
         $html .= '<div class="banner-amber">';
         $html .= '<strong>Method: ' . htmlspecialchars($report['method']) . '</strong> — '
@@ -292,7 +294,7 @@ class ReportPdfRenderer
         $html .= '<td></td></tr>';
         $html .= '</tbody></table>';
 
-        self::emit($html, $title, 'A4', 'P');
+        self::emit($html, $title, $period, 'P');
     }
 
     /**
@@ -303,9 +305,9 @@ class ReportPdfRenderer
     {
         $p = $data['period'];
         $title  = 'GST34 Return';
-        $period = "{$p['period_start']} to {$p['period_end']} ({$p['tax_type']})";
+        $period = PdfKit::period($p['period_start'], $p['period_end']) . ' · ' . strtoupper((string) $p['tax_type']);
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
 
         if ($data['quick_method']) {
             $html .= '<div class="banner-amber">';
@@ -359,15 +361,15 @@ class ReportPdfRenderer
             $html .= '</p>';
         }
 
-        self::emit($html, $title, 'A4', 'L');
+        self::emit($html, $title, $period, 'L');
     }
 
     public static function balanceSheet(array $report): void
     {
         $title  = 'Balance Sheet';
-        $period = 'As of ' . $report['as_of'];
+        $period = 'As of ' . PdfKit::date($report['as_of']);
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
         if (!$report['is_balanced']) {
             $html .= '<div class="banner-red">Balance sheet unbalanced — drift '
                   . self::money($report['drift']) . '</div>';
@@ -406,15 +408,15 @@ class ReportPdfRenderer
         $html .= '<td class="amt"><strong>' . self::money($report['total_liabilities_and_equity']) . '</strong></td></tr>';
         $html .= '</table>';
 
-        self::emit($html, $title, 'A4', 'P');
+        self::emit($html, $title, $period, 'P');
     }
 
     public static function cashFlow(array $report): void
     {
         $title  = 'Cash Flow Statement';
-        $period = $report['period']['from'] . ' to ' . $report['period']['to'];
+        $period = PdfKit::period($report['period']['from'], $report['period']['to']);
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
         if (!$report['is_tied_out']) {
             $html .= '<div class="banner-amber">Cash tie-out difference '
                   . self::money($report['tie_diff']) . ' — calculated closing cash does not match the GL cash accounts.</div>';
@@ -438,15 +440,15 @@ class ReportPdfRenderer
         }
         $html .= '</table>';
 
-        self::emit($html, $title, 'A4', 'P');
+        self::emit($html, $title, $period, 'P');
     }
 
     public static function assetSchedule(array $report): void
     {
         $title  = 'Fixed Asset Schedule';
-        $period = 'As of ' . $report['as_of'];
+        $period = 'As of ' . PdfKit::date($report['as_of']);
 
-        $html  = self::headerHtml($title, $period);
+        $html  = '';
         $html .= '<table class="rpt">';
         $html .= '<thead><tr>';
         $html .= '<th>Class</th><th>Opening Cost</th><th>Additions</th><th>Disposals</th><th>Closing Cost</th>';
@@ -465,52 +467,12 @@ class ReportPdfRenderer
         }
         $html .= '</tbody></table>';
 
-        self::emit($html, $title, 'A4', 'L');
+        self::emit($html, $title, $period, 'L');
     }
 
     // ──────────────────────────────────────────────────────────────────
     // Internals
     // ──────────────────────────────────────────────────────────────────
-
-    /**
-     * Common header HTML — company name + report title + period.
-     */
-    private static function headerHtml(string $title, string $period): string
-    {
-        $company = \settings_get('company.name') ?: 'FleetForge';
-        $now     = date('Y-m-d H:i');
-        $css     = <<<'CSS'
-<style>
-body { font-family: 'dejavusans', sans-serif; font-size: 9pt; color: #1d1d1f; }
-.hdr { border-bottom: 2px solid #1d1d1f; padding-bottom: 6px; margin-bottom: 10px; }
-.hdr .co { font-size: 14pt; font-weight: 700; }
-.hdr .ti { font-size: 11pt; margin-top: 2px; }
-.hdr .pe { font-size: 9pt; color: #555; }
-.hdr .gen { font-size: 7.5pt; color: #888; margin-top: 4px; }
-.banner-red { background: #ffe6e6; border: 1px solid #cc0000; color: #990000;
-              padding: 6px 10px; margin-bottom: 8px; font-size: 9pt; }
-.banner-amber { background: #fff7d6; border: 1px solid #b8860b; color: #6b4900;
-                padding: 6px 10px; margin-bottom: 8px; font-size: 9pt; }
-table.rpt { width: 100%; border-collapse: collapse; }
-table.rpt th { background: #f0f0f0; padding: 5px 7px; text-align: left; border-bottom: 1px solid #1d1d1f; font-size: 8.5pt; }
-table.rpt td { padding: 3px 7px; border-bottom: 1px solid #eee; vertical-align: top; }
-table.rpt td.amt { text-align: right; font-family: 'dejavusansmono', monospace; }
-table.rpt td.acct { padding-left: 14px; }
-table.rpt td.indent { padding-left: 22px; }
-table.rpt tr.group td { background: #e8f0fe; font-weight: 600; padding-top: 6px; padding-bottom: 6px; }
-table.rpt tr.total td { background: #f7f9fc; }
-table.rpt tr.subtotal td { background: #f7f9fc; padding-top: 5px; padding-bottom: 5px; border-top: 1px solid #1d1d1f; }
-table.rpt tr.grand td { background: #d8e6ff; padding-top: 6px; padding-bottom: 6px; border-top: 2px solid #1d1d1f; border-bottom: 2px solid #1d1d1f; }
-</style>
-CSS;
-        return $css
-            . '<div class="hdr">'
-            . '<div class="co">' . htmlspecialchars((string) $company) . '</div>'
-            . '<div class="ti">' . htmlspecialchars($title) . '</div>'
-            . '<div class="pe">' . htmlspecialchars($period) . '</div>'
-            . '<div class="gen">Generated ' . $now . '</div>'
-            . '</div>';
-    }
 
     /**
      * Render the Per-Unit P&L report (spec §23.10). One section per unit
@@ -522,8 +484,8 @@ CSS;
     public static function perUnitPnl(array $report): void
     {
         $title  = 'Per-Unit Profitability';
-        $period = $report['from'] . ' to ' . $report['to'];
-        $html   = self::headerHtml($title, $period);
+        $period = PdfKit::period($report['from'], $report['to']);
+        $html  = '';
 
         // Fleet summary block
         $totals = $report['fleet_totals'] ?? [];
@@ -568,7 +530,7 @@ CSS;
             $html .= '</tbody></table>';
         }
 
-        self::emit($html, $title, 'A4', 'L');
+        self::emit($html, $title, $period, 'L');
     }
 
     /**
@@ -591,7 +553,7 @@ CSS;
         $notes       = $data['notes'] ?? [];
 
         $period = "For the year ended December 31, {$fy}";
-        $html   = self::headerHtml($title, $period);
+        $html  = '';
 
         $engagementLabel = $engagement === 'review' ? 'Review Engagement' : 'Compilation Engagement';
 
@@ -623,36 +585,28 @@ CSS;
             $html .= '</div>';
         }
 
-        self::emit($html, $title, 'A4', 'P');
+        self::emit($html, $title, $period, 'P');
     }
 
-    private static function emit(string $html, string $title, string $paper, string $orientation): void
+    /**
+     * Render through the shared kit and stream inline (the report pages
+     * open this in a new tab synchronously on click, so it isn't blocked).
+     */
+    private static function emit(string $html, string $title, string $period, string $orientation): void
     {
-        $tmpDir = FF_ROOT . '/storage/tmp';
-        if (!is_dir($tmpDir)) {
-            @mkdir($tmpDir, 0755, true);
-        }
-        $mpdf = new Mpdf([
-            'mode'         => 'utf-8',
-            'format'       => $paper . '-' . $orientation,
-            'margin_top'   => 12,
-            'margin_bottom' => 12,
-            'margin_left'  => 12,
-            'margin_right' => 12,
-            'default_font' => 'dejavusans',
-            'tempDir'      => $tmpDir,
+        $bytes = PdfKit::render($html, [
+            'title'       => $title,
+            'reference'   => $period,
+            'variant'     => 'report',
+            'orientation' => $orientation,
+            // "Generated …" is already on the letterhead's meta line.
         ]);
-        $mpdf->SetTitle($title);
-        $mpdf->WriteHTML($html);
-        $safeName = preg_replace('/[^A-Za-z0-9_-]+/', '_', $title) . '_' . date('Ymd') . '.pdf';
-        $mpdf->Output($safeName, Destination::INLINE);
+        PdfKit::stream($bytes, $title . '_' . date('Ymd'));
     }
 
+    /** bcmath money (D16) — was number_format((float)…). */
     private static function money(string $val): string
     {
-        $sign = bccomp($val, '0', 2) < 0 ? '-' : '';
-        $abs  = ltrim($val, '-');
-        $n    = number_format((float) $abs, 2, '.', ',');
-        return $sign . '$' . $n;
+        return PdfKit::money($val);
     }
 }

@@ -20,7 +20,7 @@ Writing this SOP meant checking every screen against the code. It found 27 gaps 
 | I29 | A customer deposit is applied whole: it can't be split across invoices, and it can't be applied to an invoice whose balance is smaller than the deposit. | Apply it to an invoice at least as large, or refund it and record payments. |
 | I30 | A payment's **Deposited to** bank can't be changed after it is recorded. | Void the payment and record it again with the right bank. |
 | I31 | The finance-lease (lessor) accounting settings still have no screen. They matter only if a lease is set up as a sales-type lease. | Ask IT before using lessor accounting. |
-| I32 | **Send me a sample** on the Dunning letters card (Settings → Customer Emails) says no sample is available. | Generate a letter from Collections without emailing, and read the PDF. |
+| I32 | **Send me a sample** on the Dunning letters card (Settings → Customer Emails) says no sample is available. | Generate a letter from Collections without emailing, then **View PDF** on its row. |
 :::
 
 :::callout info Fixed on 24 September 2026

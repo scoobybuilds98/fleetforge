@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-PDF-LETTERHEAD** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-PDF-LETTERHEAD-1). **Every Download PDF works again and every PDF (invoices, statements, dunning letters, credit applications, accounting reports, the year-end package) prints on one letterhead with the company logo in a band across the top, the company details, and page numbers. Settings → Design has a PDF documents card again (logo on/off, accent colour, invoice footer line).** Deploy with F94.
+
 **S-CCA-PREFILL** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-CCA-PREFILL-1). **The online credit application now opens already filled in: the first time from what the customer record holds (name, email, phone, address, GST/PST), and after a "Needs Info" re-send from the customer's previous answers, so they fix only what was asked. They still sign, date and accept the terms each time.** Everything else in the online flow had already shipped in June. Deploy with F93.
 
 **S-TOPBAR-CHROME** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-TOPBAR-CHROME-1). **The top bar now stands out from the page: in the light theme it takes the sidebar's dark colour, so the two frame the page; in the dark theme it is a slightly raised band. The menus that open from it (New, search results, notifications, your account) look the same as before.**

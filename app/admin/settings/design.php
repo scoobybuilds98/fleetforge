@@ -20,9 +20,13 @@ declare(strict_types=1);
  *                         on this page by swapping <html data-bg>, Save writes
  *                         brand.background (S-BACKGROUNDS)
  *   1. Brand Identity   — color picker + 6 swatches + live preview + logo + favicon
+ *   2. PDF documents    — show logo / accent colour / invoice footer line
+ *                         (S-PDF-LETTERHEAD: re-added now that lib/Pdf/PdfKit.php
+ *                         reads all three)
  *
  * Bug #23 — REMOVED cards: "New User Defaults" (defaults.theme/density/
- * font_size), "Regional" (regional.*), "PDF & Invoices" (pdf.*) and
+ * font_size), "Regional" (regional.*), "PDF & Invoices" (pdf.* — RE-ADDED as
+ * card 2 by S-PDF-LETTERHEAD, which gave those keys a reader) and
  * "UI Behaviour" (ui.sidebar_collapsed_default, defaults.rows_per_page,
  * ui.session_timeout_minutes). A repo-wide grep found NO reader for any of
  * those 14 keys — the only code touching them was this page (to pre-fill)
@@ -50,6 +54,10 @@ if (!is_super_admin()) {
 $brand_primary_color = (string) (settings_get('brand.primary_color') ?? '#2596be');
 $brand_logo_path     = (string) (settings_get('brand.logo_path')     ?? '');
 $brand_favicon_path  = (string) (settings_get('brand.favicon_path')  ?? '');
+// S-PDF-LETTERHEAD: the PDF card is back — lib/Pdf/PdfKit.php now reads all three.
+$pdf_show_logo   = (string) (settings_get('pdf.show_logo', '1') ?? '1') !== '0';
+$pdf_accent      = (string) (settings_get('pdf.accent_color', '') ?? '');
+$pdf_footer_text = (string) (settings_get('pdf.invoice_footer_text', '') ?? '');
 // S-BACKGROUNDS: the palette registry + the palette in use (validated).
 $backgrounds         = ff_backgrounds();
 $brand_background    = ff_background();
@@ -538,9 +546,55 @@ $brandApi = base_url('api/v1/settings/brand');
     </div>
 </div>
 
-<!-- Bug #23: the "New User Defaults", "Regional", "PDF & Invoices" and
-     "UI Behaviour" cards were removed — none of their settings had a reader,
-     so saving them changed nothing. See the file docblock. -->
+<?php /* ── PDF documents (S-PDF-LETTERHEAD) ─────────────────────────────
+   Re-added under Bug #23's rule ("only together with the code that honours
+   it"): FleetForge\Pdf\PdfKit reads pdf.show_logo, pdf.accent_color and
+   pdf.invoice_footer_text for every PDF. Posts through the same brand.php
+   handlers that were kept in place. */ ?>
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">PDF documents</div>
+    <div class="card-body">
+        <form @submit.prevent="saveCard('pdf-docs', $event)" data-card="pdf-docs">
+            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 14px;">
+                Invoices, statements, dunning letters, credit applications and the accounting reports all print on one letterhead:
+                the logo above in a band across the top, the company name, address and contact details from the General tab, and page numbers.
+            </p>
+            <div class="ff-form-row">
+                <label style="display:flex;align-items:center;gap:8px;font-size:0.875rem;cursor:pointer;">
+                    <input type="checkbox" name="pdf_show_logo" value="1" <?= $pdf_show_logo ? 'checked' : '' ?>>
+                    Show the logo on PDFs
+                </label>
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">Off prints the company name in the band instead.</div>
+            </div>
+            <div class="ff-form-row" style="margin-top:14px;">
+                <label class="form-label" for="pdf_accent_color">Accent colour</label>
+                <input id="pdf_accent_color" type="text" name="pdf_accent_color" class="form-input" style="max-width:220px;"
+                       value="<?= e($pdf_accent) ?>" maxlength="7" pattern="^(#[0-9a-fA-F]{6})?$"
+                       placeholder="<?= e($brand_primary_color) ?>">
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">Headings, totals and the balance-due bar. Leave blank to use the brand colour.</div>
+            </div>
+            <div class="ff-form-row" style="margin-top:14px;">
+                <label class="form-label" for="pdf_invoice_footer_text">Invoice footer line</label>
+                <input id="pdf_invoice_footer_text" type="text" name="pdf_invoice_footer_text" class="form-input"
+                       value="<?= e($pdf_footer_text) ?>" maxlength="200" placeholder="Thank you for your business.">
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:4px;">Printed centred above the page footer on every invoice. Leave blank for none.</div>
+            </div>
+            <div class="ff-card-actions">
+                <button type="submit" class="btn btn-primary btn-sm" :disabled="saving['pdf-docs']">
+                    <span x-show="!saving['pdf-docs']">Save PDF Settings</span>
+                    <span x-show="saving['pdf-docs']" x-cloak>Saving&hellip;</span>
+                </button>
+                <span class="ff-save-msg"
+                      :style="msgStyle('pdf-docs')"
+                      x-text="msg['pdf-docs'] || ''"
+                      x-show="msg['pdf-docs']"></span>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Bug #23: the "New User Defaults", "Regional" and "UI Behaviour" cards
+     stay removed — none of their settings has a reader. See the file docblock. -->
 
 </div><!-- /#ff-design-tab -->
 

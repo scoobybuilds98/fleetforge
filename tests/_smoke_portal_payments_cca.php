@@ -18,7 +18,9 @@ declare(strict_types=1);
  *   T9  payments page source references initiate_qbo_payment endpoint
  *   T10 payments page contains portalPayBtn() Alpine component
  *   T11 credit-applications/view.php file exists
- *   T12 view.php is Trap-7/8 compliant + uses StorageClient for PDF URL
+ *   T12 view.php is Trap-7/8 compliant + links the PDF through the scoped
+ *       portal endpoint (S-PDF-LETTERHEAD: a presigned storage URL was a dead
+ *       link once storage lost the file)
  *
  * Strategy: manufactures a PHP portal session in /var/tmp (Herd's session dir)
  * using a real portal_user + customer from the DB, then GETs both pages with
@@ -287,15 +289,21 @@ foreach ($viewBadFields as $lp) {
 }
 // Trap-8: customer_id filter must be in the query
 $viewTrap8 = str_contains($viewSrc, 'customer_id = ?') || str_contains($viewSrc, 'customer_id=?');
-// PDF: file_path must not be emitted; must use StorageClient::url
-$viewPdfOk = str_contains($viewSrc, 'StorageClient::url(') && !preg_match('/echo\s+.*file_path/', $viewSrc);
+// PDF: file_path must not be emitted; the link goes through the Trap-8-scoped
+// portal endpoint (api/v1/portal/credit_applications/pdf), which itself must
+// filter by portal_customer_id().
+$pdfEndpointSrc = (string) @file_get_contents(FF_ROOT . '/api/v1/portal/credit_applications/pdf.php');
+$viewPdfOk = str_contains($viewSrc, "base_url('api/v1/portal/credit_applications/pdf')")
+    && !preg_match('/echo\s+.*file_path/', $viewSrc)
+    && str_contains($pdfEndpointSrc, 'portal_customer_id()')
+    && str_contains($pdfEndpointSrc, 'require_portal_auth()');
 
 smoke_record(
-    'T12 view.php Trap-7 (no privileged field echoed) + Trap-8 (customer_id filter) + StorageClient PDF URL',
+    'T12 view.php Trap-7 (no privileged field echoed) + Trap-8 (customer_id filter) + scoped portal PDF endpoint',
     empty($viewLeaks) && $viewTrap8 && $viewPdfOk,
     (!empty($viewLeaks) ? 'Trap-7 leak: ' . implode(', ', $viewLeaks) . '; ' : '') .
     (!$viewTrap8 ? 'Trap-8 customer_id filter missing; ' : '') .
-    (!$viewPdfOk ? 'StorageClient::url() missing or file_path echoed; ' : '')
+    (!$viewPdfOk ? 'PDF not linked through the scoped portal endpoint, or file_path echoed; ' : '')
 );
 
 // ── Summary ───────────────────────────────────────────────────────────────────

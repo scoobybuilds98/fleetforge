@@ -1518,14 +1518,15 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
         <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance' && can('invoices', 'edit')): ?>
             <a href="<?= base_url('invoices/edit') ?>?id=<?= $invoiceId ?>" class="btn btn-secondary btn-sm">Edit Line Items</a>
         <?php endif; ?>
-        <!-- S-INVOICE-PDF: generate (or re-open) the server-side PDF. Same
-             action either way — the endpoint returns a fresh signed URL
-             whether or not one already existed. -->
-        <button type="button" class="btn btn-secondary btn-sm no-print" @click="generatePdf()" :disabled="pdfWorking">
+        <!-- S-PDF-LETTERHEAD: a plain link to the streaming endpoint (it
+             generates the PDF when needed). The old button POSTed, awaited,
+             then window.open()ed the result — browsers silently block a
+             pop-up opened after an await, so "View PDF" did nothing. -->
+        <a href="<?= base_url('api/v1/invoices/pdf') ?>?id=<?= (int) $invoiceId ?>" target="_blank" rel="noopener"
+           class="btn btn-secondary btn-sm no-print">
             <?= heroicon('document-text', 'icon-sm') ?>
-            <span x-show="!pdfWorking"><?= $invoice['pdf_path'] && $invoice['status'] !== 'draft' ? 'View PDF' : 'Generate PDF' ?></span>
-            <span x-show="pdfWorking">Generating…</span>
-        </button>
+            <span><?= $invoice['status'] === 'draft' ? 'Preview PDF' : 'View PDF' ?></span>
+        </a>
 
         <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
     <?php endif; // !$isEmbed ?>
@@ -3643,30 +3644,6 @@ function FF_InvoiceShow() {
          * Card markup deleted; the site will receive the Drawdown
          * Reconciliation panel in C6 per D-L (read-only display, no
          * review actions). */
-
-        /* ── S-INVOICE-PDF: Generate / View PDF ────────────────
-         * One action either way — generate_pdf.php returns a fresh signed
-         * URL whether it built a new PDF or reused an existing one (sent+
-         * invoices are frozen, D12, so their PDF is reused unless forced).
-         */
-        pdfWorking: false,
-        async generatePdf() {
-            this.pdfWorking = true;
-            try {
-                const r = await FF_Api.post('<?= base_url('api/v1/invoices/generate_pdf') ?>', {
-                    id: <?= (int)$invoiceId ?>
-                });
-                if (r.success) {
-                    window.open(r.data.download_url, '_blank');
-                    if (r.data.regenerated) this.showToast('PDF generated', 'success');
-                } else {
-                    this.showToast(r.error?.message || 'Failed to generate PDF', 'error');
-                }
-            } catch (e) {
-                this.showToast('Network error', 'error');
-            }
-            this.pdfWorking = false;
-        },
 
         /* ── Send Invoice ───────────────────────────────────── */
         async sendInvoice() {
