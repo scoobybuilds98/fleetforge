@@ -4,47 +4,41 @@ declare(strict_types=1);
 /**
  * app/portal/includes/sidebar.php
  *
- * Portal sidebar navigation — simpler than admin.
- * 7 nav items, customer branding, user footer.
- * Included by portal/includes/header.php only.
+ * Portal sidebar (S-PORTAL-REDESIGN): brand, the account you're signed in
+ * for, grouped navigation with live badges, and a contact card. Included by
+ * header.php only; on phones it becomes the slide-in menu (the bottom tab
+ * bar in footer.php opens it).
+ *
+ * Logo: the same trimmed derivative the staff sidebar uses
+ * (FleetForge\Ui\BrandLogo — served by the public api/v1/storage/logo).
+ * A logo exported on a dark canvas sits on a matching dark plate so it
+ * blends edge to edge; no logo (or a failed load) falls back to the brand
+ * mark + company name.
+ *
+ * Badges (all Trap 8 — scoped by the signed-in customer / portal user):
+ *   Invoices  past-due invoices (red) — was "overdue OR sent", which lit the
+ *             badge for every invoice that simply hadn't been paid yet
+ *   Requests  requests still open or in review
+ *   Messages  unread staff messages in threads this user can see (MSGR-1)
+ *   Chat      unread staff chat messages (CHAT-2)
  */
 
-$_portalUser  = portal_user();
-$_companyName = settings_get('company.name', 'FleetForge');
-$_customerName = $_portalUser['company_name'] ?? '';
-$_currentPath  = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
-$_portalBase   = FF_BASE_PATH . '/portal';
+$_sbUser      = portal_user();
+$_sbCompany   = (string) settings_get('company.name', 'FleetForge');
+$_sbCustomer  = (string) ($_sbUser['company_name'] ?? '');
+$_sbPath      = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
+$_sbCid       = portal_customer_id();
+$_sbPid       = portal_user_id();
+$_sbSummary   = pt_account_summary($_sbCid);
 
-// User initials
-$_initials = 'U';
-if (!empty($_portalUser['name'])) {
-    $parts = preg_split('/\s+/', trim($_portalUser['name']));
-    $_initials = strtoupper(mb_substr($parts[0], 0, 1));
-    if (count($parts) > 1) {
-        $_initials .= strtoupper(mb_substr(end($parts), 0, 1));
-    }
-}
-
-// Badge counts — wrapped in try/catch for safety
-$_cid  = portal_customer_id();
-$_pid  = portal_user_id();
-$_overdueInvoiceBadge = 0;
-$_openRequestBadge    = 0;
-$_unreadMessageBadge  = 0;
+$_sbOpenReq = $_sbUnreadMsg = $_sbUnreadChat = 0;
 try {
-    $_overdueInvoiceBadge = db_count(
-        "SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status IN ('overdue','sent') AND deleted_at IS NULL",
-        [$_cid]
-    );
-    $_openRequestBadge = db_count(
+    $_sbOpenReq = db_count(
         "SELECT COUNT(*) FROM portal_service_requests WHERE customer_id = ? AND status IN ('open','in_review')",
-        [$_cid]
+        [$_sbCid]
     );
-    // [MSGR-1] Unread admin messages — counts admin sends with no read
-    // cursor at all OR a cursor older than the message id, scoped to the
-    // threads this portal user is allowed to see (customer-wide OR pinned).
-    // [CHAT-2] Unread staff messages in customer chat conversation channels
-    $_unreadChatBadge = db_count(
+    // [CHAT-2] Unread staff messages in customer chat channels
+    $_sbUnreadChat = db_count(
         "SELECT COUNT(*) FROM chat_messages cm
            JOIN chat_channels cc ON cc.id = cm.channel_id
                 AND cc.type = 'customer' AND cc.customer_id = ? AND cc.is_archived = 0
@@ -53,9 +47,10 @@ try {
           WHERE cm.is_deleted = 0
             AND cm.portal_user_id IS NULL
             AND (ccm.last_read_message_id IS NULL OR cm.id > ccm.last_read_message_id)",
-        [$_cid, $_pid]
+        [$_sbCid, $_sbPid]
     );
-    $_unreadMessageBadge = db_count(
+    // [MSGR-1] Unread admin messages in threads this portal user may see
+    $_sbUnreadMsg = db_count(
         "SELECT COUNT(*) AS cnt
            FROM messenger_messages mm
            JOIN messenger_threads mt ON mt.id = mm.thread_id AND mt.is_archived = 0
@@ -66,89 +61,110 @@ try {
             AND mt.customer_id = ?
             AND (mt.scope = 'customer' OR (mt.scope = 'portal_user' AND mt.portal_user_id = ?))
             AND (mtr.last_read_message_id IS NULL OR mm.id > mtr.last_read_message_id)",
-        [$_pid, $_cid, $_pid]
+        [$_sbPid, $_sbCid, $_sbPid]
     );
 } catch (Throwable) {}
 
-// Navigation items
-$_navItems = [
-    ['label' => 'Dashboard',          'url' => '/portal',                    'icon' => 'home',               'badge' => 0],
-    ['label' => 'Leases',             'url' => '/portal/leases',             'icon' => 'document',           'badge' => 0],
-    ['label' => 'Invoices',           'url' => '/portal/invoices',           'icon' => 'banknotes',          'badge' => $_overdueInvoiceBadge],
-    ['label' => 'Payments',           'url' => '/portal/payments',           'icon' => 'credit-card',        'badge' => 0],
-    ['label' => 'Equipment',          'url' => '/portal/equipment',          'icon' => 'truck',              'badge' => 0],
-    ['label' => 'Documents',          'url' => '/portal/documents',          'icon' => 'folder',             'badge' => 0],
-    ['label' => 'Credit Application', 'url' => '/portal/credit-applications','icon' => 'clipboard-document', 'badge' => 0],
-    ['label' => 'Messages',           'url' => '/portal/messages',           'icon' => 'envelope',           'badge' => $_unreadMessageBadge],
-    ['label' => 'Chat',               'url' => '/portal/chat',               'icon' => 'chat-bubble',        'badge' => $_unreadChatBadge],
-    ['label' => 'Requests',           'url' => '/portal/requests',           'icon' => 'chat',               'badge' => $_openRequestBadge],
-    ['label' => 'Account',            'url' => '/portal/account',            'icon' => 'user',               'badge' => 0],
+// [label, path under /portal, icon, badge count, badge style]
+$_sbNav = [
+    '' => [
+        ['Home', '', 'home', 0, ''],
+    ],
+    'Billing' => [
+        ['Pay & payments', 'payments', 'credit-card', 0, ''],
+        ['Invoices',       'invoices', 'document-text', $_sbSummary['past_due_count'], 'is-alert'],
+    ],
+    'Fleet' => [
+        ['Leases',    'leases',    'clipboard-document-list', $_sbSummary['active_leases'], ''],
+        ['Equipment', 'equipment', 'truck', 0, ''],
+        ['Documents', 'documents', 'folder-open', 0, ''],
+    ],
+    'Help' => [
+        ['Requests', 'requests', 'wrench-screwdriver', $_sbOpenReq, ''],
+        ['Messages', 'messages', 'envelope', $_sbUnreadMsg, 'is-brand'],
+        ['Chat',     'chat',     'chat-bubble-left-right', $_sbUnreadChat, 'is-brand'],
+    ],
+    'Account' => [
+        ['Credit application', 'credit-applications', 'clipboard-document-check', 0, ''],
+        ['Settings',           'account',             'cog-6-tooth', 0, ''],
+    ],
 ];
 
-// SVG icons inline — avoids dependency on icon files
-$_icons = [
-    'home' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"/></svg>',
-    'document' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>',
-    'banknotes' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm3 0h.008v.008H18V10.5Zm-12 0h.008v.008H6V10.5Z"/></svg>',
-    'truck' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0H21M3.375 14.25V3.75h8.25m0 0h4.875c.621 0 1.125.504 1.125 1.125v4.875m-6-6v6h6"/></svg>',
-    'folder' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z"/></svg>',
-    'chat' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155"/></svg>',
-    'envelope' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"/></svg>',
-    'chat-bubble' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375m-13.5 3.01c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.184-4.183a1.14 1.14 0 0 1 .778-.332 48.294 48.294 0 0 0 5.83-.498c1.585-.233 2.708-1.626 2.708-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z"/></svg>',
-    'user' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M17.982 18.725A7.488 7.488 0 0 0 12 15.75a7.488 7.488 0 0 0-5.982 2.975m11.963 0a9 9 0 1 0-11.963 0m11.963 0A8.966 8.966 0 0 1 12 21a8.966 8.966 0 0 1-5.982-2.275M15 9.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
-    'credit-card' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Z"/></svg>',
-    'clipboard-document' => '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="portal-nav-icon"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z"/></svg>',
-];
+$_sbLogo = null;
+try { $_sbLogo = \FleetForge\Ui\BrandLogo::forSidebar(); } catch (\Throwable) { $_sbLogo = null; }
+$_sbLogoUrl  = (string) ($_sbLogo['url'] ?? '');
+$_sbLogoDark = $_sbLogo !== null && in_array((string) ($_sbLogo['bg'] ?? ''), ['dark', ''], true);
+
+$_sbPhone = (string) settings_get('company.phone', '');
+$_sbEmail = (string) settings_get('company.email', '');
 ?>
+<aside class="pt-side" aria-label="Portal navigation">
 
-<aside class="portal-sidebar" :class="{ 'is-open': sidebarOpen, 'is-closed': !sidebarOpen }">
-
-    <!-- Brand -->
-    <div class="portal-brand">
-        <div class="portal-brand-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0H21M3.375 14.25V3.75h8.25m0 0h4.875c.621 0 1.125.504 1.125 1.125v4.875m-6-6v6h6"/></svg>
-        </div>
-        <div class="portal-brand-text">
-            <span class="portal-brand-name"><?= e($_companyName) ?></span>
-            <span class="portal-brand-label">Customer Portal</span>
-        </div>
+    <div class="pt-brand">
+        <a class="pt-brand-link" href="<?= e(pt_url()) ?>" aria-label="<?= e($_sbCompany) ?> — Home">
+            <?php if ($_sbLogoUrl !== ''): ?>
+                <span class="pt-brand-plate<?= $_sbLogoDark ? ' is-dark' : '' ?>">
+                    <img src="<?= e($_sbLogoUrl) ?>" alt="<?= e($_sbCompany) ?>"
+                         onerror="this.closest('.pt-brand').classList.add('is-logo-broken')">
+                </span>
+            <?php endif; ?>
+            <span class="pt-brand-fallback<?= $_sbLogoUrl !== '' ? ' has-logo' : '' ?>">
+                <span class="pt-brand-mark"><?= pt_icon('truck') ?></span>
+                <span class="pt-brand-name"><?= e($_sbCompany) ?></span>
+            </span>
+        </a>
+        <span class="pt-brand-sub">Customer portal</span>
     </div>
 
-    <!-- Navigation -->
-    <nav class="portal-nav" aria-label="Portal navigation">
-        <?php foreach ($_navItems as $_item): ?>
-            <?php
-            $_itemFullUrl = FF_BASE_PATH . $_item['url'];
-            // Active: exact match for portal root, starts-with for sub-pages
-            $_isActive = ($_item['url'] === '/portal')
-                ? ($_currentPath === $_itemFullUrl || $_currentPath === $_itemFullUrl . '/')
-                : str_starts_with($_currentPath, $_itemFullUrl);
+    <?php if ($_sbCustomer !== ''): ?>
+    <div class="pt-account" title="Signed in for <?= e($_sbCustomer) ?>">
+        <span class="pt-account-ic"><?= pt_icon('building-office') ?></span>
+        <span class="pt-account-text">
+            <span class="pt-account-label">Account</span>
+            <span class="pt-account-name" style="display:block"><?= e($_sbCustomer) ?></span>
+        </span>
+    </div>
+    <?php endif; ?>
+
+    <nav class="pt-nav">
+        <?php foreach ($_sbNav as $_sbGroup => $_sbItems): ?>
+            <?php if ($_sbGroup !== ''): ?>
+                <div class="pt-nav-label"><?= e($_sbGroup) ?></div>
+            <?php endif; ?>
+            <?php foreach ($_sbItems as [$_l, $_p, $_i, $_b, $_bs]):
+                $_full = FF_BASE_PATH . '/portal' . ($_p !== '' ? '/' . $_p : '');
+                $_active = $_p === ''
+                    ? ($_sbPath === $_full || $_sbPath === $_full . '/' || $_sbPath === $_full . '/index')
+                    : ($_sbPath === $_full || str_starts_with($_sbPath, $_full . '/'));
             ?>
-            <a href="<?= e(base_url(ltrim($_item['url'], '/'))) ?>"
-               class="portal-nav-item<?= $_isActive ? ' is-active' : '' ?>"
-               <?= $_isActive ? 'aria-current="page"' : '' ?>>
-                <?= $_icons[$_item['icon']] ?>
-                <span><?= e($_item['label']) ?></span>
-                <?php if ($_item['badge'] > 0): ?>
-                    <span class="portal-nav-badge"><?= e($_item['badge'] > 99 ? '99+' : (string) $_item['badge']) ?></span>
-                <?php endif; ?>
-            </a>
+                <a href="<?= e(pt_url($_p)) ?>" class="pt-nav-item<?= $_active ? ' is-active' : '' ?>"<?= $_active ? ' aria-current="page"' : '' ?>>
+                    <?= pt_icon($_i) ?>
+                    <span><?= e($_l) ?></span>
+                    <?php if ($_b > 0): ?>
+                        <span class="pt-nav-badge <?= e($_bs) ?>"><?= e($_b > 99 ? '99+' : (string) $_b) ?></span>
+                    <?php endif; ?>
+                </a>
+            <?php endforeach; ?>
         <?php endforeach; ?>
     </nav>
 
-    <!-- User footer -->
-    <div class="portal-sidebar-footer">
-        <div class="portal-user-avatar"><?= e($_initials) ?></div>
-        <div class="portal-user-info">
-            <span class="portal-user-name"><?= e($_portalUser['name'] ?? '') ?></span>
-            <span class="portal-user-company"><?= e($_customerName) ?></span>
+    <div class="pt-side-foot">
+        <div class="pt-help">
+            <p class="pt-help-title">Need a hand?</p>
+            <p class="pt-help-text">Our team is here for billing questions, extensions and repairs.</p>
+            <?php if ($_sbPhone !== ''): ?>
+                <a class="pt-help-row" href="tel:<?= e(preg_replace('/[^0-9+]/', '', $_sbPhone)) ?>"><?= pt_icon('phone') ?><span><?= e($_sbPhone) ?></span></a>
+            <?php endif; ?>
+            <?php if ($_sbEmail !== ''): ?>
+                <a class="pt-help-row" href="mailto:<?= e($_sbEmail) ?>"><?= pt_icon('envelope') ?><span><?= e($_sbEmail) ?></span></a>
+            <?php endif; ?>
+            <a class="pt-help-row" href="<?= e(pt_url('requests/create')) ?>"><?= pt_icon('plus') ?><span>Start a request</span></a>
         </div>
     </div>
 
 </aside>
-
 <?php
-unset($_portalUser, $_companyName, $_customerName, $_currentPath, $_portalBase,
-      $_initials, $_cid, $_pid, $_overdueInvoiceBadge, $_openRequestBadge,
-      $_unreadMessageBadge, $_unreadChatBadge, $_navItems, $_icons, $_item, $_itemFullUrl, $_isActive);
+unset($_sbUser, $_sbCompany, $_sbCustomer, $_sbPath, $_sbCid, $_sbPid, $_sbSummary, $_sbOpenReq, $_sbUnreadMsg,
+      $_sbUnreadChat, $_sbNav, $_sbGroup, $_sbItems, $_l, $_p, $_i, $_b, $_bs, $_full, $_active, $_sbLogo,
+      $_sbLogoUrl, $_sbLogoDark, $_sbPhone, $_sbEmail);
 ?>

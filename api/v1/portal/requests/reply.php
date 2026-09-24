@@ -22,14 +22,17 @@ declare(strict_types=1);
  * @method  POST
  * @body    { request_id: int, body: string }
  * @auth    portal session (require_portal_auth)
- * @session S-PORTAL-REQUEST-THREAD
+ * @session S-PORTAL-REQUEST-THREAD, S-PORTAL-REDESIGN (JSON 401, 5,000-char cap,
+ *          no exception text to the customer)
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
 require_once dirname(__DIR__, 4) . '/app/portal/includes/auth.php';
 
 require_method('POST');
-require_portal_auth();
+// S-PORTAL-REDESIGN: JSON 401 (was a 302 to the login page, which the
+// composer's fetch() couldn't read).
+require_portal_auth_api();
 
 $body       = json_body();
 $requestId  = (int) ($body['request_id'] ?? 0);
@@ -40,6 +43,11 @@ if ($requestId <= 0) {
 }
 if ($messageBody === '') {
     json_error('MISSING_REQUIRED', 'Type a reply before sending.', 422);
+}
+// S-PORTAL-REDESIGN: a body over the TEXT column limit used to fail the insert
+// and come back as a misleading 403. Same cap as a new request's message.
+if (mb_strlen($messageBody) > 5000) {
+    json_error('VALIDATION_ERROR', 'Replies can be up to 5,000 characters. Please shorten it or send it in two parts.', 422);
 }
 
 $portalUserId = portal_user_id();
@@ -69,5 +77,7 @@ try {
         'admins_notified' => true,
     ]);
 } catch (\Throwable $e) {
-    json_error('INTERNAL_ERROR', 'Reply failed: ' . $e->getMessage(), 500);
+    // Trap 7: log the detail, never send it to the customer.
+    error_log('[portal/requests/reply] request ' . $requestId . ': ' . $e->getMessage());
+    json_error('INTERNAL_ERROR', 'Your reply could not be sent. Please try again.', 500);
 }

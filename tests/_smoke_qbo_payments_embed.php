@@ -597,13 +597,17 @@ try {
         $c22Errors[] = 'page missing';
     } else {
         $content = (string) file_get_contents($page22);
-        if (strpos($content, 'paymentSuccessPoller') === false) $c22Errors[] = 'missing paymentSuccessPoller Alpine factory';
+        // S-PORTAL-REDESIGN: the poller is inline Alpine and now actually works —
+        // it sends the stored token and reads r.data.status (the old one sent
+        // token=undefined and read r.status). Bounded at 20 × 3 s.
+        if (strpos($content, "PT.get('api/v1/portal/payments/status?token='") === false) $c22Errors[] = 'missing status poll';
+        if (strpos($content, 'r.data.status') === false) $c22Errors[] = 'poller must read r.data.status';
         if (strpos($content, "status === 'pending'") === false) $c22Errors[] = 'missing pending state UI';
         if (strpos($content, "status === 'completed'") === false) $c22Errors[] = 'missing completed state UI';
-        if (strpos($content, 'maxWait = 30000') === false) $c22Errors[] = 'missing 30s timeout (D-QBO-15-6)';
+        if (strpos($content, 'this.tries < 20') === false) $c22Errors[] = 'missing bounded wait (D-QBO-15-6)';
     }
     if (empty($c22Errors)) {
-        echo "PASS C22 payment_success.php (Alpine poller + 30s timeout per D-QBO-15-6 race handling)\n";
+        echo "PASS C22 payment_success.php (working status poller + bounded wait per D-QBO-15-6 race handling)\n";
         $pass++;
     } else {
         echo "FAIL C22 " . implode('; ', $c22Errors) . "\n";
@@ -629,16 +633,23 @@ try {
     }
 
     // ── C24: portal/invoices/view.php has Pay Online button gating ──────
+    // S-PORTAL-REDESIGN: the same four gates (D-QBO-15-3), now spread over
+    // the shared pay flow: the invoice must be payable (view.php / pt_invoice_json),
+    // online pay must be on + connected (pt_online_pay_enabled), the invoice
+    // must be in QuickBooks (online_ready), and payments/go re-checks via
+    // PaymentInitiator::generate at click time.
     $c24Errors = [];
-    $view = (string) file_get_contents(FF_ROOT . '/app/portal/invoices/view.php');
-    if (strpos($view, 'showPayOnline') === false) $c24Errors[] = 'missing $showPayOnline gate';
-    if (strpos($view, 'qbo_payments_enabled') === false && strpos($view, "settings_get('quickbooks.payments_enabled'") === false) {
-        $c24Errors[] = 'missing payments_enabled gate';
-    }
-    if (strpos($view, 'initiate_qbo_payment') === false) $c24Errors[] = 'missing initiate_qbo_payment endpoint call';
-    if (strpos($view, 'payOnline()') === false) $c24Errors[] = 'missing payOnline() Alpine method';
+    $view   = (string) file_get_contents(FF_ROOT . '/app/portal/invoices/view.php');
+    $uiSrc  = (string) file_get_contents(FF_ROOT . '/app/portal/includes/ui.php');
+    $ftSrc  = (string) file_get_contents(FF_ROOT . '/app/portal/includes/footer.php');
+    $goSrc  = (string) @file_get_contents(FF_ROOT . '/app/portal/payments/go.php');
+    if (strpos($view, "\$j['payable']") === false || strpos($view, '$store.checkout.start(') === false) $c24Errors[] = 'invoice view must gate Pay on payable and open the Pay drawer';
+    if (strpos($uiSrc, "settings_get('quickbooks.payments_enabled'") === false || strpos($uiSrc, "'quickbooks.connection_status'") === false) $c24Errors[] = 'missing payments_enabled + connected gate';
+    if (strpos($uiSrc, "'online_ready'   => \$payable && !empty(\$r['qbo_invoice_id'])") === false) $c24Errors[] = 'missing QBO-mapping gate (online_ready)';
+    if (strpos($ftSrc, 'item.online_ready') === false) $c24Errors[] = 'drawer must hide Pay until online_ready';
+    if (strpos($goSrc, 'PaymentInitiator::generate(') === false) $c24Errors[] = 'payments/go must re-check via PaymentInitiator::generate';
     if (empty($c24Errors)) {
-        echo "PASS C24 portal invoice view has Pay Online button + 4-gate visibility (D-QBO-15-3)\n";
+        echo "PASS C24 portal pay flow keeps the 4-gate visibility (D-QBO-15-3)\n";
         $pass++;
     } else {
         echo "FAIL C24 " . implode('; ', $c24Errors) . "\n";

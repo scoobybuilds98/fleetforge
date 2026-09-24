@@ -15,14 +15,23 @@ declare(strict_types=1);
  *               app/portal/api/chat/* endpoints,
  *               FF_PortalChat() in public/assets/js/app.js
  *
- * Spec: CHAT-2
+ * Spec: CHAT-2 · S-PORTAL-REDESIGN (new shell + page header)
  */
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
 
+require_once dirname(__DIR__) . '/includes/ui.php';
+
 $pageTitle = 'Chat';
 require_once dirname(__DIR__) . '/includes/header.php';
+
+// S-PORTAL-REDESIGN: page header in the new shell.
+echo pt_page_head([
+    'eyebrow' => 'Help',
+    'title'   => 'Chat',
+    'sub'     => 'A live conversation with our team. Messages arrive here as they\'re sent.',
+]);
 ?>
 
 <style>
@@ -30,11 +39,12 @@ require_once dirname(__DIR__) . '/includes/header.php';
 .pchat-wrap {
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 120px);
-    min-height: 400px;
+    height: calc(100vh - 290px);
+    min-height: 460px;
     background: var(--bg-surface);
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
     overflow: hidden;
 }
 
@@ -44,7 +54,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
     align-items: center;
     gap: 12px;
     padding: 16px 20px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 .pchat-header-icon {
@@ -72,7 +82,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
     gap: 2px;
 }
 .pchat-messages::-webkit-scrollbar { width: 4px; }
-.pchat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.pchat-messages::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
 
 .pchat-load-more {
     text-align: center;
@@ -96,7 +106,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
     content: '';
     flex: 1;
     height: 1px;
-    background: var(--border);
+    background: var(--border-color);
 }
 
 /* ── Message bubbles ─────────────────────────────────────────────────── */
@@ -146,7 +156,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
     background: var(--bg-elevated);
     color: var(--text-primary);
     border-bottom-left-radius: 4px;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-color);
 }
 
 /* Portal/customer bubble: accent color (iMessage style) */
@@ -192,7 +202,7 @@ require_once dirname(__DIR__) . '/includes/header.php';
 }
 .pchat-msg--staff .pchat-att {
     background: var(--bg-page);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-color);
     color: var(--text-primary);
 }
 .pchat-msg--portal .pchat-att {
@@ -230,13 +240,13 @@ require_once dirname(__DIR__) . '/includes/header.php';
     align-items: flex-end;
     gap: 8px;
     padding: 12px 16px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid var(--border-color);
     flex-shrink: 0;
 }
 .pchat-compose-input {
     flex: 1;
     resize: none;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-color);
     border-radius: 20px;
     padding: 9px 16px;
     font-size: 14px;

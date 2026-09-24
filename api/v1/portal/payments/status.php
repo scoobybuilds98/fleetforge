@@ -23,7 +23,7 @@ require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
 require_once dirname(__DIR__, 4) . '/app/portal/includes/auth.php';
 
 require_method('GET');
-require_portal_auth();
+require_portal_auth_api(); // S-PORTAL-REDESIGN: JSON 401 for the success-page poller
 
 $token = (string) ($_GET['token'] ?? '');
 if ($token === '') {

@@ -4,192 +4,178 @@ declare(strict_types=1);
 /**
  * app/portal/invoices/index.php
  *
- * Portal invoice list — Outstanding / Paid / All tabs.
- * Trap 8: all queries filter by portal_customer_id().
+ * Customer portal — Invoices (S-PORTAL-REDESIGN).
+ *
+ * Tabs (Open / Past due / Paid / All) with live counts, search by invoice or
+ * lease number, an issued-date range, paging, and multi-select:
+ *   Pay selected        → the Pay drawer ($store.checkout)
+ *   Download PDFs       → api/v1/portal/invoices/zip (one ZIP)
+ *   I've paid these     → payment notice to billing ($store.notice)
+ *   Export CSV          → api/v1/portal/invoices/export (current tab + filters)
+ *
+ * Data comes from api/v1/portal/invoices/list (PT_InvoiceList in portal.js).
+ * Rows stack into cards on phones (.pt-table--stack + data-label).
+ *
+ * Trap 8: the endpoint scopes everything to portal_customer_id();
+ * visibility = pt_invoice_visible_sql() (never voids / internal drafts).
+ *
+ * @session S-PORTAL-REDESIGN (was: tabbed table, 100-row cap, ?ajax=1 branch)
  */
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
+require_once dirname(__DIR__) . '/includes/ui.php';
 
-$cid = portal_customer_id();
+$cid      = portal_customer_id();
+$summary  = pt_account_summary($cid);
+$currency = $summary['currency'];
 
-// ── AJAX handler (must run before header to avoid HTML output) ──
-if (!empty($_GET['ajax'])) {
-    header('Content-Type: application/json');
-
-    $tab = clean_string($_GET['tab'] ?? 'outstanding');
-
-    // I02: customers never see void or regular-draft invoices; advance drafts are
-    // intentionally disclosed (pre-paid future periods). Base predicate so the
-    // "All" tab ROWS match the 'all' COUNT below (previously the rows had no
-    // status filter and leaked drafts + voids).
-    $where  = [
-        'i.customer_id = ?',
-        'i.deleted_at IS NULL',
-        "i.status <> 'void'",
-        "(i.status <> 'draft' OR i.generation_source = 'advance')",
-    ];
-    $params = [$cid];
-
-    if ($tab === 'outstanding') {
-        $where[] = "i.status IN ('sent','partially_paid','overdue')";
-    } elseif ($tab === 'paid') {
-        $where[] = "i.status = 'paid'";
-    }
-
-    $whereSQL = implode(' AND ', $where);
-    $orderCol = $tab === 'outstanding' ? 'i.due_date ASC' : 'i.invoice_date DESC';
-
-    $rows = db_select(
-        // S-LEASE-CLOSE-ACTUAL-DATE: join the lease so the period column can show
-        // the ACTUAL rental end when the time-of-day rule trimmed the billed extent.
-        "SELECT i.id, i.invoice_number, i.invoice_date, i.due_date,
-                i.billing_period_start, i.billing_period_end,
-                i.generation_source, i.total_amount, i.balance_due, i.status,
-                (i.total_amount - i.balance_due) AS paid_amount,
-                l.actual_return_date, l.actual_return_time, l.start_time, l.billing_days_removed
-         FROM invoices i
-         LEFT JOIN leases l ON l.id = i.lease_id AND l.deleted_at IS NULL
-         WHERE {$whereSQL}
-         ORDER BY {$orderCol}
-         LIMIT 100",
-        $params
-    );
-
-    foreach ($rows as &$r) {
-        $r['invoice_date_fmt']       = format_date($r['invoice_date']);
-        $r['due_date_fmt']           = format_date($r['due_date']);
-        $r['billing_period_fmt']     = format_date($r['billing_period_start'])
-                                     . ' – ' . format_date(ff_invoice_display_period_end($r));
-        $r['total_amount_fmt'] = format_currency($r['total_amount']);
-        $r['balance_due_fmt']  = format_currency($r['balance_due']);
-        $r['paid_fmt']         = format_currency($r['paid_amount']);
-    }
-
-    $counts = [
-        'outstanding' => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status IN ('sent','partially_paid','overdue') AND deleted_at IS NULL", [$cid]),
-        'paid'        => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND status = 'paid' AND deleted_at IS NULL", [$cid]),
-        // advance drafts are visible in the All tab so include them in the count
-        'all'         => db_count("SELECT COUNT(*) FROM invoices WHERE customer_id = ? AND deleted_at IS NULL AND status <> 'void' AND (status != 'draft' OR generation_source = 'advance')", [$cid]),
-    ];
-
-    echo json_encode(['success' => true, 'data' => ['invoices' => $rows, 'counts' => $counts]]);
-    exit;
+$tab = (string) ($_GET['tab'] ?? 'open');
+if (!in_array($tab, ['open', 'past_due', 'paid', 'all'], true)) {
+    $tab = 'open';
 }
 
-// Total outstanding (shown prominently)
-$outstandingTotal = db_row(
-    "SELECT COALESCE(SUM(balance_due), 0) AS total
-     FROM invoices WHERE customer_id = ? AND status IN ('sent','partially_paid','overdue') AND deleted_at IS NULL",
-    [$cid]
-)['total'] ?? '0.00';
-
-$pageTitle = 'Invoices';
+$pageTitle    = 'Invoices';
+$ptHideRibbon = true;
 require_once dirname(__DIR__) . '/includes/header.php';
+
+ob_start(); ?>
+    <button type="button" class="pt-btn pt-btn--secondary" x-data @click="$store.statement.show()"><?= pt_icon('document-arrow-down') ?> Statement</button>
+    <?php if (bccomp($summary['outstanding'], '0', 2) > 0): ?>
+        <button type="button" class="pt-btn pt-btn--primary" x-data @click="$store.checkout.start([])"><?= pt_icon('credit-card') ?> Pay balance</button>
+    <?php endif; ?>
+<?php
+echo pt_page_head([
+    'eyebrow' => 'Billing',
+    'title'   => 'Invoices',
+    'sub'     => 'Every invoice on your account. Select several to pay them together or download them in one go.',
+    'actions' => ob_get_clean(),
+]);
 ?>
 
-<div x-data="PortalInvoices()" x-init="load()" x-cloak>
+<div class="pt-stats">
+    <div class="pt-stat">
+        <div class="pt-stat-top"><span class="pt-stat-label">Balance due</span><span class="pt-stat-ic pt-stat-ic--brand"><?= pt_icon('banknotes') ?></span></div>
+        <div class="pt-stat-value"><?= e(pt_money($summary['outstanding'], $currency)) ?></div>
+        <div class="pt-stat-sub"><?= $summary['open_count'] ?> open invoice<?= $summary['open_count'] === 1 ? '' : 's' ?></div>
+    </div>
+    <div class="pt-stat">
+        <div class="pt-stat-top"><span class="pt-stat-label">Past due</span><span class="pt-stat-ic <?= $summary['past_due_count'] ? 'pt-stat-ic--danger' : '' ?>"><?= pt_icon('exclamation-triangle') ?></span></div>
+        <div class="pt-stat-value<?= $summary['past_due_count'] ? ' pt-danger-ink' : '' ?>"><?= e(pt_money($summary['past_due'], $currency)) ?></div>
+        <div class="pt-stat-sub"><?= $summary['past_due_count'] ? $summary['past_due_count'] . ' invoice' . ($summary['past_due_count'] === 1 ? '' : 's') . ($summary['oldest_past_due_days'] ? ' · oldest ' . $summary['oldest_past_due_days'] . 'd' : '') : 'Nothing late' ?></div>
+    </div>
+    <div class="pt-stat">
+        <div class="pt-stat-top"><span class="pt-stat-label">Due next 7 days</span><span class="pt-stat-ic pt-stat-ic--warning"><?= pt_icon('clock') ?></span></div>
+        <div class="pt-stat-value"><?= e(pt_money($summary['due_soon'], $currency)) ?></div>
+        <div class="pt-stat-sub"><?= $summary['next_due_date'] ? 'Next due ' . e(format_date($summary['next_due_date'])) : 'Nothing coming up' ?></div>
+    </div>
+    <div class="pt-stat">
+        <div class="pt-stat-top"><span class="pt-stat-label">Credit on account</span><span class="pt-stat-ic pt-stat-ic--success"><?= pt_icon('receipt-percent') ?></span></div>
+        <div class="pt-stat-value"><?= e(pt_money($summary['credit'], $currency)) ?></div>
+        <div class="pt-stat-sub"><?= bccomp($summary['credit'], '0', 2) > 0 ? 'Ask us to apply it' : 'No credits' ?></div>
+    </div>
+</div>
 
-    <!-- Outstanding total -->
-    <div style="background:var(--bg-card);border:1px solid var(--border-color);border-radius:12px;padding:20px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-        <div>
-            <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);font-weight:500;margin-bottom:4px;">Total Outstanding</div>
-            <div style="font-size:1.75rem;font-weight:700;color:var(--text-primary);font-family:'DM Mono',monospace;"><?= e(format_currency($outstandingTotal)) ?></div>
+<section class="pt-card" x-data="PT_InvoiceList(<?= e(json_encode(['tab' => $tab])) ?>)">
+    <div class="pt-toolbar">
+        <div class="pt-tabs" role="tablist" aria-label="Invoice status">
+            <?php foreach (['open' => 'Open', 'past_due' => 'Past due', 'paid' => 'Paid', 'all' => 'All'] as $k => $label): ?>
+                <button type="button" class="pt-tab" role="tab" :class="{ 'is-active': tab === '<?= $k ?>' }" :aria-selected="tab === '<?= $k ?>'" @click="tab = '<?= $k ?>'">
+                    <?= e($label) ?> <span class="pt-tab-count" x-text="counts.<?= $k ?> ?? ''"></span>
+                </button>
+            <?php endforeach; ?>
         </div>
-        <div style="font-size:0.8125rem;color:var(--text-secondary);">
-            Payment instructions are available on each invoice detail page.
+        <div class="pt-toolbar-spacer"></div>
+        <label class="pt-search-field">
+            <?= pt_icon('magnifying-glass') ?>
+            <span class="pt-sr">Search invoices</span>
+            <input type="search" class="pt-input" placeholder="Invoice or lease #" x-model="q" @input="debounced()">
+        </label>
+        <div class="pt-daterange" title="Issued between">
+            <input type="date" class="pt-input" x-model="from" @change="page = 1; load()" aria-label="Issued from">
+            <span class="pt-faint" aria-hidden="true">–</span>
+            <input type="date" class="pt-input" x-model="to" @change="page = 1; load()" aria-label="Issued to">
         </div>
+        <button type="button" class="pt-btn pt-btn--ghost pt-btn--sm" x-show="hasFilters" x-cloak @click="clearFilters()">Clear</button>
+        <a class="pt-btn pt-btn--secondary pt-btn--sm" :href="csvHref" title="Download this list as a spreadsheet"><?= pt_icon('table-cells') ?> CSV</a>
     </div>
 
-    <!-- Tabs -->
-    <div class="portal-tabs">
-        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'outstanding' }" @click="tab = 'outstanding'; load()">
-            Outstanding <span class="portal-tab-count" x-show="counts.outstanding > 0" x-text="counts.outstanding"></span>
-        </button>
-        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'paid' }" @click="tab = 'paid'; load()">
-            Paid <span class="portal-tab-count" x-show="counts.paid > 0" x-text="counts.paid"></span>
-        </button>
-        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'all' }" @click="tab = 'all'; load()">
-            All <span class="portal-tab-count" x-show="counts.all > 0" x-text="counts.all"></span>
-        </button>
-    </div>
-
-    <!-- Table -->
-    <div class="portal-section">
-        <div class="portal-section-body--flush">
-            <template x-if="loading">
-                <div class="portal-empty"><p class="portal-empty-text">Loading invoices...</p></div>
-            </template>
-            <template x-if="!loading && invoices.length === 0">
-                <div class="portal-empty">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
-                    <p class="portal-empty-title" x-text="tab === 'outstanding' ? 'All caught up!' : 'No invoices found'"></p>
-                    <p class="portal-empty-text" x-text="tab === 'outstanding' ? 'No outstanding invoices at the moment.' : 'No invoices match this filter.'"></p>
-                </div>
-            </template>
-            <div class="table-responsive">
-<table class="portal-table" x-show="!loading && invoices.length > 0">
-                <thead>
-                    <tr>
-                        <th>Invoice #</th>
-                        <th>Billing Period</th>
-                        <th>Date</th>
-                        <th>Due Date</th>
-                        <th class="text-right">Amount</th>
-                        <th class="text-right">Paid</th>
-                        <th class="text-right">Balance</th>
-                        <th>Status</th>
+    <div class="pt-table-wrap">
+        <table data-no-auto-label class="pt-table pt-table--stack">
+            <thead>
+                <tr>
+                    <th class="shrink"><input type="checkbox" class="pt-check" :checked="allSel" :indeterminate="someSel" @change="toggleAll()" aria-label="Select all on this page"></th>
+                    <th>Invoice</th>
+                    <th>Issued</th>
+                    <th>Due</th>
+                    <th>Status</th>
+                    <th class="num">Total</th>
+                    <th class="num">Balance</th>
+                    <th class="shrink"><span class="pt-sr">Actions</span></th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-if="loading && rows.length === 0">
+                    <tr><td colspan="8" style="padding:0"><div class="pt-skel-row"><div class="pt-skel" style="width:30%"></div><div class="pt-skel" style="width:20%"></div><div class="pt-skel" style="width:15%"></div></div><div class="pt-skel-row"><div class="pt-skel" style="width:26%"></div><div class="pt-skel" style="width:18%"></div><div class="pt-skel" style="width:12%"></div></div><div class="pt-skel-row" style="border:0"><div class="pt-skel" style="width:32%"></div><div class="pt-skel" style="width:16%"></div></div></td></tr>
+                </template>
+                <template x-for="r in rows" :key="r.id">
+                    <tr :class="{ 'is-selected': isSel(r.id) }" :style="loading ? 'opacity:.55' : ''">
+                        <td class="shrink pt-cell-check"><input type="checkbox" class="pt-check" :checked="isSel(r.id)" @change="toggle(r.id)" :aria-label="'Select invoice ' + r.number"></td>
+                        <td class="pt-cell-primary">
+                            <a class="pt-table-main" :href="viewUrl(r.id)" x-text="r.number"></a>
+                            <span class="pt-table-sub" x-text="[r.period, r.lease ? 'Lease ' + r.lease : ''].filter(Boolean).join(' · ') || '—'"></span>
+                        </td>
+                        <td class="nw" data-label="Issued" x-text="PT.date(r.invoice_date)"></td>
+                        <td class="nw" data-label="Due">
+                            <span x-text="PT.date(r.due_date)"></span>
+                            <span class="pt-table-sub pt-danger-ink" x-show="r.days_late > 0" x-text="r.days_late + (r.days_late === 1 ? ' day' : ' days') + ' late'"></span>
+                        </td>
+                        <td data-label="Status"><span class="pt-pill" :class="'pt-pill--' + r.status_tone" x-text="r.status_label"></span></td>
+                        <td class="num" data-label="Total" x-text="r.total_fmt"></td>
+                        <td class="num" data-label="Balance"><strong x-text="r.payable ? r.balance_fmt : '—'"></strong></td>
+                        <td class="shrink pt-cell-actions">
+                            <div style="display:flex;gap:6px;justify-content:flex-end">
+                                <button type="button" class="pt-btn pt-btn--soft pt-btn--sm" x-show="r.payable" @click="$store.checkout.start([r.id])">Pay</button>
+                                <a class="pt-btn pt-btn--ghost pt-btn--sm" :href="pdfUrl(r.id)" target="_blank" rel="noopener" :aria-label="'PDF of invoice ' + r.number" title="PDF"><?= pt_icon('arrow-down-tray') ?></a>
+                            </div>
+                        </td>
                     </tr>
-                </thead>
-                <tbody>
-                    <template x-for="inv in invoices" :key="inv.id">
-                        <tr>
-                            <td><a :href="viewUrl(inv.id)" class="portal-table-link" x-text="inv.invoice_number"></a></td>
-                            <td class="font-mono" style="font-size:0.8125rem;" x-text="inv.billing_period_fmt"></td>
-                            <td class="font-mono" x-text="inv.invoice_date_fmt"></td>
-                            <td class="font-mono" :style="inv.status === 'overdue' ? 'color:var(--color-danger);font-weight:600' : ''" x-text="inv.due_date_fmt"></td>
-                            <td class="text-right font-mono" x-text="inv.total_amount_fmt"></td>
-                            <td class="text-right font-mono" x-text="inv.paid_fmt"></td>
-                            <td class="text-right font-mono" style="font-weight:600;" x-text="inv.balance_due_fmt"></td>
-                            <td><span class="badge" :class="badgeClass(inv.status)" x-text="statusLabel(inv.status)"></span></td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-</div>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <template x-if="!loading && rows.length === 0">
+        <div>
+            <div x-show="hasFilters"><?= pt_empty('magnifying-glass', 'No invoices match', 'Try a different number or date range.', '<button type="button" class="pt-btn pt-btn--secondary pt-btn--sm" @click="clearFilters()">Clear filters</button>') ?></div>
+            <div x-show="!hasFilters && (tab === 'open' || tab === 'past_due')"><?= pt_empty('check-circle', 'You\'re all caught up', 'There are no open invoices on your account.') ?></div>
+            <div x-show="!hasFilters && !(tab === 'open' || tab === 'past_due')"><?= pt_empty('document-text', 'No invoices yet', 'Invoices will appear here as soon as they\'re issued.') ?></div>
+        </div>
+    </template>
+
+    <div class="pt-card-foot" x-show="total > perPage" x-cloak>
+        <span x-text="'Showing ' + ((page - 1) * perPage + 1) + '–' + Math.min(page * perPage, total) + ' of ' + total"></span>
+        <div class="pt-btn-row">
+            <button type="button" class="pt-btn pt-btn--secondary pt-btn--sm" :disabled="page <= 1" @click="go(page - 1)"><?= pt_icon('chevron-left') ?> Previous</button>
+            <button type="button" class="pt-btn pt-btn--secondary pt-btn--sm" :disabled="page >= pages" @click="go(page + 1)">Next <?= pt_icon('chevron-right') ?></button>
         </div>
     </div>
 
-</div>
-
-<script>
-function PortalInvoices() {
-    return {
-        tab: new URLSearchParams(location.search).get('tab') || 'outstanding',
-        invoices: [],
-        loading: true,
-        counts: { outstanding: 0, paid: 0, all: 0 },
-
-        load() {
-            this.loading = true;
-            FF_Api.get(FF_Api.url('/portal/invoices/index.php?ajax=1&tab=' + this.tab))
-                .then(d => {
-                    if (d.success) {
-                        this.invoices = d.data.invoices || [];
-                        this.counts = d.data.counts || this.counts;
-                    }
-                    this.loading = false;
-                }).catch(() => { this.loading = false; });
-        },
-
-        viewUrl(id) { return (window.FF_BASE_PATH || '') + '/portal/invoices/view?id=' + id; },
-        badgeClass(s) {
-            return { paid: 'badge-success', overdue: 'badge-danger', sent: 'badge-info', partially_paid: 'badge-warning', void: 'badge-neutral', draft: 'badge-neutral' }[s] || 'badge-neutral';
-        },
-        statusLabel(s) { return s.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()); },
-    };
-}
-</script>
-
+    <!-- Selection bar -->
+    <div class="pt-selbar" x-show="selected.length > 0" x-cloak
+         x-transition:enter="pt-slide-up-enter" x-transition:enter-start="pt-slide-up-enter-start" x-transition:enter-end="pt-slide-up-enter-end"
+         x-transition:leave="pt-slide-up-leave" x-transition:leave-start="pt-slide-up-leave-start" x-transition:leave-end="pt-slide-up-leave-end">
+        <div>
+            <div class="pt-selbar-count" x-text="selected.length + ' selected'"></div>
+            <div class="pt-selbar-sum" x-text="selPayable.length ? selSum : 'Nothing due on these'"></div>
+        </div>
+        <div class="pt-selbar-actions">
+            <button type="button" class="pt-btn pt-btn--primary pt-btn--sm" x-show="selPayable.length" @click="paySelected()"><?= pt_icon('credit-card') ?> Pay</button>
+            <a class="pt-btn pt-btn--secondary pt-btn--sm" :href="zipHref"><?= pt_icon('arrow-down-tray') ?> PDFs</a>
+            <button type="button" class="pt-btn pt-btn--secondary pt-btn--sm" x-show="selPayable.length" @click="reportSelected()"><?= pt_icon('paper-airplane') ?> I've paid these</button>
+            <button type="button" class="pt-icon-btn" style="width:32px;height:32px" @click="selected = []" aria-label="Clear selection"><?= pt_icon('x-mark', 'pt-ic pt-ic--sm') ?></button>
+        </div>
+    </div>
+</section>
 
 <?php require_once dirname(__DIR__) . '/includes/footer.php'; ?>

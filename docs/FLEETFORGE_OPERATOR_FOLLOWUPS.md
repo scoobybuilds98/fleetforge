@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-24 via S-RATES-MODULE — **F96** added (deploy the new Rates module, fix the three rate cards with no prices — the main standard list has a Chassis line with no prices on prod — and re-record training chapter 5 with F90). Previously 2026-09-24 via S-BILLING-MODULE — **F95** added (deploy Monthly Billing + its crontab line, run October as the first cycle, decide #113). Previously 2026-09-24 via S-PDF-LETTERHEAD — **F94** added (deploy, then open one of each PDF on prod). Previously 2026-09-24 via S-CCA-PREFILL — **F93** added (deploy, then send the next credit application through FleetForge: the form now opens pre-filled). Previously 2026-09-24 via S-SIDEBAR-LOGO / S-TOPBAR-CHROME — **F90** widened again (the top bar is now dark and the sidebar logo trimmed — every chapter's chrome changed; nothing to do for the logo itself: it is rebuilt automatically on the first page load after deploy). Previously 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
+**Last updated:** 2026-09-24 via S-PORTAL-REDESIGN — **F97** added (deploy the redesigned customer portal, look at it as a customer, decide on online payment, re-record training chapter 34 with F90). Previously 2026-09-24 via S-RATES-MODULE — **F96** added (deploy the new Rates module, fix the three rate cards with no prices — the main standard list has a Chassis line with no prices on prod — and re-record training chapter 5 with F90). Previously 2026-09-24 via S-BILLING-MODULE — **F95** added (deploy Monthly Billing + its crontab line, run October as the first cycle, decide #113). Previously 2026-09-24 via S-PDF-LETTERHEAD — **F94** added (deploy, then open one of each PDF on prod). Previously 2026-09-24 via S-CCA-PREFILL — **F93** added (deploy, then send the next credit application through FleetForge: the form now opens pre-filled). Previously 2026-09-24 via S-SIDEBAR-LOGO / S-TOPBAR-CHROME — **F90** widened again (the top bar is now dark and the sidebar logo trimmed — every chapter's chrome changed; nothing to do for the logo itself: it is rebuilt automatically on the first page load after deploy). Previously 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
 
 ---
 
@@ -99,6 +99,20 @@ Safety net: anything dated before go-live is refused as a NEW push until linked 
 - If rental revenue should split by equipment category, that needs a small code change (the revenue lookup must use the unit's category) — ask for it; until then add a plain `base_rental` entry to the revenue map to at least move it out of "Other Revenue".
 - Past entries stay where they are (a reclass journal is the accountant's call).
 **Done when:** the Items page warning is gone (or only shows the GPS-net note the accountant accepted).
+
+---
+
+### F97 — Deploy the redesigned customer portal, then look at it as a customer 🟡 OPEN (next deploy)
+
+**Surfaced by:** S-PORTAL-REDESIGN (2026-09-24), from the operator's "completely redesign the customer portal. add new features, pay thing".
+**Why:** every portal page is new, with a Pay & payments page, a Pay drawer, payment notices, statements, receipts and invoice downloads. It also closes a documents leak (customers could see files from other customers' time on a unit, and private documents) — worth deploying promptly.
+**Operator action:**
+1. Deploy `main` (PHP + new `portal.css` / `portal.js` + icons; no migration): `sudo /var/www/fleetforge/bin/deploy.sh`. If prod serves assets by `.env` `FF_ASSET_VERSION` rather than the git hash, bump it so browsers load the new stylesheet.
+2. Open the portal as a customer (Users → Portal → a portal user) and check Home, Invoices, Pay & payments and one invoice.
+3. **Online payment:** Pay buttons that open QuickBooks only appear while QuickBooks Payments is on (Master Controls → `quickbooks.payments_enabled`) and the invoice is already in QuickBooks. With it off, customers see how to pay you directly instead — add bank / e-Transfer / cheque details in Settings (company bank name + account, cheque payable-to, payment instructions) so that panel is complete. The QuickBooks pay link itself is still unproven on a live company (see project memory: sandbox Payments is US-only).
+4. **Payment notices** arrive as "Billing Inquiry" requests titled "Payment sent: …" — route billing questions to your accounting role in Settings → Portal & Requests if they should not go to super admins.
+5. Re-record training chapter 34 (Customer Portal) with F90 — it shows the old screens and its script's selectors need updating.
+**Done when:** a customer has signed in to the new portal on prod and chapter 34 is re-recorded.
 
 ---
 

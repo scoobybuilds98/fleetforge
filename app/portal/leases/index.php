@@ -4,172 +4,155 @@ declare(strict_types=1);
 /**
  * app/portal/leases/index.php
  *
- * Portal lease list — Active / Historical / All tabs.
- * All queries filter by portal_customer_id() (Trap 8).
+ * Customer portal — Leases (S-PORTAL-REDESIGN).
+ *
+ * A card per lease (unit, type, contract, since, rate, days on rent) with
+ * On rent / Upcoming / Returned / All tabs and instant search by contract or
+ * unit number. Leases are server-rendered once as JSON and filtered in the
+ * browser — a customer has tens of leases, not thousands (capped at 500).
+ *
+ * Replaces the ?ajax=1 list whose tab counts ignored the equipment join
+ * (counts could disagree with rows) and whose search didn't escape LIKE
+ * wildcards.
+ *
+ * Trap 8: leases filtered by portal_customer_id().
+ *
+ * @session S-PORTAL-REDESIGN
  */
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
+require_once dirname(__DIR__) . '/includes/ui.php';
 
-$cid = portal_customer_id();
+$cid   = portal_customer_id();
+$today = ff_today();
 
-// ── AJAX handler (must run before header to avoid HTML output) ──
-if (!empty($_GET['ajax'])) {
-    header('Content-Type: application/json');
+$rows = db_select(
+    "SELECT l.id, l.contract_number, l.status, l.start_date, l.end_date, l.actual_return_date,
+            l.daily_rate, l.weekly_rate, l.monthly_rate, l.hourly_rate, l.currency,
+            eu.id AS unit_id, eu.unit_number, eb.label AS brand, et.name AS type_name, et.category
+       FROM leases l
+       JOIN equipment_units eu ON eu.id = l.equipment_unit_id AND eu.deleted_at IS NULL
+       LEFT JOIN equipment_templates et ON et.id = eu.template_id
+       LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
+      WHERE l.customer_id = ? AND l.deleted_at IS NULL
+      ORDER BY FIELD(l.status, 'active', 'pending', 'completed', 'cancelled'), l.start_date DESC
+      LIMIT 500",
+    [$cid]
+);
 
-    $tab    = clean_string($_GET['tab'] ?? 'active');
-    $search = clean_string($_GET['q'] ?? null);
-
-    $where  = ['l.customer_id = ?', 'l.deleted_at IS NULL', 'eu.deleted_at IS NULL', 'et.deleted_at IS NULL'];
-    $params = [$cid];
-
-    if ($tab === 'active') {
-        $where[] = "l.status = 'active'";
-    } elseif ($tab === 'historical') {
-        $where[] = "l.status IN ('completed','cancelled')";
+$leases = [];
+$counts = ['active' => 0, 'pending' => 0, 'past' => 0, 'all' => 0];
+foreach ($rows as $r) {
+    $cur = (string) ($r['currency'] ?? 'CAD');
+    $rate = '';
+    foreach ([['monthly_rate', '/mo'], ['weekly_rate', '/wk'], ['daily_rate', '/day'], ['hourly_rate', '/hr']] as [$col, $suffix]) {
+        if (bccomp((string) ($r[$col] ?? '0'), '0', 2) > 0) { $rate = pt_money($r[$col], $cur) . $suffix; break; }
     }
-
-    if ($search) {
-        $where[] = "(l.contract_number LIKE ? OR eu.unit_number LIKE ?)";
-        $params[] = "%{$search}%";
-        $params[] = "%{$search}%";
-    }
-
-    $whereSQL = implode(' AND ', $where);
-
-    $rows = db_select(
-        "SELECT l.id, l.contract_number, l.start_date, l.end_date, l.status,
-                l.monthly_rate, eu.unit_number, et.category
-         FROM leases l
-         JOIN equipment_units eu ON eu.id = l.equipment_unit_id
-         JOIN equipment_templates et ON et.id = eu.template_id
-         WHERE {$whereSQL}
-         ORDER BY l.start_date DESC LIMIT 50",
-        $params
-    );
-
-    foreach ($rows as &$r) {
-        $r['start_date_fmt']   = format_date($r['start_date']);
-        $r['end_date_fmt']     = $r['end_date'] ? format_date($r['end_date']) : null;
-        $r['monthly_rate_fmt'] = format_currency($r['monthly_rate']);
-    }
-
-    $counts = [
-        'active'     => db_count("SELECT COUNT(*) FROM leases WHERE customer_id = ? AND status = 'active' AND deleted_at IS NULL", [$cid]),
-        'historical' => db_count("SELECT COUNT(*) FROM leases WHERE customer_id = ? AND status IN ('completed','cancelled') AND deleted_at IS NULL", [$cid]),
-        'all'        => db_count("SELECT COUNT(*) FROM leases WHERE customer_id = ? AND deleted_at IS NULL", [$cid]),
+    $end  = $r['actual_return_date'] ?: ($r['status'] === 'active' ? $today : ($r['end_date'] ?: $today));
+    $days = max(1, pt_days_between((string) $r['start_date'], (string) $end) + 1);
+    $group = match ($r['status']) { 'active' => 'active', 'pending' => 'pending', default => 'past' };
+    $counts[$group]++;
+    $counts['all']++;
+    [$sl, $st] = match ($r['status']) {
+        'active'    => ['On rent', 'success'],
+        'pending'   => ['Starting soon', 'info'],
+        'completed' => ['Returned', 'neutral'],
+        'cancelled' => ['Cancelled', 'danger'],
+        default     => [ucfirst((string) $r['status']), 'neutral'],
+    };
+    $leases[] = [
+        'id'       => (int) $r['id'],
+        'contract' => (string) $r['contract_number'],
+        'unit'     => (string) $r['unit_number'],
+        'unit_id'  => (int) $r['unit_id'],
+        'type'     => trim(($r['brand'] ? $r['brand'] . ' ' : '') . ($r['type_name'] ?: ucfirst((string) $r['category']))),
+        'group'    => $group,
+        'status'   => $sl,
+        'tone'     => $st,
+        'since'    => format_date($r['start_date']),
+        'ended'    => $r['actual_return_date'] ? format_date($r['actual_return_date']) : ($r['end_date'] ? format_date($r['end_date']) : ''),
+        'ends_soon'=> $r['status'] === 'active' && $r['end_date'] && $r['end_date'] >= $today && $r['end_date'] <= ff_local_date_add($today, 21),
+        'rate'     => $rate,
+        'days'     => $days,
+        'url'      => pt_url('leases/view?id=' . (int) $r['id']),
+        'report'   => pt_url('requests/create?type=damage_report&lease_id=' . (int) $r['id'] . '&equipment_id=' . (int) $r['unit_id']),
     ];
-
-    echo json_encode(['success' => true, 'data' => ['leases' => $rows, 'counts' => $counts]]);
-    exit;
 }
+
+$tab = (string) ($_GET['tab'] ?? ($counts['active'] > 0 ? 'active' : 'all'));
+if (!in_array($tab, ['active', 'pending', 'past', 'all'], true)) $tab = 'all';
 
 $pageTitle = 'Leases';
 require_once dirname(__DIR__) . '/includes/header.php';
+
+echo pt_page_head([
+    'eyebrow' => 'Fleet',
+    'title'   => 'Leases',
+    'sub'     => 'Every rental on your account. Open one to see its invoices, mileage, documents and rates — or to extend or return it.',
+    'actions' => '<a class="pt-btn pt-btn--primary" href="' . e(pt_url('requests/create?type=new_lease_inquiry')) . '">' . pt_icon('plus') . ' Rent more equipment</a>',
+]);
 ?>
 
-<div x-data="PortalLeases()" x-init="load()" x-cloak>
-
-    <!-- Tabs -->
-    <div class="portal-tabs">
-        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'active' }" @click="tab = 'active'; load()">
-            Active <span class="portal-tab-count" x-show="counts.active > 0" x-text="counts.active"></span>
-        </button>
-        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'historical' }" @click="tab = 'historical'; load()">
-            Historical <span class="portal-tab-count" x-show="counts.historical > 0" x-text="counts.historical"></span>
-        </button>
-        <button class="portal-tab-btn" :class="{ 'is-active': tab === 'all' }" @click="tab = 'all'; load()">
-            All <span class="portal-tab-count" x-show="counts.all > 0" x-text="counts.all"></span>
-        </button>
-    </div>
-
-    <!-- Search -->
-    <div class="portal-filters">
-        <input type="text" class="portal-search-input"
-               placeholder="Search by contract #, unit..."
-               x-model="search" @input.debounce.400ms="load()">
-    </div>
-
-    <!-- Table -->
-    <div class="portal-section">
-        <div class="portal-section-body--flush">
-            <template x-if="loading">
-                <div class="portal-empty">
-                    <p class="portal-empty-text">Loading leases...</p>
-                </div>
-            </template>
-            <template x-if="!loading && leases.length === 0">
-                <div class="portal-empty">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
-                    <p class="portal-empty-title">No leases found</p>
-                    <p class="portal-empty-text" x-text="tab === 'active' ? 'No active leases at the moment.' : 'No leases match your filters.'"></p>
-                </div>
-            </template>
-            <div class="table-responsive">
-<table class="portal-table" x-show="!loading && leases.length > 0">
-                <thead>
-                    <tr>
-                        <th>Contract #</th>
-                        <th>Unit</th>
-                        <th>Type</th>
-                        <th>Start Date</th>
-                        <th>End Date</th>
-                        <th class="text-right">Monthly Rate</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <template x-for="l in leases" :key="l.id">
-                        <tr>
-                            <td>
-                                <a :href="viewUrl(l.id)" class="portal-table-link" x-text="l.contract_number"></a>
-                            </td>
-                            <td x-text="l.unit_number"></td>
-                            <td><span style="color:var(--text-secondary);font-size:0.8125rem;" x-text="l.category"></span></td>
-                            <td class="font-mono" x-text="l.start_date_fmt"></td>
-                            <td class="font-mono" x-text="l.end_date_fmt || '—'"></td>
-                            <td class="text-right font-mono" x-text="l.monthly_rate_fmt"></td>
-                            <td><span class="badge" :class="badgeClass(l.status)" x-text="statusLabel(l.status)"></span></td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-</div>
+<div x-data="{
+        tab: <?= e(json_encode($tab)) ?>,
+        q: '',
+        rows: <?= e(json_encode($leases)) ?>,
+        get list() {
+            const t = this.q.trim().toLowerCase();
+            return this.rows.filter(r => (this.tab === 'all' || r.group === this.tab)
+                && (!t || r.contract.toLowerCase().includes(t) || r.unit.toLowerCase().includes(t) || r.type.toLowerCase().includes(t)));
+        }
+    }">
+    <div class="pt-card" style="margin-bottom:var(--pt-gap)">
+        <div class="pt-toolbar" style="border-bottom:0">
+            <div class="pt-tabs" role="tablist" aria-label="Lease status">
+                <?php foreach (['active' => 'On rent', 'pending' => 'Upcoming', 'past' => 'Returned', 'all' => 'All'] as $k => $label):
+                    if ($k === 'pending' && $counts['pending'] === 0) continue; ?>
+                    <button type="button" class="pt-tab" role="tab" :class="{ 'is-active': tab === '<?= $k ?>' }" :aria-selected="tab === '<?= $k ?>'" @click="tab = '<?= $k ?>'">
+                        <?= e($label) ?> <span class="pt-tab-count"><?= (int) $counts[$k] ?></span>
+                    </button>
+                <?php endforeach; ?>
+            </div>
+            <div class="pt-toolbar-spacer"></div>
+            <label class="pt-search-field">
+                <?= pt_icon('magnifying-glass') ?>
+                <span class="pt-sr">Search leases</span>
+                <input type="search" class="pt-input" placeholder="Lease, unit or type" x-model="q">
+            </label>
         </div>
     </div>
 
+    <div class="pt-units">
+        <template x-for="l in list" :key="l.id">
+            <article class="pt-unit">
+                <a :href="l.url" class="pt-unit-top" style="text-decoration:none;color:inherit">
+                    <span class="pt-unit-art"><?= pt_icon('truck') ?></span>
+                    <span style="min-width:0">
+                        <span class="pt-unit-id" style="display:block" x-text="l.unit"></span>
+                        <span class="pt-unit-type" style="display:block" x-text="l.type"></span>
+                    </span>
+                    <span class="pt-unit-status"><span class="pt-pill" :class="'pt-pill--' + l.tone" x-text="l.status"></span></span>
+                </a>
+                <div class="pt-unit-facts">
+                    <div class="pt-unit-fact"><div class="pt-unit-fact-k">Lease</div><div class="pt-unit-fact-v" x-text="l.contract"></div></div>
+                    <div class="pt-unit-fact"><div class="pt-unit-fact-k" x-text="l.group === 'past' ? 'Returned' : 'Since'"></div><div class="pt-unit-fact-v" x-text="l.group === 'past' ? (l.ended || '—') : l.since"></div></div>
+                    <div class="pt-unit-fact"><div class="pt-unit-fact-k">Rate</div><div class="pt-unit-fact-v" x-text="l.rate || '—'"></div></div>
+                    <div class="pt-unit-fact"><div class="pt-unit-fact-k" x-text="l.group === 'active' ? 'Days on rent' : 'Days'"></div><div class="pt-unit-fact-v" x-text="l.days.toLocaleString()"></div></div>
+                </div>
+                <div class="pt-note pt-note--info" x-show="l.ends_soon" style="margin:10px 12px 0;padding:8px 12px;font-size:12.5px"><span x-text="'Ends ' + l.ended + ' — need it longer?'"></span></div>
+                <div class="pt-unit-foot">
+                    <a class="pt-btn pt-btn--secondary pt-btn--sm" :href="l.url">View lease</a>
+                    <a class="pt-btn pt-btn--ghost pt-btn--sm" :href="l.report" x-show="l.group === 'active'"><?= pt_icon('wrench-screwdriver') ?> Report a problem</a>
+                </div>
+            </article>
+        </template>
+    </div>
+
+    <div class="pt-card" x-show="list.length === 0" x-cloak>
+        <div x-show="q.trim() !== ''"><?= pt_empty('magnifying-glass', 'No leases match', 'Try a different contract or unit number.') ?></div>
+        <div x-show="q.trim() === ''"><?= pt_empty('clipboard-document-list', 'Nothing here yet', 'Leases in this view will appear here.', '<a class="pt-btn pt-btn--soft pt-btn--sm" href="' . e(pt_url('requests/create?type=new_lease_inquiry')) . '">Rent equipment</a>') ?></div>
+    </div>
 </div>
-
-<script>
-function PortalLeases() {
-    return {
-        tab: new URLSearchParams(location.search).get('tab') || 'active',
-        search: '',
-        leases: [],
-        loading: true,
-        counts: { active: 0, historical: 0, all: 0 },
-
-        load() {
-            this.loading = true;
-            const params = new URLSearchParams({ tab: this.tab, q: this.search });
-            FF_Api.get(FF_Api.url('/portal/leases/index.php?ajax=1&' + params.toString()))
-                .then(d => {
-                    if (d.success) {
-                        this.leases = d.data.leases || [];
-                        this.counts = d.data.counts || this.counts;
-                    }
-                    this.loading = false;
-                }).catch(() => { this.loading = false; });
-        },
-
-        viewUrl(id) { return (window.FF_BASE_PATH || '') + '/portal/leases/view?id=' + id; },
-        badgeClass(s) {
-            return { active: 'badge-success', completed: 'badge-neutral', cancelled: 'badge-danger', pending: 'badge-info' }[s] || 'badge-neutral';
-        },
-        statusLabel(s) { return s.charAt(0).toUpperCase() + s.slice(1); },
-    };
-}
-</script>
-
 
 <?php require_once dirname(__DIR__) . '/includes/footer.php'; ?>

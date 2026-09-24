@@ -88,6 +88,29 @@ function require_portal_auth(): void
 }
 
 /**
+ * require_portal_auth_api() — the JSON twin of require_portal_auth() for
+ * portal endpoints under api/v1/portal/ (S-PORTAL-REDESIGN).
+ *
+ * WHY: require_portal_auth() answers an expired session with a 302 to the
+ * login page. A fetch() then receives the login HTML, FF_Api's res.json()
+ * throws, and the page shows "Network error" instead of "please sign in".
+ * This returns a 401 JSON envelope the portal JS can act on, and applies
+ * the same mid-session revocation check. Requires api/bootstrap.php
+ * (json_error) to have been loaded by the endpoint.
+ */
+function require_portal_auth_api(): void
+{
+    if (!portal_user()) {
+        json_error('UNAUTHORIZED', 'Your session has ended. Please sign in again.', 401);
+    }
+    $revoked = portal_status_revoked();
+    if ($revoked !== null) {
+        _portal_session_clear();
+        json_error('UNAUTHORIZED', $revoked, 401);
+    }
+}
+
+/**
  * portal_status_revoked() — re-validate that BOTH the logged-in customer and
  * the portal user are still in an allowed status. Returns a user-facing flash
  * message when access must be revoked, or null when access may continue.

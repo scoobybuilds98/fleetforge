@@ -4,314 +4,264 @@ declare(strict_types=1);
 /**
  * app/portal/account/users.php
  *
- * Sub-user management — invite new sub-users, resend invites, deactivate/reactivate.
- * Only accessible to primary account holders (portal_is_primary()).
- * Trap 8: all queries filter by portal_customer_id().
+ * Customer portal — Team members (S-PORTAL-REDESIGN). Main contact only.
+ *
+ * Invite colleagues, resend an invite, deactivate / reactivate a login.
+ * Everyone on the account sees the same invoices, leases and requests.
+ *
+ * Fixed here: invites were NEVER emailed — the set-password link was only
+ * appended to logs/mail.log, while the page told the customer "Invitation
+ * sent". Invites now go through the shared Mailer (SES in production,
+ * logs/mail.log in development — the same path as staff-created invites,
+ * api/v1/portal_users/create.php) and the message says what really happened.
+ * Actions are audited and redirect after POST (refresh no longer repeats
+ * them).
+ *
+ * Rules (unchanged): only the main contact manages the team; the main
+ * contact can't be deactivated; an invite link sets the password through
+ * portal/auth/reset_password and expires in 7 days; password_reset_token
+ * is used (invite_token is the remember-me hash).
+ *
+ * Trap 8: every target row is checked against portal_customer_id().
+ *
+ * @session S-PORTAL-REDESIGN
  */
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
+require_once dirname(__DIR__) . '/includes/ui.php';
 
-// Only primary account holder can manage sub-users
+use FleetForge\Email\EmailService;
+use FleetForge\Notifications\Mailer;
+use FleetForge\Security\RateLimiter;
+
 if (!portal_is_primary()) {
-    header('Location: ' . base_url('portal/account'));
+    header('Location: ' . pt_url('account'));
     exit;
 }
 
 $cid  = portal_customer_id();
-$puid = portal_user_id();
+$puid = (int) portal_user_id();
+$me   = portal_user();
 
-$_csrfToken = portal_csrf_token();
-$success = '';
-$error   = '';
+/**
+ * Email a set-password invite. Returns true when the Mailer accepted it.
+ */
+$sendInvite = static function (string $email, string $name, string $plainToken) use ($me, $cid): bool {
+    $operator = (string) settings_get('company.name', 'FleetForge');
+    $customer = (string) (db_row("SELECT company_name FROM customers WHERE id = ?", [$cid])['company_name'] ?? '');
+    $url      = base_url('portal/auth/reset_password') . '?token=' . $plainToken . '&email=' . urlencode($email);
+    $color    = preg_match('/^#[0-9a-fA-F]{6}$/', (string) settings_get('brand.primary_color', '')) ? (string) settings_get('brand.primary_color') : '#2563eb';
+    $html = EmailService::renderEmailHtml(
+        '<h2 style="margin:0 0 16px;">You\'re invited to the ' . e($operator) . ' customer portal</h2>'
+        . '<p>Hi ' . e($name) . ',</p>'
+        . '<p>' . e((string) ($me['name'] ?? 'A colleague')) . ' added you to ' . e($customer)
+        . '\'s account. In the portal you can see and pay invoices, check your rentals and message our team.</p>'
+        . '<p style="margin:24px 0;"><a href="' . e($url) . '" style="display:inline-block;background:' . e($color)
+        . ';color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:600;">Set your password</a></p>'
+        . '<p style="color:#64748b;font-size:13px;">This link expires in 7 days. If the button doesn\'t work, paste this into your browser:<br>'
+        . '<span style="word-break:break-all;">' . e($url) . '</span></p>'
+    );
+    try {
+        return Mailer::send($email, $name, 'You\'re invited to the ' . $operator . ' customer portal', $html);
+    } catch (\Throwable $e) {
+        error_log('[portal/account/users invite] ' . $e->getMessage());
+        return false;
+    }
+};
+$audit = static function (string $action, int $targetId, string $label, string $notes) use ($puid): void {
+    try {
+        db_insert('audit_log', [
+            'user_id' => null, 'user_name' => 'portal:' . $puid, 'action' => $action, 'module' => 'portal',
+            'entity_type' => 'portal_user', 'entity_id' => $targetId, 'entity_label' => mb_substr($label, 0, 255),
+            'notes' => $notes, 'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+    } catch (\Throwable $e) {
+        error_log('[portal/account/users audit] ' . $e->getMessage());
+    }
+};
+$sentMsg = static fn (bool $ok, string $email): string => $ok
+    ? (APP_ENV === 'production' ? 'Invitation emailed to ' . $email . '.' : 'Invitation created for ' . $email . ' (development: written to logs/mail.log).')
+    : 'We saved the invitation for ' . $email . ', but the email didn\'t go out. Try "Resend" in a moment, or contact us.';
 
-// Handle POST actions
+$flash = $_SESSION['pt_team_flash'] ?? null;
+unset($_SESSION['pt_team_flash']);
+$error = '';
+$old   = ['name' => '', 'email' => ''];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $submittedCsrf = (string) ($_POST['csrf_token'] ?? '');
-    $action = clean_string($_POST['action'] ?? null);
+    $action = (string) clean_string($_POST['action'] ?? '', 30);
+    $done   = null;
 
-    if (!portal_verify_csrf($submittedCsrf)) {
-        $error = 'Invalid request token. Please refresh and try again.';
+    if (!portal_verify_csrf((string) ($_POST['csrf_token'] ?? ''))) {
+        $error = 'Your session token expired. Please try again.';
     } elseif ($action === 'invite') {
-        $inviteName  = clean_string($_POST['invite_name'] ?? null);
-        $inviteEmail = clean_string($_POST['invite_email'] ?? null);
-
-        if (!$inviteName) {
-            $error = 'Name is required.';
-        } elseif (!$inviteEmail || !filter_var($inviteEmail, FILTER_VALIDATE_EMAIL)) {
-            $error = 'A valid email address is required.';
+        $old = ['name' => trim((string) clean_string($_POST['invite_name'] ?? '', 255)), 'email' => trim((string) clean_string($_POST['invite_email'] ?? '', 255))];
+        $rl  = RateLimiter::check('portal_team_invite:' . $puid, 20, 60);
+        if (!$rl['allowed']) {
+            $error = 'You\'ve sent a lot of invitations recently. Please try again later.';
+        } elseif ($old['name'] === '') {
+            $error = 'Enter their name.';
+        } elseif (!filter_var($old['email'], FILTER_VALIDATE_EMAIL)) {
+            $error = 'Enter a valid email address.';
+        } elseif (db_row("SELECT id FROM portal_users WHERE email = ?", [$old['email']])) {
+            $error = 'That email address already has a portal login. If it should be moved to your account, contact us.';
         } else {
-            // Check if email already exists in portal_users
-            $existing = db_row("SELECT id, status FROM portal_users WHERE email = ?", [$inviteEmail]);
-            if ($existing) {
-                $error = 'A user with this email address already exists.';
-            } else {
-                // Generate invite token
-                $plainToken = bin2hex(random_bytes(32));
-                $tokenHash  = hash('sha256', $plainToken);
-                // UTC (S-UTC-STAMPS): DATETIMEs are UTC (db.php pins '+00:00');
-                // reset_password.php compares this expiry as UTC.
-                $expiry     = ff_now_utc('+7 days');
-
-                // WHY: use password_reset_token (not invite_token) so reset_password.php
-                // can validate the link. invite_token is reserved for remember-me cookies.
-                $newId = db_insert('portal_users', [
+            $plain = bin2hex(random_bytes(32));
+            try {
+                $newId = (int) db_insert('portal_users', [
                     'customer_id'           => $cid,
-                    'name'                  => $inviteName,
-                    'email'                 => $inviteEmail,
+                    'name'                  => $old['name'],
+                    'email'                 => $old['email'],
                     'status'                => 'invited',
                     'is_primary'            => 0,
-                    'password_reset_token'  => $tokenHash,
-                    'password_reset_expiry' => $expiry,
-                    'invite_sent_at'        => ff_now_utc(), // UTC: format_datetime() reads it as UTC
+                    'password_reset_token'  => hash('sha256', $plain),
+                    'password_reset_expiry' => ff_now_utc('+7 days'),
+                    'invite_sent_at'        => ff_now_utc(),
                 ]);
-
-                // Log invite URL (dev mode — no real email sending)
-                $resetUrl = base_url('portal/auth/reset_password') . '?token=' . $plainToken . '&email=' . urlencode($inviteEmail);
-                $logDir = dirname(__DIR__, 3) . '/logs';
-                if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
-                file_put_contents(
-                    $logDir . '/mail.log',
-                    sprintf(
-                        "[%s] PORTAL INVITE: To: %s | Name: %s | Set Password URL: %s\n",
-                        date('Y-m-d H:i:s'),
-                        $inviteEmail,
-                        $inviteName,
-                        $resetUrl
-                    ),
-                    FILE_APPEND
-                );
-
-                $success = 'Invitation sent to ' . $inviteEmail . '. They can set their password using the link sent to their email.';
+            } catch (\PDOException $e) {
+                if ($e->getCode() === '23000' && stripos($e->getMessage(), 'email') !== false) {
+                    $error = 'That email address already has a portal login.';
+                    $newId = 0;
+                } else {
+                    throw $e;
+                }
+            }
+            if ($newId) {
+                $ok = $sendInvite($old['email'], $old['name'], $plain);
+                $audit('create', $newId, $old['name'] . ' <' . $old['email'] . '>', 'Main contact invited a team member (email ' . ($ok ? 'sent' : 'FAILED') . ').');
+                $done = [$ok ? 'success' : 'warning', $sentMsg($ok, $old['email'])];
             }
         }
-    } elseif ($action === 'deactivate') {
-        $targetId = clean_int($_POST['user_id'] ?? null);
-        if ($targetId) {
-            // Cannot deactivate self or other primary users
-            $target = db_row(
-                "SELECT id, is_primary FROM portal_users WHERE id = ? AND customer_id = ?",
-                [$targetId, $cid]
-            );
-            if (!$target) {
-                $error = 'User not found.';
-            } elseif ($target['is_primary']) {
-                $error = 'Cannot deactivate the primary account holder.';
+    } elseif (in_array($action, ['deactivate', 'reactivate', 'resend_invite'], true)) {
+        $targetId = (int) (clean_int($_POST['user_id'] ?? null) ?? 0);
+        $t = db_row("SELECT id, name, email, status, is_primary FROM portal_users WHERE id = ? AND customer_id = ?", [$targetId, $cid]);
+        if (!$t) {
+            $error = 'That team member wasn\'t found.';
+        } elseif ($action === 'deactivate') {
+            if ((int) $t['is_primary'] === 1 || (int) $t['id'] === $puid) {
+                $error = 'The main contact can\'t be deactivated here.';
             } else {
-                db_update('portal_users', ['status' => 'inactive'], 'id = ? AND customer_id = ?', [$targetId, $cid]);
-                $success = 'User has been deactivated.';
+                db_update('portal_users', ['status' => 'inactive', 'invite_token' => null], 'id = ? AND customer_id = ?', [$targetId, $cid]);
+                $audit('update', $targetId, (string) $t['email'], 'Main contact deactivated this portal login.');
+                $done = ['success', $t['name'] . ' can no longer sign in.'];
             }
-        }
-    } elseif ($action === 'reactivate') {
-        $targetId = clean_int($_POST['user_id'] ?? null);
-        if ($targetId) {
-            $target = db_row(
-                "SELECT id, status FROM portal_users WHERE id = ? AND customer_id = ? AND status = 'inactive'",
-                [$targetId, $cid]
-            );
-            if (!$target) {
-                $error = 'User not found or not inactive.';
+        } elseif ($action === 'reactivate') {
+            if ($t['status'] !== 'inactive') {
+                $error = 'Only deactivated logins can be reactivated.';
             } else {
                 db_update('portal_users', ['status' => 'active'], 'id = ? AND customer_id = ?', [$targetId, $cid]);
-                $success = 'User has been reactivated.';
+                $audit('update', $targetId, (string) $t['email'], 'Main contact reactivated this portal login.');
+                $done = ['success', $t['name'] . ' can sign in again.'];
             }
-        }
-    } elseif ($action === 'resend_invite') {
-        $targetId = clean_int($_POST['user_id'] ?? null);
-        if ($targetId) {
-            $target = db_row(
-                "SELECT id, name, email, status FROM portal_users WHERE id = ? AND customer_id = ? AND status = 'invited'",
-                [$targetId, $cid]
-            );
-            if (!$target) {
-                $error = 'User not found or already activated.';
+        } else { // resend_invite
+            if ($t['status'] !== 'invited') {
+                $error = 'They\'ve already accepted their invitation.';
             } else {
-                // Generate new invite token
-                $plainToken = bin2hex(random_bytes(32));
-                $tokenHash  = hash('sha256', $plainToken);
-                // UTC (S-UTC-STAMPS): compared as UTC in reset_password.php.
-                $expiry     = ff_now_utc('+7 days');
-
+                $plain = bin2hex(random_bytes(32));
                 db_update('portal_users', [
-                    'password_reset_token'  => $tokenHash,
-                    'password_reset_expiry' => $expiry,
-                    'invite_sent_at'        => ff_now_utc(), // UTC: format_datetime() reads it as UTC
+                    'password_reset_token'  => hash('sha256', $plain),
+                    'password_reset_expiry' => ff_now_utc('+7 days'),
+                    'invite_sent_at'        => ff_now_utc(),
                 ], 'id = ? AND customer_id = ?', [$targetId, $cid]);
-
-                // Log invite URL
-                $resetUrl = base_url('portal/auth/reset_password') . '?token=' . $plainToken . '&email=' . urlencode($target['email']);
-                $logDir = dirname(__DIR__, 3) . '/logs';
-                if (!is_dir($logDir)) @mkdir($logDir, 0755, true);
-                file_put_contents(
-                    $logDir . '/mail.log',
-                    sprintf(
-                        "[%s] PORTAL INVITE RESEND: To: %s | Name: %s | Set Password URL: %s\n",
-                        date('Y-m-d H:i:s'),
-                        $target['email'],
-                        $target['name'],
-                        $resetUrl
-                    ),
-                    FILE_APPEND
-                );
-
-                $success = 'Invitation resent to ' . $target['email'] . '.';
+                $ok = $sendInvite((string) $t['email'], (string) $t['name'], $plain);
+                $audit('update', $targetId, (string) $t['email'], 'Main contact re-sent the portal invite (email ' . ($ok ? 'sent' : 'FAILED') . ').');
+                $done = [$ok ? 'success' : 'warning', $sentMsg($ok, (string) $t['email'])];
             }
         }
     }
+
+    if ($done !== null) {
+        $_SESSION['pt_team_flash'] = $done;
+        header('Location: ' . pt_url('account/users'));
+        exit;
+    }
 }
 
-// Fetch all sub-users for this customer
-$subUsers = db_select(
-    "SELECT id, name, email, status, is_primary, last_login_at, created_at, invite_sent_at
-     FROM portal_users WHERE customer_id = ?
-     ORDER BY is_primary DESC, name ASC",
+$team = db_select(
+    "SELECT id, name, email, status, is_primary, last_login_at, invite_sent_at
+       FROM portal_users WHERE customer_id = ?
+      ORDER BY is_primary DESC, status = 'inactive', name ASC",
     [$cid]
 );
 
-$pageTitle = 'Manage Sub-Users';
+$pageTitle = 'Team members';
 require_once dirname(__DIR__) . '/includes/header.php';
+
+echo pt_page_head([
+    'back'  => ['Settings', pt_url('account')],
+    'title' => 'Team members',
+    'sub'   => 'Give colleagues their own login. Everyone on your account sees the same invoices, leases and requests.',
+]);
 ?>
 
-<div style="max-width:900px;">
+<?php if ($flash): ?>
+    <div class="pt-note pt-note--<?= e($flash[0]) ?>" style="margin-bottom:16px"><?= pt_icon($flash[0] === 'success' ? 'check-circle' : 'exclamation-triangle') ?><span><?= e($flash[1]) ?></span></div>
+<?php endif; ?>
+<?php if ($error !== ''): ?>
+    <div class="pt-note pt-note--danger" style="margin-bottom:16px"><?= pt_icon('exclamation-triangle') ?><span><?= e($error) ?></span></div>
+<?php endif; ?>
 
-    <a href="<?= e(base_url('portal/account')) ?>" class="portal-form-link" style="font-size:0.8125rem;display:inline-flex;align-items:center;gap:4px;margin-bottom:16px;">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
-        Back to Account
-    </a>
-
-    <?php if ($success): ?>
-        <div class="portal-login-success" style="margin-bottom:16px;"><?= e($success) ?></div>
-    <?php endif; ?>
-    <?php if ($error): ?>
-        <div class="portal-login-error" style="margin-bottom:16px;">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/></svg>
-            <?= e($error) ?>
-        </div>
-    <?php endif; ?>
-
-    <!-- Invite Form -->
-    <div class="portal-section" style="margin-bottom:24px;">
-        <div class="portal-section-header">
-            <h2 class="portal-section-title">Invite New Sub-User</h2>
-        </div>
-        <div class="portal-section-body">
-            <form method="POST">
-                <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
-                <input type="hidden" name="action" value="invite">
-
-                <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
-                    <div class="portal-form-group" style="margin-bottom:0;">
-                        <label class="portal-form-label" for="invite_name">Name</label>
-                        <input type="text" id="invite_name" name="invite_name"
-                               class="portal-form-input"
-                               placeholder="Full name" required
-                               value="<?= e($_POST['invite_name'] ?? '') ?>">
-                    </div>
-                    <div class="portal-form-group" style="margin-bottom:0;">
-                        <label class="portal-form-label" for="invite_email">Email Address</label>
-                        <input type="email" id="invite_email" name="invite_email"
-                               class="portal-form-input"
-                               placeholder="user@company.com" required
-                               value="<?= e($_POST['invite_email'] ?? '') ?>">
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-md">Send Invite</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Users List -->
-    <div class="portal-section">
-        <div class="portal-section-header">
-            <h2 class="portal-section-title">Team Members</h2>
-            <span style="font-size:0.8125rem;color:var(--text-muted);"><?= e(count($subUsers)) ?> user<?= count($subUsers) !== 1 ? 's' : '' ?></span>
-        </div>
-        <div class="portal-section-body--flush">
-            <div class="table-responsive">
-<table class="portal-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Role</th>
-                        <th>Status</th>
-                        <th>Last Login</th>
-                        <th></th>
-                    </tr>
-                </thead>
+<div class="pt-grid pt-grid--main">
+    <section class="pt-card">
+        <div class="pt-card-head"><div><h2 class="pt-card-title"><?= pt_icon('users') ?> People with access</h2><p class="pt-card-sub"><?= count($team) ?> login<?= count($team) === 1 ? '' : 's' ?></p></div></div>
+        <div class="pt-card-body--flush pt-table-wrap">
+            <table data-no-auto-label class="pt-table pt-table--stack">
+                <thead><tr><th>Name</th><th>Status</th><th>Last signed in</th><th class="shrink"><span class="pt-sr">Actions</span></th></tr></thead>
                 <tbody>
-                    <?php foreach ($subUsers as $su): ?>
+                <?php foreach ($team as $t):
+                    [$sl, $st] = match ($t['status']) {
+                        'active'   => ['Active', 'success'],
+                        'invited'  => ['Invited', 'info'],
+                        'inactive' => ['Deactivated', 'neutral'],
+                        default    => [ucfirst((string) $t['status']), 'neutral'],
+                    };
+                ?>
                     <tr>
-                        <td style="font-weight:600;">
-                            <?= e($su['name']) ?>
-                            <?php if ((int)$su['id'] === $puid): ?>
-                                <span style="font-size:0.7rem;color:var(--text-muted);margin-left:4px;">(you)</span>
-                            <?php endif; ?>
+                        <td class="pt-cell-primary">
+                            <div style="display:flex;gap:12px;align-items:center">
+                                <span class="pt-avatar"><?= e(pt_initials((string) $t['name'])) ?></span>
+                                <span><span class="pt-table-main"><?= e((string) $t['name']) ?><?= (int) $t['id'] === $puid ? ' <span class="pt-faint" style="font-weight:500">(you)</span>' : '' ?></span><span class="pt-table-sub"><?= e((string) $t['email']) ?></span></span>
+                            </div>
                         </td>
-                        <td><?= e($su['email']) ?></td>
-                        <td>
-                            <?php if ($su['is_primary']): ?>
-                                <span class="badge badge-info">Primary</span>
-                            <?php else: ?>
-                                Sub-user
-                            <?php endif; ?>
-                        </td>
-                        <td>
-                            <span class="badge <?= $su['status'] === 'active' ? 'badge-success' : ($su['status'] === 'invited' ? 'badge-info' : 'badge-neutral') ?>">
-                                <?= e(ucfirst($su['status'])) ?>
-                            </span>
-                        </td>
-                        <td class="font-mono"><?= $su['last_login_at'] ? e(format_datetime($su['last_login_at'])) : 'Never' ?></td>
-                        <td>
-                            <?php if (!$su['is_primary']): ?>
-                                <div style="display:flex;gap:6px;justify-content:flex-end;">
-                                    <?php if ($su['status'] === 'invited'): ?>
-                                        <form method="POST" style="display:inline;">
-                                            <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
-                                            <input type="hidden" name="action" value="resend_invite">
-                                            <input type="hidden" name="user_id" value="<?= e((string)$su['id']) ?>">
-                                            <button type="submit" class="btn btn-secondary btn-sm">Resend Invite</button>
-                                        </form>
+                        <td data-label="Status"><?= pt_badge($sl, $st) ?><?= (int) $t['is_primary'] ? ' ' . pt_badge('Main contact', 'brand') : '' ?></td>
+                        <td class="nw" data-label="Last signed in"><?= $t['last_login_at'] ? e(format_datetime($t['last_login_at'], 'M j, Y')) : ($t['status'] === 'invited' && $t['invite_sent_at'] ? '<span class="pt-faint">Invited ' . e(format_datetime($t['invite_sent_at'], 'M j')) . '</span>' : '<span class="pt-faint">Never</span>') ?></td>
+                        <td class="shrink pt-cell-actions">
+                            <?php if (!(int) $t['is_primary'] && (int) $t['id'] !== $puid): ?>
+                                <form method="POST" style="display:inline" <?= $t['status'] === 'active' ? 'onsubmit="return confirm(\'Deactivate ' . e(addslashes((string) $t['name'])) . '? They won\\\'t be able to sign in.\')"' : '' ?>>
+                                    <input type="hidden" name="csrf_token" value="<?= e(portal_csrf_token()) ?>">
+                                    <input type="hidden" name="user_id" value="<?= (int) $t['id'] ?>">
+                                    <?php if ($t['status'] === 'invited'): ?>
+                                        <button class="pt-btn pt-btn--secondary pt-btn--sm" name="action" value="resend_invite"><?= pt_icon('paper-airplane') ?> Resend</button>
+                                        <button class="pt-btn pt-btn--ghost pt-btn--sm" name="action" value="deactivate">Cancel invite</button>
+                                    <?php elseif ($t['status'] === 'active'): ?>
+                                        <button class="pt-btn pt-btn--ghost pt-btn--sm" name="action" value="deactivate">Deactivate</button>
+                                    <?php else: ?>
+                                        <button class="pt-btn pt-btn--secondary pt-btn--sm" name="action" value="reactivate">Reactivate</button>
                                     <?php endif; ?>
-                                    <?php if ($su['status'] === 'active'): ?>
-                                        <form method="POST" style="display:inline;" onsubmit="return confirm('Deactivate this user? They will no longer be able to log in.')">
-                                            <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
-                                            <input type="hidden" name="action" value="deactivate">
-                                            <input type="hidden" name="user_id" value="<?= e((string)$su['id']) ?>">
-                                            <button type="submit" class="btn btn-secondary btn-sm" style="color:var(--color-danger);">Deactivate</button>
-                                        </form>
-                                    <?php elseif ($su['status'] === 'inactive'): ?>
-                                        <form method="POST" style="display:inline;">
-                                            <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
-                                            <input type="hidden" name="action" value="reactivate">
-                                            <input type="hidden" name="user_id" value="<?= e((string)$su['id']) ?>">
-                                            <button type="submit" class="btn btn-secondary btn-sm">Reactivate</button>
-                                        </form>
-                                    <?php endif; ?>
-                                </div>
+                                </form>
                             <?php endif; ?>
                         </td>
                     </tr>
-                    <?php endforeach; ?>
+                <?php endforeach; ?>
                 </tbody>
             </table>
-</div>
         </div>
-    </div>
+    </section>
 
-    <p style="margin-top:16px;font-size:0.8125rem;color:var(--text-muted);">
-        Sub-users have the same read access as the primary account holder but cannot manage other users.
-        Invited users will receive an email with a link to set their password.
-    </p>
-
+    <aside class="pt-stack">
+        <section class="pt-card">
+            <div class="pt-card-head"><h2 class="pt-card-title"><?= pt_icon('plus') ?> Invite someone</h2></div>
+            <form method="POST" class="pt-card-body">
+                <input type="hidden" name="csrf_token" value="<?= e(portal_csrf_token()) ?>">
+                <input type="hidden" name="action" value="invite">
+                <div class="pt-field"><label class="pt-label" for="tm-name">Name</label><input id="tm-name" name="invite_name" class="pt-input" maxlength="255" value="<?= e($old['name']) ?>" required></div>
+                <div class="pt-field"><label class="pt-label" for="tm-email">Work email</label><input id="tm-email" name="invite_email" type="email" class="pt-input" maxlength="255" value="<?= e($old['email']) ?>" required></div>
+                <p class="pt-hint" style="margin:12px 0 0">They'll get an email with a link to set their password (valid for 7 days).</p>
+                <button type="submit" class="pt-btn pt-btn--primary pt-btn--block" style="margin-top:14px"><?= pt_icon('paper-airplane') ?> Send invitation</button>
+            </form>
+        </section>
+    </aside>
 </div>
-
-<style>
-@media (max-width: 768px) {
-    div[style*="grid-template-columns:1fr 1fr auto"] {
-        grid-template-columns: 1fr !important;
-    }
-}
-</style>
 
 <?php require_once dirname(__DIR__) . '/includes/footer.php'; ?>

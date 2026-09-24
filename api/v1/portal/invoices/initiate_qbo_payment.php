@@ -19,7 +19,8 @@ declare(strict_types=1);
  * @method  POST
  * @body    { invoice_id: int }
  * @auth    portal session (require_portal_auth)
- * @session S-QBO-15
+ * @session S-QBO-15, S-PORTAL-REDESIGN (customer-safe error text; the portal's
+ *          Pay buttons now use app/portal/payments/go.php)
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
@@ -57,6 +58,14 @@ try {
     ]);
 } catch (\Throwable $e) {
     error_log('[initiate_qbo_payment audit] ' . $e->getMessage());
+}
+
+// S-PORTAL-REDESIGN (Trap 7): the initiator's `error` is operator-facing
+// (setting keys, QuickBooks ids, "run invoice sync first"). It is kept in the
+// audit row above; the customer gets the status mapped to plain language.
+if (empty($result['success'])) {
+    require_once dirname(__DIR__, 4) . '/app/portal/includes/ui.php';
+    $result['error'] = pt_payment_error_message($result['status'] ?? null);
 }
 
 json_success($result);

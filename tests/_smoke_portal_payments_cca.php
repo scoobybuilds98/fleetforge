@@ -14,9 +14,11 @@ declare(strict_types=1);
  *   T5  payments query is Trap-8-safe (customer_id filter present)
  *   T6  CCA query is Trap-8-safe (customer_id filter present)
  *   T7  No token_hash / signature_path / review_notes leaked in CCA page source
- *   T8  CCA page uses cca_badge() for status rendering (function present)
- *   T9  payments page source references initiate_qbo_payment endpoint
- *   T10 payments page contains portalPayBtn() Alpine component
+ *   T8  CCA page maps every status/outcome to a customer label
+ *   T9  payments page opens the Pay drawer; pay links go through payments/go
+ *   T10 the Pay drawer store ($store.checkout) is defined in portal.js
+ *       (S-PORTAL-REDESIGN rebased T3/T4/T8–T10 onto the new markup — same
+ *       intent: nav entries present, statuses mapped, pay flow wired)
  *   T11 credit-applications/view.php file exists
  *   T12 view.php is Trap-7/8 compliant + links the PDF through the scoped
  *       portal endpoint (S-PDF-LETTERHEAD: a presigned storage URL was a dead
@@ -191,12 +193,14 @@ $sidebarSrc = (string) file_get_contents(FF_ROOT . '/app/portal/includes/sidebar
 
 smoke_record(
     'T3 sidebar has Payments nav item',
-    str_contains($sidebarSrc, "'/portal/payments'") || str_contains($sidebarSrc, '"/portal/payments"'),
+    str_contains($sidebarSrc, "'/portal/payments'") || str_contains($sidebarSrc, '"/portal/payments"')
+        || preg_match("/\\['Pay & payments',\\s*'payments'/", $sidebarSrc) === 1,
     'sidebar.php does not contain /portal/payments entry'
 );
 smoke_record(
     'T4 sidebar has Credit Application nav item',
-    str_contains($sidebarSrc, "'/portal/credit-applications'") || str_contains($sidebarSrc, '"/portal/credit-applications"'),
+    str_contains($sidebarSrc, "'/portal/credit-applications'") || str_contains($sidebarSrc, '"/portal/credit-applications"')
+        || preg_match("/'credit-applications',\\s*'clipboard-document-check'/", $sidebarSrc) === 1,
     'sidebar.php does not contain /portal/credit-applications entry'
 );
 
@@ -244,23 +248,29 @@ smoke_record(
 
 // ── T8: cca_badge() function present in CCA source ───────────────────────────
 smoke_record(
-    'T8 CCA page defines cca_badge() status helper',
-    str_contains($ccaSrc, 'function cca_badge('),
-    'cca_badge() not found in credit-applications/index.php'
+    'T8 CCA page maps every status/outcome to a customer label',
+    str_contains($ccaSrc, "'Approved'") && str_contains($ccaSrc, "'Not approved'")
+        && str_contains($ccaSrc, "'More info needed'") && str_contains($ccaSrc, "'Under review'")
+        && str_contains($ccaSrc, "'Invitation sent'") && str_contains($ccaSrc, "'Link expired'"),
+    'status → label map incomplete in credit-applications/index.php'
 );
 
 // ── T9: payments page references the QBO payment initiation endpoint ─────────
+$footerSrc = (string) file_get_contents(FF_ROOT . '/app/portal/includes/footer.php');
+$portalJs  = (string) file_get_contents(FF_ROOT . '/public/assets/js/portal.js');
 smoke_record(
-    'T9 payments/index.php references initiate_qbo_payment endpoint',
-    str_contains($pmtSrc, 'initiate_qbo_payment'),
-    'initiate_qbo_payment endpoint reference missing from payments/index.php'
+    'T9 payments page opens the Pay drawer; pay links go through payments/go',
+    str_contains($pmtSrc, '$store.checkout.start(') && str_contains($portalJs, "portal/payments/go?invoice=")
+        && is_file(FF_ROOT . '/app/portal/payments/go.php')
+        && str_contains((string) file_get_contents(FF_ROOT . '/app/portal/payments/go.php'), 'PaymentInitiator::generate('),
+    'Pay drawer / payments/go wiring missing'
 );
 
 // ── T10: payments page defines the portalPayBtn() Alpine component ────────────
 smoke_record(
-    'T10 payments/index.php defines portalPayBtn() Alpine component',
-    str_contains($pmtSrc, 'function portalPayBtn('),
-    'portalPayBtn() function not found in payments/index.php'
+    'T10 Pay drawer store is defined (portal.js) and rendered (footer.php)',
+    str_contains($portalJs, "Alpine.store('checkout'") && str_contains($footerSrc, '$store.checkout.open'),
+    "Alpine.store('checkout') or its drawer markup missing"
 );
 
 // ── T11: view.php exists and is Trap-7/Trap-8 compliant (static analysis) ────

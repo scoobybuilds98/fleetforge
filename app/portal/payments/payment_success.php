@@ -4,170 +4,104 @@ declare(strict_types=1);
 /**
  * app/portal/payments/payment_success.php
  *
- * Landing page after QBO Payments hosted-page checkout. QBO redirects
- * here with ?token=X carrying the initiation_token.
+ * Return page after a QuickBooks payment (?token=<initiation_token>)
+ * (S-QBO-15; rebuilt S-PORTAL-REDESIGN).
  *
- * Per QUICKBOOKS_SPEC.md §11.2 step 11 + D-QBO-15-6 (race handling):
- *   - Webhook may have already fired (status='completed') → show "Thank you"
- *     with invoice details
- *   - Webhook may NOT have fired yet (status='pending') → poll
- *     api/v1/portal/payments/status every 2s up to 30s, then time out
- *     gracefully with "We'll confirm shortly" message
+ * The Payment webhook may land before or after the customer does
+ * (D-QBO-15-6), so a pending initiation is polled via
+ * api/v1/portal/payments/status every 3 s for up to a minute, then settles
+ * on "we'll confirm shortly".
  *
- * @session S-QBO-15
+ * Fixed here: the old poller never worked — it sent `token=undefined` (the
+ * token was never stored on the component) and read `r.status` instead of
+ * `r.data.status`, so every pending payment ended on the timeout message.
+ * Also: the invoice lookup now excludes deleted invoices.
+ *
+ * Note: QuickBooks' hosted invoice page does not redirect back
+ * (QuickBooksClient::generatePaymentsHostedUrl), so most customers never
+ * reach this page — the portal's Pay drawer polls instead.
+ *
+ * Trap 8: the initiation's invoice must belong to portal_customer_id().
+ *
+ * @session S-QBO-15, S-PORTAL-REDESIGN
  */
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
+require_once dirname(__DIR__) . '/includes/ui.php';
 
-$token = (string) ($_GET['token'] ?? '');
-$initRow = null;
-$invoice = null;
+use FleetForge\QboPushers\PaymentInitiator;
 
-if ($token !== '') {
-    $initRow = \FleetForge\QboPushers\PaymentInitiator::findByToken($token);
-}
+$token   = (string) ($_GET['token'] ?? '');
+$initRow = $token !== '' ? PaymentInitiator::findByToken($token) : null;
+$invoice = $initRow ? db_row(
+    "SELECT id, invoice_number, total_amount, balance_due, currency, status
+       FROM invoices WHERE id = ? AND customer_id = ? AND deleted_at IS NULL",
+    [(int) $initRow['ff_invoice_id'], portal_customer_id()]
+) : null;
 
-if ($initRow !== null) {
-    $invoice = db_row(
-        "SELECT id, invoice_number, total_amount, balance_due, currency, status
-           FROM invoices
-          WHERE id = ? AND customer_id = ?",
-        [(int) $initRow['ff_invoice_id'], portal_customer_id()]
-    );
-}
-
-$pageTitle = 'Payment Confirmation';
+$pageTitle    = 'Payment';
+$ptHideRibbon = true;
 require_once dirname(__DIR__) . '/includes/header.php';
 ?>
 
-<nav class="breadcrumb">
-    <a href="<?= e(base_url('portal')) ?>">Portal</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= e(base_url('portal/invoices')) ?>">Invoices</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Payment Confirmation</span>
-</nav>
-
-<?php if ($initRow === null): ?>
-    <div class="card" style="padding:24px;text-align:center;">
-        <h1>Payment Confirmation Unavailable</h1>
-        <p>We couldn't find your payment initiation. If you completed a payment, please contact us with your QBO confirmation number.</p>
-        <a href="<?= e(base_url('portal/invoices')) ?>" class="btn btn-primary" style="margin-top:14px;">Back to Invoices</a>
-    </div>
-<?php elseif ($invoice === null): ?>
-    <div class="card" style="padding:24px;text-align:center;">
-        <h1>Invoice Not Found</h1>
-        <p>The invoice for this payment is no longer available.</p>
-    </div>
+<div style="max-width:560px;margin:5vh auto 0">
+<?php if (!$initRow || !$invoice): ?>
+    <div class="pt-card"><div class="pt-card-body" style="padding:30px">
+        <?= pt_empty('information-circle', 'We couldn\'t match that payment', 'If you completed a payment, it will show on your account as soon as QuickBooks confirms it. Contact us with your confirmation number if anything looks wrong.', '<a class="pt-btn pt-btn--primary pt-btn--sm" href="' . e(pt_url('payments')) . '">Go to Pay &amp; payments</a>') ?>
+    </div></div>
 <?php else: ?>
-
-<?php /* e(): json_encode's double quotes would otherwise close the x-data attribute. */ ?>
-<div x-data="paymentSuccessPoller(<?= e(json_encode($token)) ?>, <?= e(json_encode($initRow['status'])) ?>)" class="card" style="padding:32px;text-align:center;">
-
-    <!-- Pending (waiting for webhook) -->
-    <template x-if="status === 'pending' && !timedOut">
-        <div>
-            <div style="font-size:48px;line-height:1;margin-bottom:16px;">⏳</div>
-            <h1 style="margin-bottom:8px;">Payment Processing</h1>
-            <p class="text-secondary" style="margin-bottom:14px;">
-                We're confirming your payment with QuickBooks. This usually takes 5-30 seconds.
-            </p>
-            <div class="text-sm text-secondary" style="margin-top:18px;">
-                Polling for confirmation… (<span x-text="elapsedSeconds"></span>s)
-            </div>
-        </div>
-    </template>
-
-    <!-- Completed (webhook handshook) -->
-    <template x-if="status === 'completed'">
-        <div>
-            <div style="font-size:48px;line-height:1;margin-bottom:16px;">✓</div>
-            <h1 style="margin-bottom:8px;color:var(--color-success);">Payment Received</h1>
-            <p style="margin-bottom:14px;">
-                Thank you! Your payment for invoice <strong><?= e($invoice['invoice_number']) ?></strong> has been confirmed by QuickBooks.
-            </p>
-            <p class="text-secondary text-sm" style="margin-bottom:14px;">
-                A receipt has been recorded against your account. The invoice will reflect the new status shortly.
-            </p>
-            <div style="display:flex;gap:12px;justify-content:center;margin-top:20px;">
-                <a href="<?= e(base_url('portal/invoices/view?id=' . $invoice['id'])) ?>" class="btn btn-primary">View Invoice</a>
-                <a href="<?= e(base_url('portal/invoices')) ?>" class="btn btn-secondary">All Invoices</a>
-            </div>
-        </div>
-    </template>
-
-    <!-- Timed out (webhook hasn't fired in 30s — uncommon but possible) -->
-    <template x-if="status === 'pending' && timedOut">
-        <div>
-            <div style="font-size:48px;line-height:1;margin-bottom:16px;">⏱</div>
-            <h1 style="margin-bottom:8px;">We'll Confirm Shortly</h1>
-            <p style="margin-bottom:14px;">
-                Your payment is processing. We haven't received final confirmation from QuickBooks yet, but this can sometimes take a few minutes.
-            </p>
-            <p class="text-secondary text-sm" style="margin-bottom:14px;">
-                You'll see the updated invoice status the next time you refresh. If the invoice doesn't update within an hour, please contact us with your QBO confirmation number.
-            </p>
-            <a href="<?= e(base_url('portal/invoices/view?id=' . $invoice['id'])) ?>" class="btn btn-secondary">View Invoice</a>
-        </div>
-    </template>
-
-    <!-- Cancelled or failed -->
-    <template x-if="['cancelled','failed','expired'].includes(status)">
-        <div>
-            <div style="font-size:48px;line-height:1;margin-bottom:16px;">⚠</div>
-            <h1 style="margin-bottom:8px;">Payment Not Completed</h1>
-            <p class="text-secondary" style="margin-bottom:14px;">
-                Your payment was <span x-text="status"></span>. The invoice balance is unchanged.
-            </p>
-            <a href="<?= e(base_url('portal/invoices/view?id=' . $invoice['id'])) ?>" class="btn btn-primary">Back to Invoice</a>
-        </div>
-    </template>
-</div>
-
-<script>
-function paymentSuccessPoller(token, initialStatus) {
-    return {
-        status: initialStatus,
-        elapsedSeconds: 0,
-        timedOut: false,
-        pollTimer: null,
-
-        init() {
-            if (this.status === 'pending') {
-                this.startPolling();
+    <div class="pt-card" x-data="{
+            status: <?= e(json_encode((string) $initRow['status'])) ?>,
+            token: <?= e(json_encode($token)) ?>,
+            tries: 0,
+            init() { if (this.status === 'pending') this.poll(); },
+            async poll() {
+                while (this.status === 'pending' && this.tries < 20) {
+                    await new Promise(r => setTimeout(r, 3000));
+                    this.tries++;
+                    const r = await PT.get('api/v1/portal/payments/status?token=' + encodeURIComponent(this.token));
+                    if (r && r.success && r.data && r.data.status) this.status = r.data.status;
+                }
+                if (this.status === 'pending') this.status = 'timeout';
             }
-        },
-
-        startPolling() {
-            const startTime = Date.now();
-            const maxWait = 30000;  // 30s timeout per D-QBO-15-6
-
-            this.pollTimer = setInterval(async () => {
-                const elapsed = Date.now() - startTime;
-                this.elapsedSeconds = Math.floor(elapsed / 1000);
-
-                if (elapsed >= maxWait) {
-                    this.timedOut = true;
-                    clearInterval(this.pollTimer);
-                    return;
-                }
-
-                try {
-                    const r = await FF_Api.get('<?= base_url('api/v1/portal/payments/status') ?>?token=' + encodeURIComponent(this.token));
-                    if (r.success && r.status !== 'pending') {
-                        this.status = r.status;
-                        clearInterval(this.pollTimer);
-                    }
-                } catch (e) {
-                    // Transient — continue polling.
-                }
-            }, 2000);
-        },
-    };
-}
-</script>
-
+        }">
+        <div class="pt-card-body" style="padding:32px;text-align:center">
+            <template x-if="status === 'completed'">
+                <div>
+                    <span class="pt-empty-ic" style="margin:0 auto 14px;background:var(--color-success-light);color:var(--color-success-text)"><?= pt_icon('check-circle') ?></span>
+                    <h1 class="pt-title" style="font-size:24px">Payment received — thank you!</h1>
+                    <p class="pt-sub" style="margin:8px auto 0">Invoice <?= e($invoice['invoice_number']) ?> has been updated on your account.</p>
+                </div>
+            </template>
+            <template x-if="status === 'pending'">
+                <div>
+                    <span class="pt-empty-ic" style="margin:0 auto 14px"><span class="pt-spin" style="width:24px;height:24px"></span></span>
+                    <h1 class="pt-title" style="font-size:24px">Confirming your payment…</h1>
+                    <p class="pt-sub" style="margin:8px auto 0">We're waiting for QuickBooks to confirm the payment on invoice <?= e($invoice['invoice_number']) ?>. This usually takes a few seconds.</p>
+                </div>
+            </template>
+            <template x-if="status === 'timeout'">
+                <div>
+                    <span class="pt-empty-ic" style="margin:0 auto 14px"><?= pt_icon('clock') ?></span>
+                    <h1 class="pt-title" style="font-size:24px">We'll confirm shortly</h1>
+                    <p class="pt-sub" style="margin:8px auto 0">Your payment is being processed. Invoice <?= e($invoice['invoice_number']) ?> will update automatically once QuickBooks confirms it — there's no need to pay again.</p>
+                </div>
+            </template>
+            <template x-if="['cancelled','failed','expired'].includes(status)">
+                <div>
+                    <span class="pt-empty-ic" style="margin:0 auto 14px;background:var(--color-warning-light);color:var(--color-warning-text)"><?= pt_icon('exclamation-triangle') ?></span>
+                    <h1 class="pt-title" style="font-size:24px">Payment not completed</h1>
+                    <p class="pt-sub" style="margin:8px auto 0">No payment was taken for invoice <?= e($invoice['invoice_number']) ?>. You can try again or pay another way.</p>
+                </div>
+            </template>
+            <div class="pt-btn-row" style="justify-content:center;margin-top:22px">
+                <a class="pt-btn pt-btn--primary" href="<?= e(pt_url('invoices/view?id=' . (int) $invoice['id'])) ?>">View invoice</a>
+                <a class="pt-btn pt-btn--secondary" href="<?= e(pt_url('payments')) ?>">Pay &amp; payments</a>
+            </div>
+        </div>
+    </div>
 <?php endif; ?>
+</div>
 
 <?php require_once dirname(__DIR__) . '/includes/footer.php'; ?>

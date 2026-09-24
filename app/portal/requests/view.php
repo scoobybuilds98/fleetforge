@@ -4,265 +4,180 @@ declare(strict_types=1);
 /**
  * app/portal/requests/view.php
  *
- * Portal service request thread view.
- * Shows initial message + admin response. Customer can close.
- * Trap 8: query filters by portal_customer_id().
+ * Customer portal — one request as a conversation (S-PORTAL-REDESIGN).
+ *
+ * The original message, then every non-internal reply
+ * (RequestMessageService::fetchThread — internal staff notes never show),
+ * a composer that posts to api/v1/portal/requests/reply (a reply to a
+ * resolved/closed request re-opens it), and "Close request" once resolved.
+ *
+ * Fixed here: requests answered before the thread table existed kept their
+ * staff reply only in psr.response, which this page never showed — the
+ * customer saw "awaiting response" forever. It now shows as the staff reply
+ * when the thread has no staff message. The request row is read once (was
+ * twice), and the close action is audited.
+ *
+ * Trap 8: the request must belong to portal_customer_id().
+ *
+ * @session S-PORTAL-REDESIGN
  */
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
+require_once dirname(__DIR__) . '/includes/ui.php';
 
-$cid = portal_customer_id();
+use FleetForge\Requests\RequestMessageService;
+
+$cid       = portal_customer_id();
 $requestId = clean_int($_GET['id'] ?? null);
-
 if (!$requestId) {
-    header('Location: ' . base_url('portal/requests'));
+    header('Location: ' . pt_url('requests'));
     exit;
 }
 
-$req = db_row(
-    "SELECT psr.*, pu.name AS submitter_name,
-            eu.unit_number, l.contract_number,
+$load = static fn () => db_row(
+    "SELECT psr.*, pu.name AS submitter_name, eu.unit_number, l.contract_number, l.id AS lease_ref,
             u.name AS assigned_name
-     FROM portal_service_requests psr
-     JOIN portal_users pu ON pu.id = psr.portal_user_id
-     LEFT JOIN equipment_units eu ON eu.id = psr.equipment_unit_id
-     LEFT JOIN leases l ON l.id = psr.lease_id
-     LEFT JOIN users u ON u.id = psr.assigned_to
-     WHERE psr.id = ? AND psr.customer_id = ?",
+       FROM portal_service_requests psr
+       LEFT JOIN portal_users pu ON pu.id = psr.portal_user_id
+       LEFT JOIN equipment_units eu ON eu.id = psr.equipment_unit_id
+       LEFT JOIN leases l ON l.id = psr.lease_id
+       LEFT JOIN users u ON u.id = psr.assigned_to
+      WHERE psr.id = ? AND psr.customer_id = ?",
     [$requestId, $cid]
 );
 
+$req = $load();
 if (!$req) {
-    header('Location: ' . base_url('portal/requests'));
+    header('Location: ' . pt_url('requests'));
     exit;
 }
 
-$justCreated = !empty($_GET['created']);
-
-// Handle "Mark as Closed" action
-$_csrfToken = portal_csrf_token();
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['action'])) {
-    $submittedCsrf = (string) ($_POST['csrf_token'] ?? '');
-    if (portal_verify_csrf($submittedCsrf)) {
-        if ($_POST['action'] === 'close' && $req['status'] === 'resolved') {
-            db_update('portal_service_requests', [
-                'status' => 'closed',
-            ], 'id = ? AND customer_id = ?', [$requestId, $cid]);
-            header('Location: ' . base_url('portal/requests/view?id=' . $requestId));
-            exit;
-        }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'close'
+    && portal_verify_csrf((string) ($_POST['csrf_token'] ?? '')) && $req['status'] === 'resolved') {
+    db_update('portal_service_requests', ['status' => 'closed'], 'id = ? AND customer_id = ?', [$requestId, $cid]);
+    try {
+        db_insert('audit_log', [
+            'user_id' => null, 'user_name' => 'portal:' . portal_user_id(), 'action' => 'update',
+            'module' => 'portal', 'entity_type' => 'portal_service_request', 'entity_id' => $requestId,
+            'entity_label' => mb_substr((string) $req['subject'], 0, 255), 'notes' => 'Customer closed the resolved request.',
+            'ip_address' => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+        ]);
+    } catch (\Throwable $e) {
+        error_log('[portal/requests/view close audit] ' . $e->getMessage());
     }
+    header('Location: ' . pt_url('requests/view?id=' . $requestId . '&closed=1'));
+    exit;
 }
 
-// Re-fetch after possible update
-$req = db_row(
-    "SELECT psr.*, pu.name AS submitter_name,
-            eu.unit_number, l.contract_number,
-            u.name AS assigned_name
-     FROM portal_service_requests psr
-     JOIN portal_users pu ON pu.id = psr.portal_user_id
-     LEFT JOIN equipment_units eu ON eu.id = psr.equipment_unit_id
-     LEFT JOIN leases l ON l.id = psr.lease_id
-     LEFT JOIN users u ON u.id = psr.assigned_to
-     WHERE psr.id = ? AND psr.customer_id = ?",
-    [$requestId, $cid]
-);
+$thread = RequestMessageService::fetchThread($requestId, false);
+$hasStaffMsg = (bool) array_filter($thread, static fn ($m) => $m['sender_type'] === 'admin');
+if (!$hasStaffMsg && trim((string) ($req['response'] ?? '')) !== '') {
+    // Legacy single reply (pre S-PORTAL-REQUEST-THREAD) — show it where it belongs.
+    $thread[] = [
+        'id' => 0, 'sender_type' => 'admin', 'sender_label' => (string) ($req['assigned_name'] ?: 'Our team'),
+        'body' => (string) $req['response'], 'is_internal' => 0,
+        'created_at' => (string) ($req['resolved_at'] ?: $req['updated_at']),
+    ];
+}
 
-$statusBadge = match($req['status']) {
-    'open'      => 'badge-info',
-    'in_review' => 'badge-warning',
-    'resolved'  => 'badge-success',
-    'closed'    => 'badge-neutral',
-    default     => 'badge-neutral',
+$types = pt_request_types();
+[$typeLabel, $typeIcon] = [$types[$req['request_type']][0] ?? 'Request', $types[$req['request_type']][1] ?? 'chat-bubble-left-ellipsis'];
+[$sl, $st] = match ($req['status']) {
+    'open'      => ['Open', 'info'],
+    'in_review' => ['In progress', 'warning'],
+    'resolved'  => ['Resolved', 'success'],
+    'closed'    => ['Closed', 'neutral'],
+    default     => [ucfirst((string) $req['status']), 'neutral'],
 };
+$me = portal_user_id();
 
-$typeLabel = ucfirst(str_replace('_', ' ', $req['request_type']));
-
-$pageTitle = 'Request #' . $req['id'];
+$pageTitle = $req['subject'];
 require_once dirname(__DIR__) . '/includes/header.php';
+
+$actions = '';
+if ($req['status'] === 'resolved') {
+    $actions = '<form method="POST" style="display:inline"><input type="hidden" name="csrf_token" value="' . e(portal_csrf_token()) . '"><input type="hidden" name="action" value="close">'
+        . '<button type="submit" class="pt-btn pt-btn--secondary">' . pt_icon('check-circle') . ' Close request</button></form>';
+}
+echo pt_page_head([
+    'back'    => ['Requests', pt_url('requests')],
+    'title'   => (string) $req['subject'],
+    'meta'    => pt_badge($sl, $st) . '<span>' . e($typeLabel) . '</span><span>#' . (int) $req['id'] . ' · opened ' . e(format_datetime($req['created_at'], 'M j, Y')) . '</span>',
+    'actions' => $actions,
+]);
 ?>
 
-<!-- Success toast for just-created -->
-<?php if ($justCreated): ?>
-<div class="portal-login-success" style="margin-bottom:16px;">
-    Your service request has been submitted successfully. We'll get back to you soon.
-</div>
+<?php if (!empty($_GET['created'])): ?>
+    <div class="pt-note pt-note--success" style="margin-bottom:18px"><?= pt_icon('check-circle') ?><span><strong>Request sent.</strong> Our team has been notified — you'll see their reply here and get a notification.</span></div>
+<?php elseif (!empty($_GET['closed'])): ?>
+    <div class="pt-note pt-note--success" style="margin-bottom:18px"><?= pt_icon('check-circle') ?><span>Request closed. Thanks for letting us know.</span></div>
 <?php endif; ?>
 
-<!-- Header -->
-<div class="portal-detail-header">
-    <div>
-        <a href="<?= e(base_url('portal/requests')) ?>" class="portal-form-link" style="font-size:0.8125rem;display:inline-flex;align-items:center;gap:4px;margin-bottom:8px;">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:14px;height:14px;"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/></svg>
-            Back to Requests
-        </a>
-        <h1 class="portal-detail-title"><?= e($req['subject']) ?></h1>
-        <p class="portal-detail-subtitle">
-            <span class="badge badge-neutral"><?= e($typeLabel) ?></span>
-            &nbsp; <span class="badge <?= e($statusBadge) ?>"><?= e(ucfirst(str_replace('_', ' ', $req['status']))) ?></span>
-            &nbsp; Submitted <?= e(format_datetime($req['created_at'])) ?>
-        </p>
-    </div>
-    <div class="portal-detail-actions">
-        <?php if ($req['status'] === 'resolved'): ?>
-            <form method="POST" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="<?= e($_csrfToken) ?>">
-                <input type="hidden" name="action" value="close">
-                <button type="submit" class="btn btn-secondary btn-sm">Mark as Closed</button>
-            </form>
-        <?php endif; ?>
-    </div>
-</div>
-
-<!-- Request Details -->
-<div class="portal-detail-grid" style="grid-template-columns: 1fr 300px;">
-
-    <!-- Thread -->
-    <?php
-    // Portal viewers never see internal-flagged messages.
-    $thread = \FleetForge\Requests\RequestMessageService::fetchThread((int) $req['id'], false);
-    ?>
-    <div class="portal-section">
-        <div class="portal-section-header">
-            <h2 class="portal-section-title">Conversation</h2>
-        </div>
-        <div class="portal-thread">
-
-            <!-- Original message (the customer's first submission) -->
-            <div class="portal-thread-message portal-thread-message--customer">
-                <div class="portal-thread-author">
-                    <?= e($req['submitter_name']) ?>
-                    <span class="portal-thread-time"><?= e(format_datetime($req['created_at'])) ?></span>
+<div class="pt-grid pt-grid--main">
+    <section class="pt-card">
+        <div class="pt-thread">
+            <div class="pt-msg pt-msg--<?= (int) $req['portal_user_id'] === $me ? 'me' : 'them' ?>">
+                <span class="pt-avatar"><?= e(pt_initials((string) ($req['submitter_name'] ?: 'You'))) ?></span>
+                <div>
+                    <div class="pt-msg-meta"><strong><?= e((int) $req['portal_user_id'] === $me ? 'You' : (string) $req['submitter_name']) ?></strong><span><?= e(format_datetime($req['created_at'], 'M j, g:i A')) ?></span></div>
+                    <div class="pt-msg-bubble"><?= e((string) $req['message']) ?></div>
                 </div>
-                <div style="white-space:pre-wrap;"><?= e($req['message']) ?></div>
             </div>
-
-            <!-- Thread of replies (admin + customer alternating) -->
-            <?php foreach ($thread as $msg):
-                $isAdmin = $msg['sender_type'] === 'admin';
+            <?php foreach ($thread as $m):
+                $staff = $m['sender_type'] === 'admin';
             ?>
-            <div class="portal-thread-message portal-thread-message--<?= $isAdmin ? 'admin' : 'customer' ?>">
-                <div class="portal-thread-author">
-                    <?= e($msg['sender_label']) ?>
-                    <?php if ($isAdmin): ?>
-                        <span class="badge badge-info" style="font-size:0.6rem;padding:1px 6px;">Staff</span>
-                    <?php endif; ?>
-                    <span class="portal-thread-time"><?= e(format_datetime($msg['created_at'])) ?></span>
+                <div class="pt-msg pt-msg--<?= $staff ? 'them' : 'me' ?>">
+                    <span class="pt-avatar" style="<?= $staff ? 'background:var(--bg-surface-2);color:var(--text-secondary)' : '' ?>"><?= e(pt_initials($m['sender_label'])) ?></span>
+                    <div>
+                        <div class="pt-msg-meta"><strong><?= e($staff ? $m['sender_label'] : 'You') ?></strong><?php if ($staff): ?><span class="pt-tag" style="height:18px;font-size:11px">Staff</span><?php endif; ?><span><?= e(format_datetime($m['created_at'], 'M j, g:i A')) ?></span></div>
+                        <div class="pt-msg-bubble"><?= e($m['body']) ?></div>
+                    </div>
                 </div>
-                <div style="white-space:pre-wrap;"><?= e($msg['body']) ?></div>
-            </div>
             <?php endforeach; ?>
-
-            <?php if (empty($thread) && in_array($req['status'], ['open', 'in_review'], true)): ?>
-            <div style="text-align:center;padding:18px;color:var(--text-muted);font-size:0.8125rem;">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:24px;height:24px;margin-bottom:4px;"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
-                <p>Awaiting response from our team. We typically respond within 1 business day.</p>
-            </div>
-            <?php endif; ?>
-
-        </div>
-
-        <!-- ── Portal-side reply form (Alpine + FF_Api so CSRF header injects) ── -->
-        <?php if (in_array($req['status'], ['open', 'in_review', 'resolved', 'closed'], true)): ?>
-        <div x-data="portalReplyForm(<?= (int) $req['id'] ?>)" style="margin-top:16px;border-top:1px solid var(--border-color);padding-top:16px;">
-
-            <div x-show="flash.message" x-cloak
-                 :class="flash.type === 'success' ? 'portal-login-success' : 'portal-login-error'"
-                 style="margin-bottom:12px;"
-                 x-text="flash.message"></div>
-
-            <div class="portal-form-group" style="margin-bottom:10px;">
-                <label class="portal-form-label" for="portal-reply-body">Reply</label>
-                <textarea id="portal-reply-body" x-model="body"
-                          class="portal-form-input portal-form-textarea"
-                          placeholder="Type your reply..."
-                          rows="4"></textarea>
-            </div>
-            <button type="button" class="btn btn-primary btn-md"
-                    @click="send()" :disabled="sending || !body.trim()">
-                <span x-show="!sending">Send Reply</span>
-                <span x-show="sending" x-cloak>Sending…</span>
-            </button>
-            <?php if (in_array($req['status'], ['resolved', 'closed'], true)): ?>
-                <span class="text-xs text-muted" style="margin-left:10px;">
-                    Your reply will re-open this request.
-                </span>
+            <?php if (!$thread && in_array($req['status'], ['open', 'in_review'], true)): ?>
+                <div class="pt-note" style="align-self:center"><?= pt_icon('clock') ?><span>Our team has your request. Their reply will appear here.</span></div>
             <?php endif; ?>
         </div>
 
-        <script>
-        function portalReplyForm(requestId) {
-            return {
-                requestId,
-                body: '',
-                sending: false,
-                flash: { type: '', message: '' },
+        <form class="pt-composer" x-data="{
+                body: '', sending: false, error: '',
                 async send() {
+                    this.error = '';
                     if (!this.body.trim()) return;
                     this.sending = true;
-                    this.flash = { type: '', message: '' };
-                    try {
-                        const r = await FF_Api.post(
-                            FF_Api.url('/api/v1/portal/requests/reply.php'),
-                            { request_id: this.requestId, body: this.body }
-                        );
-                        if (r.success) {
-                            this.flash = { type: 'success', message: 'Reply sent. Reloading…' };
-                            setTimeout(() => window.location.reload(), 900);
-                        } else {
-                            this.flash = { type: 'danger', message: r.error?.message || 'Send failed.' };
-                        }
-                    } catch (e) {
-                        this.flash = { type: 'danger', message: 'Send failed: ' + (e.message || e) };
-                    } finally {
-                        this.sending = false;
-                    }
+                    const r = await PT.post('api/v1/portal/requests/reply', { request_id: <?= (int) $requestId ?>, body: this.body });
+                    if (r && r.success) { window.location.reload(); return; }
+                    this.sending = false;
+                    this.error = (r && r.error && r.error.message) || 'Your reply could not be sent. Please try again.';
                 }
-            };
-        }
-        </script>
-        <?php endif; ?>
-    </div>
+            }" @submit.prevent="send()">
+            <label class="pt-label" for="rq-reply"><?= in_array($req['status'], ['resolved', 'closed'], true) ? 'Something else? Replying re-opens this request' : 'Reply' ?></label>
+            <textarea id="rq-reply" class="pt-textarea" rows="3" maxlength="5000" x-model="body" placeholder="Write a reply…" @keydown.meta.enter="send()" @keydown.ctrl.enter="send()"></textarea>
+            <div class="pt-note pt-note--danger" x-show="error" x-cloak><?= pt_icon('exclamation-triangle') ?><span x-text="error"></span></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+                <span class="pt-hint">⌘/Ctrl + Enter to send</span>
+                <button type="submit" class="pt-btn pt-btn--primary" :disabled="sending || !body.trim()"><span class="pt-spin" x-show="sending" x-cloak></span><?= pt_icon('paper-airplane') ?> Send</button>
+            </div>
+        </form>
+    </section>
 
-    <!-- Sidebar Info -->
-    <div>
-        <div class="portal-info-card" style="margin-bottom:16px;">
-            <div class="portal-info-card-header">Request Details</div>
-            <ul class="portal-info-list">
-                <li><span class="portal-info-label">Request #</span><span class="portal-info-value font-mono"><?= e((string)$req['id']) ?></span></li>
-                <li><span class="portal-info-label">Type</span><span class="portal-info-value"><?= e($typeLabel) ?></span></li>
-                <li><span class="portal-info-label">Status</span><span class="portal-info-value"><span class="badge <?= e($statusBadge) ?>"><?= e(ucfirst(str_replace('_', ' ', $req['status']))) ?></span></span></li>
-                <li><span class="portal-info-label">Submitted</span><span class="portal-info-value font-mono" style="font-size:0.75rem;"><?= e(format_datetime($req['created_at'])) ?></span></li>
-                <?php if ($req['contract_number']): ?>
-                <li>
-                    <span class="portal-info-label">Lease</span>
-                    <span class="portal-info-value">
-                        <a href="<?= e(base_url('portal/leases/view?id=' . $req['lease_id'])) ?>" class="portal-table-link"><?= e($req['contract_number']) ?></a>
-                    </span>
-                </li>
-                <?php endif; ?>
-                <?php if ($req['unit_number']): ?>
-                <li><span class="portal-info-label">Unit</span><span class="portal-info-value"><?= e($req['unit_number']) ?></span></li>
-                <?php endif; ?>
-                <?php if ($req['assigned_name']): ?>
-                <li><span class="portal-info-label">Assigned To</span><span class="portal-info-value"><?= e($req['assigned_name']) ?></span></li>
-                <?php endif; ?>
-                <?php if ($req['resolved_at']): ?>
-                <li><span class="portal-info-label">Resolved</span><span class="portal-info-value font-mono" style="font-size:0.75rem;"><?= e(format_datetime($req['resolved_at'])) ?></span></li>
-                <?php endif; ?>
-            </ul>
-        </div>
-    </div>
-
+    <aside class="pt-stack">
+        <section class="pt-card">
+            <div class="pt-card-head"><h2 class="pt-card-title"><?= pt_icon($typeIcon) ?> Details</h2></div>
+            <div class="pt-card-body" style="padding-top:6px">
+                <dl class="pt-kv">
+                    <div class="pt-kv-row"><dt>Status</dt><dd><?= pt_badge($sl, $st) ?></dd></div>
+                    <div class="pt-kv-row"><dt>Type</dt><dd><?= e($typeLabel) ?></dd></div>
+                    <?php if ($req['contract_number']): ?><div class="pt-kv-row"><dt>Lease</dt><dd><a class="pt-link" href="<?= e(pt_url('leases/view?id=' . (int) $req['lease_ref'])) ?>"><?= e($req['contract_number']) ?></a></dd></div><?php endif; ?>
+                    <?php if ($req['unit_number']): ?><div class="pt-kv-row"><dt>Unit</dt><dd><?= e($req['unit_number']) ?></dd></div><?php endif; ?>
+                    <div class="pt-kv-row"><dt>Opened by</dt><dd><?= e((string) ($req['submitter_name'] ?: '—')) ?></dd></div>
+                    <?php if ($req['assigned_name']): ?><div class="pt-kv-row"><dt>Handled by</dt><dd><?= e($req['assigned_name']) ?></dd></div><?php endif; ?>
+                    <?php if ($req['resolved_at']): ?><div class="pt-kv-row"><dt>Resolved</dt><dd><?= e(format_datetime($req['resolved_at'], 'M j, Y')) ?></dd></div><?php endif; ?>
+                </dl>
+            </div>
+        </section>
+    </aside>
 </div>
-
-<style>
-@media (max-width: 768px) {
-    .portal-detail-grid[style*="300px"] {
-        grid-template-columns: 1fr !important;
-    }
-}
-</style>
 
 <?php require_once dirname(__DIR__) . '/includes/footer.php'; ?>

@@ -21,7 +21,7 @@ declare(strict_types=1);
  * inside MessengerService::portalCanAccessThread().
  *
  * @auth     portal session
- * @session  MSGR-1
+ * @session  MSGR-1, S-PORTAL-REDESIGN (new shell; double-init fix)
  * @depends  app/portal/includes/{auth,header,footer}.php
  *           app/portal/api/messenger/* endpoints
  *           FF_PortalMessenger() in public/assets/js/app.js
@@ -29,18 +29,26 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/includes/auth.php';
 require_portal_auth();
+require_once dirname(__DIR__) . '/includes/ui.php';
 
 $pageTitle = 'Messages';
-// Optional ?thread=N deep-link — admin notifications use this so a click
-// from the bell drops the customer straight into the right conversation.
-$thread_id_param = isset($_GET['thread']) ? (int) $_GET['thread'] : 0;
 
 require_once dirname(__DIR__) . '/includes/header.php';
+
+// S-PORTAL-REDESIGN: page header in the new shell. The ?thread=N deep link
+// (admin notifications) is read by FF_PortalMessenger().init() itself — the
+// old page also called init(N) from an x-init attribute, which ran it a
+// SECOND time (Alpine 3 already auto-runs init()).
+echo pt_page_head([
+    'eyebrow' => 'Help',
+    'title'   => 'Messages',
+    'sub'     => 'Conversations our team has started with you. Reply here any time — for something new, start a request.',
+    'actions' => '<a class="pt-btn pt-btn--secondary" href="' . e(pt_url('requests/create')) . '">' . pt_icon('plus') . ' New request</a>',
+]);
 ?>
 
 <div class="portal-msgr-page"
-     x-data="FF_PortalMessenger()"
-     x-init="init(<?= (int) $thread_id_param ?>)">
+     x-data="FF_PortalMessenger()">
 
     <div class="portal-msgr-layout">
 

@@ -201,10 +201,17 @@ try {
         if (!isset($consts['REQUEST_TYPE_LABELS']) || count($consts['REQUEST_TYPE_LABELS']) !== 7) {
             $c1Errors[] = 'REQUEST_TYPE_LABELS should have 7 entries';
         }
-        // Mirror check against the portal form's $validTypes
+        // Mirror check against the portal form's type list. S-PORTAL-REDESIGN:
+        // the form (and the payment notice) take their types from
+        // pt_request_types() in app/portal/includes/ui.php.
+        require_once __DIR__ . '/../app/portal/includes/ui.php';
+        $portalTypes = function_exists('pt_request_types') ? array_keys(pt_request_types()) : [];
+        if ($portalTypes !== $consts['REQUEST_TYPES']) {
+            $c1Errors[] = 'pt_request_types() keys drifted from PortalRequestNotifier::REQUEST_TYPES';
+        }
         $portalCreate = file_get_contents(__DIR__ . '/../app/portal/requests/create.php');
-        if (strpos($portalCreate, "\$validTypes = ['lease_extension', 'early_return', 'damage_report', 'billing_inquiry', 'document_request', 'new_lease_inquiry', 'general']") === false) {
-            $c1Errors[] = 'portal/requests/create.php $validTypes drifted from PortalRequestNotifier::REQUEST_TYPES';
+        if (strpos($portalCreate, 'pt_request_types()') === false || strpos($portalCreate, 'isset($types[$form[\'request_type\']])') === false) {
+            $c1Errors[] = 'portal/requests/create.php must validate the type against pt_request_types()';
         }
     }
     if (empty($c1Errors)) { echo "PASS C1 class surfaces + REQUEST_TYPES alignment with portal create.php\n"; $pass++; }
@@ -443,17 +450,26 @@ try {
 
     // ── C19: portal create.php hook ────────────────────────────────────
     $c19Errors = [];
+    // S-PORTAL-REDESIGN: the INSERT + notify pair lives in pt_create_request()
+    // (app/portal/includes/ui.php), shared by create.php and the payment
+    // notice endpoint. create.php must call it before its redirect; the helper
+    // must INSERT then notify.
     $src = file_get_contents(__DIR__ . '/../app/portal/requests/create.php');
-    if (strpos($src, 'PortalRequestNotifier::notify((int) $newId)') === false) {
-        $c19Errors[] = "portal create.php must call PortalRequestNotifier::notify((int) \$newId)";
+    $callPos     = strpos($src, 'pt_create_request(');
+    $redirectPos = strpos($src, 'header(\'Location: \' . pt_url(\'requests/view');
+    if ($callPos === false || $redirectPos === false || $callPos > $redirectPos) {
+        $c19Errors[] = "create.php must call pt_create_request() before redirecting (positions: {$callPos}/{$redirectPos})";
     }
-    // Verify hook is in success path (after db_insert, before redirect)
-    $insertPos = strpos($src, "db_insert('portal_service_requests'");
-    $notifyPos = strpos($src, 'PortalRequestNotifier::notify');
-    $redirectPos = strpos($src, 'header(\'Location:');
-    if ($insertPos === false || $notifyPos === false || $redirectPos === false
-        || !($insertPos < $notifyPos && $notifyPos < $redirectPos)) {
-        $c19Errors[] = "hook must be between db_insert and redirect (insert/notify/redirect positions: {$insertPos}/{$notifyPos}/{$redirectPos})";
+    $uiSrc  = file_get_contents(__DIR__ . '/../app/portal/includes/ui.php');
+    $fnPos  = strpos($uiSrc, 'function pt_create_request(');
+    $insPos = $fnPos === false ? false : strpos($uiSrc, "db_insert('portal_service_requests'", $fnPos);
+    $ntfPos = $fnPos === false ? false : strpos($uiSrc, 'PortalRequestNotifier::notify($id)', $fnPos);
+    if ($fnPos === false || $insPos === false || $ntfPos === false || $insPos > $ntfPos) {
+        $c19Errors[] = 'pt_create_request() must db_insert the request and then PortalRequestNotifier::notify($id)';
+    }
+    $noticeSrc = (string) @file_get_contents(__DIR__ . '/../api/v1/portal/payments/notice.php');
+    if (strpos($noticeSrc, 'pt_create_request(') === false) {
+        $c19Errors[] = 'api/v1/portal/payments/notice.php must create its request through pt_create_request()';
     }
     if (empty($c19Errors)) { echo "PASS C19 portal/requests/create.php hooks notifier in success path (between INSERT and redirect)\n"; $pass++; }
     else { echo "FAIL C19 " . implode('; ', $c19Errors) . "\n"; $failures[] = 'C19'; }
@@ -842,7 +858,9 @@ try {
         $c37Errors[] = "api/v1/portal/requests/reply.php does not exist";
     } else {
         $replySrc = file_get_contents($replyPath);
-        if (strpos($replySrc, 'require_portal_auth()') === false) $c37Errors[] = "missing require_portal_auth() gate";
+        // S-PORTAL-REDESIGN: the JSON twin (401 instead of a login redirect).
+        if (strpos($replySrc, 'require_portal_auth_api()') === false && strpos($replySrc, 'require_portal_auth()') === false) $c37Errors[] = "missing portal auth gate";
+        if (strpos($replySrc, 'mb_strlen($messageBody) > 5000') === false) $c37Errors[] = "missing 5,000-character cap";
         if (strpos($replySrc, 'appendPortalMessage') === false) $c37Errors[] = "missing appendPortalMessage call";
         if (strpos($replySrc, 'json_error') === false) $c37Errors[] = "missing error handling";
         if (strpos($replySrc, "'MISSING_REQUIRED'") === false) $c37Errors[] = "missing body validation";
@@ -858,7 +876,8 @@ try {
     foreach (['adminReplyForm', 'fetchThread', 'requests/respond.php', '/api/v1/requests/respond.php'] as $needle) {
         if (strpos($adminViewSrc, $needle) === false) $c38Errors[] = "admin view missing: {$needle}";
     }
-    foreach (['portalReplyForm', 'fetchThread', '/api/v1/portal/requests/reply.php'] as $needle) {
+    // S-PORTAL-REDESIGN: the composer posts through PT.post (portal.js).
+    foreach (['fetchThread', "PT.post('api/v1/portal/requests/reply'"] as $needle) {
         if (strpos($portalViewSrc, $needle) === false) $c38Errors[] = "portal view missing: {$needle}";
     }
     if (empty($c38Errors)) { echo "PASS C38 admin + portal view source — fetchThread render + Alpine reply form referencing correct endpoints\n"; $pass++; }

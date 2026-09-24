@@ -4234,6 +4234,16 @@ function FF_PortalMessenger() {
         // ── Lifecycle ────────────────────────────────────────────────────
 
         async init(threadIdParam = 0) {
+            // S-PORTAL-REDESIGN: Alpine 3 calls init() by itself, and the page
+            // used to call it AGAIN via x-init="init(N)" — two list pollers,
+            // a leaked thread poller, and a deep link racing the auto-select.
+            // Guard BEFORE the first await, and read ?thread= here so the page
+            // needs no x-init at all.
+            if (this._booted) return;
+            this._booted = true;
+            if (!threadIdParam) {
+                threadIdParam = parseInt(new URLSearchParams(window.location.search).get('thread') || '0', 10) || 0;
+            }
             await this.loadThreads();
             // Deep-link support — admin notifications use ?thread=N to jump
             // a customer straight into the right conversation.
