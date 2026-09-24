@@ -157,11 +157,24 @@ $_currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?? '';
 // saves the upload as a StorageClient key under brand.logo_path; we sign
 // it here so the sidebar serves it via the same signed-URL pathway as
 // every other uploaded file.
+//
+// S-SIDEBAR-LOGO: the sidebar shows a TRIMMED copy of the upload (its baked-in
+// canvas margins removed, cached once per upload) instead of the raw file — a
+// logo exported on a big black canvas rendered as a small mark floating in a
+// black box. BrandLogo also finds the logo's left-hand icon for the collapsed
+// rail, and reports the canvas colour (shell.css blends a dark one away and
+// badges a light one). It falls back to the original's signed URL whenever it
+// cannot process the file.
 $_companyName = settings_get('company.name', 'FleetForge');
-$_logoKey     = (string) (settings_get('brand.logo_path') ?? '');
-$_logoUrl     = $_logoKey !== ''
-    ? \FleetForge\Storage\StorageClient::url($_logoKey, 86400)
-    : '';
+$_logo        = \FleetForge\Ui\BrandLogo::forSidebar();
+$_logoUrl     = $_logo['url'] ?? '';
+$_brandClass  = 'sidebar-brand';
+if ($_logo !== null) {
+    $_brandClass .= ' has-logo'
+        . ($_logo['bg'] !== '' ? ' logo-bg-' . $_logo['bg'] : '')
+        . ($_logo['markUrl'] !== '' ? ' has-logo-mark' : '')
+        . ($_logo['wide'] ? ' is-logo-wide' : '');
+}
 
 $_sidebarUser = current_user();
 ?>
@@ -176,7 +189,7 @@ $_sidebarUser = current_user();
              there is none — or it fails to load (onerror flips the block
              to .is-logo-broken) — the truck tile + company name show, so
              the brand never degrades to raw alt text. */ ?>
-    <div class="sidebar-brand<?= $_logoUrl ? ' has-logo' : '' ?>">
+    <div class="<?= e($_brandClass) ?>">
         <a href="<?= e(base_url('dashboard')) ?>"
            class="sidebar-brand-link"
            aria-label="<?= e($_companyName) ?> — Dashboard">
@@ -185,6 +198,14 @@ $_sidebarUser = current_user();
                      alt=""
                      class="sidebar-logo"
                      onerror="this.closest('.sidebar-brand').classList.add('is-logo-broken')">
+                <?php if ($_logo['markUrl'] !== ''): ?>
+                    <?php /* Collapsed-rail icon (shown only there, by shell.css). A failed
+                             load drops the class so the rail shows the truck tile instead. */ ?>
+                    <img src="<?= e($_logo['markUrl']) ?>"
+                         alt=""
+                         class="sidebar-logo-mark"
+                         onerror="this.closest('.sidebar-brand').classList.remove('has-logo-mark'); this.remove()">
+                <?php endif; ?>
             <?php endif; ?>
             <span class="sidebar-brand-icon" aria-hidden="true">
                 <?php /* SopIcons, not heroicon(): heroicon() caches by name, and this

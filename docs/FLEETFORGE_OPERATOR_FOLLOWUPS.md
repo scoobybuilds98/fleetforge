@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
+**Last updated:** 2026-09-24 via S-SIDEBAR-LOGO / S-TOPBAR-CHROME — **F90** widened again (the top bar is now dark and the sidebar logo trimmed — every chapter's chrome changed; nothing to do for the logo itself: it is rebuilt automatically on the first page load after deploy). Previously 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
 
 ---
 
@@ -122,8 +122,8 @@ Safety net: anything dated before go-live is refused as a NEW push until linked 
 
 ### F90 — Re-record the training videos that show the redesigned screens 🟡 OPEN (after deploying the redesign)
 
-**Surfaced by:** S-DASHBOARD-REDESIGN / S-DASHBOARD-VIZ / S-SHELL-REDESIGN; widened by S-LIST-COMPACT / S-RECORD-REDESIGN / S-PAYOFF-ONE-PAGE / S-SETTINGS-REDESIGN (2026-09-24).
-**Why:** the dashboard, sidebar, top bar, list pages, every profile page (header actions, tabs, right-hand panel), the Payoff tab (the separate payoff page is gone) and Settings were redesigned. The recorded videos show the old screens. The chapter scripts are already updated: chapter 1 rewritten, tab clicks go through the new `d.tab()` helper, chapter 3's payoff steps rewritten for the single Payoff tab.
+**Surfaced by:** S-DASHBOARD-REDESIGN / S-DASHBOARD-VIZ / S-SHELL-REDESIGN; widened by S-LIST-COMPACT / S-RECORD-REDESIGN / S-PAYOFF-ONE-PAGE / S-SETTINGS-REDESIGN / S-TOPBAR-CHROME / S-SIDEBAR-LOGO (2026-09-24).
+**Why:** the dashboard, sidebar (incl. the trimmed company logo), top bar (now dark, framing the page), list pages, every profile page (header actions, tabs, right-hand panel), the Payoff tab (the separate payoff page is gone) and Settings were redesigned. The recorded videos show the old screens. The chapter scripts are already updated: chapter 1 rewritten, tab clicks go through the new `d.tab()` helper, chapter 3's payoff steps rewritten for the single Payoff tab.
 **Operator action:**
 1. Deploy `main` (no migration).
 2. On DEV: `node scripts/walkthrough/record.mjs <NN> --dry` for each chapter below (selector check), then record them as usual — at least 01, 02, 03, 07, 08, 09, 11, 12, 13, 16, 17, 19, 32, 33.

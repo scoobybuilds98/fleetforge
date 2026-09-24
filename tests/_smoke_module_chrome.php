@@ -381,6 +381,13 @@ if (!str_contains($src('includes/header.php'), "asset_url('assets/css/shell.css'
 $shell = (string) preg_replace('~/\*.*?\*/~s', '', $src('public/assets/css/shell.css'));
 if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $shell, $hm)) { $e[] = "shell.css hardcodes {$hm[0]}"; }
 if (preg_match('/(^|[;{\s])width\s*:\s*var\(--sidebar-width/m', $shell)) { $e[] = 'shell.css sets a sidebar width (widths belong to app.css)'; }
+// S-TOPBAR-CHROME: the topbar is the sidebar's dark chrome (out-ranking
+// app.css's light no-blur fallback), and only its CONTROLS are re-tokened —
+// a token on .topbar itself would darken every menu that opens from it.
+if (!preg_match('/\[data-theme="light"\] \.topbar\s*\{[^}]*var\(--sidebar-bg\)/', $shell)) { $e[] = 'topbar lost the dark chrome background'; }
+if (!preg_match('/(\.topbar-left,[^{]*)\{[^}]*--text-primary:/', $shell, $tm)) { $e[] = 'topbar controls are not re-tokened'; }
+elseif (str_contains($tm[1], 'dropdown') || preg_match('/(^|,)\s*\.topbar\s*(,|$)/', $tm[1])) { $e[] = 'topbar re-tokening reaches its dropdown menus'; }
+if (preg_match('/(^|\})\s*\.topbar\s*\{[^}]*--text-primary:/', $shell)) { $e[] = '.topbar itself is re-tokened (menus would go dark)'; }
 $nav = require FF_ROOT . '/config/navigation.php';
 $labels = []; $sections = 0;
 foreach ($nav as $item) {
