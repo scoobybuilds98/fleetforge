@@ -8,7 +8,7 @@ declare(strict_types=1);
  *
  * The portal *page* guard require_portal_auth() re-queries customers.status (and
  * portal_users.status) every request and logs out a revoked account. But the
- * three portal API bootstraps (messenger / chat / notifications) gated on
+ * portal API bootstraps (chat / notifications; messenger retired by S-CHAT-REBUILD) gated on
  * portal_user_id()/portal_customer_id() from the SESSION only — so a customer
  * suspended mid-session kept hitting the JSON polling endpoints until the
  * session expired. Own-data only (no cross-tenant leak), defense-in-depth.
@@ -141,8 +141,7 @@ try {
 
     // ── CHECK 5: all three API bootstraps call the shared helper ────────────
     $bootstraps = [
-        'app/portal/api/messenger/_bootstrap.php',
-        'app/portal/api/chat/_bootstrap.php',
+        'app/portal/api/chat/_bootstrap.php',   // S-CHAT-REBUILD: messenger bootstrap retired
         'app/portal/api/notifications/_bootstrap.php',
     ];
     $missing = [];
@@ -152,7 +151,7 @@ try {
         }
     }
     if (!$missing) {
-        $pass("5 wiring — messenger + chat + notifications bootstraps all re-check status");
+        $pass("5 wiring — chat + notifications bootstraps both re-check status");
     } else {
         $fail("5 wiring — bootstraps NOT calling portal_status_revoked(): " . implode(', ', $missing));
     }

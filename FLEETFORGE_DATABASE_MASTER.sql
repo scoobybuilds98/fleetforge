@@ -2190,102 +2190,6 @@ CREATE TABLE `billing_holds` (
   CONSTRAINT `fk_billing_hold_lease` FOREIGN KEY (`lease_id`) REFERENCES `leases` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_billing_hold_released_by` FOREIGN KEY (`released_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `chat_attachments` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `message_id` int unsigned NOT NULL,
-  `attachment_type` enum('invoice','lease','customer','payment','work_order','damage_claim','document','reservation','equipment','file','image') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `entity_id` int unsigned DEFAULT NULL,
-  `file_path` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `file_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `file_size` int unsigned DEFAULT NULL,
-  `mime_type` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `preview_title` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `preview_subtitle` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `preview_badge` varchar(100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `preview_badge_class` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `preview_url` varchar(500) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_message` (`message_id`),
-  CONSTRAINT `chat_attachments_ibfk_1` FOREIGN KEY (`message_id`) REFERENCES `chat_messages` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `chat_channel_members` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `channel_id` int unsigned NOT NULL,
-  `user_id` int unsigned DEFAULT NULL COMMENT 'Staff member',
-  `portal_user_id` int unsigned DEFAULT NULL COMMENT 'Portal/customer user',
-  `role` enum('owner','admin','member') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'member',
-  `last_read_at` datetime DEFAULT NULL,
-  `last_read_message_id` int unsigned DEFAULT NULL,
-  `is_muted` tinyint(1) NOT NULL DEFAULT '0',
-  `joined_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_staff_member` (`channel_id`,`user_id`),
-  KEY `idx_user` (`user_id`),
-  KEY `idx_portal_user` (`portal_user_id`),
-  CONSTRAINT `chat_channel_members_ibfk_1` FOREIGN KEY (`channel_id`) REFERENCES `chat_channels` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `chat_channel_members_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `chat_channels` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `slug` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `description` text COLLATE utf8mb4_unicode_ci,
-  `type` enum('channel','direct','customer') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'channel',
-  `is_private` tinyint(1) NOT NULL DEFAULT '0',
-  `is_archived` tinyint(1) NOT NULL DEFAULT '0',
-  `created_by` int unsigned NOT NULL,
-  `customer_id` int unsigned DEFAULT NULL COMMENT 'For customer conversation threads',
-  `portal_user_id` int unsigned DEFAULT NULL COMMENT 'Portal user this conversation is with',
-  `last_message_at` datetime DEFAULT NULL,
-  `last_message_preview` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `unread_count_cache` int unsigned NOT NULL DEFAULT '0',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_slug` (`slug`),
-  KEY `idx_type` (`type`),
-  KEY `idx_customer` (`customer_id`),
-  KEY `idx_last_message` (`last_message_at`),
-  KEY `created_by` (`created_by`),
-  CONSTRAINT `chat_channels_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`),
-  CONSTRAINT `chat_channels_ibfk_2` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `chat_messages` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `channel_id` int unsigned NOT NULL,
-  `user_id` int unsigned DEFAULT NULL COMMENT 'Staff sender',
-  `portal_user_id` int unsigned DEFAULT NULL COMMENT 'Portal/customer sender',
-  `sender_display_name` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Customer-facing display name',
-  `message` text COLLATE utf8mb4_unicode_ci,
-  `type` enum('text','system','attachment','file') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'text',
-  `is_edited` tinyint(1) NOT NULL DEFAULT '0',
-  `edited_at` datetime DEFAULT NULL,
-  `is_deleted` tinyint(1) NOT NULL DEFAULT '0',
-  `deleted_at` datetime DEFAULT NULL,
-  `reply_to_id` int unsigned DEFAULT NULL,
-  `mentions` json DEFAULT NULL COMMENT 'Array of {type,id,name} mentioned',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_channel_created` (`channel_id`,`created_at`),
-  KEY `idx_user` (`user_id`),
-  KEY `idx_created` (`created_at`),
-  KEY `reply_to_id` (`reply_to_id`),
-  CONSTRAINT `chat_messages_ibfk_1` FOREIGN KEY (`channel_id`) REFERENCES `chat_channels` (`id`),
-  CONSTRAINT `chat_messages_ibfk_2` FOREIGN KEY (`reply_to_id`) REFERENCES `chat_messages` (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `chat_reactions` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `message_id` int unsigned NOT NULL,
-  `user_id` int unsigned DEFAULT NULL,
-  `portal_user_id` int unsigned DEFAULT NULL,
-  `emoji` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `unique_reaction` (`message_id`,`user_id`,`emoji`),
-  CONSTRAINT `chat_reactions_ibfk_1` FOREIGN KEY (`message_id`) REFERENCES `chat_messages` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `contract_templates` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -2301,6 +2205,80 @@ CREATE TABLE `contract_templates` (
   PRIMARY KEY (`id`),
   KEY `created_by` (`created_by`),
   CONSTRAINT `contract_templates_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `conversation_members` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `conversation_id` int unsigned NOT NULL,
+  `user_id` int unsigned NOT NULL,
+  `joined_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_conv_member` (`conversation_id`,`user_id`),
+  KEY `idx_conv_member_user` (`user_id`),
+  CONSTRAINT `fk_conv_member_conv` FOREIGN KEY (`conversation_id`) REFERENCES `conversations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_conv_member_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `conversation_message_records` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `message_id` int unsigned NOT NULL,
+  `record_type` enum('lease','invoice','payment','customer','equipment','reservation','work_order','damage_claim') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `record_id` int unsigned NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_conv_msg_record` (`message_id`,`record_type`,`record_id`),
+  KEY `idx_conv_record` (`record_type`,`record_id`),
+  CONSTRAINT `fk_conv_record_msg` FOREIGN KEY (`message_id`) REFERENCES `conversation_messages` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `conversation_messages` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `conversation_id` int unsigned NOT NULL,
+  `sender_type` enum('staff','customer') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `user_id` int unsigned DEFAULT NULL COMMENT 'sender_type=staff',
+  `portal_user_id` int unsigned DEFAULT NULL COMMENT 'sender_type=customer',
+  `body` text CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `deleted_at` datetime DEFAULT NULL COMMENT 'Unsent by its author — body is blanked, row kept for ordering',
+  PRIMARY KEY (`id`),
+  KEY `idx_conv_msg_conv` (`conversation_id`,`id`),
+  KEY `fk_conv_msg_user` (`user_id`),
+  KEY `fk_conv_msg_portal_user` (`portal_user_id`),
+  CONSTRAINT `fk_conv_msg_conv` FOREIGN KEY (`conversation_id`) REFERENCES `conversations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_conv_msg_portal_user` FOREIGN KEY (`portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_conv_msg_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `conversation_reads` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `conversation_id` int unsigned NOT NULL,
+  `user_id` int unsigned DEFAULT NULL,
+  `portal_user_id` int unsigned DEFAULT NULL,
+  `last_read_message_id` int unsigned NOT NULL DEFAULT '0',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_conv_read_user` (`conversation_id`,`user_id`),
+  UNIQUE KEY `uq_conv_read_portal` (`conversation_id`,`portal_user_id`),
+  KEY `idx_conv_read_user` (`user_id`),
+  KEY `idx_conv_read_portal` (`portal_user_id`),
+  CONSTRAINT `fk_conv_read_conv` FOREIGN KEY (`conversation_id`) REFERENCES `conversations` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_conv_read_portal_user` FOREIGN KEY (`portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_conv_read_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE `conversations` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `kind` enum('direct','group','customer') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `title` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'Group name; NULL for direct/customer (derived at read)',
+  `customer_id` int unsigned DEFAULT NULL COMMENT 'kind=customer: one thread per customer',
+  `direct_key` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT 'kind=direct: "<lowUserId>:<highUserId>" — one DM per pair',
+  `created_by_user_id` int unsigned DEFAULT NULL,
+  `last_message_id` int unsigned DEFAULT NULL,
+  `last_message_at` datetime DEFAULT NULL,
+  `last_message_preview` varchar(160) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_conv_customer` (`customer_id`),
+  UNIQUE KEY `uq_conv_direct` (`direct_key`),
+  KEY `idx_conv_kind_last` (`kind`,`last_message_at`),
+  KEY `fk_conv_created_by` (`created_by_user_id`),
+  CONSTRAINT `fk_conv_created_by` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_conv_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `credit_note_applications` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -3679,65 +3657,6 @@ CREATE TABLE `maintenance_work_orders` (
   CONSTRAINT `maintenance_work_orders_ibfk_1` FOREIGN KEY (`equipment_unit_id`) REFERENCES `equipment_units` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `maintenance_work_orders_ibfk_2` FOREIGN KEY (`vendor_id`) REFERENCES `vendors` (`id`) ON DELETE SET NULL,
   CONSTRAINT `maintenance_work_orders_ibfk_3` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `messenger_messages` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `thread_id` int unsigned NOT NULL,
-  `sender_type` enum('admin','portal') COLLATE utf8mb4_unicode_ci NOT NULL,
-  `admin_user_id` int unsigned DEFAULT NULL COMMENT 'Set when sender_type=admin',
-  `portal_user_id` int unsigned DEFAULT NULL COMMENT 'Set when sender_type=portal',
-  `body` text COLLATE utf8mb4_unicode_ci NOT NULL,
-  `is_archived` tinyint(1) NOT NULL DEFAULT '0',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_thread` (`thread_id`),
-  KEY `idx_admin_user` (`admin_user_id`),
-  KEY `idx_portal_user` (`portal_user_id`),
-  KEY `idx_created` (`created_at`),
-  CONSTRAINT `fk_msgr_msg_admin` FOREIGN KEY (`admin_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_msgr_msg_portal` FOREIGN KEY (`portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE SET NULL,
-  CONSTRAINT `fk_msgr_msg_thread` FOREIGN KEY (`thread_id`) REFERENCES `messenger_threads` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `messenger_thread_reads` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `thread_id` int unsigned NOT NULL,
-  `admin_user_id` int unsigned DEFAULT NULL,
-  `portal_user_id` int unsigned DEFAULT NULL,
-  `last_read_message_id` int unsigned DEFAULT NULL,
-  `last_read_at` datetime DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  UNIQUE KEY `uq_admin_reader` (`thread_id`,`admin_user_id`),
-  UNIQUE KEY `uq_portal_reader` (`thread_id`,`portal_user_id`),
-  KEY `idx_admin` (`admin_user_id`),
-  KEY `idx_portal` (`portal_user_id`),
-  CONSTRAINT `fk_msgr_reads_admin` FOREIGN KEY (`admin_user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_msgr_reads_portal` FOREIGN KEY (`portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_msgr_reads_thread` FOREIGN KEY (`thread_id`) REFERENCES `messenger_threads` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-CREATE TABLE `messenger_threads` (
-  `id` int unsigned NOT NULL AUTO_INCREMENT,
-  `customer_id` int unsigned NOT NULL,
-  `scope` enum('customer','portal_user') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'customer',
-  `portal_user_id` int unsigned DEFAULT NULL COMMENT 'Only set when scope=portal_user',
-  `subject` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
-  `created_by_user_id` int unsigned NOT NULL COMMENT 'Admin user who started the thread',
-  `last_message_at` datetime DEFAULT NULL,
-  `last_message_preview` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `last_message_by` enum('admin','portal') COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  `unread_admin_count` int unsigned NOT NULL DEFAULT '0' COMMENT 'Quick-lookup: messages from portal not yet read by ANY admin',
-  `is_archived` tinyint(1) NOT NULL DEFAULT '0',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
-  KEY `idx_customer` (`customer_id`),
-  KEY `idx_portal_user` (`portal_user_id`),
-  KEY `idx_last_message` (`last_message_at`),
-  KEY `idx_scope` (`scope`),
-  KEY `fk_msgr_threads_created_by` (`created_by_user_id`),
-  CONSTRAINT `fk_msgr_threads_created_by` FOREIGN KEY (`created_by_user_id`) REFERENCES `users` (`id`),
-  CONSTRAINT `fk_msgr_threads_customer` FOREIGN KEY (`customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_msgr_threads_portal_user` FOREIGN KEY (`portal_user_id`) REFERENCES `portal_users` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE `mileage_logs` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,

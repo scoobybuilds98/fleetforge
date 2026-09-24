@@ -39,12 +39,10 @@ if (!$widgetAiEnabled || !$widgetHasApiKey) return;
 
 <!--
   ── AI Chat Widget ───────────────────────────────────────────────────────
-  NOTE: Uses FF_AiChatWidget() (not FF_ChatWidget) to avoid a name collision
-  with the Team Chat widget in includes/partials/chat-widget.php, which uses
-  the factory FF_ChatWidget() defined in public/assets/js/app.js. Because
-  app.js is loaded AFTER this inline <script>, the team-chat factory would
-  otherwise clobber this one and the AI chatbox would silently render as
-  display:none on every page.
+  NOTE: The factory is named FF_AiChatWidget() because app.js (loaded AFTER
+  this inline <script>) once defined a same-named team-chat widget factory
+  that silently clobbered it. That widget was retired by S-CHAT-REBUILD;
+  keep the distinct name so no future global can collide with it.
 
   Topbar wiring: x-init below also registers the widget's toggle callback
   as the plain global `window.FF_OpenAiChat`. The topbar AI icon calls that
@@ -671,9 +669,8 @@ if (!$widgetAiEnabled || !$widgetHasApiKey) return;
 
 <!-- ── Alpine Component ───────────────────────────────────────────────────── -->
 <!--
-  NOTE: renamed from FF_ChatWidget to FF_AiChatWidget to avoid colliding
-  with the Team Chat factory in public/assets/js/app.js. See the comment
-  on the outer <div x-data> above for the full explanation.
+  NOTE: distinctly named FF_AiChatWidget — see the comment on the outer
+  <div x-data> above.
 -->
 <script>
 function FF_AiChatWidget() {

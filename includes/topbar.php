@@ -575,18 +575,18 @@ $_topbarCompany = (string) settings_get('company.name', 'FleetForge');
         </button>
 
         <!--
-          ── Team Chat icon — navigates to /chat page ──────────────────
-          The floating bottom-right bubble is now the AI chat widget;
-          team chat remains accessible via this topbar icon → /chat.
-          Unread badge still reflects team chat unreads.
+          ── Messages icon — navigates to /chat (S-CHAT-REBUILD) ───────
+          One inbox: Team (DMs + groups) and Customers (one text thread per
+          customer). Badge = FF_ChatHubBadge → /api/v1/chat/unread.php.
+          The floating bottom-right bubble is the AI chat widget.
         -->
         <div class="chat-topbar"
              x-data="FF_ChatHubBadge()">
             <a href="<?= base_url('chat') ?>"
                class="chat-topbar-btn topbar-chat-btn"
                :class="{ 'has-unread': totalUnread > 0 }"
-               :aria-label="totalUnread > 0 ? 'Team chat (' + totalUnread + ' unread)' : 'Team chat'"
-               title="Team chat">
+               :aria-label="totalUnread > 0 ? 'Messages (' + totalUnread + ' unread)' : 'Messages'"
+               title="Messages">
                 <?= heroicon('chat-bubble-left-right', 'nav-icon') ?>
                 <span class="chat-badge"
                       x-show="totalUnread > 0"

@@ -151,6 +151,7 @@ $meta = pt_badge($j['status_label'], $j['status_tone'])
 ob_start(); ?>
     <a class="pt-btn pt-btn--secondary" href="<?= e($pdfUrl) ?>" target="_blank" rel="noopener"><?= pt_icon('arrow-down-tray') ?> PDF</a>
     <a class="pt-btn pt-btn--secondary" href="<?= e($askUrl) ?>"><?= pt_icon('question-mark-circle') ?> Ask about this invoice</a>
+    <a class="pt-btn pt-btn--secondary" href="<?= e(pt_url('chat?attach=invoice:' . (int) $invoiceId)) ?>"><?= pt_icon('chat-bubble-left-right') ?> Message us</a><?php /* S-CHAT-REBUILD */ ?>
 <?php
 echo pt_page_head([
     'back'    => ['Invoices', pt_url('invoices')],

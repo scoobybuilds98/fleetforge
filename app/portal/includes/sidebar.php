@@ -19,8 +19,8 @@ declare(strict_types=1);
  *   Invoices  past-due invoices (red) — was "overdue OR sent", which lit the
  *             badge for every invoice that simply hadn't been paid yet
  *   Requests  requests still open or in review
- *   Messages  unread staff messages in threads this user can see (MSGR-1)
- *   Chat      unread staff chat messages (CHAT-2)
+ *   Messages  unread texts from staff in this customer's thread (S-CHAT-REBUILD;
+ *             replaces the separate MSGR-1 Messages + CHAT-2 Chat entries)
  */
 
 $_sbUser      = portal_user();
@@ -31,37 +31,15 @@ $_sbCid       = portal_customer_id();
 $_sbPid       = portal_user_id();
 $_sbSummary   = pt_account_summary($_sbCid);
 
-$_sbOpenReq = $_sbUnreadMsg = $_sbUnreadChat = 0;
+$_sbOpenReq = $_sbUnreadMsg = 0;
 try {
     $_sbOpenReq = db_count(
         "SELECT COUNT(*) FROM portal_service_requests WHERE customer_id = ? AND status IN ('open','in_review')",
         [$_sbCid]
     );
-    // [CHAT-2] Unread staff messages in customer chat channels
-    $_sbUnreadChat = db_count(
-        "SELECT COUNT(*) FROM chat_messages cm
-           JOIN chat_channels cc ON cc.id = cm.channel_id
-                AND cc.type = 'customer' AND cc.customer_id = ? AND cc.is_archived = 0
-           LEFT JOIN chat_channel_members ccm
-                ON ccm.channel_id = cm.channel_id AND ccm.portal_user_id = ?
-          WHERE cm.is_deleted = 0
-            AND cm.portal_user_id IS NULL
-            AND (ccm.last_read_message_id IS NULL OR cm.id > ccm.last_read_message_id)",
-        [$_sbCid, $_sbPid]
-    );
-    // [MSGR-1] Unread admin messages in threads this portal user may see
-    $_sbUnreadMsg = db_count(
-        "SELECT COUNT(*) AS cnt
-           FROM messenger_messages mm
-           JOIN messenger_threads mt ON mt.id = mm.thread_id AND mt.is_archived = 0
-           LEFT JOIN messenger_thread_reads mtr
-                  ON mtr.thread_id = mm.thread_id AND mtr.portal_user_id = ?
-          WHERE mm.sender_type = 'admin'
-            AND mm.is_archived = 0
-            AND mt.customer_id = ?
-            AND (mt.scope = 'customer' OR (mt.scope = 'portal_user' AND mt.portal_user_id = ?))
-            AND (mtr.last_read_message_id IS NULL OR mm.id > mtr.last_read_message_id)",
-        [$_sbPid, $_sbCid, $_sbPid]
+    // On the Messages page itself the thread is being read — no badge.
+    $_sbUnreadMsg = str_contains($_sbPath, '/portal/chat') ? 0 : \FleetForge\Chat\Conversations::portalUnread(
+        \FleetForge\Chat\Conversations::portalViewer((int) $_sbPid, (int) $_sbCid)
     );
 } catch (Throwable) {}
 
@@ -81,8 +59,7 @@ $_sbNav = [
     ],
     'Help' => [
         ['Requests', 'requests', 'wrench-screwdriver', $_sbOpenReq, ''],
-        ['Messages', 'messages', 'envelope', $_sbUnreadMsg, 'is-brand'],
-        ['Chat',     'chat',     'chat-bubble-left-right', $_sbUnreadChat, 'is-brand'],
+        ['Messages', 'chat',     'chat-bubble-left-right', $_sbUnreadMsg, 'is-brand'],
     ],
     'Account' => [
         ['Credit application', 'credit-applications', 'clipboard-document-check', 0, ''],
@@ -165,6 +142,6 @@ $_sbEmail = (string) settings_get('company.email', '');
 </aside>
 <?php
 unset($_sbUser, $_sbCompany, $_sbCustomer, $_sbPath, $_sbCid, $_sbPid, $_sbSummary, $_sbOpenReq, $_sbUnreadMsg,
-      $_sbUnreadChat, $_sbNav, $_sbGroup, $_sbItems, $_l, $_p, $_i, $_b, $_bs, $_full, $_active, $_sbLogo,
+      $_sbNav, $_sbGroup, $_sbItems, $_l, $_p, $_i, $_b, $_bs, $_full, $_active, $_sbLogo,
       $_sbLogoUrl, $_sbLogoDark, $_sbPhone, $_sbEmail);
 ?>

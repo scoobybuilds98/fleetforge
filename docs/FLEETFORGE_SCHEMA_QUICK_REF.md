@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-09-24
-**Tables:** 177 total · **Columns:** 2814
+**Tables:** 174 total · **Columns:** 2761
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -16,7 +16,23 @@
 
 # Core tables
 
-_12 tables._
+_13 tables._
+
+## `conversations`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `kind` | enum('direct','group','customer') | MUL | NO |
+| `title` | varchar(120) |  | YES |
+| `customer_id` | int unsigned | UNI | YES |
+| `direct_key` | varchar(32) | UNI | YES |
+| `created_by_user_id` | int unsigned | MUL | YES |
+| `last_message_id` | int unsigned |  | YES |
+| `last_message_at` | datetime |  | YES |
+| `last_message_preview` | varchar(160) |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `customers`
 
@@ -2080,7 +2096,7 @@ _72 tables._
 
 # Other tables
 
-_93 tables._
+_89 tables._
 
 ## `ai_anomaly_alerts`
 
@@ -2165,6 +2181,7 @@ _93 tables._
 | `entity_type` | varchar(100) | MUL | NO |
 | `entity_id` | int unsigned |  | NO |
 | `summary_type` | enum('lease_summary','customer_insights','fleet_health','unit_analysis','payment_risk','forecast','anomaly','accounting_overview','pl_narrative','bs_narrative','cashflow_narrative','budget_variance','invoice_analysis','reservation_summary','vendor_summary','payment_summary') |  | NO |
+| `with_money` | tinyint(1) |  | NO |
 | `content` | longtext |  | NO |
 | `tokens_used` | int unsigned |  | YES |
 | `model_used` | varchar(100) |  | YES |
@@ -2331,90 +2348,6 @@ _93 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
-## `chat_attachments`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `message_id` | int unsigned | MUL | NO |
-| `attachment_type` | enum('invoice','lease','customer','payment','work_order','damage_claim','document','reservation','equipment','file','image') |  | NO |
-| `entity_id` | int unsigned |  | YES |
-| `file_path` | varchar(500) |  | YES |
-| `file_name` | varchar(255) |  | YES |
-| `file_size` | int unsigned |  | YES |
-| `mime_type` | varchar(100) |  | YES |
-| `preview_title` | varchar(255) |  | YES |
-| `preview_subtitle` | varchar(255) |  | YES |
-| `preview_badge` | varchar(100) |  | YES |
-| `preview_badge_class` | varchar(50) |  | YES |
-| `preview_url` | varchar(500) |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-
-## `chat_channel_members`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `channel_id` | int unsigned | MUL | NO |
-| `user_id` | int unsigned | MUL | YES |
-| `portal_user_id` | int unsigned | MUL | YES |
-| `role` | enum('owner','admin','member') |  | NO |
-| `last_read_at` | datetime |  | YES |
-| `last_read_message_id` | int unsigned |  | YES |
-| `is_muted` | tinyint(1) |  | NO |
-| `joined_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-
-## `chat_channels`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `name` | varchar(100) |  | NO |
-| `slug` | varchar(100) | UNI | NO |
-| `description` | text |  | YES |
-| `type` | enum('channel','direct','customer') | MUL | NO |
-| `is_private` | tinyint(1) |  | NO |
-| `is_archived` | tinyint(1) |  | NO |
-| `created_by` | int unsigned | MUL | NO |
-| `customer_id` | int unsigned | MUL | YES |
-| `portal_user_id` | int unsigned |  | YES |
-| `last_message_at` | datetime | MUL | YES |
-| `last_message_preview` | varchar(255) |  | YES |
-| `unread_count_cache` | int unsigned |  | NO |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
-## `chat_messages`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `channel_id` | int unsigned | MUL | NO |
-| `user_id` | int unsigned | MUL | YES |
-| `portal_user_id` | int unsigned |  | YES |
-| `sender_display_name` | varchar(255) |  | YES |
-| `message` | text |  | YES |
-| `type` | enum('text','system','attachment','file') |  | NO |
-| `is_edited` | tinyint(1) |  | NO |
-| `edited_at` | datetime |  | YES |
-| `is_deleted` | tinyint(1) |  | NO |
-| `deleted_at` | datetime |  | YES |
-| `reply_to_id` | int unsigned | MUL | YES |
-| `mentions` | json |  | YES |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
-## `chat_reactions`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `message_id` | int unsigned | MUL | NO |
-| `user_id` | int unsigned |  | YES |
-| `portal_user_id` | int unsigned |  | YES |
-| `emoji` | varchar(20) |  | NO |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-
 ## `contract_templates`
 
 | Column | Type | Key | Nullable |
@@ -2429,6 +2362,48 @@ _93 tables._
 | `version` | tinyint unsigned |  | NO |
 | `created_by` | int unsigned | MUL | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `conversation_members`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `conversation_id` | int unsigned | MUL | NO |
+| `user_id` | int unsigned | MUL | NO |
+| `joined_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `conversation_message_records`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `message_id` | int unsigned | MUL | NO |
+| `record_type` | enum('lease','invoice','payment','customer','equipment','reservation','work_order','damage_claim') | MUL | NO |
+| `record_id` | int unsigned |  | NO |
+
+## `conversation_messages`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `conversation_id` | int unsigned | MUL | NO |
+| `sender_type` | enum('staff','customer') |  | NO |
+| `user_id` | int unsigned | MUL | YES |
+| `portal_user_id` | int unsigned | MUL | YES |
+| `body` | text |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `deleted_at` | datetime |  | YES |
+
+## `conversation_reads`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `conversation_id` | int unsigned | MUL | NO |
+| `user_id` | int unsigned | MUL | YES |
+| `portal_user_id` | int unsigned | MUL | YES |
+| `last_read_message_id` | int unsigned |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `credit_note_applications`
@@ -3240,49 +3215,6 @@ _93 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `deleted_at` | datetime |  | YES |
-
-## `messenger_messages`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `thread_id` | int unsigned | MUL | NO |
-| `sender_type` | enum('admin','portal') |  | NO |
-| `admin_user_id` | int unsigned | MUL | YES |
-| `portal_user_id` | int unsigned | MUL | YES |
-| `body` | text |  | NO |
-| `is_archived` | tinyint(1) |  | NO |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
-
-## `messenger_thread_reads`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `thread_id` | int unsigned | MUL | NO |
-| `admin_user_id` | int unsigned | MUL | YES |
-| `portal_user_id` | int unsigned | MUL | YES |
-| `last_read_message_id` | int unsigned |  | YES |
-| `last_read_at` | datetime |  | YES |
-
-## `messenger_threads`
-
-| Column | Type | Key | Nullable |
-|--------|------|-----|----------|
-| `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `customer_id` | int unsigned | MUL | NO |
-| `scope` | enum('customer','portal_user') | MUL | NO |
-| `portal_user_id` | int unsigned | MUL | YES |
-| `subject` | varchar(255) |  | NO |
-| `created_by_user_id` | int unsigned | MUL | NO |
-| `last_message_at` | datetime | MUL | YES |
-| `last_message_preview` | varchar(255) |  | YES |
-| `last_message_by` | enum('admin','portal') |  | YES |
-| `unread_admin_count` | int unsigned |  | NO |
-| `is_archived` | tinyint(1) |  | NO |
-| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
-| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `mileage_logs`
 

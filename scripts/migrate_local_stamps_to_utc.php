@@ -110,12 +110,13 @@ const REGISTRY = [
     ['acc_cca_continuity', 'computed_at', 'past', null, [], ''],
     ['acc_disclosure_notes', 'edited_at', 'past', null, [], ''],
     ['acc_depreciation_runs', 'run_date', 'past', null, [], 'asset schedule YTD bounds read it as UTC now'],
-    // ── Payments / AI / messenger / QuickBooks mapping stamps ────────────────
+    // ── Payments / AI / QuickBooks mapping stamps ──────────────────────────────
     ['payments', 'received_at', 'past', null, [], ''],
     ['ai_chat_sessions', 'last_message_at', 'past', null, [], ''],
     ['ai_pending_changes', 'expires_at', 'past', null, [], '30-min TTL; a pre-deploy value above the cutover simply stays expired early'],
     ['ai_pending_changes', 'applied_at', 'past', null, [], ''],
-    ['messenger_thread_reads', 'last_read_at', 'past', null, [], 'display only; unread counts use message ids'],
+    // (The MSGR-1 thread-reads stamp was dropped with its table by S-CHAT-REBUILD;
+    //  conversation_reads.updated_at is a DB DEFAULT/ON UPDATE stamp, UTC already.)
     ['acc_qbo_customer_map', 'last_synced_at', 'past', null, [], ''],
     ['acc_qbo_customer_map', 'pushed_at', 'past', null, [], ''],
     ['acc_qbo_customer_map', 'last_push_at', 'past', null, [], ''],

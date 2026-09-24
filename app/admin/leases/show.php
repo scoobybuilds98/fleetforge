@@ -168,6 +168,7 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
 <?php $heroOwn = ob_get_clean(); ?>
 <?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <a class="btn btn-secondary btn-sm" href="<?= e(base_url('chat?attach=lease:' . (int) $leaseId)) ?>"><?= heroicon('chat-bubble-left-right', 'icon-sm') ?> Send in chat</a><?php /* S-CHAT-REBUILD */ ?>
         <?php if (can('customers', 'create')): /* EMAIL-1: send lease confirmation email */ ?>
         <button type="button"
                 class="btn btn-secondary btn-sm"

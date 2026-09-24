@@ -29,7 +29,7 @@ declare(strict_types=1);
  *   R16 request reply: > 5,000 characters → 422
  *   R17 email-reminder preferences save (primary contact) and round-trip
  *   R18 wiring guards: shell assets, table opt-out, no dead serve.php link,
- *       messenger double-init fixed, portal.css has no stray hex colours,
+ *       Messages (chat) double-init guarded (S-CHAT-REBUILD), portal.css has no stray hex colours,
  *       every pt_icon() name exists
  *
  * Hermetic: creates one temp portal user (+ fixture documents), deletes them,
@@ -162,8 +162,7 @@ try {
         'portal/account'                => 'Email reminders',
         'portal/account/users'          => 'Team members',
         'portal/credit-applications'    => 'Credit application',
-        'portal/messages'               => 'FF_PortalMessenger',
-        'portal/chat'                   => 'FF_PortalChat',
+        'portal/chat'                   => 'FF_ChatApp',   // S-CHAT-REBUILD: one Messages page (old /portal/messages retired)
     ];
     if ($lease) $pages['portal/leases/view?id=' . (int) $lease['id']] = 'Lease terms';
     $bad = [];
@@ -343,8 +342,8 @@ try {
     foreach ($it as $f) { if (str_ends_with((string) $f, '.php')) $all .= "\n/*FILE " . $f . "*/\n" . file_get_contents((string) $f); }
     if (preg_match_all('/<table(?![^>]*data-no-auto-label)(?![^>]*class="pt-sr")[^>]*class="pt-table/', $all) > 0) $w[] = 'a .pt-table lacks data-no-auto-label';
     if (str_contains($all, 'api/v1/documents/serve.php')) $w[] = 'dead serve.php link remains';
-    if (str_contains((string) file_get_contents(FF_ROOT . '/app/portal/messages/index.php'), 'x-init="init(')) $w[] = 'messages x-init double-init';
-    if (!str_contains((string) file_get_contents(FF_ROOT . '/public/assets/js/app.js'), 'if (this._booted) return;')) $w[] = 'FF_PortalMessenger guard missing';
+    if (str_contains((string) file_get_contents(FF_ROOT . '/app/portal/chat/index.php'), 'x-init="init(')) $w[] = 'chat x-init double-init';
+    if (!str_contains((string) file_get_contents(FF_ROOT . '/public/assets/js/chat.js'), 'if (this._started) return;')) $w[] = 'FF_ChatApp init guard missing';
     $css = (string) file_get_contents(FF_ROOT . '/public/assets/css/portal.css');
     $css = (string) preg_replace('#/\*.*?\*/#s', '', $css);
     $css = (string) preg_replace('/url\("data:[^"]*"\)/', '', $css);

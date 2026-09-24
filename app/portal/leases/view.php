@@ -197,7 +197,9 @@ if ($lease['status'] === 'active'): ?>
     <a class="pt-btn pt-btn--secondary" href="<?= e(pt_url($reqBase . 'lease_extension')) ?>"><?= pt_icon('calendar-days') ?> Extend</a>
     <a class="pt-btn pt-btn--secondary" href="<?= e(pt_url($reqBase . 'early_return')) ?>"><?= pt_icon('arrow-uturn-left') ?> Return</a>
     <a class="pt-btn pt-btn--primary" href="<?= e(pt_url($reqBase . 'damage_report')) ?>"><?= pt_icon('wrench-screwdriver') ?> Report a problem</a>
-<?php endif;
+<?php endif; ?>
+    <a class="pt-btn pt-btn--secondary" href="<?= e(pt_url('chat?attach=lease:' . (int) $leaseId)) ?>"><?= pt_icon('chat-bubble-left-right') ?> Message us</a><?php /* S-CHAT-REBUILD */
+
 $actions = ob_get_clean();
 
 echo pt_page_head([

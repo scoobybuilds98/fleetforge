@@ -2,7 +2,7 @@
  * Chapter 25 — Email, Messaging & Notifications
  * Customer email (Compose modal on Summit Carriers Ltd.: templates, variables, attachments,
  * preview), Email History, Email Templates, Bulk Email wizard, automated Customer Emails
- * settings, Messenger (customer portal inbox), Team Chat, the notification bell and
+ * settings, Messages (Team + Customers texting, S-CHAT-REBUILD), the notification bell and
  * Notifications page, and where notification preferences live.
  * Creates no records: Send / Send Email / Mark all read / Clear all read / Save are only
  * hovered. The invoice attachment added in Compose is client-side and discarded on Cancel.
@@ -188,36 +188,23 @@ export default {
       run: async (d) => { await d.highlight('text=Do-not-email list', 'Never email these customers', 2800); },
     },
     {
-      say: 'For two-way conversations with customers who use the portal, use Messenger. It is a shared team inbox: everyone with customer access sees every thread. It has no sidebar link yet, so bookmark it.',
-      run: async (d) => {
-        await d.goto('/messenger');
-        await d.wait(1200);
-        await d.highlight('.chat-sidebar', 'Customer conversations', 2600);
-      },
-    },
-    {
-      say: 'Start a conversation by picking a company to message all of its portal users, or a single contact to message one person.',
-      run: async (d) => {
-        await d.click('button:has-text("Start a conversation")');
-        await d.wait(1200);
-        await d.type('input[x-model="contactQuery"]', 'Summit', { delay: 60 });
-        await d.wait(1200);
-        await d.click('.modal-overlay .modal-close-btn');
-      },
-    },
-    {
-      say: 'Team Chat is for talking with colleagues. Open it from the chat icon in the top bar; a badge shows unread messages.',
+      say: 'For conversations, open Messages from the chat bubble in the top bar. The badge shows how many messages you have not read.',
       run: async (d) => {
         await d.hover('.topbar-chat-btn', 900);
         await d.click('.topbar-chat-btn', { nav: true });
+        await d.wait(1200);
       },
     },
     {
-      say: 'Chat has channels for teams or topics, direct messages between two people, and customer chats. In a message you can mention a colleague, attach a record like a lease or invoice, and react.',
+      say: 'It is simple texting, split in two. Team is for colleagues: direct messages and small groups. Customers holds one thread per customer, which their portal users see in the portal.',
       run: async (d) => {
-        await d.hover('button:has-text("+ Browse All")', 900);
-        await d.hover('button:has-text("+ New Direct Message")', 900);
-        await d.hover('button:has-text("+ Start Customer Chat")', 900);
+        await d.highlight('.cx-seg', 'Team or Customers', 2600);
+      },
+    },
+    {
+      say: 'The plus button starts a conversation with a teammate, a group, or a customer. In any conversation, the paper clip attaches a lease, invoice, payment or unit, and it shows as a live card with its current status.',
+      run: async (d) => {
+        await d.hover('.cx-new-btn', 1200);
       },
     },
     {

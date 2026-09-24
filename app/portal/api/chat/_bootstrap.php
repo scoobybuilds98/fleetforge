@@ -4,8 +4,8 @@ declare(strict_types=1);
 /**
  * app/portal/api/chat/_bootstrap.php
  *
- * Shared bootstrap for every portal chat API endpoint.
- * Mirrors app/portal/api/messenger/_bootstrap.php structure.
+ * Shared bootstrap for every portal chat API endpoint (thread / send /
+ * unsend / records). Customer side of lib/Chat/Conversations.php.
  *
  * Responsibilities:
  *   - Boot config + portal auth
@@ -15,7 +15,7 @@ declare(strict_types=1);
  * WHY: Portal users access customer conversation channels via portal session,
  *      not admin session — they need their own guarded endpoints.
  *
- * Spec: CHAT-2
+ * Spec: CHAT-2 · S-CHAT-REBUILD (one thread per customer, record cards)
  */
 
 require_once dirname(__DIR__, 4) . '/config/app.php';
@@ -94,3 +94,6 @@ if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
         portal_chat_err('CSRF_INVALID', 'Invalid CSRF token.', 403);
     }
 }
+
+// The portal user's viewer for lib/Chat (customer-scoped record access).
+$portalViewer = \FleetForge\Chat\Conversations::portalViewer((int) $portalUserId, (int) $portalCustomerId);

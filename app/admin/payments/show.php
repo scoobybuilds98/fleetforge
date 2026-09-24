@@ -216,6 +216,7 @@ ob_start(); ?>
         <?php endif; ?>
 <?php $heroBadges = ob_get_clean(); ?>
 <?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <a class="btn btn-secondary btn-sm" href="<?= e(base_url('chat?attach=payment:' . (int) $id)) ?>"><?= heroicon('chat-bubble-left-right', 'icon-sm') ?> Send in chat</a><?php /* S-CHAT-REBUILD */ ?>
         <?php if (can('payments', 'edit')): ?>
         <!-- Edit metadata — opens the inline edit card at the top of the page -->
         <button type="button" class="btn btn-secondary btn-sm"

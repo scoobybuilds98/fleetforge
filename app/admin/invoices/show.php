@@ -1399,6 +1399,7 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
         </div>
 <?php $heroOwn = ob_get_clean(); ?>
 <?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <a class="btn btn-secondary btn-sm" href="<?= e(base_url('chat?attach=invoice:' . (int) $invoiceId)) ?>"><?= heroicon('chat-bubble-left-right', 'icon-sm') ?> Send in chat</a><?php /* S-CHAT-REBUILD */ ?>
     <?php if (!$isEmbed): ?>
         <?php if ($canEdit && !$isDraft && ($invoice['status'] ?? '') !== 'void'): ?>
             <!-- Re-send (S-BILLING-MODULE): emails the ALREADY-SENT invoice again

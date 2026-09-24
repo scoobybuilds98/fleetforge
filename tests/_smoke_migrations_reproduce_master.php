@@ -337,6 +337,29 @@ if ($code !== 0) {
 }
 echo "  ✓ 000_baseline.sql applied with no errors\n";
 
+// Tables that 000_baseline creates but a LATER delta migration deliberately
+// drops. 000_baseline is frozen (D-BASELINE-6), so on a master-shaped DB its
+// CREATE TABLE IF NOT EXISTS re-creates them — the real prod path never sees
+// that (prod ran the baseline BEFORE the dropping delta). Drop them here so
+// SC4 still proves the baseline changes nothing ELSE. Add a table only
+// together with the delta migration that drops it. Child tables first (FKs).
+$retiredAfterBaseline = [
+    // S-CHAT-REBUILD (202609250500_S-CHAT-REBUILD_conversations.sql)
+    'chat_reactions', 'chat_attachments', 'chat_channel_members', 'chat_messages', 'chat_channels',
+    'messenger_thread_reads', 'messenger_messages', 'messenger_threads',
+];
+if ($retiredAfterBaseline) {
+    $dropCmd   = bzMysqlCmd($dbHost, $dbPort, $dbUser, $dbPass);
+    $dropCmd[] = $scratchProd;
+    $dropCmd[] = '-e';
+    $dropCmd[] = implode(' ', array_map(fn($t) => "DROP TABLE IF EXISTS `{$t}`;", $retiredAfterBaseline));
+    [$code, $out] = bzRunCmd($dropCmd);
+    if ($code !== 0) {
+        bzFail("SC4 retired-table drop failed: {$out}", $scratchFresh, $scratchProd, $keepScratch, $dbHost, $dbPort, $dbUser, $dbPass);
+    }
+    echo "  ✓ dropped " . count($retiredAfterBaseline) . " table(s) retired after the baseline\n";
+}
+
 echo "[3/4] Dumping prod-sim DB after 000_baseline apply\n";
 $prodDump = $tmp . '/ff_bz_prod_sim.sql';
 [$code, $out] = bzRunCmd(bzDumpCmd($dbHost, $dbPort, $dbUser, $dbPass, $scratchProd));

@@ -4,76 +4,31 @@ declare(strict_types=1);
 /**
  * app/portal/api/chat/send.php
  *
- * POST { channel_id: N, message: "text" }
- * Sends a message to the customer conversation channel as the portal user.
+ * POST { body, records: [{type, id}] } — text the team. Creates the
+ * customer's thread on first use. Records must be this customer's own
+ * lease / invoice / payment (validated server-side).
  *
- * WHY: Portal users send with portal_user_id (not user_id). The admin chat
- *      endpoints use require_auth_api() which is staff-only — portal users
- *      need their own guarded send endpoint.
- *
- * Spec: CHAT-2
+ * @session S-CHAT-REBUILD
  */
 
 require_once __DIR__ . '/_bootstrap.php';
 
-if ($method !== 'POST') {
-    portal_chat_err('METHOD_NOT_ALLOWED', 'POST only.', 405);
+use FleetForge\Chat\Conversations;
+
+if ($method !== 'POST') portal_chat_err('METHOD_NOT_ALLOWED', 'POST only.', 405);
+
+$in   = portal_chat_input();
+$body = is_string($in['body'] ?? null) ? $in['body'] : '';
+$refs = is_array($in['records'] ?? null) ? $in['records'] : [];
+
+$cv = Conversations::portalThread($portalViewer)
+    ?? Conversations::find(Conversations::openCustomer((int) $portalCustomerId, null), $portalViewer);
+
+try {
+    $msgId = Conversations::send($cv, $portalViewer, $body, $refs);
+} catch (\InvalidArgumentException $e) {
+    portal_chat_err('VALIDATION_ERROR', $e->getMessage(), 422);
 }
 
-$body      = portal_chat_input();
-$channelId = isset($body['channel_id']) ? (int) $body['channel_id'] : 0;
-$message   = trim((string) ($body['message'] ?? ''));
-
-if (!$channelId) {
-    portal_chat_err('MISSING_REQUIRED', 'channel_id is required.', 422);
-}
-if ($message === '') {
-    portal_chat_err('MISSING_REQUIRED', 'message is required.', 422);
-}
-if (mb_strlen($message) > 5000) {
-    portal_chat_err('VALIDATION_ERROR', 'Message too long (max 5000 characters).', 422);
-}
-
-// Verify channel belongs to portal user's customer
-$chan = db_row(
-    "SELECT id FROM chat_channels WHERE id = ? AND type = 'customer' AND customer_id = ? AND is_archived = 0",
-    [$channelId, $portalCustomerId]
-);
-if (!$chan) {
-    portal_chat_err('NOT_FOUND', 'Channel not found.', 404);
-}
-
-// Portal user's display name from session
-$portalUser  = portal_user();
-$senderName  = $portalUser['name'] ?? ($portalUser['company_name'] ?? 'Customer');
-
-// Insert the message
-$msgId = db_insert('chat_messages', [
-    'channel_id'           => $channelId,
-    'user_id'              => null,                  // WHY: portal_user, not staff
-    'portal_user_id'       => $portalUserId,
-    'sender_display_name'  => $senderName,
-    'message'              => $message,
-    'type'                 => 'text',
-    // S-LOCAL-DAY-TS: created_at/updated_at omitted — column DEFAULTs write UTC
-    // like staff-side messages; PHP date() was local wall time, so a portal
-    // message sorted 7-8h BEFORE the staff reply it answered.
-]);
-
-// Update channel's last_message_at + preview
-// S-LOCAL-DAY-TS: NOW() (UTC session), same as every staff-side writer — the
-// channel list orders by last_message_at.
-$preview = mb_substr($message, 0, 100);
-db_execute(
-    "UPDATE chat_channels SET last_message_at = NOW(), last_message_preview = ? WHERE id = ?",
-    [$preview, $channelId]
-);
-
-// Mark channel as read for this portal user (their own message)
-db_execute(
-    "UPDATE chat_channel_members SET last_read_message_id = ?, last_read_at = NOW()
-     WHERE channel_id = ? AND portal_user_id = ?",
-    [$msgId, $channelId, $portalUserId]
-);
-
-portal_chat_ok(['id' => $msgId], 201);
+$page = Conversations::messages($cv, $portalViewer, $msgId - 1);
+portal_chat_ok(['conversation_id' => (int) $cv['id'], 'message' => $page['messages'][0] ?? null], 201);

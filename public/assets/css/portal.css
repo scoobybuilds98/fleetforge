@@ -1051,10 +1051,6 @@ a.pt-unit:hover { transform: translateY(-2px); border-color: var(--border-color-
 .pt-step.is-current::before { background: linear-gradient(90deg, var(--color-primary) 50%, var(--bg-surface-2) 50%); }
 
 /* ── Legacy portal components inside the new shell ────────────────────── */
-/* Messenger / chat keep their own components (FF_PortalMessenger /
-   FF_PortalChat); give them the portal card frame. */
-.pt-app .portal-msgr-page { margin: 0; }
-.pt-app .portal-msgr-layout { border-radius: var(--pt-r); border-color: var(--pt-line); box-shadow: var(--pt-raise); overflow: hidden; }
 .pt-app .notif-dropdown { border-radius: 16px; }
 
 /* ── Responsive ───────────────────────────────────────────────────────── */
