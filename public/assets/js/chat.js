@@ -19,7 +19,8 @@
  *
  * Seen: the server returns `receipt` ("Seen" / "Sent" / "Seen by …") for the
  * newest message when it's on my side; every poll refreshes it, so it flips
- * to Seen live (S-CHAT-SEEN).
+ * to Seen live (S-CHAT-SEEN), with the time it was read in the viewer's own
+ * timezone and a per-reader hover in groups (S-CHAT-SEEN-TIME).
  *
  * Polling: open thread every 4s (after=lastId), inbox every 15s (staff),
  * paused while the tab is hidden, caught up on refocus. The staff page posts
@@ -51,6 +52,20 @@
     }
     function timeLabel(d) {
         return d ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    }
+    // "3:42 PM" today, "Yesterday 3:42 PM", "Mon 3:42 PM" this week, else "Sep 3, 3:42 PM".
+    function seenStamp(ts) {
+        const d = parseUtc(ts);
+        if (!d) return '';
+        const now = new Date();
+        const y = new Date(); y.setDate(now.getDate() - 1);
+        const time = timeLabel(d);
+        if (sameDay(d, now)) return time;
+        if (sameDay(d, y)) return 'Yesterday ' + time;
+        if ((now - d) / 86400000 < 6) return d.toLocaleDateString([], { weekday: 'short' }) + ' ' + time;
+        const opts = { month: 'short', day: 'numeric' };
+        if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+        return d.toLocaleDateString([], opts) + ', ' + time;
     }
     function listStamp(ts) {
         const d = parseUtc(ts);
@@ -87,7 +102,7 @@
             loadingEarlier: false,
             attachTypes: [],
             mobileThread: false,
-            receipt: null,                  // { message_id, text: 'Seen'|'Sent'|'Seen by …', seen } — server-built
+            receipt: null,                  // { message_id, text, seen, at, readers, _label, _title } — see setReceipt()
 
             // ── composer ─────────────────────────────────────────────
             draft: '',
@@ -268,7 +283,7 @@
                     this.attachTypes = res.data.attach_types || [];
                     this.messages = this.decorate(res.data.messages || []);
                     this.hasMore = !!res.data.has_more;
-                    this.receipt = res.data.receipt || null;
+                    this.setReceipt(res.data.receipt);
                     this._after(() => this.scrollToEnd());
                 } catch (e) {
                     this.error = 'Couldn\'t open this conversation. Check your connection.';
@@ -313,7 +328,7 @@
                     const res = await FF_Api.get(this.threadUrl('after=' + last));
                     if (!res || !res.success || convAtStart !== this.activeId) return;
                     // The receipt can flip to "Seen" with no new message — always take it.
-                    this.receipt = res.data.receipt || null;
+                    this.setReceipt(res.data.receipt);
                     this.merge(res.data.messages || []);
                 } catch (e) { /* next tick retries */ }
             },
@@ -380,6 +395,17 @@
                 if (box) box.scrollTop = box.scrollHeight;
             },
 
+            // Receipt + its display: "Seen · 3:42 PM" (browser-local time) and,
+            // for named lists, a hover with each reader's time (S-CHAT-SEEN-TIME).
+            setReceipt(r) {
+                if (!r) { this.receipt = null; return; }
+                const when = r.at ? seenStamp(r.at) : '';
+                this.receipt = Object.assign({}, r, {
+                    _label: r.text + (when ? ' · ' + when : ''),
+                    _title: (r.readers || []).map(x => x.name + (x.at ? ' — ' + seenStamp(x.at) : '')).join('\n'),
+                });
+            },
+
             // ── composer ─────────────────────────────────────────────
             onKey(e) {
                 if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -417,7 +443,7 @@
                     this.picker.open = false;
                     if (this._ref('input')) { this._ref('input').style.height = 'auto'; this._ref('input').focus(); }
                     if (res.data.message) this.merge([res.data.message]);
-                    this.receipt = res.data.receipt || null;
+                    this.setReceipt(res.data.receipt);
                 } catch (e) {
                     this.error = 'Message not sent — check your connection and try again.';
                 } finally {

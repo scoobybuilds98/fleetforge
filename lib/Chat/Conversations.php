@@ -383,7 +383,9 @@ final class Conversations
     /**
      * "Seen" receipt for the newest message, when it's on the viewer's side —
      * like a phone, it sits under the last message only and disappears once
-     * the other side replies. Built from conversation_reads (no extra state):
+     * the other side replies. Built from conversation_reads (read mark + last_read_at):
+     *   (every "Seen" also carries `at` — UTC, formatted in the browser — and,
+     *   for named lists, `readers` [{name, at}] for the hover; S-CHAT-SEEN-TIME)
      *   direct            "Seen" / "Sent"
      *   group             "Seen by Mike, Sara" / "Seen by everyone" / "Sent"
      *   customer (staff)  "Seen by Dana" (the customer's portal users) / "Sent"
@@ -391,7 +393,7 @@ final class Conversations
      *   customer (portal) "Seen" (any staff read it) / "Sent" — staff unnamed
      * Unsent (deleted) last message → no receipt.
      *
-     * @return array{message_id:int, text:string, seen:bool}|null
+     * @return array{message_id:int, text:string, seen:bool, at:?string, readers:list<array{name:string,at:?string}>}|null
      */
     public static function receipt(array $cv, array $viewer): ?array
     {
@@ -406,42 +408,69 @@ final class Conversations
 
         if ($viewer['side'] === 'portal') {
             if ($last['sender_type'] !== 'customer') return null;
-            $seen = \db_count(
-                'SELECT COUNT(*) FROM conversation_reads WHERE conversation_id = ? AND user_id IS NOT NULL AND last_read_message_id >= ?',
+            // Staff stay unnamed to customers; the time is when the team FIRST saw it.
+            $r = \db_row(
+                'SELECT COUNT(*) AS n, MIN(last_read_at) AS at FROM conversation_reads
+                  WHERE conversation_id = ? AND user_id IS NOT NULL AND last_read_message_id >= ?',
                 [$convId, $msgId]
-            ) > 0;
-            return ['message_id' => $msgId, 'text' => $seen ? 'Seen' : 'Sent', 'seen' => $seen];
+            );
+            $seen = (int) ($r['n'] ?? 0) > 0;
+            return ['message_id' => $msgId, 'text' => $seen ? 'Seen' : 'Sent', 'seen' => $seen, 'at' => $seen ? $r['at'] : null, 'readers' => []];
         }
 
         if ($cv['kind'] === 'customer') {
             if ($last['sender_type'] !== 'staff') return null;
             $readers = \db_select(
-                "SELECT pu.name FROM conversation_reads r
+                "SELECT pu.name, r.last_read_at AS at FROM conversation_reads r
                    JOIN portal_users pu ON pu.id = r.portal_user_id AND pu.customer_id = ?
                   WHERE r.conversation_id = ? AND r.last_read_message_id >= ?
-                  ORDER BY pu.name",
+                  ORDER BY r.last_read_at, pu.name",
                 [(int) $cv['customer_id'], $convId, $msgId]
             );
             $names = array_column($readers, 'name');
-            return ['message_id' => $msgId, 'text' => $names ? 'Seen by ' . self::nameList($names) : 'Sent', 'seen' => (bool) $names];
+            return [
+                'message_id' => $msgId, 'text' => $names ? 'Seen by ' . self::nameList($names) : 'Sent', 'seen' => (bool) $names,
+                'at' => self::latest($readers), 'readers' => self::readerList($readers),
+            ];
         }
 
         // Team: only my own newest message gets a receipt.
         if ($last['sender_type'] !== 'staff' || (int) $last['user_id'] !== $viewer['user_id']) return null;
         $others = \db_select(
-            "SELECT u.name, (COALESCE(r.last_read_message_id, 0) >= ?) AS seen
+            "SELECT u.name, (COALESCE(r.last_read_message_id, 0) >= ?) AS seen, r.last_read_at AS at
                FROM conversation_members cm
                JOIN users u ON u.id = cm.user_id
                LEFT JOIN conversation_reads r ON r.conversation_id = cm.conversation_id AND r.user_id = cm.user_id
               WHERE cm.conversation_id = ? AND cm.user_id <> ?
-              ORDER BY u.name",
+              ORDER BY r.last_read_at, u.name",
             [$msgId, $convId, $viewer['user_id']]
         );
-        $seenBy = array_column(array_filter($others, fn($o) => (int) $o['seen'] === 1), 'name');
-        if (!$seenBy) return ['message_id' => $msgId, 'text' => 'Sent', 'seen' => false];
-        if ($cv['kind'] === 'direct') return ['message_id' => $msgId, 'text' => 'Seen', 'seen' => true];
+        $seenRows = array_values(array_filter($others, fn($o) => (int) $o['seen'] === 1));
+        $seenBy   = array_column($seenRows, 'name');
+        if (!$seenBy) return ['message_id' => $msgId, 'text' => 'Sent', 'seen' => false, 'at' => null, 'readers' => []];
+        $at = self::latest($seenRows);
+        if ($cv['kind'] === 'direct') return ['message_id' => $msgId, 'text' => 'Seen', 'seen' => true, 'at' => $at, 'readers' => []];
         $text = count($seenBy) === count($others) ? 'Seen by everyone' : 'Seen by ' . self::nameList($seenBy);
-        return ['message_id' => $msgId, 'text' => $text, 'seen' => true];
+        return ['message_id' => $msgId, 'text' => $text, 'seen' => true, 'at' => $at, 'readers' => self::readerList($seenRows)];
+    }
+
+    /**
+     * When the receipt's statement became true = the LATEST read among the
+     * listed readers ("Seen by everyone · 3:42 PM" = the last one read it then).
+     * Null if any listed reader's time was never recorded (reads before
+     * S-CHAT-SEEN-TIME) — plain "Seen" beats a wrong time.
+     */
+    private static function latest(array $rows): ?string
+    {
+        $times = array_column($rows, 'at');
+        if (!$times || in_array(null, $times, true)) return null;
+        return max($times);
+    }
+
+    /** [{name, at}] for the hover list ("Mike — 3:40 PM"). */
+    private static function readerList(array $rows): array
+    {
+        return array_map(fn($r) => ['name' => (string) $r['name'], 'at' => $r['at']], $rows);
     }
 
     /** "Mike", "Mike and Sara", "Mike, Sara and 2 others" — first names keep it short. */
@@ -471,9 +500,15 @@ final class Conversations
         if ($messageId <= 0) return;
         $col = $viewer['side'] === 'staff' ? 'user_id' : 'portal_user_id';
         $who = $viewer['side'] === 'staff' ? $viewer['user_id'] : $viewer['portal_user_id'];
+        // last_read_at moves ONLY when the mark advances (a 4s poll re-reading
+        // the same message must not push "Seen 3:42 PM" forward). MySQL applies
+        // ON DUPLICATE assignments left to right, so last_read_at is compared
+        // against the OLD mark before last_read_message_id is raised.
         \db_execute(
-            "INSERT INTO conversation_reads (conversation_id, {$col}, last_read_message_id) VALUES (?, ?, ?)
-             ON DUPLICATE KEY UPDATE last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id))",
+            "INSERT INTO conversation_reads (conversation_id, {$col}, last_read_message_id, last_read_at) VALUES (?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+                last_read_at         = IF(VALUES(last_read_message_id) > last_read_message_id, NOW(), last_read_at),
+                last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id))",
             [(int) $cv['id'], $who, $messageId]
         );
         // Reading the thread clears its bell item too.

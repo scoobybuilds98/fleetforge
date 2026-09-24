@@ -17,6 +17,7 @@
  *   F. unread totals — staff badge (team / customers) and portal badge
  *   G. search — all 8 types execute against the real schema
  *   J. seen receipts — Sent → Seen (DM), Seen by … / everyone (group), portal users by name, customer side unnamed (S-CHAT-SEEN)
+ *   K. seen time — set only when the read mark advances (not on re-read or delete), latest for named lists, earliest for the customer, NULL → plain "Seen" (S-CHAT-SEEN-TIME)
  *   I. delete chat / leave group — mine only, others keep theirs, comes back on a new message (S-CHAT-DELETE)
  *   H. static — no code references the retired tables/endpoints
  *
@@ -353,6 +354,54 @@ try {
     Conversations::markRead($ctRow2, $disp, $pm2);
     check('seen: "Seen" in the portal once any staff member reads it (no staff name)', ($rt($ct, $portal)['text'] ?? '') === 'Seen');
     check('seen: the customer\'s message gives staff no receipt', $rt($ct, $admin) === null);
+
+    // ── K. Seen time (S-CHAT-SEEN-TIME) — SQL clock pinned, so exact ──
+    echo "K. Seen time\n";
+    $pin = fn(string $ts) => db_execute('SET TIMESTAMP = UNIX_TIMESTAMP(?)', [$ts]);
+    $kd = Conversations::openDirect($mgr['user_id'], $disp['user_id']);
+    $pin('2026-09-25 09:00:00');
+    $km = Conversations::send(Conversations::find($kd, $mgr), $mgr, 'time test', []);
+    check('time: "Sent" carries no time', ($r = $rt($kd, $mgr)) && $r['text'] === 'Sent' && $r['at'] === null);
+    $pin('2026-09-25 10:15:00');
+    Conversations::markRead(Conversations::find($kd, $disp), $disp, $km);
+    check('time: "Seen" carries the moment they read it', ($rt($kd, $mgr)['at'] ?? '') === '2026-09-25 10:15:00', json_encode($rt($kd, $mgr)));
+    $pin('2026-09-25 11:30:00');
+    Conversations::markRead(Conversations::find($kd, $disp), $disp, $km);   // the 4s poll re-reading the same message
+    check('time: re-reading the same message does NOT move the time', ($rt($kd, $mgr)['at'] ?? '') === '2026-09-25 10:15:00');
+    Conversations::deleteForViewer(Conversations::find($kd, $disp), $disp);
+    check('time: deleting the chat does NOT move the time', ($rt($kd, $mgr)['at'] ?? '') === '2026-09-25 10:15:00');
+    db_execute('UPDATE conversation_reads SET last_read_at = NULL WHERE conversation_id = ? AND user_id = ?', [$kd, $disp['user_id']]);
+    check('time: a read from before times were recorded shows plain "Seen" (no made-up time)', ($r = $rt($kd, $mgr)) && $r['text'] === 'Seen' && $r['at'] === null);
+
+    $kg = Conversations::createGroup($acct['user_id'], 'Time smoke', [$mgr['user_id'], $disp['user_id']]);
+    $pin('2026-09-25 12:00:00');
+    as_role('accountant');
+    $kgm = Conversations::send(Conversations::find($kg, $acct), $acct, 'group time', []);
+    $pin('2026-09-25 12:05:00');
+    Conversations::markRead(Conversations::find($kg, $mgr), $mgr, $kgm);
+    $pin('2026-09-25 12:09:00');
+    Conversations::markRead(Conversations::find($kg, $disp), $disp, $kgm);
+    $r = $rt($kg, $acct);
+    check('time: "Seen by everyone" is timed when the LAST member read it', $r && $r['text'] === 'Seen by everyone' && $r['at'] === '2026-09-25 12:09:00', json_encode($r));
+    check('time: hover list has each reader with their own time, earliest first',
+        $r && array_column($r['readers'], 'at') === ['2026-09-25 12:05:00', '2026-09-25 12:09:00']);
+
+    $pin('2026-09-25 13:00:00');
+    as_role('super_admin');
+    $kpm = Conversations::send(Conversations::find($ct, $portal), $portal, 'portal time', []);
+    $pin('2026-09-25 13:02:00');
+    Conversations::markRead(Conversations::find($ct, $disp), $disp, $kpm);
+    $pin('2026-09-25 13:07:00');
+    Conversations::markRead(Conversations::find($ct, $admin), $admin, $kpm);
+    $r = $rt($ct, $portal);
+    check('time: the customer sees when the team FIRST saw it, no names', $r && $r['text'] === 'Seen' && $r['at'] === '2026-09-25 13:02:00' && $r['readers'] === []);
+    $pin('2026-09-25 13:10:00');
+    $ksm = Conversations::send(Conversations::find($ct, $admin), $admin, 'staff time', []);
+    $pin('2026-09-25 13:12:00');
+    Conversations::markRead(Conversations::find($ct, $portal), $portal, $ksm);
+    $r = $rt($ct, $disp);
+    check('time: staff see "Seen by <portal user>" with the time and a hover entry', $r && $r['at'] === '2026-09-25 13:12:00' && count($r['readers']) === 1);
+    db_execute('SET TIMESTAMP = DEFAULT');
 
     // ── G. Search ──────────────────────────────────────────────────────
     echo "G. Search (every type, real schema)\n";

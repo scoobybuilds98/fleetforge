@@ -232,6 +232,7 @@ body:has(.cx--staff) .ff-chat-fab { display: none; }
 
 .cx-receipt { margin: 3px 10px 0; font-size: 0.7rem; font-weight: 550; color: var(--text-muted); }
 .cx-receipt.is-seen { color: var(--cx-brand-ink); }
+.cx-receipt[title] { cursor: help; }   /* hover lists who read it when (groups / customer threads) */
 .cx-time { font-size: 0.68rem; color: var(--text-muted); white-space: nowrap; opacity: 0; transition: opacity var(--transition-fast, 120ms); }
 .cx-msg:hover .cx-time, .cx-msg:focus-within .cx-time { opacity: 1; }
 .cx-unsend {

@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-CHAT-SEEN-TIME** — SHIPPED 2026-09-25 (see PROGRESS.md SESSION LOG row). **"Seen" now says when — "Seen · 3:42 PM", "Seen · Yesterday 5:10 PM" — in each person's own time zone; in groups, hovering shows each reader's time. One small migration.** Deploy with F100 step 1b.
+
 **S-CHAT-SEEN** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Messages shows "Sent" / "Seen" under your newest message — "Seen by Mike and Sara" or "Seen by everyone" in groups, "Seen by Dana" when a customer's portal user reads it, and "Seen" for customers once your team has read theirs. It updates live. No migration.** Deploy with F100.
 
 **S-CHAT-DELETE** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-CHAT-DELETE-1). **Messages gets a trash button: "Delete chat" removes a conversation from your own Messages (the teammate or customer keeps theirs; it comes back if anyone writes again), and "Leave group" takes you out of a group (the last one out deletes it). One small migration.** Deploy with F100.
