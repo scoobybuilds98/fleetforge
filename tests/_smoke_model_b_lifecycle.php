@@ -125,6 +125,15 @@ function s5_scenario(array &$results, string $label, callable $fn, int $customer
  * This is the D-SMOKE-HERMETIC-MODELB fix: the fixture controls counter
  * state locally. (S-SMOKE-MODELB-HERMETIC)
  */
+/**
+ * S-BILLING-MODULE-2: the monthly job now follows billing_cycle.mode (arrears
+ * bills only months that have ended). The C-scenarios were written for
+ * ADVANCE billing, so they pin it — inside the scenario's rolled-back txn.
+ */
+function mbcron_pin_advance(): void {
+    db_execute("UPDATE settings SET `value` = 'advance' WHERE `key` = 'billing_cycle.mode'");
+}
+
 function s5_invoice_scenario(array &$results, string $label, callable $fn, int $customerId, int $unitId, int $userId): void {
     s5_scenario($results, $label, function ($customerId, $unitId, $userId) use ($fn) {
         mbcron_bump_counter(); // drift-proof: sets counter = MAX(committed)+50 before any generateInvoiceNumber() call
@@ -1388,6 +1397,7 @@ function mbcron_bump_counter(): void {
 s5_scenario($results, 'C1 cron bills when next_billing_date == today',
     function ($customerId, $unitId, $userId) {
         mbcron_bump_counter();
+        mbcron_pin_advance(); // S-BILLING-MODULE-2: these scenarios test ADVANCE billing (current month on the 1st)
         $unit    = s5_make_unit(null, $userId); // non-Samsara → clean full_month
         $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-03-15'], $customerId, $unitId, $userId);
 
@@ -1407,6 +1417,7 @@ s5_scenario($results, 'C1 cron bills when next_billing_date == today',
 s5_scenario($results, 'C2 cron catch-up bills a past-due period (<= match)',
     function ($customerId, $unitId, $userId) {
         mbcron_bump_counter();
+        mbcron_pin_advance(); // S-BILLING-MODULE-2: these scenarios test ADVANCE billing (current month on the 1st)
         $unit    = s5_make_unit(null, $userId);
         $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-03-01'], $customerId, $unitId, $userId);
 
@@ -1436,6 +1447,7 @@ s5_scenario($results, 'C3 cron does NOT bill a future-dated lease',
 s5_scenario($results, 'C4 cron does NOT double-bill an already-billed period',
     function ($customerId, $unitId, $userId) {
         mbcron_bump_counter();
+        mbcron_pin_advance(); // S-BILLING-MODULE-2: these scenarios test ADVANCE billing (current month on the 1st)
         $unit    = s5_make_unit(null, $userId);
         $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-03-01'], $customerId, $unitId, $userId);
 
@@ -1460,6 +1472,7 @@ s5_scenario($results, 'C4 cron does NOT double-bill an already-billed period',
 s5_scenario($results, 'C5 cron multi-period catch-up bills every missed month',
     function ($customerId, $unitId, $userId) {
         mbcron_bump_counter();
+        mbcron_pin_advance(); // S-BILLING-MODULE-2: these scenarios test ADVANCE billing (current month on the 1st)
         $unit    = s5_make_unit(null, $userId);
         $leaseId = s5_make_lease(['equipment_unit_id' => $unit, 'next_billing_date' => '2026-02-01'], $customerId, $unitId, $userId);
 

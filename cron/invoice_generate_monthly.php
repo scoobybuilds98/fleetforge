@@ -65,6 +65,12 @@ declare(strict_types=1);
  *   so tests/_smoke_model_b_lifecycle.php can require this file and drive the
  *   runner with deterministic dates inside BEGIN/ROLLBACK.
  *
+ * S-BILLING-MODULE-2 (KNOWN ISSUE #112): a month counts as billed when any
+ * live RENTAL invoice overlaps it (not just a full_month on the 1st); in
+ * arrears mode only ended months are billed; closed billing cycles are left
+ * alone; the cycle's readings feed manual leases; failures land in Billing →
+ * Exceptions (source 'cron') and successes clear them.
+ *
  * S-BILLING-MODULE: leases on a billing hold (Billing → Holds) are skipped
  * without advancing next_billing_date, so releasing the hold lets the
  * catch-up loop bill the held months in order.
@@ -134,7 +140,7 @@ function ff_run_monthly_billing(string $today): array
     // The per-unit Samsara odometer snapshot ("now") is read once here and
     // applied only to the most-recent catch-up period below.
     $leases = db_select(
-        "SELECT l.id, l.contract_number, l.odometer_start_km,
+        "SELECT l.id, l.contract_number, l.customer_id, l.odometer_start_km,
                 l.mileage_tracking_mode,
                 u.samsara_odometer_km    AS unit_samsara_odometer_km,
                 u.samsara_last_synced_at AS unit_samsara_last_synced_at
@@ -198,18 +204,55 @@ function ff_run_monthly_billing(string $today): array
                 break;
             }
 
+            // ── S-BILLING-MODULE-2: follow the billing cycle ─────────────────
+            // (a) Arrears (Billing → Settings "Which month a cycle bills" =
+            //     last month): a month is billed only once it has ENDED, so on
+            //     the 1st the job bills the month just finished — the same month
+            //     the cycle opens for. Advance keeps the old behaviour (bill the
+            //     current month on the 1st). The pointer is NOT advanced: the
+            //     next run picks the month up once it qualifies.
+            if ((string) settings_get('billing_cycle.mode', 'arrears') === 'arrears' && $periodEnd >= $today) {
+                break;
+            }
+            // (b) A CLOSED billing cycle is signed off — the job adds nothing to
+            //     it (same lock as the workbench). Not advanced either: reopening
+            //     the cycle lets the next run bill the month.
+            if ($closedCycle = \FleetForge\Billing\Cycle\CycleClose::closedCycleFor($periodStart, $periodEnd)) {
+                $skipped++;
+                db_insert('audit_log', [
+                    'user_id'      => null,
+                    'user_name'    => 'system',
+                    'action'       => 'cron',
+                    'module'       => 'invoices',
+                    'entity_type'  => 'lease',
+                    'entity_id'    => $leaseId,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'        => "invoice_generate_monthly: skipped {$periodStart}..{$periodEnd} for lease #{$leaseId} — billing cycle {$closedCycle['reference']} is closed.",
+                    'ip_address'   => '127.0.0.1',
+                ]);
+                break;
+            }
+
             try {
-                // ── Idempotency guard (D-BILLING-MATCH-LTE) ──────────────────
-                // Never emit a second full_month invoice for a (lease, period)
-                // that already has one — advance billing may have pre-generated
-                // it, or a prior partial run did. Heal the pointer and move on.
+                // ── Idempotency guard (D-BILLING-MATCH-LTE, widened KNOWN ISSUE #112)
+                // The month is already billed when ANY live RENTAL invoice
+                // overlaps it — a full_month from advance billing or an earlier
+                // run, but also the workbench, a lease's Generate Invoice
+                // (partial_end / single_period / custom ranges) — none of which
+                // move next_billing_date. The old guard matched only a
+                // full_month starting on the 1st, so those months were billed a
+                // second time (flat add-ons + estimates in full). A partly
+                // covered month is skipped too: the holistic engine re-prices the
+                // lease cumulatively, so its rental lands on the next invoice.
+                // mileage_only / adjustment invoices never count as billing days.
+                // Heal the pointer and move on.
                 $already = db_row(
                     "SELECT id FROM invoices
-                      WHERE lease_id = ? AND billing_period_start = ?
-                        AND billing_type = 'full_month'
-                        AND status <> 'void' AND deleted_at IS NULL
+                      WHERE lease_id = ? AND status <> 'void' AND deleted_at IS NULL
+                        AND billing_type IN ('" . implode("','", \FleetForge\Billing\Cycle\BillingCycles::RENTAL_BILLING_TYPES) . "')
+                        AND billing_period_start <= ? AND billing_period_end >= ?
                       LIMIT 1",
-                    [$leaseId, $periodStart]
+                    [$leaseId, $periodEnd, $periodStart]
                 );
 
                 if ($already) {
@@ -285,7 +328,12 @@ function ff_run_monthly_billing(string $today): array
                     $generator, $leaseId, $periodStart, $periodEnd,
                     $odoPeriodStart, $odoPeriodEnd, $odoSource, $odoFetchedAt
                 ) {
-                    $inv = $generator->createFromLease([
+                    // S-BILLING-MODULE-2: the cycle's period-end readings (manual
+                    // mileage / hours) win over the null odometer params below;
+                    // Samsara leases get no reading keys, so the GPS snapshot
+                    // above still applies. Queued charges are added by the
+                    // generator itself.
+                    $inv = $generator->createFromLease(\FleetForge\Billing\Cycle\CycleReadings::generatorParams($leaseId, $periodStart, $periodEnd) + [
                         'lease_id'          => $leaseId,
                         'period_start'      => $periodStart,
                         'period_end'        => $periodEnd,
@@ -330,6 +378,8 @@ function ff_run_monthly_billing(string $today): array
                     'notes'        => "Cron generated monthly invoice {$result['invoice_number']} for lease #{$leaseId} ({$periodStart} to {$periodEnd})",
                     'ip_address'   => '127.0.0.1',
                 ]);
+                // S-BILLING-MODULE-2: a lease that bills clears its open exception.
+                \FleetForge\Billing\BillingExceptions::clear($leaseId, $periodStart, $periodEnd, null);
 
             } catch (\Throwable $e) {
                 // S-AUDIT-BILLING-ENGINE-1 #23: per-lease failures now reach
@@ -350,6 +400,13 @@ function ff_run_monthly_billing(string $today): array
                     'notes'        => "invoice_generate_monthly failed for lease #{$leaseId} period {$periodStart}: " . $e->getMessage(),
                     'ip_address'   => '127.0.0.1',
                 ]);
+                // S-BILLING-MODULE-2: the failure lands in Billing → Exceptions
+                // (same queue as the workbench), not only in the audit log.
+                \FleetForge\Billing\BillingExceptions::flag(
+                    $leaseId, isset($lease['customer_id']) ? (int) $lease['customer_id'] : null,
+                    $periodStart, $periodEnd,
+                    'Monthly invoice job: ' . $e->getMessage(), 'cron', null, null
+                );
                 // Stop catch-up for THIS lease — the pointer still points at the
                 // failed period, so the next run retries it. Move to next lease.
                 break;

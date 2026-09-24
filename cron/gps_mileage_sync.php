@@ -4,7 +4,12 @@ declare(strict_types=1);
 // ============================================================
 // cron/gps_mileage_sync.php — Daily GPS Mileage Sync
 //
-// Schedule: 0 7 * * * (daily at 7AM)
+// Schedule: see cron/README.md (daily).
+//
+// S-BILLING-MODULE-2: these gps_sync rows (and manual Mileage Logs entries)
+// are offered on the billing cycle's Readings sheet as the suggested
+// month-end odometer; the cycle's saved readings are written back here as
+// log_type 'manual' rows, so a unit's mileage history shows what was billed.
 // Advisory lock: ff_cron_gps_mileage_sync
 //
 // For each active lease where the unit has a gps_device_id:
@@ -38,7 +43,9 @@ if (!$lock || (int) $lock['ok'] !== 1) {
 $processed = 0;
 $skipped   = 0;
 $failed    = 0;
-$today     = date('Y-m-d');
+// Company-local business day (S-BILLING-MODULE-2, KNOWN ISSUE #115): the
+// server clock's date() rolled to tomorrow in the evening (UTC host).
+$today     = ff_today();
 
 try {
     // ── Instantiate GPS client (returns null if API keys blank — dev safe)
@@ -60,6 +67,7 @@ try {
             l.customer_id,
             l.equipment_unit_id,
             l.mileage_unit,
+            l.km_to_miles_conversion,
             eu.unit_number,
             eu.samsara_vehicle_id,
             eu.samsara_entity_type,
@@ -112,8 +120,14 @@ try {
         $odometer    = $odometerKm; // getOdometerReading() returns km
 
         if ($mileageUnit === 'miles') {
-            // Convert km → miles for storage consistency with lease preference
-            $odometer = (int) round($odometerKm * 0.621371);
+            // Convert km → miles for storage consistency with lease preference —
+            // with the LEASE's own factor in bcmath (was a float × fixed
+            // 0.621371, S-BILLING-MODULE-2 / KNOWN ISSUE #115).
+            $factor = (string) ($lease['km_to_miles_conversion'] ?? '0.621371');
+            if (bccomp($factor, '0', 6) <= 0) $factor = '0.621371';
+            $odometer = (int) bcround(bcmul((string) $odometerKm, $factor, 6), 0);
+        } else {
+            $odometer = (int) bcround((string) $odometerKm, 0);
         }
 
         // ── Insert mileage_logs row + update equipment_units.mileage

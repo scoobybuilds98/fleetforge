@@ -88,6 +88,7 @@ final class BillingReadiness
             'credit_hold'              => [self::class, 'checkCreditHold'],
             'rate_amendments'          => [self::class, 'checkAmendments'],
             'approval_pending'         => [self::class, 'checkPendingRuns'],
+            'charges_due'              => [self::class, 'checkChargesDue'],
         ];
 
         $acks = is_array($cycle['readiness_ack'] ?? null) ? $cycle['readiness_ack'] : [];
@@ -608,6 +609,12 @@ final class BillingReadiness
 
     private static function checkDueOnSend(array $ctx): array
     {
+        // S-BILLING-MODULE-2 (KNOWN ISSUE #113): with terms running from the
+        // send date, sending sets a fresh due date — nothing is past due on send.
+        if ((string) \settings_get('billing_cycle.due_date_basis', 'send_date') === 'send_date') {
+            return self::make('info', 'Invoices that will be past due when sent',
+                'Payment terms run from the day an invoice is sent (Billing → Settings), so none is past due when it goes out.', '', []);
+        }
         $items = [];
         foreach (self::customers($ctx) as $c) {
             $due = PaymentTerms::dueDate($ctx['start'], $c['payment_terms'] !== null ? (string) $c['payment_terms'] : null);
@@ -688,6 +695,19 @@ final class BillingReadiness
             'A rate amendment re-prices the whole lease, so this month\'s invoice includes a catch-up for earlier months at the new rate.',
             'Expect a larger (or credit) rental line on these leases.',
             array_map(static fn($r) => self::leaseItem($r, 'Rate amended ' . substr((string) $r['created_at'], 0, 10)), $rows));
+    }
+
+    private static function checkChargesDue(array $ctx): array
+    {
+        $rows = BillingCharges::list(['state' => 'pending', 'month' => substr($ctx['start'], 0, 7)]);
+        return self::make('info', 'Charges waiting to be billed this month',
+            'Queued charges ride on each lease\'s next invoice automatically (one-off charges once, monthly charges every month).',
+            'Nothing to do — check the amounts on the Charges tab before generating.',
+            array_map(static fn($c) => [
+                'label'  => $c['contract_number'] . ' · ' . $c['company_name'],
+                'detail' => $c['description'] . ' — ' . ($c['recurrence'] === 'monthly' ? 'monthly' : 'once'),
+                'url'    => '#charges',
+            ], $rows));
     }
 
     private static function checkPendingRuns(array $ctx): array

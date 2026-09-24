@@ -58,7 +58,7 @@ final class BillingReview
         $invoices = \db_select(
             "SELECT i.id, i.invoice_number, i.lease_id, i.customer_id, i.status, i.invoice_type, i.billing_type,
                     i.billing_period_start, i.billing_period_end, i.currency, i.exchange_rate_to_cad,
-                    i.subtotal, i.tax_total, i.total_amount, i.balance_due, i.created_at, i.sent_at,
+                    i.subtotal, i.tax_total, i.total_amount, i.balance_due, i.created_at, i.sent_at, i.updated_at,
                     i.generation_source, i.tax_exempt_snapshot, i.gst_exempt_snapshot, i.pst_exempt_snapshot,
                     COALESCE(i.contract_number_snapshot, l.contract_number) AS contract_number,
                     COALESCE(c.company_name, i.company_name_snapshot) AS company_name,
@@ -77,6 +77,19 @@ final class BillingReview
 
         $invIds   = array_map(static fn($r) => (int) $r['id'], $invoices);
         $leaseIds = array_values(array_unique(array_map(static fn($r) => (int) $r['lease_id'], $invoices)));
+
+        // Queued billing charges carried per invoice (S-BILLING-MODULE-2).
+        $chargeCount = [];
+        if ($invIds) {
+            $cph = implode(',', array_fill(0, count($invIds), '?'));
+            foreach (\db_select(
+                "SELECT invoice_id, COUNT(*) AS n FROM invoice_line_items
+                  WHERE reference_type = 'billing_charge' AND invoice_id IN ({$cph}) GROUP BY invoice_id",
+                $invIds
+            ) as $r) {
+                $chargeCount[(int) $r['invoice_id']] = (int) $r['n'];
+            }
+        }
 
         // Line-type sums per invoice (signed: credit lines negative).
         $lines = [];
@@ -218,6 +231,10 @@ final class BillingReview
                     break;
                 }
             }
+            if (($chargeCount[$id] ?? 0) > 0) {
+                $flags[] = ['key' => 'charges', 'severity' => 'info',
+                    'text' => 'Carries ' . $chargeCount[$id] . ' queued charge(s) from Billing → Charges'];
+            }
             if (($first[$lid] ?? null) === $inv['billing_period_start']) {
                 $flags[] = ['key' => 'first_invoice', 'severity' => 'info', 'text' => 'First invoice for this lease'];
             }
@@ -254,6 +271,8 @@ final class BillingReview
                 'change'          => ($withMoney && isset($prev[$lid])) ? bcsub($total, $prev[$lid], 2) : null,
                 'generation_source' => $inv['generation_source'],
                 'created_at'      => $inv['created_at'],
+                'updated_at'      => $inv['updated_at'],
+                'charges'         => (int) ($chargeCount[$id] ?? 0),
                 'flags'           => $flags,
                 'worst'           => $worst,
                 'review'          => $inv['review_status'] ? [
@@ -337,5 +356,53 @@ final class BillingReview
             ($status === 'clear' ? 'Cleared review marks on ' : 'Marked ' . $status . ': ') . count($valid) . ' invoice(s)'
             . ($note ? " — {$note}" : '') . '.');
         return $changed;
+    }
+
+    /**
+     * One-click repair of the F71 double-mileage shape on a DRAFT: a
+     * "Mileage usage" line (odometer-exact) AND a "Mileage overage" line
+     * (item_type 'mileage') billing the same distance. Removes the overage
+     * line(s) — keeping usage, exactly what F71 tells the operator to do by
+     * hand — recomputes totals with InvoiceRecalc (the invoice's frozen tax
+     * snapshot), moves leases.total_invoiced by the change (drafts count
+     * there, same rule as update_lines) and audits. Draft only: a sent
+     * invoice is corrected with a credit note (D12). (S-BILLING-MODULE-2)
+     *
+     * @return array{removed:int, old_total:string, new_total:string}
+     * @throws \DomainException "CODE|message" — NOT_FOUND, NOT_DRAFT, NOTHING_TO_FIX
+     */
+    public static function removeDoubleMileage(int $invoiceId): array
+    {
+        return \db_transaction(static function () use ($invoiceId): array {
+            $inv = \db_row("SELECT id, invoice_number, status, lease_id, total_amount FROM invoices WHERE id = ? AND deleted_at IS NULL FOR UPDATE", [$invoiceId]);
+            if (!$inv) throw new \DomainException('NOT_FOUND|Invoice not found.');
+            if ($inv['status'] !== 'draft') throw new \DomainException('NOT_DRAFT|Only a draft can be fixed here — correct a sent invoice with a credit note.');
+            $types = array_column(\db_select("SELECT item_type FROM invoice_line_items WHERE invoice_id = ?", [$invoiceId]), 'item_type');
+            if (!in_array('mileage_usage', $types, true) || !in_array('mileage', $types, true)) {
+                throw new \DomainException('NOTHING_TO_FIX|This draft does not carry both a Mileage usage and a Mileage overage line.');
+            }
+            $actor   = BillingCycles::actor();
+            $removed = \db_execute("DELETE FROM invoice_line_items WHERE invoice_id = ? AND item_type = 'mileage'", [$invoiceId]);
+            \db_update('invoices', ['updated_by' => $actor['id']], 'id = ?', [$invoiceId]);
+            $totals = \FleetForge\Billing\InvoiceRecalc::recalc($invoiceId);
+            if (!empty($inv['lease_id'])) {
+                $delta = bcsub((string) $totals['total_amount'], (string) $inv['total_amount'], 2);
+                \db_execute("UPDATE leases SET total_invoiced = total_invoiced + ?, updated_at = ? WHERE id = ?", [$delta, \ff_now_utc(), $inv['lease_id']]);
+            }
+            \db_insert('audit_log', [
+                'user_id'      => $actor['id'],
+                'user_name'    => $actor['name'],
+                'action'       => 'update',
+                'module'       => 'billing',
+                'entity_type'  => 'invoice',
+                'entity_id'    => $invoiceId,
+                'entity_label' => $inv['invoice_number'],
+                'old_values'   => json_encode(['total_amount' => $inv['total_amount']]),
+                'new_values'   => json_encode(['total_amount' => $totals['total_amount'], 'removed_lines' => $removed]),
+                'notes'        => "Removed the duplicate Mileage overage line from {$inv['invoice_number']} (Mileage usage kept) — Billing review fix.",
+                'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
+            ]);
+            return ['removed' => $removed, 'old_total' => (string) $inv['total_amount'], 'new_total' => (string) $totals['total_amount']];
+        });
     }
 }

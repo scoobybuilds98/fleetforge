@@ -92,6 +92,39 @@ A hold stops a lease — or every lease of a customer — being billed by the wo
 2. Pick **One lease** or **Every lease of a customer**, give the reason and the dates (leave **Until** blank to hold until released).
 3. **Release** the hold when billing should resume.
 
+## Every tab explains itself
+
+Each tab of a cycle opens with a short guide — **what it is**, **what you do**, **what the buttons do**. Hide it with **Hide help** once you know it. The step tabs end with **Sign off this step**: it records who finished the step, when, and an optional note, and shows it on the stepper. A sign-off is a record, not a lock — the stepper still works out from the invoices whether each step is really done. The Billing page's **How monthly billing works** card sums up the whole month on one screen.
+
+## Charges — extra lines for the next invoice
+
+The **Charges** tab queues anything to bill besides the rent: a one-off (damage, an extra wash, an admin fee) or a monthly fee (yard parking, a second tracker).
+
+1. **+ Add charge** → pick the lease, describe it (the description prints on the invoice), price it, choose **Once** or **Every month** (with an optional last month).
+2. Bill the month as usual — the charge is added to the lease's next invoice, however it is created (workbench, the lease's Generate Invoice, or its close).
+3. Voiding or regenerating a draft puts its charges back in the queue. **Cancel** stops a charge billing again. Credits are not charges — use a credit note.
+
+The Billing page's **Charges** tab lists every charge across months.
+
+## Customers — the month by customer
+
+The **Customers** tab shows each customer's month: leases billed and still to bill, drafts, sent and emailed invoices, the total, and where the email goes. **Send month** sends that customer's drafts and emails all their invoices for the month together in **one email** (a PDF each, with Pay now links). **Email again** resends that combined email.
+
+## Review and Send tools
+
+- **Preview** opens any invoice in a side panel without leaving the cycle.
+- On the Review tab, tick drafts to **Regenerate** them (after fixing a rate or reading) or **Void** them. An invoice flagged *double mileage* has a **Fix: remove the overage line** button (drafts only — it keeps the odometer-exact Mileage usage line).
+- On the Delivery tab, **Mark as mailed** / **Mark as on portal** records invoices that reached the customer another way, and **Download PDFs** fetches the ticked invoices (a ZIP for several).
+- On the Readings tab, **Use log** fills a reading from the unit's latest Mileage Logs entry; every saved reading is also written to Mileage Logs.
+
+## Due dates
+
+An invoice is dated the first day of the month it bills. With **Billing → Settings → Payment terms run from: the day the invoice is sent** (the default), sending moves the due date to the send date + the customer's terms whenever that is later — so a month billed in arrears is not overdue the day it goes out. The invoice date never changes.
+
+## Trends
+
+The Billing page's **Trends** tab shows the last 12 months: invoices, amount billed (CAD), drafts still unsent, how many sent invoices were emailed, days from month end to the last invoice going out, exceptions and voids.
+
 ## Working a draft backlog
 
 **Monthly Billing → Cycles** lists months that have unsent drafts but no cycle. Click **Open cycle** on the oldest, review and send (or void) its drafts from the Review and Delivery tabs, close it, then move to the next month.
@@ -108,6 +141,8 @@ A hold stops a lease — or every lease of a customer — being billed by the wo
 - **A cycle owns no invoices.** An invoice belongs to the cycle of the month its billing period starts in (lease invoices only; late fees and credit notes are not part of the month's billing). Every way of creating an invoice lands in the right cycle.
 - **Leases in the month** are active leases that started by the month end, plus closed leases whose return reaches into the month.
 - **Readings** are stored in km and passed to the invoice only when the billed period ends on the month's last day.
+- **The monthly invoice job** (off by default) follows the cycle: in arrears it bills a month only after it ends, never bills a month already covered by a live invoice, and leaves closed months alone.
+- **Charges** count as billed while a live invoice line points at them — nothing is stamped, so voids and regenerations put them back.
 - **Holds** are honoured by the workbench, the dry run, approved runs and the monthly invoice job (which does not advance past a held month). A lease's own Generate Invoice is not blocked; Review flags an invoice billed while held.
 - **Closing** locks the workbench out of the month (generating, submitting a run, generating an approved run). The close snapshot keeps the figures as they stood.
 - **Permissions:** viewing uses Invoices *view*; generating, readings and opening cycles need *create*; sending, reviewing, holds and closing need *edit*; reopening needs *approve*; the register export needs *export*. Amounts are shown only to roles that can see payments. Billing settings need the Settings (General) *edit* permission.

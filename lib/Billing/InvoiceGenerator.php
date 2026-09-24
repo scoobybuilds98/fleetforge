@@ -1750,6 +1750,25 @@ class InvoiceGenerator
                 }
             }
 
+            // --- Step 4a2: Queued billing charges (S-BILLING-MODULE-2) ---
+            // One-off and monthly charges queued in Billing → Charges ride on
+            // the next RENTAL invoice. Each line references its charge
+            // (reference_type 'billing_charge'), and "billed" is derived from
+            // live lines — so void / delete / regenerate put a charge back in
+            // the queue on their own, and a dry run never consumes one. The
+            // lease row is already locked (FOR UPDATE above), which serializes
+            // concurrent generations exactly like the cartage guard below.
+            // 'skip_billing_charges' lets a caller opt out (none do today).
+            if (in_array($billingType, \FleetForge\Billing\Cycle\BillingCharges::CHARGE_BILLING_TYPES, true)
+                && in_array($invoiceType, \FleetForge\Billing\Cycle\BillingCharges::CHARGE_INVOICE_TYPES, true)
+                && empty($params['skip_billing_charges'])
+            ) {
+                foreach (\FleetForge\Billing\Cycle\BillingCharges::dueLines($leaseId, $periodStart, $periodEnd) as $chargeLine) {
+                    $chargeLine['sort_order'] = $sortOrder++;
+                    $lineItems[] = $chargeLine;
+                }
+            }
+
             // --- Step 4b: Cartage — one-time delivery charge (S-LEASE-SERVICE-CHARGES) ---
             // Entered at lease creation; bills exactly ONCE — on the first invoice
             // that actually STICKS. Excluded from mileage_only/adjustment/credit_note.
@@ -2359,6 +2378,10 @@ class InvoiceGenerator
                     'mileage_distance' => $item['mileage_distance'] ?? null,
                     'mileage_rate'     => $item['mileage_rate'] ?? null,
                     'mileage_unit'     => $item['mileage_unit'] ?? null,
+                    // S-BILLING-MODULE-2: a queued billing charge's line points
+                    // back at its charge — that live line IS the "billed" state.
+                    'reference_type'   => $item['reference_type'] ?? null,
+                    'reference_id'     => $item['reference_id'] ?? null,
                 ]);
             }
 

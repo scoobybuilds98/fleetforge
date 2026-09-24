@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-09-24
-**Tables:** 176 total · **Columns:** 2793
+**Tables:** 177 total · **Columns:** 2814
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -2080,7 +2080,7 @@ _72 tables._
 
 # Other tables
 
-_92 tables._
+_93 tables._
 
 ## `ai_anomaly_alerts`
 
@@ -2231,6 +2231,31 @@ _92 tables._
 | `trigger_source` | enum('cron','manual') |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
 
+## `billing_charges`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `lease_id` | int unsigned | MUL | NO |
+| `customer_id` | int unsigned | MUL | NO |
+| `description` | varchar(255) |  | NO |
+| `item_type` | enum('other','damage','fuel','wash','sweep','manual_adjustment') |  | NO |
+| `quantity` | decimal(10,4) |  | NO |
+| `unit_price` | decimal(12,2) |  | NO |
+| `amount` | decimal(12,2) |  | NO |
+| `taxable` | tinyint(1) |  | NO |
+| `recurrence` | enum('once','monthly') |  | NO |
+| `bill_from` | date |  | NO |
+| `bill_until` | date |  | YES |
+| `status` | enum('active','cancelled') |  | NO |
+| `notes` | varchar(500) |  | YES |
+| `cancelled_by` | int unsigned | MUL | YES |
+| `cancelled_at` | datetime |  | YES |
+| `cancel_reason` | varchar(500) |  | YES |
+| `created_by` | int unsigned | MUL | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `billing_cycle_readings`
 
 | Column | Type | Key | Nullable |
@@ -2286,6 +2311,7 @@ _92 tables._
 | `last_nudged_at` | datetime |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `step_signoffs` | json |  | YES |
 
 ## `billing_holds`
 
@@ -3012,7 +3038,7 @@ _92 tables._
 | `period_start` | date |  | NO |
 | `period_end` | date |  | NO |
 | `reason` | text |  | NO |
-| `source` | enum('batch_generate','batch_run','manual') |  | NO |
+| `source` | enum('batch_generate','batch_run','manual','cron') |  | NO |
 | `batch_run_id` | int unsigned |  | YES |
 | `status` | enum('open','resolved','ignored') | MUL | NO |
 | `resolution_note` | text |  | YES |

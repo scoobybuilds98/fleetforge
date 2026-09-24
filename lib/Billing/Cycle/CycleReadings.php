@@ -61,7 +61,7 @@ final class CycleReadings
             "SELECT l.id AS lease_id, l.contract_number, l.customer_id, l.status AS lease_status,
                     l.mileage_tracking_mode, l.mileage_unit, l.miles_to_km_conversion, l.km_to_miles_conversion,
                     l.mileage_rate_km, l.mileage_rate, l.hourly_rate, l.precharge_enabled,
-                    l.odometer_start_km, l.engine_hours_at_start, l.start_date,
+                    l.odometer_start_km, l.engine_hours_at_start, l.start_date, l.equipment_unit_id,
                     c.company_name,
                     COALESCE(eu.unit_number, l.unit_number_snapshot) AS unit_number,
                     eu.samsara_odometer_km, eu.samsara_last_synced_at, eu.samsara_vehicle_id,
@@ -95,6 +95,27 @@ final class CycleReadings
             array_merge(BillingCycles::scopeParams($cycle), $ids)
         ) as $r) {
             $billed[(int) $r['lease_id']] = $r;
+        }
+
+        // S-BILLING-MODULE-2 (KNOWN ISSUE #115): the latest Mileage Logs
+        // odometer for each lease's unit on or before the month end — offered
+        // as a one-click suggestion, like the Samsara odometer. This sheet's
+        // own write-backs (notes marker) are excluded so a saved reading never
+        // "suggests" itself.
+        $units = array_values(array_filter(array_map(static fn($r) => (int) $r['equipment_unit_id'], $rows)));
+        $logs = [];
+        if ($units) {
+            $uph = implode(',', array_fill(0, count($units), '?'));
+            foreach (\db_select(
+                "SELECT ml.equipment_unit_id, ml.odometer_reading, ml.mileage_unit, ml.log_date, ml.log_type
+                   FROM mileage_logs ml
+                  WHERE ml.equipment_unit_id IN ({$uph}) AND ml.log_date <= ?
+                    AND (ml.notes IS NULL OR ml.notes NOT LIKE 'Billing cycle %')
+                  ORDER BY ml.log_date ASC, ml.id ASC",
+                array_merge($units, [$cycle['period_end']])
+            ) as $lg) {
+                $logs[(int) $lg['equipment_unit_id']] = $lg; // ASC: last wins = latest
+            }
         }
 
         $out = [];
@@ -140,6 +161,13 @@ final class CycleReadings
                 'samsara_odometer_in_unit' => ($r['samsara_vehicle_id'] && $r['samsara_odometer_km'] !== null)
                     ? bcmul((string) $r['samsara_odometer_km'], $toUnit, 2) : null,
                 'samsara_synced_at' => $r['samsara_last_synced_at'],
+                'log_odometer_in_unit' => isset($logs[(int) $r['equipment_unit_id']])
+                    ? self::toLeaseUnit((string) $logs[(int) $r['equipment_unit_id']]['odometer_reading'],
+                        (string) $logs[(int) $r['equipment_unit_id']]['mileage_unit'], $unit,
+                        (string) $r['km_to_miles_conversion'], (string) $r['miles_to_km_conversion'])
+                    : null,
+                'log_date'          => $logs[(int) $r['equipment_unit_id']]['log_date'] ?? null,
+                'log_type'          => $logs[(int) $r['equipment_unit_id']]['log_type'] ?? null,
                 'reading'           => $entered ? [
                     'odometer_km'      => $r['odometer_km'],
                     'odometer_in_unit' => $r['odometer_km'] !== null ? bcmul((string) $r['odometer_km'], $toUnit, 2) : null,
@@ -160,6 +188,13 @@ final class CycleReadings
             ];
         }
         return $out;
+    }
+
+    /** Convert a logged odometer into the lease's unit (bcmath). */
+    private static function toLeaseUnit(string $value, string $fromUnit, string $leaseUnit, string $kmToMiles, string $milesToKm): string
+    {
+        if ($fromUnit === $leaseUnit) return bcadd($value, '0', 2);
+        return $leaseUnit === 'miles' ? bcmul($value, $kmToMiles, 2) : bcmul($value, $milesToKm, 2);
     }
 
     /**
@@ -287,6 +322,7 @@ final class CycleReadings
             if ($odoKm === null && $hours === null) {
                 $n = \db_execute("DELETE FROM billing_cycle_readings WHERE cycle_id = ? AND lease_id = ?", [$cycle['id'], $leaseId]);
                 if ($n > 0) $cleared++;
+                self::syncMileageLog($cycle, $leaseId, null, $row['mileage_unit'], null, $userId);
                 continue;
             }
 
@@ -302,6 +338,7 @@ final class CycleReadings
                  $notes !== '' ? mb_substr($notes, 0, 500) : null, $userId]
             );
             $saved++;
+            self::syncMileageLog($cycle, $leaseId, $odo !== null ? (string) $odo : null, $row['mileage_unit'], $date ?: null, $userId);
         }
 
         if ($saved || $cleared) {
@@ -309,6 +346,36 @@ final class CycleReadings
                 "Readings sheet: {$saved} saved" . ($cleared ? ", {$cleared} cleared" : '') . '.');
         }
         return ['saved' => $saved, 'cleared' => $cleared, 'errors' => $errors];
+    }
+
+    /**
+     * Mirror a month-end odometer reading into Mileage Logs (log_type
+     * 'manual', notes "Billing cycle BC-YYYY-MM month-end reading") so the
+     * unit's mileage history shows what billing used. One row per lease per
+     * cycle: replaced on re-save, removed when the reading is cleared.
+     * Best-effort — a log failure never blocks the reading.
+     */
+    private static function syncMileageLog(array $cycle, int $leaseId, ?string $odoInUnit, string $unit, ?string $date, ?int $userId): void
+    {
+        try {
+            $marker = 'Billing cycle ' . $cycle['reference'] . ' month-end reading';
+            \db_execute("DELETE FROM mileage_logs WHERE lease_id = ? AND notes = ?", [$leaseId, $marker]);
+            if ($odoInUnit === null) return;
+            $unitId = \db_row("SELECT equipment_unit_id FROM leases WHERE id = ?", [$leaseId])['equipment_unit_id'] ?? null;
+            if (!$unitId) return;
+            \db_insert('mileage_logs', [
+                'equipment_unit_id' => (int) $unitId,
+                'lease_id'          => $leaseId,
+                'log_type'          => 'manual',
+                'odometer_reading'  => (int) \bcround($odoInUnit, 0),
+                'mileage_unit'      => $unit === 'miles' ? 'miles' : 'km',
+                'log_date'          => $date ?: (string) $cycle['period_end'],
+                'notes'             => $marker,
+                'recorded_by'       => $userId,
+            ]);
+        } catch (\Throwable $e) {
+            error_log('[CycleReadings] mileage log sync failed for lease #' . $leaseId . ': ' . $e->getMessage());
+        }
     }
 
     /**

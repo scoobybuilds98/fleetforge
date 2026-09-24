@@ -251,7 +251,27 @@ class FinancialActions
         // FF_formatUtc). sent_date below stays the LOCAL business date.
         $now = ff_now_utc();
 
-        db_transaction(function () use ($id, $invoice, $sentToEmail, $now, $userId, $userName, $ip): void {
+        // ── Due date basis (S-BILLING-MODULE-2, KNOWN ISSUE #113) ──────────
+        // An invoice is dated the first day of the period it bills, and its
+        // due date was invoice date + terms. A month billed in ARREARS (or a
+        // backlog draft) was therefore due — even overdue, and late-fee
+        // eligible — the day it went out. With billing_cycle.due_date_basis =
+        // 'send_date' (the default) the terms run from the SEND date whenever
+        // that is later. Only ever extends; the invoice date (revenue period,
+        // ledger date) is untouched. Customer terms, else the default days.
+        $newDueDate = null;
+        if ((string) settings_get('billing_cycle.due_date_basis', 'send_date') === 'send_date') {
+            $terms = null;
+            if (!empty($invoice['customer_id'])) {
+                $terms = db_row("SELECT payment_terms FROM customers WHERE id = ?", [(int) $invoice['customer_id']])['payment_terms'] ?? null;
+            }
+            $candidate = \FleetForge\Billing\PaymentTerms::dueDate(ff_today(), $terms !== null ? (string) $terms : null);
+            if ($candidate > (string) $invoice['due_date']) {
+                $newDueDate = $candidate;
+            }
+        }
+
+        db_transaction(function () use ($id, $invoice, $sentToEmail, $now, $userId, $userName, $ip, $newDueDate): void {
             // Precharge lifecycle gate (S-MILEAGE-2A D-D)
             $stampPrechargeAfter = false;
             $stampPrechargeLease = null;
@@ -294,18 +314,42 @@ class FinancialActions
             // below (double OB/revenue). Gate the UPDATE on status='draft'; a
             // concurrent send serializes on the row lock, matches 0 rows, and we
             // abort BEFORE any counter is touched.
-            $affected = db_update('invoices', [
+            $sentFields = [
                 'status'          => 'sent',
-                'sent_date'       => date('Y-m-d'),
+                // Company-local business day (was the server clock's date).
+                'sent_date'       => ff_today(),
                 'sent_at'         => $now,
                 'sent_by'         => $userId,
                 'sent_to_email'   => $sentToEmail,
                 'delivery_method' => 'email',
                 'updated_by'      => $userId,
-            ], 'id = ? AND status = ?', [$id, 'draft']);
+                // A PDF rendered while this was a DRAFT (preview, workbench
+                // "View PDF") carries the DRAFT badge and draft-only line
+                // filtering; InvoicePdfGenerator reuses any stored PDF of a
+                // non-draft invoice, so without this the customer's email
+                // attached the draft copy. Clear it — the next open or email
+                // renders the sent invoice. (S-BILLING-MODULE-2)
+                'pdf_path'         => null,
+                'pdf_generated_at' => null,
+            ];
+            if ($newDueDate !== null) {
+                $sentFields['due_date'] = $newDueDate;
+            }
+            $affected = db_update('invoices', $sentFields, 'id = ? AND status = ?', [$id, 'draft']);
             if ($affected === 0) {
                 throw new ActionException('INVALID_TRANSITION',
                     "Invoice {$invoice['invoice_number']} was modified concurrently (no longer draft). Refresh and retry.", 409);
+            }
+
+            if ($newDueDate !== null) {
+                db_insert('audit_log', [
+                    'user_id' => $userId, 'user_name' => $userName, 'action' => 'update', 'module' => 'invoices',
+                    'entity_type' => 'invoice', 'entity_id' => $id, 'entity_label' => $invoice['invoice_number'],
+                    'old_values' => json_encode(['due_date' => $invoice['due_date']]),
+                    'new_values' => json_encode(['due_date' => $newDueDate]),
+                    'notes' => "Due date set to {$newDueDate} at send (was {$invoice['due_date']}): payment terms run from the send date (Billing → Settings).",
+                    'ip_address' => $ip ?? '127.0.0.1',
+                ]);
             }
 
             $balanceDue  = (string) $invoice['balance_due'];

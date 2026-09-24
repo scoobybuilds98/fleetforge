@@ -35,6 +35,7 @@ const BILLING_SETTING_KEYS = [
     'billing_cycle.variance_min_amount'   => ['type' => 'decimal', 'min' => '0', 'max' => '1000000', 'default' => '100'],
     'billing_cycle.close_requires_review' => ['type' => 'bool', 'default' => '0'],
     'billing_cycle.owner_user_id'         => ['type' => 'user', 'default' => ''],
+    'billing_cycle.due_date_basis'        => ['type' => 'enum', 'values' => ['send_date', 'invoice_date'], 'default' => 'send_date'],
     'invoices.approval_required'          => ['type' => 'bool', 'default' => '0'],
     'invoices.approval_allow_self'        => ['type' => 'bool', 'default' => '1'],
 ];

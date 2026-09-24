@@ -208,10 +208,11 @@ final class BillingCycles
         $row['id'] = (int) $row['id'];
         $row['month'] = substr((string) $row['period_start'], 0, 7);
         $row['label'] = self::label((string) $row['period_start']);
-        foreach (['readiness_ack', 'readiness_summary', 'close_snapshot'] as $k) {
+        foreach (['readiness_ack', 'readiness_summary', 'close_snapshot', 'step_signoffs'] as $k) {
             $row[$k] = $row[$k] !== null ? (json_decode((string) $row[$k], true) ?: null) : null;
         }
         $row['readiness_ack'] ??= [];
+        $row['step_signoffs'] ??= [];
         return $row;
     }
 
@@ -577,9 +578,13 @@ final class BillingCycles
             'hint' => $closed ? 'Closed ' . substr((string) $cycle['closed_at'], 0, 10) : 'Close and lock the month',
         ];
 
-        // First not-done, not-skipped step is "current".
+        // First not-done, not-skipped step is "current". A manual sign-off
+        // (step_signoffs) is shown alongside — it records who finished the
+        // step; the derived state still says whether the work is really done.
+        $signoffs = is_array($cycle['step_signoffs'] ?? null) ? $cycle['step_signoffs'] : [];
         $currentSet = false;
         foreach ($steps as &$s) {
+            $s['signoff'] = $signoffs[$s['key']] ?? null;
             $s['skipped'] = !empty($s['skipped']);
             $s['attention'] = !empty($s['attention']);
             if ($s['done'] || $s['skipped']) {
@@ -638,6 +643,40 @@ final class BillingCycles
             return ['id' => \current_user_id(), 'name' => (string) ($u['name'] ?? 'system')];
         }
         return ['id' => null, 'name' => 'system'];
+    }
+
+    /** Steps a person can sign off. Close is not one: closing the cycle IS its sign-off. */
+    public const SIGNOFF_STEPS = ['prepare', 'readings', 'generate', 'review', 'approve', 'send'];
+
+    /**
+     * Sign off one step of the cycle (who finished it, when, optional note),
+     * or withdraw that sign-off. Stored in billing_cycles.step_signoffs and
+     * shown on the stepper beside the derived "done" state — a record of who
+     * did the work, never a gate. Audited. (S-BILLING-MODULE-2)
+     *
+     * @return array<string, array{by:string, by_id:?int, at:string, note:?string}> the new map
+     * @throws \InvalidArgumentException on an unknown step
+     */
+    public static function signoff(array $cycle, string $step, bool $signed, ?string $note = null): array
+    {
+        if (!in_array($step, self::SIGNOFF_STEPS, true)) {
+            throw new \InvalidArgumentException('Unknown step.');
+        }
+        // Read under a row lock so two people signing different steps at the
+        // same moment cannot drop each other's entry (read-modify-write of one JSON column).
+        return \db_transaction(static function () use ($cycle, $step, $signed, $note): array {
+            $row = \db_row("SELECT step_signoffs FROM billing_cycles WHERE id = ? FOR UPDATE", [$cycle['id']]);
+            $map = $row && $row['step_signoffs'] ? (json_decode((string) $row['step_signoffs'], true) ?: []) : [];
+            if ($signed) {
+                $actor = self::actor();
+                $map[$step] = ['by' => $actor['name'], 'by_id' => $actor['id'], 'at' => \ff_now_utc(), 'note' => $note];
+            } else {
+                unset($map[$step]);
+            }
+            \db_execute("UPDATE billing_cycles SET step_signoffs = ? WHERE id = ?", [$map ? json_encode($map) : null, $cycle['id']]);
+            self::audit($cycle, 'update', ($signed ? 'Signed off' : 'Withdrew sign-off of') . " step '{$step}'" . ($note ? ": {$note}" : '.'));
+            return $map;
+        });
     }
 
     /** Record an audit row against a cycle. */

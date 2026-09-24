@@ -19,6 +19,10 @@ declare(strict_types=1);
  *                   history and Reopen
  *       Approvals   batch runs submitted for approval (was on Batch Invoicing)
  *       Holds       standing billing holds on leases / customers
+ *       Charges     queued charges across all leases (S-BILLING-MODULE-2)
+ *       Trends      how each month's billing ran — invoices, unsent drafts,
+ *                   emailed %, days to send, exceptions, voids (S-BILLING-MODULE-2)
+ *   - "How monthly billing works": the seven steps + rules + glossary.
  *
  * Nothing here computes billing: every figure comes from api/v1/billing/*,
  * api/v1/invoices/billing_exceptions/* and api/v1/invoices/batch_runs/*.
@@ -72,6 +76,52 @@ require_once FF_ROOT . '/includes/header.php';
 
 <div id="billing-home" x-data="FF_BillingHome()" x-cloak>
 
+    <!-- ── How monthly billing works (S-BILLING-MODULE-2) ─────────
+         The whole month on one card, in plain words. Collapsible; the
+         choice is remembered per person (localStorage, convenience only). -->
+    <div class="card" style="margin-bottom:16px;">
+        <div class="card-header" style="display:flex; align-items:center; justify-content:space-between; cursor:pointer;" @click="toggleHow()">
+            <h3 class="card-title">How monthly billing works</h3>
+            <span class="text-sm bc-muted" x-text="howOpen ? 'Hide' : 'Show the 7 steps'"></span>
+        </div>
+        <div class="card-body" x-show="howOpen">
+            <p class="bc-muted" style="margin:0 0 12px; font-size:13.5px; line-height:1.55;">
+                Each month is a <strong>billing cycle</strong>. Open it, then work the seven steps left to right — each step has its own tab
+                with the same explanation at the top. Nothing is billed or emailed until you press a button that says so.
+            </p>
+            <div class="bc-flow">
+                <div class="bc-flow-step"><span class="bc-flow-num">1</span><span class="bc-flow-title">Prepare</span><span class="bc-flow-text">Automatic checks find missing rates, readings, emails, expired tax exemptions and gaps — before billing.</span></div>
+                <div class="bc-flow-step"><span class="bc-flow-num">2</span><span class="bc-flow-title">Readings</span><span class="bc-flow-text">Type the month-end odometer / hours for manual-mileage and hourly leases.</span></div>
+                <div class="bc-flow-step"><span class="bc-flow-num">3</span><span class="bc-flow-title">Generate</span><span class="bc-flow-text">The workbench creates the month's draft invoices (dry run first). Queued charges ride along.</span></div>
+                <div class="bc-flow-step"><span class="bc-flow-num">4</span><span class="bc-flow-title">Review</span><span class="bc-flow-text">Every invoice is compared with last month and checked for known mistakes. Mark each one reviewed.</span></div>
+                <div class="bc-flow-step"><span class="bc-flow-num">5</span><span class="bc-flow-title">Approve</span><span class="bc-flow-text">Only when approval is required: a manager approves the run before it is generated.</span></div>
+                <div class="bc-flow-step"><span class="bc-flow-num">6</span><span class="bc-flow-title">Send</span><span class="bc-flow-text">Send and email the invoices — one email per customer if you like — and track who got theirs.</span></div>
+                <div class="bc-flow-step"><span class="bc-flow-num">7</span><span class="bc-flow-title">Close</span><span class="bc-flow-text">Freeze the month's figures and lock it; download the billing register.</span></div>
+            </div>
+            <div class="bc-rules">
+                <div class="bc-rule"><strong>Drafts count for nothing</strong>An invoice only becomes real — customer balance, revenue, QuickBooks — when it is sent. A draft can be edited, regenerated or deleted freely.</div>
+                <div class="bc-rule"><strong>Sent invoices are never edited</strong>Correct a sent invoice with a credit note (Invoices → Credit Notes), or void it and bill again.</div>
+                <div class="bc-rule"><strong>Payments and collections live elsewhere</strong>Payments, statements, aging and dunning are in Payments and Accounting → Receivables. Billing ends when the month is sent and closed.</div>
+            </div>
+            <details style="margin-top:12px;">
+                <summary class="text-sm" style="cursor:pointer; font-weight:600;">Words used here</summary>
+                <div class="bc-glossary">
+                    <div><b>Cycle</b> — one month of billing (e.g. BC-2026-08 = August 2026).</div>
+                    <div><b>In arrears / in advance</b> — bill last month after it ends, or this month on the 1st (Billing → Settings).</div>
+                    <div><b>Workbench</b> — the page that generates a month's draft invoices for many leases at once.</div>
+                    <div><b>Dry run</b> — "Preview totals": works out every invoice without saving anything.</div>
+                    <div><b>Exception</b> — a lease a run could not bill; it waits on the Exceptions tab until fixed or ignored.</div>
+                    <div><b>Hold</b> — "do not bill this lease/customer until released". Billing is deferred, not forgiven.</div>
+                    <div><b>Charge</b> — an extra line for a lease's next invoice, once or every month.</div>
+                    <div><b>Reading</b> — a month-end odometer or engine-hours figure for a manual lease.</div>
+                    <div><b>Run</b> — a set of invoices submitted for approval (only when approval is required).</div>
+                    <div><b>Close</b> — signs off the month: figures frozen, workbench locked out of it.</div>
+                </div>
+            </details>
+            <p class="text-sm" style="margin:12px 0 0;"><a href="<?= base_url('help/billing') ?>">Read the full guide →</a></p>
+        </div>
+    </div>
+
     <!-- ── The cycle to work on now ─────────────────────────────── -->
     <div class="bc-spotlight" x-show="kpis">
         <div>
@@ -87,6 +137,7 @@ require_once FF_ROOT . '/includes/header.php';
                         <span x-show="kpis.target_cycle.send_by_date" x-text="'Send by ' + fmtDate(kpis.target_cycle.send_by_date)"></span>
                     </div>
                     <div class="bc-progress" style="margin-top:10px;"><span :style="'width:' + (kpis.target_cycle.stage ? kpis.target_cycle.stage.percent : 0) + '%'"></span></div>
+                    <div class="bc-spotlight-now" x-show="currentStep()" x-text="currentStep() ? 'Now: ' + currentStep().label + ' — ' + currentStep().hint : ''"></div>
                     <div class="bc-spotlight-actions">
                         <a class="btn btn-primary btn-sm" :href="cycleUrl(kpis.target_cycle.id)">Continue the cycle →</a>
                     </div>
@@ -135,27 +186,28 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="stat-grid stat-grid--4 ff-stats">
         <button type="button" class="stat-card stat-card--red" style="text-align:left;cursor:pointer;" @click="setTab('exceptions')">
             <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
-            <div class="stat-label">Billing exceptions</div>
+            <div class="stat-label">Exceptions</div>
             <div class="stat-value font-mono" x-text="kpis ? kpis.open_exceptions : '—'"></div>
-            <div class="stat-delta">leases that could not be billed</div>
+            <div class="stat-delta">could not be billed</div>
         </button>
         <button type="button" class="stat-card stat-card--amber" style="text-align:left;cursor:pointer;" @click="setTab('approvals')">
             <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clipboard"/></svg></span>
             <div class="stat-label">Awaiting approval</div>
             <div class="stat-value font-mono" x-text="kpis ? kpis.pending_runs : '—'"></div>
-            <div class="stat-delta" x-text="kpis && kpis.approved_runs ? kpis.approved_runs + ' approved, not generated' : 'batch runs'"></div>
+            <div class="stat-delta" x-text="kpis && kpis.approved_runs ? kpis.approved_runs + ' approved, to generate' : 'batch runs'"></div>
         </button>
         <button type="button" class="stat-card stat-card--purple" style="text-align:left;cursor:pointer;" @click="setTab('holds')">
             <span class="stat-icon stat-icon--purple"><svg><use href="#icon-lock-open"/></svg></span>
-            <div class="stat-label">Billing holds</div>
+            <div class="stat-label">On hold</div>
             <div class="stat-value font-mono" x-text="kpis ? kpis.active_holds : '—'"></div>
-            <div class="stat-delta">leases / customers paused</div>
+            <div class="stat-delta">billing paused</div>
         </button>
         <button type="button" class="stat-card stat-card--slate" style="text-align:left;cursor:pointer;" @click="setTab('cycles')">
             <span class="stat-icon stat-icon--slate"><svg><use href="#icon-clock"/></svg></span>
-            <div class="stat-label">Unsent from earlier months</div>
+            <div class="stat-label">Unsent old drafts</div>
             <div class="stat-value font-mono" x-text="kpis ? kpis.backlog_drafts : '—'"></div>
-            <div class="stat-delta" x-text="kpis ? (kpis.backlog_months + ' month' + (kpis.backlog_months === 1 ? '' : 's') + (kpis.backlog_total_cad !== null ? ' · ' + money(kpis.backlog_total_cad) : '')) : ''"></div>
+            <div class="stat-delta" x-text="kpis ? ('in ' + kpis.backlog_months + ' month' + (kpis.backlog_months === 1 ? '' : 's')) : ''"
+                 :title="kpis && kpis.backlog_total_cad !== null ? money(kpis.backlog_total_cad) + ' in unsent drafts from earlier months' : ''"></div>
         </button>
     </div>
 
@@ -187,6 +239,13 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="approved">Approved</option>
                     <option value="generated">Generated</option>
                     <option value="rejected">Rejected</option>
+                    <option value="cancelled">Cancelled</option>
+                </select>
+            </template>
+            <template x-if="tab === 'charges'">
+                <select class="form-select form-control-sm" x-model="charges.state" @change="loadCharges()" aria-label="Charge state">
+                    <option value="pending">Active (waiting / monthly)</option>
+                    <option value="all">All</option>
                     <option value="cancelled">Cancelled</option>
                 </select>
             </template>
@@ -421,6 +480,91 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
+    <!-- ── CHARGES (all months) ───────────────────────────────── -->
+    <div x-show="tab === 'charges'">
+        <div class="card">
+            <div class="card-body" style="padding-bottom:0;">
+                <p class="bc-muted text-sm" style="margin:0 0 10px;">
+                    Charges queued on leases: a one-off rides on the lease's next invoice, a monthly one on one invoice every month.
+                    Add a charge from a cycle's <strong>Charges</strong> tab. Voiding or regenerating a draft puts its charges back in the queue.
+                </p>
+            </div>
+            <template x-if="charges.loading"><div><template x-for="n in 3" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
+            <template x-if="!charges.loading && !charges.rows.length"><div class="bc-empty">No charges.</div></template>
+            <template x-if="!charges.loading && charges.rows.length">
+                <div style="overflow-x:auto;">
+                <table class="table" aria-label="Charges">
+                    <thead><tr><th>Lease</th><th>Charge</th><th>How often</th><?php if ($showMoney): ?><th class="text-right">Amount</th><?php endif; ?><th>State</th><th>Billed on</th></tr></thead>
+                    <tbody>
+                        <template x-for="c in charges.rows" :key="c.id">
+                            <tr>
+                                <td class="bc-nowrap"><a :href="base + '/leases/show?id=' + c.lease_id" x-text="c.contract_number"></a><div class="bc-sub" x-text="c.company_name"></div></td>
+                                <td><div x-text="c.description"></div><div class="bc-sub" x-text="c.item_label"></div></td>
+                                <td class="text-sm bc-nowrap" x-text="c.recurrence === 'monthly' ? 'Monthly from ' + fmtDate(c.bill_from) + (c.bill_until ? ' to ' + fmtDate(c.bill_until) : '') : 'Once, from ' + fmtDate(c.bill_from)"></td>
+                                <?php if ($showMoney): ?><td class="bc-amount" x-text="money(c.amount)"></td><?php endif; ?>
+                                <td><span class="bc-pill" :class="{ 'bc-tone-warning': c.state === 'pending', 'bc-tone-success': c.state === 'billed', 'bc-tone-info': c.state === 'recurring', 'bc-tone-muted': c.state === 'cancelled' || c.state === 'ended' }"
+                                          x-text="{ pending: 'Waiting', billed: 'Billed', recurring: 'Monthly', cancelled: 'Cancelled', ended: 'Ended' }[c.state] || c.state"></span></td>
+                                <td class="text-sm"><template x-for="b in c.billed_on" :key="b.invoice_id"><div><a :href="base + '/invoices/show?id=' + b.invoice_id" x-text="b.invoice_number"></a> <span class="bc-muted" x-text="b.month"></span></div></template>
+                                    <span class="bc-muted" x-show="!c.billed_on.length">—</span></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- ── TRENDS ─────────────────────────────────────────────── -->
+    <div x-show="tab === 'trends'">
+        <div class="card">
+            <div class="card-body" style="padding-bottom:0;">
+                <p class="bc-muted text-sm" style="margin:0 0 10px;">
+                    How the monthly billing has been running — not a revenue report (that is Reports → Financial).
+                    <strong>Days to send</strong> = days from the month's end to its last invoice going out (only once nothing is left in draft).
+                </p>
+            </div>
+            <template x-if="trends.loading"><div><template x-for="n in 6" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
+            <template x-if="!trends.loading && trends.rows.length">
+                <div style="overflow-x:auto;">
+                <table class="table" aria-label="Billing trends">
+                    <thead><tr><th>Month</th><th>Invoices</th><?php if ($showMoney): ?><th style="min-width:220px;">Billed (CAD)</th><?php endif; ?><th class="text-right">Unsent drafts</th><th class="text-right">Emailed</th><th class="text-right">Days to send</th><th class="text-right">Exceptions</th><th class="text-right">Voided</th><th>Cycle</th></tr></thead>
+                    <tbody>
+                        <template x-for="m in trends.rows" :key="m.month">
+                            <tr>
+                                <td class="bc-nowrap" x-text="m.label"></td>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:8px;" :title="m.label + ': ' + m.invoices + ' invoices'">
+                                        <span class="bc-catbar-track" style="max-width:120px;"><span :style="'width:' + trendPct(m.invoices, 'invoices') + '%'"></span></span>
+                                        <span class="bc-mono" x-text="m.invoices"></span>
+                                    </div>
+                                </td>
+                                <?php if ($showMoney): ?>
+                                <td>
+                                    <div style="display:flex; align-items:center; gap:8px;" :title="m.label + ': ' + money(m.billed_cad)">
+                                        <span class="bc-catbar-track" style="max-width:120px;"><span :style="'width:' + trendPct(m.billed_cad, 'billed_cad') + '%'"></span></span>
+                                        <span class="bc-mono" x-text="money(m.billed_cad)"></span>
+                                    </div>
+                                </td>
+                                <?php endif; ?>
+                                <td class="text-right bc-mono" :style="m.drafts ? 'color:var(--color-warning);font-weight:600;' : ''" x-text="m.drafts"></td>
+                                <td class="text-right bc-mono" x-text="m.emailed_pct === null ? '—' : m.emailed_pct + '%'"></td>
+                                <td class="text-right bc-mono" x-text="m.days_to_send === null ? (m.drafts ? 'not done' : '—') : m.days_to_send + ' d'"></td>
+                                <td class="text-right bc-mono" x-text="m.exceptions"></td>
+                                <td class="text-right bc-mono" x-text="m.voids"></td>
+                                <td class="bc-nowrap">
+                                    <template x-if="m.cycle"><a :href="cycleUrl(m.cycle.id)"><span class="bc-pill" :class="m.cycle.status === 'closed' ? 'bc-tone-success' : 'bc-tone-primary'" x-text="m.cycle.status === 'closed' ? 'Closed' : 'Open'"></span></a></template>
+                                    <template x-if="!m.cycle"><?php if ($canCreate): ?><button type="button" class="btn btn-ghost btn-xs" @click="openMonth(m.month)">Open</button><?php else: ?><span class="bc-muted">—</span><?php endif; ?></template>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                </div>
+            </template>
+        </div>
+    </div>
+
     <!-- ── Open-a-month modal ──────────────────────────────────── -->
     <?php if ($canCreate): ?>
     <div x-show="monthModal.open" x-cloak class="modal-overlay" style="z-index:var(--z-modal);" @bc-open-month.window="monthModal.open = true; monthModal.month = kpis ? kpis.target_month : ''">
@@ -557,6 +701,9 @@ function FF_BillingHome() {
         exc: { loading: false, loaded: false, status: 'open', rows: [] },
         runs: { loading: false, loaded: false, status: '', rows: [] },
         holds: { loading: false, loaded: false, state: 'active', rows: [] },
+        charges: { loading: false, loaded: false, state: 'pending', rows: [] },
+        trends: { loading: false, loaded: false, rows: [] },
+        howOpen: (() => { try { return localStorage.getItem('ff_billing_how_hidden') !== '1'; } catch (e) { return true; } })(),
         monthModal: { open: false, month: '' },
         holdModal: { open: false, saving: false, scope: 'lease', lease_id: null, customer_id: null, preset_label: '', reason: '', starts_on: '', ends_on: '', errors: {} },
 
@@ -566,19 +713,21 @@ function FF_BillingHome() {
                 { key: 'exceptions', label: 'Exceptions', count: () => this.kpis ? this.kpis.open_exceptions : 0 },
                 { key: 'approvals',  label: 'Approvals',  count: () => this.kpis ? this.kpis.pending_runs : 0 },
                 { key: 'holds',      label: 'Holds',      count: () => this.kpis ? this.kpis.active_holds : 0 },
+                { key: 'charges',    label: 'Charges',    count: () => 0 },
+                { key: 'trends',     label: 'Trends',     count: () => 0 },
             ];
         },
 
         init() {
             if (this._inited) return; this._inited = true;
             const h = (location.hash || '').replace('#', '');
-            if (['cycles', 'exceptions', 'approvals', 'holds'].includes(h)) this.tab = h;
+            if (['cycles', 'exceptions', 'approvals', 'holds', 'charges', 'trends'].includes(h)) this.tab = h;
             this.loadKpis();
             this.loadCycles();
             this.loadTab();
             window.addEventListener('hashchange', () => {
                 const t = (location.hash || '').replace('#', '');
-                if (t && t !== this.tab && ['cycles', 'exceptions', 'approvals', 'holds'].includes(t)) { this.tab = t; this.loadTab(); }
+                if (t && t !== this.tab && ['cycles', 'exceptions', 'approvals', 'holds', 'charges', 'trends'].includes(t)) { this.tab = t; this.loadTab(); }
             });
         },
 
@@ -591,6 +740,34 @@ function FF_BillingHome() {
             if (this.tab === 'exceptions' && !this.exc.loaded) this.loadExceptions();
             if (this.tab === 'approvals' && !this.runs.loaded) this.loadRuns();
             if (this.tab === 'holds' && !this.holds.loaded) this.loadHolds();
+            if (this.tab === 'charges' && !this.charges.loaded) this.loadCharges();
+            if (this.tab === 'trends' && !this.trends.loaded) this.loadTrends();
+        },
+        toggleHow() {
+            this.howOpen = !this.howOpen;
+            try { localStorage.setItem('ff_billing_how_hidden', this.howOpen ? '0' : '1'); } catch (e) { /* convenience only */ }
+        },
+        currentStep() {
+            const st = this.kpis && this.kpis.target_cycle && this.kpis.target_cycle.stage;
+            return st ? (st.steps.find(s => s.key === st.current) || null) : null;
+        },
+        async loadCharges() {
+            this.charges.loading = true;
+            const r = await FF_Api.get(api + '/billing/charges/index?state=' + this.charges.state);
+            if (r.success) { this.charges.rows = r.data.charges; this.charges.loaded = true; }
+            else FF_Toast.error(r.error?.message || 'Could not load charges.');
+            this.charges.loading = false;
+        },
+        async loadTrends() {
+            this.trends.loading = true;
+            const r = await FF_Api.get(api + '/billing/trends?months=12');
+            if (r.success) { this.trends.rows = r.data.months.slice().reverse(); this.trends.loaded = true; }
+            else FF_Toast.error(r.error?.message || 'Could not load trends.');
+            this.trends.loading = false;
+        },
+        trendPct(v, key) {
+            const max = Math.max(1, ...this.trends.rows.map(m => Number(m[key] || 0)));
+            return Math.round(Number(v || 0) / max * 100);
         },
 
         // ── formatting ──

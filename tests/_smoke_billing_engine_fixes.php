@@ -429,6 +429,8 @@ scenario('E8 payments GL', function () {
 
 /* ══ E9 — cron double-run + catch-up ════════════════════════════════════ */
 scenario('E9 cron idempotency + catch-up', function () {
+    // S-BILLING-MODULE-2: the job follows billing_cycle.mode — this scenario tests ADVANCE catch-up.
+    db_execute("UPDATE settings SET `value` = 'advance' WHERE `key` = 'billing_cycle.mode'");
     $ambientMin = db_row("SELECT MIN(next_billing_date) mn FROM leases WHERE status='active' AND billing_cycle='monthly' AND deleted_at IS NULL AND next_billing_date IS NOT NULL")['mn'];
     $today = '2026-03-15';
     if ($ambientMin !== null && $ambientMin <= $today) {
@@ -454,6 +456,7 @@ scenario('E9 cron idempotency + catch-up', function () {
 
 /* ══ E10 — poison lease isolation ═══════════════════════════════════════ */
 scenario('E10 poison lease isolation', function () {
+    db_execute("UPDATE settings SET `value` = 'advance' WHERE `key` = 'billing_cycle.mode'"); // S-BILLING-MODULE-2
     $cust = make_customer();
     $today = '2026-03-15';
     $poison = make_lease(['start_date' => '2026-02-01', 'next_billing_date' => '2026-03-01',

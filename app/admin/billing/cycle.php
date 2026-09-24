@@ -95,6 +95,85 @@ if ($isClosed) {
 }
 $prevCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start < ? ORDER BY period_start DESC LIMIT 1", [$cycle['period_start']]);
 $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start > ? ORDER BY period_start ASC LIMIT 1", [$cycle['period_start']]);
+
+/*
+ * S-BILLING-MODULE-2 — the plain-language guide at the top of every tab:
+ * what the step is, what to do, what the buttons do. Kept here (not in a
+ * help page) so it is right where the work happens; each panel can be
+ * collapsed and remembers that per person (localStorage, a convenience only).
+ * `step` = the stepper step the tab belongs to (enables "Sign off this step").
+ */
+$guides = [
+    'overview' => ['title' => 'The month at a glance', 'step' => null,
+        'what' => 'A billing cycle is one month of billing: every lease on rent that month, every invoice it produces, and the seven steps from checking the month to closing it. Nothing here bills anyone by itself.',
+        'do'   => ['Follow the steps left to right — the blue one is where you are.', 'Read "What to do next" below: it says exactly what is left.', 'Set an owner and target dates so everyone knows who runs the month and by when.'],
+        'buttons' => ['Click a step to open its tab.', 'Open workbench = where the month\'s invoices are generated.', 'Sign off (on each step\'s tab) records who finished it.']],
+    'readiness' => ['title' => 'Step 1 · Prepare — check the month before billing', 'step' => 'prepare',
+        'what' => 'Automatic checks that look for anything that would put a wrong amount on an invoice, or stop it reaching the customer — missing rates, readings, emails, tax exemptions, earlier months never billed, US-dollar rate, and more.',
+        'do'   => ['Fix every red Blocker — those leases cannot bill.', 'Fix each amber Warning, or Acknowledge it with a reason if it is fine.', 'Blue items are for information.', 'Re-run the checks after fixing things.'],
+        'buttons' => ['Each name links to the page where you fix it.', 'Acknowledge — bill anyway: records who accepted the warning and why.', 'Nothing on this tab changes an invoice.']],
+    'readings' => ['title' => 'Step 2 · Readings — month-end odometer and hours', 'step' => 'readings',
+        'what' => 'Leases on Manual mileage (with a mileage rate) and leases with an hourly rate only bill their usage from a reading. Enter each one\'s odometer / hours at the end of the month here — before generating.',
+        'do'   => ['Type the reading in the lease\'s own unit (km or miles), or click a suggestion (Samsara or the latest Mileage Log).', 'Press Save readings. A reading lower than the previous one is refused.'],
+        'buttons' => ['Save readings stores them; generating the month uses them automatically.', 'Saved readings are also added to the unit\'s Mileage Logs.', 'A reading entered after the invoice exists changes nothing — use Regenerate on the draft.']],
+    'charges' => ['title' => 'Charges — extra lines for the next invoice', 'step' => null,
+        'what' => 'Anything to add to a lease\'s invoice besides the rent: a one-off (damage, an extra wash, an admin fee) or a standing monthly fee (yard parking, a second tracker).',
+        'do'   => ['Add charge → pick the lease, describe it, price it, choose once or every month.', 'Generate the month as usual — the charge is added to the lease\'s invoice by itself.'],
+        'buttons' => ['Charges are picked up by every way of creating an invoice (workbench, a lease\'s Generate Invoice, close).', 'Voiding or regenerating a draft puts its charges back in the queue.', 'Cancel stops a charge billing again; credits go on a credit note, not here.']],
+    'leases' => ['title' => 'Step 3 · Generate — every lease on rent this month', 'step' => 'generate',
+        'what' => 'Each lease on rent in the month and what happened to it: billed, covered by another invoice, on hold, an exception, billed at close, closed without its last invoice, or still To bill.',
+        'do'   => ['Open the workbench to bill the To bill leases (dry run first).', 'For Closed, unbilled leases use the lease\'s Generate Invoice.', 'Put a hold on anything that should wait.'],
+        'buttons' => ['Open workbench — generates drafts (nothing is sent).', 'The coloured chips filter the list.', 'Drafts count for nothing until they are sent.']],
+    'customers' => ['title' => 'Customers — the month by customer', 'step' => null,
+        'what' => 'Each customer with a lease on rent this month: how many leases, what is billed or still to bill, their invoices, where the invoices go, and whether they have been emailed.',
+        'do'   => ['When a customer\'s invoices are ready, press Send month: their drafts are sent and ALL their invoices for the month go out in one email, one PDF per invoice, with Pay now links.'],
+        'buttons' => ['Send month = send the drafts + one combined email.', 'Email again (when already sent) resends the combined email.', 'Customers billed by mail are marked on the Delivery tab.']],
+    'review' => ['title' => 'Step 4 · Review — check every invoice before it goes out', 'step' => 'review',
+        'what' => 'Every invoice of the month compared with the same lease last month and checked for mistakes that have happened before: double billing, double mileage, big changes, $0, no tax, no recipient.',
+        'do'   => ['Clear the red flags first, then look at the amber ones.', 'Preview an invoice beside the list; fix the lease and Regenerate, or fix the draft\'s lines.', 'Mark each draft Reviewed. Query anything that needs a second look.'],
+        'buttons' => ['Fix = removes a duplicate mileage overage line from a draft.', 'Regenerate = rebuild selected drafts from their lease (same numbers kept).', 'Void = cancel invoices. A queried invoice stops the month closing.']],
+    'delivery' => ['title' => 'Step 6 · Send — make sure every invoice reaches its customer', 'step' => 'send',
+        'what' => 'How each invoice reached (or did not reach) its customer: still a draft, emailed, sent but never emailed, email failed or bounced, printed and mailed, or on the portal.',
+        'do'   => ['Tick drafts → Send & email (in stages if there are many).', 'Tick "Sent, never emailed" or failed ones → Email again.', 'For customers billed by mail: Download PDFs, print, post, then Mark as mailed.'],
+        'buttons' => ['Send & email = the invoice becomes real (balance, ledger, QuickBooks) and is emailed.', 'Email again only emails — nothing else changes.', 'Mark as mailed / on portal records how it was delivered.']],
+    'close' => ['title' => 'Step 7 · Close — sign off the month', 'step' => null,
+        'what' => 'Closing says the month\'s billing is done: it freezes the figures and stops the workbench billing the month again. A late lease close can still add an invoice; it shows as a late addition.',
+        'do'   => ['Clear everything marked Must fix.', 'If anything marked Check is fine, tick Close anyway and explain in the note.', 'Close, then download the billing register for the accountant.'],
+        'buttons' => ['Close and lock — needs invoice edit rights.', 'Reopen — needs invoice approval rights and a reason.', 'The figures show the month frozen at close, or live.']],
+];
+
+/** Render a tab's guide panel. */
+$renderGuide = static function (string $tab) use ($guides, $canEdit, $isClosed): void {
+    $g = $guides[$tab] ?? null;
+    if (!$g) return;
+    ?>
+    <div class="bc-guide">
+        <div class="bc-guide-head" @click="toggleGuide('<?= e($tab) ?>')">
+            <span class="bc-guide-ic">?</span>
+            <h3><?= e($g['title']) ?></h3>
+            <span class="text-sm bc-muted" x-text="guideOpen('<?= e($tab) ?>') ? 'Hide help' : 'How this works'"></span>
+        </div>
+        <div class="bc-guide-body" x-show="guideOpen('<?= e($tab) ?>')">
+            <div><h4>What it is</h4><p><?= e($g['what']) ?></p></div>
+            <div><h4>What you do</h4><ul><?php foreach ($g['do'] as $li): ?><li><?= e($li) ?></li><?php endforeach; ?></ul></div>
+            <div><h4>What the buttons do</h4><ul><?php foreach ($g['buttons'] as $li): ?><li><?= e($li) ?></li><?php endforeach; ?></ul></div>
+        </div>
+        <?php if ($g['step'] && $canEdit && !$isClosed): ?>
+        <div class="bc-guide-foot" x-show="guideOpen('<?= e($tab) ?>') || signoffFor('<?= e($g['step']) ?>')">
+            <template x-if="signoffFor('<?= e($g['step']) ?>')">
+                <span>✓ Signed off by <strong x-text="signoffFor('<?= e($g['step']) ?>').by"></strong>
+                    <span x-text="FF_formatUtc(signoffFor('<?= e($g['step']) ?>').at)"></span><span x-show="signoffFor('<?= e($g['step']) ?>').note" x-text="' — ' + (signoffFor('<?= e($g['step']) ?>').note || '')"></span>
+                    <button type="button" class="btn btn-ghost btn-xs" @click="signoff('<?= e($g['step']) ?>', false)">Withdraw</button></span>
+            </template>
+            <template x-if="!signoffFor('<?= e($g['step']) ?>')">
+                <button type="button" class="btn btn-secondary btn-xs" @click="signoff('<?= e($g['step']) ?>', true)">✓ Sign off this step</button>
+            </template>
+            <span>Signing off records that you finished this step; the stepper still shows whether the work is really done.</span>
+        </div>
+        <?php endif; ?>
+    </div>
+    <?php
+};
 ?>
 <link rel="stylesheet" href="<?= asset_url('assets/css/billing.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
@@ -167,6 +246,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
                     <span class="bc-step-label" x-text="s.label"></span>
                 </div>
                 <div class="bc-step-hint" x-text="s.hint"></div>
+                <div class="bc-step-sign" x-show="s.signoff" x-text="s.signoff ? '✓ ' + s.signoff.by : ''" :title="s.signoff ? 'Signed off ' + FF_formatUtc(s.signoff.at) : ''"></div>
             </button>
         </template>
     </div>
@@ -185,6 +265,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
          OVERVIEW
          =========================================================== -->
     <section x-show="tab === 'overview'">
+        <?php $renderGuide('overview'); ?>
         <template x-if="!ov"><div><template x-for="n in 4" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
         <template x-if="ov">
         <div>
@@ -312,6 +393,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
          READINESS
          =========================================================== -->
     <section x-show="tab === 'readiness'">
+        <?php $renderGuide('readiness'); ?>
         <div class="bc-toolbar">
             <div class="bc-toolbar-left">
                 <template x-if="ready.summary">
@@ -376,6 +458,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
          READINGS
          =========================================================== -->
     <section x-show="tab === 'readings'">
+        <?php $renderGuide('readings'); ?>
         <div class="card">
             <div class="card-body" style="padding-bottom:6px;">
                 <p class="bc-muted text-sm" style="margin:0;">
@@ -436,6 +519,10 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
                                                     @click="rd.edit[r.lease_id].odometer = r.samsara_odometer_in_unit"
                                                     :title="'Samsara last synced ' + FF_formatUtc(r.samsara_synced_at)"
                                                     x-text="'Use Samsara ' + num(r.samsara_odometer_in_unit)"></button>
+                                            <button type="button" class="btn btn-ghost btn-xs" x-show="r.log_odometer_in_unit !== null && !r.billed && cycle.status === 'open'"
+                                                    @click="rd.edit[r.lease_id].odometer = r.log_odometer_in_unit; rd.edit[r.lease_id].reading_date = r.log_date || rd.edit[r.lease_id].reading_date"
+                                                    :title="'Latest Mileage Log (' + (r.log_type || '') + ') on ' + fmtDate(r.log_date)"
+                                                    x-text="'Use log ' + num(r.log_odometer_in_unit) + ' (' + fmtDate(r.log_date) + ')'"></button>
                                             <div class="bc-inline-error" x-show="rd.errors[r.lease_id] && rd.errors[r.lease_id].field === 'odometer'" x-text="rd.errors[r.lease_id] ? rd.errors[r.lease_id].message : ''"></div>
                                         </div>
                                     </template>
@@ -467,9 +554,68 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
     </section>
 
     <!-- ===========================================================
+         CHARGES (S-BILLING-MODULE-2)
+         =========================================================== -->
+    <section x-show="tab === 'charges'">
+        <?php $renderGuide('charges'); ?>
+        <div class="bc-toolbar">
+            <div class="bc-toolbar-left bc-filterchips">
+                <button type="button" class="bc-chip" :class="{ 'is-on': ch.state === 'pending' }" @click="ch.state = 'pending'; loadCharges()">Waiting to bill this month</button>
+                <button type="button" class="bc-chip" :class="{ 'is-on': ch.state === 'billed' }" @click="ch.state = 'billed'; loadCharges()">Billed this month</button>
+                <button type="button" class="bc-chip" :class="{ 'is-on': ch.state === 'all' }" @click="ch.state = 'all'; loadCharges()">All for this month</button>
+                <button type="button" class="bc-chip" :class="{ 'is-on': ch.state === 'cancelled' }" @click="ch.state = 'cancelled'; loadCharges()">Cancelled</button>
+            </div>
+            <div class="bc-toolbar-right">
+                <?php if ($canCreate && $showMoney): ?>
+                <button type="button" class="btn btn-primary btn-sm" @click="openChargeModal()">+ Add charge</button>
+                <?php endif; ?>
+            </div>
+        </div>
+        <div class="card">
+            <template x-if="ch.loading"><div><template x-for="n in 3" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
+            <template x-if="!ch.loading && !ch.rows.length">
+                <div class="bc-empty" x-text="ch.state === 'pending' ? 'No charges waiting for this month. Add one to put it on a lease\'s next invoice.' : 'None.'"></div>
+            </template>
+            <template x-if="!ch.loading && ch.rows.length">
+                <div style="overflow-x:auto;">
+                <table class="table" aria-label="Charges">
+                    <thead><tr><th>Lease</th><th>Charge</th><th>How often</th><?php if ($showMoney): ?><th class="text-right">Amount</th><?php endif; ?><th>State</th><th>Added</th><th></th></tr></thead>
+                    <tbody>
+                        <template x-for="c in ch.rows" :key="c.id">
+                            <tr>
+                                <td class="bc-nowrap"><a :href="base + '/leases/show?id=' + c.lease_id" x-text="c.contract_number"></a>
+                                    <div class="bc-sub" x-text="c.company_name + (c.unit_number ? ' · ' + c.unit_number : '')"></div></td>
+                                <td><div x-text="c.description"></div><div class="bc-sub" x-text="c.item_label + (c.taxable ? ' · taxable' : ' · not taxed') + (c.notes ? ' · ' + c.notes : '')"></div></td>
+                                <td class="bc-nowrap text-sm" x-text="c.recurrence === 'monthly' ? 'Every month from ' + fmtDate(c.bill_from) + (c.bill_until ? ' to ' + fmtDate(c.bill_until) : '') : 'Once, from ' + fmtDate(c.bill_from)"></td>
+                                <?php if ($showMoney): ?><td class="bc-amount" x-text="money(c.amount, c.currency) + (Number(c.quantity) !== 1 ? ' (' + Number(c.quantity) + ' × ' + money(c.unit_price, c.currency) + ')' : '')"></td><?php endif; ?>
+                                <td>
+                                    <span class="bc-pill" :class="{ 'bc-tone-warning': c.state === 'pending', 'bc-tone-success': c.state === 'billed', 'bc-tone-muted': c.state === 'cancelled' || c.state === 'ended', 'bc-tone-info': c.state === 'recurring' }"
+                                          x-text="{ pending: 'Waiting', billed: 'Billed', cancelled: 'Cancelled', ended: 'Ended', recurring: 'Monthly' }[c.state] || c.state"></span>
+                                    <template x-for="b in c.billed_on" :key="b.invoice_id">
+                                        <div class="bc-sub"><a :href="base + '/invoices/show?id=' + b.invoice_id" x-text="b.invoice_number"></a> <span x-text="b.status"></span></div>
+                                    </template>
+                                    <div class="bc-sub" x-show="c.cancel_reason" x-text="c.cancel_reason"></div>
+                                </td>
+                                <td class="text-sm bc-nowrap" x-text="(c.created_by_name || '—') + ' · ' + fmtDate(String(c.created_at).slice(0, 10))"></td>
+                                <td class="text-right">
+                                    <?php if ($canEdit): ?>
+                                    <button type="button" class="btn btn-ghost btn-xs" x-show="c.status === 'active'" @click="cancelCharge(c)">Cancel</button>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- ===========================================================
          LEASES (coverage)
          =========================================================== -->
     <section x-show="tab === 'leases'">
+        <?php $renderGuide('leases'); ?>
         <div class="bc-toolbar">
             <div class="bc-toolbar-left bc-filterchips">
                 <button type="button" class="bc-chip" :class="{ 'is-on': leases.filter === '' }" @click="leases.filter = ''">All <b x-text="leases.rows.length"></b></button>
@@ -522,9 +668,71 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
     </section>
 
     <!-- ===========================================================
+         CUSTOMERS (S-BILLING-MODULE-2)
+         =========================================================== -->
+    <section x-show="tab === 'customers'">
+        <?php $renderGuide('customers'); ?>
+        <div class="bc-toolbar">
+            <div class="bc-toolbar-left bc-filterchips">
+                <button type="button" class="bc-chip" :class="{ 'is-on': cu.filter === '' }" @click="cu.filter = ''">All <b x-text="cu.rows.length"></b></button>
+                <button type="button" class="bc-chip" :class="{ 'is-on': cu.filter === 'ready' }" @click="cu.filter = 'ready'">Ready to send <b x-text="cu.rows.filter(r => r.drafts > 0 && r.leases_to_bill === 0).length"></b></button>
+                <button type="button" class="bc-chip" :class="{ 'is-on': cu.filter === 'tobill' }" @click="cu.filter = 'tobill'">Leases still to bill <b x-text="cu.rows.filter(r => r.leases_to_bill > 0).length"></b></button>
+                <button type="button" class="bc-chip" :class="{ 'is-on': cu.filter === 'notemailed' }" @click="cu.filter = 'notemailed'">Sent, not emailed <b x-text="cu.rows.filter(r => r.sent > r.emailed).length"></b></button>
+                <input type="search" class="form-control form-control-sm" placeholder="Search customer…" x-model="cu.search" style="min-width:200px;">
+            </div>
+            <div class="bc-toolbar-right"><label class="text-sm" style="display:flex; gap:6px; align-items:center;"><input type="checkbox" x-model="cu.attachPdf"> Attach the PDFs</label></div>
+        </div>
+        <div class="alert alert-info" x-show="cu.result" style="margin-bottom:10px;"><span x-text="cu.result"></span></div>
+        <div class="card">
+            <template x-if="cu.loading"><div><template x-for="n in 5" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
+            <template x-if="!cu.loading && !cuVisible().length"><div class="bc-empty">No customers match.</div></template>
+            <template x-if="!cu.loading && cuVisible().length">
+                <div style="overflow-x:auto;">
+                <table class="table" aria-label="Customers this month">
+                    <thead><tr><th>Customer</th><th>Leases</th><th>Invoices</th><?php if ($showMoney): ?><th class="text-right">This month</th><?php endif; ?><th>Goes to</th><th></th></tr></thead>
+                    <tbody>
+                        <template x-for="r in cuVisible()" :key="r.customer_id">
+                            <tr>
+                                <td><a :href="base + '/customers/show?id=' + r.customer_id" x-text="r.company_name"></a>
+                                    <div class="bc-sub" x-text="(r.payment_terms ? 'Terms ' + r.payment_terms : 'Default terms') + (r.customer_status !== 'active' ? ' · ' + r.customer_status.replace('_', ' ') : '')"></div>
+                                    <div class="bc-sub" x-show="r.hold" style="color:var(--color-warning);" x-text="'On hold: ' + r.hold"></div></td>
+                                <td class="text-sm bc-nowrap">
+                                    <span x-text="r.leases_billed + ' of ' + r.leases + ' billed'"></span>
+                                    <div class="bc-sub" x-show="r.leases_to_bill" style="color:var(--color-warning);" x-text="r.leases_to_bill + ' still to bill'"></div>
+                                    <div class="bc-sub" x-show="r.leases_held" x-text="r.leases_held + ' on hold'"></div>
+                                </td>
+                                <td class="text-sm bc-nowrap">
+                                    <span x-text="r.invoices + ' invoice(s)'"></span>
+                                    <div class="bc-sub" x-text="r.drafts + ' draft · ' + r.sent + ' sent · ' + r.emailed + ' emailed'"></div>
+                                </td>
+                                <?php if ($showMoney): ?><td class="bc-amount" x-text="moneyMap(r.total)"></td><?php endif; ?>
+                                <td class="text-sm">
+                                    <span x-text="r.delivery_pref === 'email' ? (r.recipient || 'no email on file') : ({ mail: 'Mail', portal: 'Portal only', none: 'Kept on file' }[r.delivery_pref] || r.delivery_pref)"
+                                          :style="(r.delivery_pref === 'email' && (!r.recipient || r.email_disabled)) ? 'color:var(--color-danger)' : ''"></span>
+                                    <div class="bc-sub" x-show="r.email_disabled" style="color:var(--color-danger);">email bounced — switched off</div>
+                                    <div class="bc-sub" x-show="r.last_emailed" x-text="r.last_emailed ? 'last emailed ' + FF_formatUtc(r.last_emailed) : ''"></div>
+                                </td>
+                                <td class="text-right bc-nowrap">
+                                    <?php if ($canEdit): ?>
+                                    <button type="button" class="btn btn-primary btn-xs" x-show="r.invoices > 0 && r.delivery_pref === 'email'" :disabled="cu.working === r.customer_id"
+                                            @click="sendCustomer(r)" x-text="cu.working === r.customer_id ? 'Sending…' : (r.drafts ? 'Send month' : 'Email again')"></button>
+                                    <?php endif; ?>
+                                    <button type="button" class="btn btn-ghost btn-xs" @click="dl.search = r.company_name; setTab('delivery')">Invoices</button>
+                                </td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                </div>
+            </template>
+        </div>
+    </section>
+
+    <!-- ===========================================================
          REVIEW
          =========================================================== -->
     <section x-show="tab === 'review'">
+        <?php $renderGuide('review'); ?>
         <div class="bc-toolbar">
             <div class="bc-toolbar-left bc-filterchips">
                 <button type="button" class="bc-chip" :class="{ 'is-on': rv.filter === 'flagged' }" @click="rv.filter = 'flagged'">Flagged <b x-text="rv.rows.filter(r => r.worst === 'danger' || r.worst === 'warning').length"></b></button>
@@ -546,9 +754,18 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
             <button class="ff-bulk-btn" @click="markReview('reviewed')" :disabled="rv.working">Mark reviewed</button>
             <button class="ff-bulk-btn" @click="markReview('query')" :disabled="rv.working">Query…</button>
             <button class="ff-bulk-btn" @click="markReview('clear')" :disabled="rv.working">Clear mark</button>
+            <div class="ff-bulk-bar-sep"></div>
+            <button class="ff-bulk-btn" @click="regenerateSelected()" :disabled="rv.working" title="Rebuild the selected DRAFTS from their lease's current data (same invoice numbers)">Regenerate drafts</button>
+            <button class="ff-bulk-btn ff-bulk-btn-delete" @click="voidSelected()" :disabled="rv.working" title="Void the selected invoices (draft or sent) — asks for a reason">Void…</button>
             <button class="ff-bulk-btn ff-bulk-btn-clear" @click="rv.selected = {}" title="Clear selection">×</button>
         </div>
         <?php endif; ?>
+        <div class="alert alert-info" x-show="rv.result" style="margin-bottom:10px;">
+            <span x-text="rv.result ? rv.result.text : ''"></span>
+            <ul style="margin:6px 0 0; padding-left:18px;" x-show="rv.result && rv.result.errors.length">
+                <template x-for="(er, i) in (rv.result ? rv.result.errors : [])" :key="i"><li x-text="er"></li></template>
+            </ul>
+        </div>
         <div class="card">
             <template x-if="rv.loading"><div><template x-for="n in 5" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
             <template x-if="!rv.loading && !rvVisible().length">
@@ -570,7 +787,8 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
                             <tr :class="{ 'bc-row-danger': r.worst === 'danger', 'bc-row-warning': r.worst === 'warning' }">
                                 <?php if ($canEdit): ?><td><input type="checkbox" :checked="!!rv.selected[r.invoice_id]" @change="rv.selected[r.invoice_id] = $event.target.checked" :aria-label="'Select ' + r.invoice_number"></td><?php endif; ?>
                                 <td class="bc-nowrap"><a :href="base + '/invoices/show?id=' + r.invoice_id" target="_blank" x-text="r.invoice_number"></a>
-                                    <div class="bc-sub" x-text="r.status + (r.generation_source ? ' · ' + r.generation_source : '')"></div></td>
+                                    <div class="bc-sub" x-text="r.status + (r.generation_source ? ' · ' + r.generation_source : '')"></div>
+                                    <button type="button" class="btn btn-ghost btn-xs" @click="openPreview(r.invoice_id, r.invoice_number)">Preview</button></td>
                                 <td><div x-text="r.company_name"></div><div class="bc-sub" x-text="r.contract_number + (r.unit_number ? ' · ' + r.unit_number : '')"></div></td>
                                 <td class="bc-nowrap text-sm" x-text="fmtDate(r.period_start) + ' – ' + fmtDate(r.period_end)"></td>
                                 <?php if ($showMoney): ?>
@@ -585,6 +803,11 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
                                     <div class="bc-flags">
                                         <template x-for="(f, idx) in r.flags" :key="idx"><div class="bc-flag" :data-sev="f.severity" x-text="f.text"></div></template>
                                         <span class="bc-sub" x-show="!r.flags.length">No flags</span>
+                                        <?php if ($canEdit): ?>
+                                        <button type="button" class="btn btn-secondary btn-xs" style="align-self:flex-start;"
+                                                x-show="r.status === 'draft' && r.flags.some(f => f.key === 'double_mileage') && cycle.status === 'open'"
+                                                @click="fixDoubleMileage(r)">Fix: remove the overage line</button>
+                                        <?php endif; ?>
                                     </div>
                                 </td>
                                 <td class="bc-nowrap text-sm">
@@ -629,6 +852,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
          DELIVERY
          =========================================================== -->
     <section x-show="tab === 'delivery'">
+        <?php $renderGuide('delivery'); ?>
         <div class="bc-toolbar">
             <div class="bc-toolbar-left bc-filterchips">
                 <button type="button" class="bc-chip" :class="{ 'is-on': dl.filter === '' }" @click="dl.filter = ''">All <b x-text="dl.rows.length"></b></button>
@@ -653,6 +877,11 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
                     x-text="'Mark ' + dlSelected().filter(r => r.state === 'draft').length + ' as sent (no email)'"></button>
             <button class="ff-bulk-btn" x-show="dlSelected().some(r => r.state !== 'draft')" @click="emailAgain()" :disabled="dl.working"
                     x-text="'Email ' + dlSelected().filter(r => r.state !== 'draft').length + ' sent invoice(s)'"></button>
+            <button class="ff-bulk-btn" x-show="dlSelected().some(r => r.state !== 'draft')" @click="markDelivered('manual')" :disabled="dl.working">Mark as mailed</button>
+            <button class="ff-bulk-btn" x-show="dlSelected().some(r => r.state !== 'draft')" @click="markDelivered('portal')" :disabled="dl.working">Mark as on portal</button>
+            <div class="ff-bulk-bar-sep"></div>
+            <button class="ff-bulk-btn" @click="downloadPdfs('pdf')" :disabled="dl.working" title="One PDF with every selected invoice — for printing">Download PDF</button>
+            <button class="ff-bulk-btn" @click="downloadPdfs('zip')" :disabled="dl.working">ZIP</button>
             <button class="ff-bulk-btn ff-bulk-btn-clear" @click="dl.selected = {}" title="Clear selection">×</button>
         </div>
         <?php endif; ?>
@@ -705,6 +934,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
                                     <span class="bc-sub" x-show="!r.last_email">never emailed</span>
                                 </td>
                                 <td class="text-right bc-nowrap">
+                                    <button type="button" class="btn btn-ghost btn-xs" @click="openPreview(r.id, r.invoice_number)">Preview</button>
                                     <a class="btn btn-ghost btn-xs" :href="base + '/api/v1/invoices/pdf?id=' + r.id" target="_blank">PDF</a>
                                 </td>
                             </tr>
@@ -720,6 +950,7 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
          CLOSE
          =========================================================== -->
     <section x-show="tab === 'close'">
+        <?php $renderGuide('close'); ?>
         <template x-if="!cl.data"><div><template x-for="n in 4" :key="n"><div class="skeleton skeleton-row"></div></template></div></template>
         <template x-if="cl.data">
         <div>
@@ -881,6 +1112,114 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
         require FF_ROOT . '/includes/partials/activity-log.php';
         ?>
     </section>
+
+    <!-- ── Invoice preview drawer (Review / Delivery) ──────────── -->
+    <template x-if="preview.id">
+        <div>
+            <div class="bc-drawer-backdrop" @click="preview.id = null"></div>
+            <div class="bc-drawer" @keydown.escape.window="preview.id = null">
+                <div class="bc-drawer-head">
+                    <strong x-text="preview.label"></strong>
+                    <a class="btn btn-secondary btn-xs" :href="base + '/invoices/show?id=' + preview.id" target="_blank">Open full page ↗</a>
+                    <button type="button" class="btn btn-ghost btn-xs" @click="preview.id = null">Close</button>
+                </div>
+                <iframe :src="base + '/invoices/show?id=' + preview.id + '&embed=1'" title="Invoice preview"></iframe>
+            </div>
+        </div>
+    </template>
+
+    <!-- ── Add charge modal ────────────────────────────────────── -->
+    <?php if ($canCreate && $showMoney): ?>
+    <div x-show="chModal.open" x-cloak class="modal-overlay" style="z-index:var(--z-modal);">
+        <div class="modal-backdrop" @click="chModal.open = false"></div>
+        <div class="modal" @click.stop style="max-width:560px;">
+            <div class="modal-header">
+                <h3 class="modal-title">Add a charge</h3>
+                <button type="button" class="modal-close-btn" aria-label="Close" @click="chModal.open = false">×</button>
+            </div>
+            <div class="modal-body">
+                <p class="form-hint" style="margin-top:0;">It is added to the lease's next invoice automatically — once, or on one invoice every month.</p>
+                <div class="form-group">
+                    <label class="form-label">Lease <span class="required">*</span></label>
+                    <template x-if="chModal.open">
+                        <div>
+                            <?php
+                            $pickerName      = 'bc_charge_lease_picker';
+                            $pickerConfig    = [
+                                'endpoint'    => '/api/v1/leases/index.php',
+                                'searchParam' => 'search',
+                                'resultKey'   => 'items',
+                                'perPage'     => 10,
+                                'extraParams' => 'status=active',
+                                'placeholder' => 'Search leases by contract #, customer or unit…',
+                                'mapResult'   => "r => ({ id: r.id, label: r.contract_number + ' — ' + (r.customer_display_name || ''), sublabel: 'Unit ' + (r.unit_display_number || '—') + ' · ' + r.status + ' · ' + (r.currency || ''), raw: r })",
+                            ];
+                            $pickerOnPicked  = 'chModal.lease_id = $event.detail.id';
+                            $pickerOnCleared = 'chModal.lease_id = null';
+                            $pickerError     = 'chModal.errors.lease_id';
+                            require FF_ROOT . '/includes/partials/record-picker.php';
+                            ?>
+                        </div>
+                    </template>
+                    <div class="field-error" x-show="chModal.errors.lease_id" x-text="chModal.errors.lease_id"></div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="bc_ch_desc">Description (prints on the invoice) <span class="required">*</span></label>
+                    <input id="bc_ch_desc" type="text" class="form-control" maxlength="255" x-model="chModal.description" placeholder="e.g. Tire replacement — driver side">
+                    <div class="field-error" x-show="chModal.errors.description" x-text="chModal.errors.description"></div>
+                </div>
+                <div class="bc-grid-2">
+                    <div class="form-group">
+                        <label class="form-label" for="bc_ch_type">Type</label>
+                        <select id="bc_ch_type" class="form-select" x-model="chModal.item_type">
+                            <template x-for="(label, key) in ch.types" :key="key"><option :value="key" x-text="label"></option></template>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" style="display:flex; gap:6px; align-items:center; margin-top:26px;"><input type="checkbox" x-model="chModal.taxable"> Taxable</label>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="bc_ch_qty">Quantity</label>
+                        <input id="bc_ch_qty" type="text" inputmode="decimal" class="form-control" x-model="chModal.quantity">
+                        <div class="field-error" x-show="chModal.errors.quantity" x-text="chModal.errors.quantity"></div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="bc_ch_price">Price each (lease currency) <span class="required">*</span></label>
+                        <input id="bc_ch_price" type="text" inputmode="decimal" class="form-control" x-model="chModal.unit_price" placeholder="0.00">
+                        <div class="field-error" x-show="chModal.errors.unit_price" x-text="chModal.errors.unit_price"></div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">How often</label>
+                    <div style="display:flex; gap:16px; flex-wrap:wrap;">
+                        <label style="display:flex; gap:6px; align-items:center;"><input type="radio" value="once" x-model="chModal.recurrence"> Once — on the next invoice</label>
+                        <label style="display:flex; gap:6px; align-items:center;"><input type="radio" value="monthly" x-model="chModal.recurrence"> Every month</label>
+                    </div>
+                </div>
+                <div class="bc-grid-2">
+                    <div class="form-group">
+                        <label class="form-label" for="bc_ch_from" x-text="chModal.recurrence === 'monthly' ? 'First month (from)' : 'Bill from'"></label>
+                        <input id="bc_ch_from" type="date" class="form-control" x-model="chModal.bill_from">
+                    </div>
+                    <div class="form-group" x-show="chModal.recurrence === 'monthly'">
+                        <label class="form-label" for="bc_ch_until">Last month (optional)</label>
+                        <input id="bc_ch_until" type="date" class="form-control" x-model="chModal.bill_until">
+                        <div class="field-error" x-show="chModal.errors.bill_until" x-text="chModal.errors.bill_until"></div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="bc_ch_notes">Internal note (optional)</label>
+                    <input id="bc_ch_notes" type="text" class="form-control" maxlength="500" x-model="chModal.notes" placeholder="Not shown to the customer">
+                </div>
+                <p class="form-hint" style="margin:0;" x-show="chTotal()" x-text="'Adds ' + chTotal() + ' (before tax)' + (chModal.recurrence === 'monthly' ? ' every month.' : ' once.')"></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" @click="chModal.open = false">Cancel</button>
+                <button type="button" class="btn btn-primary btn-sm" :disabled="chModal.saving" @click="saveCharge()" x-text="chModal.saving ? 'Saving…' : 'Add charge'"></button>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 </div>
 
 <style>
@@ -895,7 +1234,8 @@ $nextCycle = db_row("SELECT id, reference FROM billing_cycles WHERE period_start
 function FF_BillingCycle(cfg) {
     const base = <?= json_encode(rtrim(base_url(''), '/')) ?>;
     const api  = base + '/api/v1';
-    const TABS = ['overview', 'readiness', 'readings', 'leases', 'review', 'delivery', 'close', 'activity'];
+    const TABS = ['overview', 'readiness', 'readings', 'charges', 'leases', 'customers', 'review', 'delivery', 'close', 'activity'];
+    const GUIDE_KEY = 'ff_billing_guide_hidden';
     return {
         base, cfg,
         tab: 'overview',
@@ -906,9 +1246,14 @@ function FF_BillingCycle(cfg) {
         ready: { loading: false, loaded: false, checks: [], summary: null, checked_at: null, open: {}, showPassed: false },
         rd: { loading: false, loaded: false, rows: [], edit: {}, orig: {}, errors: {}, filter: 'needed', search: '', saving: false },
         leases: { loading: false, loaded: false, rows: [], counts: {}, filter: '', search: '' },
-        rv: { loading: false, loaded: false, rows: [], missing: [], flag_counts: {}, filter: 'flagged', search: '', selected: {}, working: false },
+        rv: { loading: false, loaded: false, rows: [], missing: [], flag_counts: {}, filter: 'flagged', search: '', selected: {}, working: false, result: null },
         dl: { loading: false, loaded: false, rows: [], counts: {}, filter: '', search: '', selected: {}, overrides: {}, attachPdf: true, working: false, result: null },
         cl: { loaded: false, data: null, note: '', override: false, working: false, view: 'snapshot' },
+        ch: { loading: false, loaded: false, rows: [], state: 'pending', types: {} },
+        chModal: { open: false, saving: false, errors: {}, lease_id: null, description: '', item_type: 'other', quantity: '1', unit_price: '', taxable: true, recurrence: 'once', bill_from: '', bill_until: '', notes: '' },
+        cu: { loading: false, loaded: false, rows: [], filter: '', search: '', attachPdf: true, working: null, result: '' },
+        preview: { id: null, label: '' },
+        guideHidden: (() => { try { return JSON.parse(localStorage.getItem(GUIDE_KEY) || '{}') || {}; } catch (e) { return {}; } })(),
 
         coverageStates: [
             { key: 'billed',            label: 'Billed',               tone: 'bc-tone-success' },
@@ -927,6 +1272,8 @@ function FF_BillingCycle(cfg) {
             { key: 'email_failed', label: 'Email failed',         tone: 'bc-tone-danger' },
             { key: 'bounced',      label: 'Email bounced',        tone: 'bc-tone-danger' },
             { key: 'print',        label: 'Print & mail',         tone: 'bc-tone-info' },
+            { key: 'mailed',       label: 'Mailed / handed over', tone: 'bc-tone-success' },
+            { key: 'on_portal',    label: 'On the portal',        tone: 'bc-tone-success' },
             { key: 'portal',       label: 'Portal / no delivery', tone: 'bc-tone-muted' },
         ],
 
@@ -937,7 +1284,9 @@ function FF_BillingCycle(cfg) {
                 { key: 'overview',  label: 'Overview' },
                 { key: 'readiness', label: 'Readiness', badge: rs ? (rs.blocker || rs.warning || '') : '', tone: rs && rs.blocker ? 'badge-danger' : 'badge-warning' },
                 { key: 'readings',  label: 'Readings',  badge: this.ov && this.ov.readings.missing ? this.ov.readings.missing : '', tone: 'badge-warning' },
+                { key: 'charges',   label: 'Charges' },
                 { key: 'leases',    label: 'Leases',    badge: this.toBillCount() || '', tone: 'badge-primary' },
+                { key: 'customers', label: 'Customers' },
                 { key: 'review',    label: 'Review',    badge: s ? (s.unreviewed_drafts || '') : '', tone: 'badge-neutral' },
                 { key: 'delivery',  label: 'Delivery',  badge: s ? (s.drafts || '') : '', tone: 'badge-warning' },
                 { key: 'close',     label: this.cycle.status === 'closed' ? 'Summary' : 'Close' },
@@ -964,6 +1313,106 @@ function FF_BillingCycle(cfg) {
             if (this.tab === 'review' && !this.rv.loaded) this.loadReview();
             if (this.tab === 'delivery' && !this.dl.loaded) this.loadDelivery();
             if (this.tab === 'close' && !this.cl.loaded) this.loadClose();
+            if (this.tab === 'charges' && !this.ch.loaded) this.loadCharges();
+            if (this.tab === 'customers' && !this.cu.loaded) this.loadCustomers();
+        },
+
+        // ── guides + sign-offs ──
+        guideOpen(t) { return !this.guideHidden[t]; },
+        toggleGuide(t) {
+            this.guideHidden = { ...this.guideHidden, [t]: !this.guideHidden[t] };
+            try { localStorage.setItem(GUIDE_KEY, JSON.stringify(this.guideHidden)); } catch (e) { /* convenience only */ }
+        },
+        signoffFor(step) { return (this.cycle.step_signoffs && this.cycle.step_signoffs[step]) || null; },
+        async signoff(step, on) {
+            let note = '';
+            if (on) {
+                note = await FF_Confirm.askText({ title: 'Sign off this step', message: 'Records that you finished it. Add a note (optional).', confirmLabel: 'Sign off', placeholder: 'e.g. All readings entered from the yard sheet' });
+                if (note === null) return;
+            }
+            const r = await FF_Api.post(api + '/billing/cycles/signoff', { id: this.cycle.id, step, signed: on, note });
+            if (r.success) { this.cycle.step_signoffs = r.data.step_signoffs; this.loadOverview(); }
+            else FF_Toast.error(r.error?.message || 'Could not update the sign-off.');
+        },
+
+        // ── preview drawer ──
+        openPreview(id, label) { this.preview = { id, label: label || ('Invoice #' + id) }; },
+        moneyMap(m) {
+            if (!m) return '—';
+            const parts = Object.entries(m).map(([cur, v]) => this.money(v, cur));
+            return parts.length ? parts.join(' + ') : '—';
+        },
+
+        // ── charges ──
+        async loadCharges() {
+            this.ch.loading = true;
+            const r = await FF_Api.get(api + '/billing/charges/index?month=' + this.cycle.month + '&state=' + this.ch.state);
+            this.ch.loading = false;
+            if (!r.success) { FF_Toast.error(r.error?.message || 'Could not load charges.'); return; }
+            Object.assign(this.ch, { loaded: true, rows: r.data.charges, types: r.data.item_types });
+        },
+        openChargeModal() {
+            if (!Object.keys(this.ch.types).length) this.loadCharges();
+            const firstOfMonth = this.cycle.month + '-01';
+            this.chModal = { open: true, saving: false, errors: {}, lease_id: null, description: '', item_type: 'other', quantity: '1', unit_price: '', taxable: true, recurrence: 'once', bill_from: firstOfMonth, bill_until: '', notes: '' };
+        },
+        chTotal() {
+            const q = parseFloat(this.chModal.quantity), p = parseFloat(this.chModal.unit_price);
+            return (q > 0 && p > 0) ? this.money((Math.round(q * p * 100) / 100).toFixed(2)) : '';
+        },
+        async saveCharge() {
+            const m = this.chModal;
+            m.saving = true; m.errors = {};
+            const r = await FF_Api.post(api + '/billing/charges/create', {
+                lease_id: m.lease_id, description: m.description, item_type: m.item_type, quantity: m.quantity, unit_price: m.unit_price,
+                taxable: m.taxable, recurrence: m.recurrence, bill_from: m.bill_from, bill_until: m.recurrence === 'monthly' ? m.bill_until : '', notes: m.notes,
+            });
+            m.saving = false;
+            if (r.success) { m.open = false; FF_Toast.success('Charge added — it will be on the lease\'s next invoice.'); this.ch.state = 'pending'; this.loadCharges(); }
+            else { m.errors = r.error?.fields || {}; if (!r.error?.fields) FF_Toast.error(r.error?.message || 'Could not add the charge.'); }
+        },
+        async cancelCharge(c) {
+            const reason = await FF_Confirm.askText({ title: 'Cancel this charge', message: 'It will not be billed again. Invoices that already carry it are not changed.', confirmLabel: 'Cancel charge', placeholder: 'Why?' });
+            if (reason === null) return;
+            const r = await FF_Api.post(api + '/billing/charges/cancel', { id: c.id, reason });
+            if (r.success) { FF_Toast.success('Charge cancelled.'); this.loadCharges(); }
+            else FF_Toast.error(r.error?.message || 'Could not cancel.');
+        },
+
+        // ── customers ──
+        cuVisible() {
+            const q = this.cu.search.trim().toLowerCase();
+            return this.cu.rows.filter(r => {
+                if (this.cu.filter === 'ready' && !(r.drafts > 0 && r.leases_to_bill === 0)) return false;
+                if (this.cu.filter === 'tobill' && !(r.leases_to_bill > 0)) return false;
+                if (this.cu.filter === 'notemailed' && !(r.sent > r.emailed)) return false;
+                return !q || r.company_name.toLowerCase().includes(q);
+            });
+        },
+        async loadCustomers() {
+            this.cu.loading = true;
+            const r = await FF_Api.get(api + '/billing/cycles/customers?id=' + this.cycle.id);
+            this.cu.loading = false;
+            if (!r.success) { FF_Toast.error(r.error?.message || 'Could not load customers.'); return; }
+            Object.assign(this.cu, { loaded: true, rows: r.data.rows });
+        },
+        async sendCustomer(row) {
+            const msg = row.drafts
+                ? 'Send ' + row.company_name + '\'s ' + row.drafts + ' draft(s) and email all ' + row.invoices + ' of their ' + this.cycle.label + ' invoices in ONE email to ' + (row.recipient || 'their email') + '? Sending makes the drafts real (balance, ledger, QuickBooks).'
+                : 'Email ' + row.company_name + '\'s ' + row.invoices + ' ' + this.cycle.label + ' invoice(s) again, together in one email, to ' + (row.recipient || 'their email') + '?';
+            if (row.leases_to_bill > 0 && row.drafts) {
+                if (!await FF_Confirm.ask(row.leases_to_bill + ' of their leases are not billed yet — send what is ready anyway?')) return;
+            }
+            if (!await FF_Confirm.ask(msg)) return;
+            this.cu.working = row.customer_id;
+            const r = await FF_Api.post(api + '/billing/cycles/send_customer', { id: this.cycle.id, customer_id: row.customer_id, send_drafts: true, attach_pdf: this.cu.attachPdf });
+            this.cu.working = null;
+            if (!r.success) { FF_Toast.error(r.error?.message || 'Could not send.'); return; }
+            const d = r.data;
+            this.cu.result = row.company_name + ': ' + d.sent + ' sent' + (d.emailed ? ', ' + d.count + ' emailed together to ' + d.to : ', not emailed — ' + (d.email_error || '')) + (d.send_errors.length ? '. Problems: ' + d.send_errors.map(e => e.reason).join('; ') : '.');
+            d.emailed ? FF_Toast.success('Sent.') : FF_Toast.error('Not emailed: ' + (d.email_error || ''));
+            this.cu.loaded = false; this.dl.loaded = false; this.rv.loaded = false;
+            this.loadCustomers(); this.loadOverview();
         },
         stepTab(key) {
             return { prepare: 'readiness', readings: 'readings', generate: 'leases', review: 'review', approve: 'review', send: 'delivery', close: 'close' }[key] || 'overview';
@@ -974,7 +1423,7 @@ function FF_BillingCycle(cfg) {
         },
         refreshAll() {
             this.loadOverview();
-            ['ready', 'rd', 'leases', 'rv', 'dl', 'cl'].forEach(k => this[k].loaded = false);
+            ['ready', 'rd', 'leases', 'rv', 'dl', 'cl', 'ch', 'cu'].forEach(k => this[k].loaded = false);
             this.loadTab();
         },
 
@@ -993,7 +1442,8 @@ function FF_BillingCycle(cfg) {
         flagLabel(k) {
             return { duplicate_period: 'Double billing', double_mileage: 'Double mileage', held: 'Billed while held', swing: 'Big change',
                      zero_total: '$0 invoice', no_tax: 'No tax', usd_no_rate: 'USD, no rate', no_recipient: 'No recipient',
-                     credit_line: 'Credit line', usage_true_up: 'Usage true-up', first_invoice: 'First invoice', several: 'Several invoices' }[k] || k;
+                     credit_line: 'Credit line', usage_true_up: 'Usage true-up', first_invoice: 'First invoice', several: 'Several invoices',
+                     charges: 'Has charges' }[k] || k;
         },
 
         // ── overview ──
@@ -1240,6 +1690,78 @@ function FF_BillingCycle(cfg) {
             this.dl.result = { text: emailed + ' emailed' + (errors.length ? ', ' + errors.length + ' problem(s):' : '.'), errors };
             this.dl.selected = {};
             this.dl.loaded = false; this.loadDelivery(); this.loadOverview();
+        },
+
+        async fixDoubleMileage(r) {
+            if (!await FF_Confirm.ask('Remove the Mileage overage line from ' + r.invoice_number + '? The Mileage usage line (odometer-exact) stays and the totals are recomputed.')) return;
+            const res = await FF_Api.post(api + '/billing/fixes/double_mileage', { invoice_id: r.invoice_id });
+            if (res.success) { FF_Toast.success('Fixed: ' + this.money(res.data.old_total) + ' → ' + this.money(res.data.new_total)); this.rv.loaded = false; this.loadReview(); this.loadOverview(); }
+            else FF_Toast.error(res.error?.message || 'Could not fix.');
+        },
+        async regenerateSelected() {
+            const rows = this.rv.rows.filter(r => this.rv.selected[r.invoice_id]);
+            const drafts = rows.filter(r => r.status === 'draft');
+            if (!drafts.length) { FF_Toast.error('Only drafts can be regenerated — none selected.'); return; }
+            if (!await FF_Confirm.ask('Regenerate ' + drafts.length + ' draft(s) from their lease\'s current data? Each keeps its invoice number; totals may change. Precharge and advance-billed drafts are refused.')) return;
+            this.rv.working = true;
+            let ok = 0; const errors = [];
+            for (const r of drafts) {
+                const res = await FF_Api.post(api + '/invoices/regenerate', { id: r.invoice_id }, { quiet: true });
+                if (res.success) ok++; else errors.push(r.invoice_number + ': ' + (res.error?.message || 'failed'));
+            }
+            this.rv.working = false;
+            this.rv.result = { text: ok + ' regenerated' + (errors.length ? ', ' + errors.length + ' not:' : '.'), errors };
+            this.rv.selected = {};
+            this.refreshAll();
+        },
+        async voidSelected() {
+            const ids = this.rvSelected();
+            if (!ids.length) return;
+            const reason = await FF_Confirm.askText({ title: 'Void ' + ids.length + ' invoice(s)', message: 'Voiding reverses a sent invoice\'s balance and revenue and makes the month billable again. Paid or partly paid invoices are refused. Reason (required):', confirmLabel: 'Void', placeholder: 'e.g. Billed at the wrong rate' });
+            if (!reason) return;
+            this.rv.working = true;
+            const res = await this.inChunks(ids, chunk => FF_Api.post(api + '/invoices/bulk_void', { ids: chunk, void_reason: reason }));
+            this.rv.working = false;
+            let n = 0; const errors = [];
+            res.forEach(r => { if (!r.success) { errors.push(r.error?.message || 'failed'); return; } n += (r.data.actioned || 0); (r.data.errors || []).forEach(e => errors.push('#' + e.id + ': ' + e.reason)); });
+            this.rv.result = { text: n + ' voided' + (errors.length ? ', ' + errors.length + ' not:' : '.'), errors };
+            this.rv.selected = {};
+            this.refreshAll();
+        },
+        async markDelivered(method) {
+            const ids = this.dlSelected().filter(r => r.state !== 'draft').map(r => r.id);
+            if (!ids.length) return;
+            const note = await FF_Confirm.askText({ title: method === 'manual' ? 'Mark as mailed / handed over' : 'Mark as on the portal', message: ids.length + ' invoice(s). Add a note (optional).', confirmLabel: 'Mark', placeholder: method === 'manual' ? 'e.g. Posted Sep 30' : '' });
+            if (note === null) return;
+            this.dl.working = true;
+            const r = await FF_Api.post(api + '/billing/mark_delivered', { ids, method, note });
+            this.dl.working = false;
+            if (r.success) { FF_Toast.success(r.data.updated + ' marked.'); this.dl.selected = {}; this.dl.loaded = false; this.loadDelivery(); }
+            else FF_Toast.error(r.error?.message || 'Could not mark.');
+        },
+        async downloadPdfs(format) {
+            const ids = this.dlSelected().map(r => r.id);
+            if (!ids.length) return;
+            if (ids.length > 100) { FF_Toast.error('At most 100 at a time — select fewer.'); return; }
+            this.dl.working = true;
+            try {
+                const res = await fetch(api + '/invoices/batch_download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content },
+                    body: JSON.stringify({ ids, format }),
+                });
+                const ctype = res.headers.get('content-type') || '';
+                if (!res.ok || ctype.includes('application/json')) {
+                    let m = 'Download failed.'; try { const j = await res.json(); m = j.error?.message || m; } catch (e) {}
+                    FF_Toast.error(m); return;
+                }
+                const url = URL.createObjectURL(await res.blob());
+                const a = document.createElement('a');
+                a.href = url; a.download = 'invoices-' + this.cycle.month + (format === 'zip' ? '.zip' : '.pdf');
+                document.body.appendChild(a); a.click(); a.remove();
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+            } catch (e) { FF_Toast.error('Network error during download.'); }
+            finally { this.dl.working = false; }
         },
 
         // ── close ──

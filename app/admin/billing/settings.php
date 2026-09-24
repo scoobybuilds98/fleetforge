@@ -94,6 +94,14 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
                 <p class="form-hint" style="margin-top:-6px;">Counted from the day the month can be billed. The owner is reminded weekly while a cycle is past its send-by date with drafts unsent.</p>
                 <div class="form-group">
+                    <label class="form-label" for="bs_due">Payment terms run from</label>
+                    <select id="bs_due" class="form-select" x-model="s['billing_cycle.due_date_basis']" :disabled="!canEdit">
+                        <option value="send_date">The day the invoice is sent (recommended)</option>
+                        <option value="invoice_date">The invoice date (the first day of the month billed)</option>
+                    </select>
+                    <p class="form-hint">An invoice is dated the first day of the month it bills. Billed in arrears, "invoice date + 30 days" is due about the day it is sent — overdue straight away. With <em>the day it is sent</em>, sending moves the due date to send date + the customer's terms whenever that is later. The invoice date (and the month its revenue belongs to) never changes.</p>
+                </div>
+                <div class="form-group">
                     <label class="form-label" for="bs_owner">Default owner of new cycles</label>
                     <select id="bs_owner" class="form-select" x-model="s['billing_cycle.owner_user_id']" :disabled="!canEdit">
                         <option value="">Everyone who can see invoices</option>
@@ -189,7 +197,7 @@ require_once FF_ROOT . '/includes/header.php';
             <div class="card-body">
                 <p class="form-hint" style="margin-top:0;">Kept in their own modules so there is only one place to change each.</p>
                 <ul class="bc-check-list">
-                    <li><a href="<?= base_url('settings') ?>?tab=intelligence">Scheduled Jobs</a><span class="bc-muted">— turn "Open billing cycles", "Monthly invoice generation" (ships off), overdue marking and late fees on or off.</span></li>
+                    <li><a href="<?= base_url('settings') ?>?tab=intelligence">Scheduled Jobs</a><span class="bc-muted">— turn "Open billing cycles", overdue marking and late fees on or off. "Monthly invoice generation" (ships off) generates each lease's month automatically; it now follows this page's arrears/advance choice, skips held leases, closed cycles and months already billed, and sends failures to Exceptions.</span></li>
                     <li><a href="<?= base_url('settings') ?>?tab=general">General → Invoices &amp; Billing</a><span class="bc-muted">— invoice number prefix, default payment terms, advance billing limit, USD markup.</span></li>
                     <li><a href="<?= base_url('settings/late_fees') ?>">Late Fees</a><span class="bc-muted">— the global late-fee rule and per-customer overrides.</span></li>
                     <li><a href="<?= base_url('settings') ?>?tab=customer_notifications">Customer Emails</a><span class="bc-muted">— due-soon, overdue, receipt and statement reminders.</span></li>

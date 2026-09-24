@@ -205,8 +205,11 @@ db_transaction(function () use ($id, $odoCapture, &$result) {
 
     $nextBillingDate = null;
     if ($lease['billing_cycle'] === 'monthly' && !$isAdvancePath) {
-        $startTs         = strtotime($lease['start_date']);
-        $nextBillingDate = date('Y-m-01', strtotime('+1 month', $startTs));
+        // KNOWN ISSUE #111 (S-BILLING-MODULE-2): step from the FIRST of the
+        // start month. strtotime('+1 month') on the 29th–31st overflows
+        // (2026-01-31 → 2026-03-03 → '2026-03-01'), skipping February.
+        $startMonth      = date('Y-m-01', strtotime($lease['start_date']));
+        $nextBillingDate = date('Y-m-01', strtotime($startMonth . ' +1 month'));
     }
 
     // Update lease — set odometer fields when capture succeeded; leave

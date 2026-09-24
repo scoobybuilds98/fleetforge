@@ -121,7 +121,8 @@ db_transaction(function () use ($id, $reopenReason, &$result) {
     // show page displayed the OLD close's readings and the next close's
     // "reading below start" guard compared against ghosts.
     // (billing_days_removed is safe — always overwritten at re-close.)
-    $nextBillingDate = date('Y-m-d', strtotime('first day of next month'));
+    // Company-local "today" (not the server clock) — S-BILLING-MODULE-2.
+    $nextBillingDate = date('Y-m-01', strtotime(substr(ff_today(), 0, 7) . '-01 +1 month'));
     db_execute(
         "UPDATE leases
          SET status = 'active',

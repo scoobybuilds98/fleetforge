@@ -13,6 +13,8 @@ declare(strict_types=1);
  *   bounced       customer email is switched off after a bounce/complaint
  *   print         customer is billed by mail — print and post
  *   portal        customer is billed through the portal only
+ *   mailed        recorded as printed + mailed / handed over (mark_delivered)
+ *   on_portal     recorded as left on the customer portal (mark_delivered)
  *   not_emailed   sent (status) but never emailed
  * The email facts come from email_logs (every InvoiceDelivery / compose
  * attempt is logged against entity_type 'invoice').
@@ -39,7 +41,7 @@ $showMoney = can_view_financials();
 
 $rows = db_select(
     "SELECT i.id, i.invoice_number, i.status, i.total_amount, i.balance_due, i.currency,
-            i.sent_at, i.sent_to_email, i.pdf_generated_at, i.due_date,
+            i.sent_at, i.sent_to_email, i.pdf_generated_at, i.due_date, i.delivery_method,
             COALESCE(c.company_name, i.company_name_snapshot) AS company_name, i.customer_id,
             COALESCE(i.contract_number_snapshot, l.contract_number) AS contract_number,
             c.invoice_delivery, c.invoice_email, c.billing_email, c.email AS customer_email, c.email_disabled
@@ -67,6 +69,10 @@ foreach ($rows as $r) {
         $state = 'emailed';
     } elseif ($last && $last['status'] === 'failed') {
         $state = 'email_failed';
+    } elseif ($r['delivery_method'] === 'manual') {
+        $state = 'mailed';     // recorded as printed + mailed / handed over
+    } elseif ($r['delivery_method'] === 'portal') {
+        $state = 'on_portal';  // recorded as left on the customer portal
     } elseif ((int) $r['email_disabled'] === 1 && $pref === 'email') {
         $state = 'bounced';
     } elseif ($pref === 'mail') {
@@ -95,6 +101,7 @@ foreach ($rows as $r) {
         'delivery_pref'  => $pref,
         'email_disabled' => (int) $r['email_disabled'] === 1,
         'has_pdf'        => $r['pdf_generated_at'] !== null,
+        'delivery_method'=> $r['delivery_method'],
         'last_email'     => $last,
         'state'          => $state,
     ];

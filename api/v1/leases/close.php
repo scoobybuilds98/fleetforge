@@ -1058,10 +1058,16 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         && (($lease['precharge_invoiced_at'] ?? null) !== null
             || (int) ($lease['precharge_enabled'] ?? 0) === 0)
     );
+    // S-BILLING-MODULE-2 (found tracing KNOWN ISSUE #114): an ESTIMATE-model
+    // lease closed with an actual mileage bills its true-up through
+    // $cumulativeActualKmOverride (set above), so it is not "$0 mileage" —
+    // the warning fired falsely on every such close.
+    $estimateTrueUpWillBill = $usesEstimateMileage && $cumulativeActualKmOverride !== null;
     if (($lease['mileage_tracking_mode'] ?? 'off') === 'manual'
         && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0
         && !$hasMileageLine
         && !$modernMileageWillBill
+        && !$estimateTrueUpWillBill
     ) {
         // S-MILEAGE-UNITS: label the rate in the lease's unit ($/mile for a miles lease).
         $warnDisp = ff_mileage_line_display($lease, '0', (string) ($lease['mileage_rate_km'] ?? '0'));

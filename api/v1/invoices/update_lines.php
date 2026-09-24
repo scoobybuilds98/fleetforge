@@ -163,6 +163,7 @@ foreach ($rawLines as $i => $ln) {
     if ($unitPrice === null) { $unitPrice = $amount ?? '0.00'; }
 
     $clean[] = [
+        'line_id'    => clean_int($ln['line_id'] ?? null) ?: null,
         'item_type'  => $type ?: 'manual_adjustment',
         'description'=> $desc ?? '',
         'quantity'   => $qty,
@@ -246,9 +247,25 @@ $result = db_transaction(function () use ($id, $invoice, $clean) {
     }
     $oldTotal = ['total_amount' => $locked['total_amount']];
 
+    // S-BILLING-MODULE-2: a queued billing charge is "billed" by the live
+    // line that references it. Keep that reference (and the line's period)
+    // on every line the editor sends back with its original line_id — so
+    // editing a draft never re-queues (and double-bills) a charge. A charge
+    // line REMOVED here goes back in the queue for the next invoice; cancel
+    // the charge in Billing to drop it for good.
+    $keep = [];
+    foreach (db_select(
+        "SELECT id, reference_type, reference_id, period_start, period_end
+           FROM invoice_line_items WHERE invoice_id = ?",
+        [$id]
+    ) as $old) {
+        $keep[(int) $old['id']] = $old;
+    }
+
     db_execute("DELETE FROM invoice_line_items WHERE invoice_id = ?", [$id]);
 
     foreach ($clean as $ln) {
+        $prev = ($ln['line_id'] && isset($keep[$ln['line_id']])) ? $keep[$ln['line_id']] : null;
         db_insert('invoice_line_items', [
             'invoice_id' => $id,
             'sort_order' => $ln['sort_order'],
@@ -260,6 +277,10 @@ $result = db_transaction(function () use ($id, $invoice, $clean) {
             'amount'     => $ln['amount'],
             'is_credit'  => $ln['is_credit'],
             'taxable'    => $ln['taxable'],
+            'period_start'   => $prev['period_start'] ?? null,
+            'period_end'     => $prev['period_end'] ?? null,
+            'reference_type' => $prev['reference_type'] ?? null,
+            'reference_id'   => $prev['reference_id'] ?? null,
         ]);
     }
 

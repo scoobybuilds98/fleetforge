@@ -70,7 +70,9 @@ From the lease → **Generate Invoice**:
 - **Copy pay link** on the invoice page copies the same link, to text or paste into a chat.
 
 :::callout warning Billing rules
-- Invoice date = period start; due = invoice date + the customer's Payment Terms (30 days when blank).
+- Invoice date = period start; due = invoice date + the customer's Payment Terms (30 days when blank). When the invoice is **sent**, the due date moves to send date + terms if that is later (Billing › Settings › "Payment terms run from" — default: the day it is sent), so an arrears or backlog invoice is never overdue the day it goes out.
+- **Extra charges** (damage, a wash, yard parking…): add them on the cycle's **Charges** tab — once, or every month. They ride on the lease's next invoice however it is created; voiding or regenerating the draft puts them back in the queue.
+- **One email per customer:** the cycle's **Customers** tab → **Send month** sends that customer's drafts and emails all their invoices for the month together.
 - Billing a month before it ends bills the whole month ahead.
 - Drafts count for nothing in reports or receivables.
 - A precharge can be billed on one invoice only.

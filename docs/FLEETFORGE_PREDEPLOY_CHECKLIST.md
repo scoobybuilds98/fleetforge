@@ -616,6 +616,19 @@ ITEM E-BILLING-MODULE | 2026-09-24 | E — Data migrations | Deploy Monthly Bill
   Owner: Operator (deploy + crontab) + Code Desktop (shipped)
   Status: PENDING (deploy)
 
+ITEM E-BILLING-MODULE-2 | 2026-09-24 | E — Data migrations | Monthly Billing round 2: migration 202609250200
+  Originating session: S-BILLING-MODULE-2
+  Surfaced into checklist: S-BILLING-MODULE-2
+  Detail: 202609250200_S-BILLING-MODULE-2_charges_signoffs.sql — NEW billing_charges table,
+    billing_cycles.step_signoffs (JSON), invoice_billing_exceptions.source += 'cron', setting
+    billing_cycle.due_date_basis = 'send_date', email template 'invoice_bundle' (INSERT IGNORE).
+    BEHAVIOUR CHANGE: with due_date_basis = send_date, sending an invoice moves its due date to
+    send date + terms when later (audited). No new permission, no crontab change.
+  Action: Deploy main with E-BILLING-MODULE (same deploy runs both migrations). Verify
+    `php bin/migrate.php --status` → pending 0; Billing → Settings shows "Payment terms run from".
+  Owner: Operator (deploy) + Code Desktop (shipped)
+  Status: PENDING (deploy)
+
 ITEM E1 | 2026-05-16 | E — Data | Seed Standard 2025 rate cards on prod
   Originating session: 2026-05-16 Lightsail deployment
   Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS

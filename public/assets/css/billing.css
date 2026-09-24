@@ -23,6 +23,8 @@
     grid-template-columns: repeat(7, minmax(0, 1fr));
     gap: 6px;
     margin: 0 0 16px;
+    container-type: inline-size;
+    container-name: bcstepper;
 }
 .bc-step {
     position: relative;
@@ -51,7 +53,12 @@
     color: var(--text-secondary);
     background: var(--bg-surface-2);
 }
-.bc-step-label { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Labels NEVER truncate (operator: "Prepa…", "Readi…" was cropped): they
+   wrap, and when the stepper itself is narrow (container query below) the
+   dot stacks above the label so each word has the step's full width. */
+.bc-step-label { font-size: 13px; font-weight: 600; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.bc-step-top > * { min-width: 0; }
+.bc-step-sign { font-size: 11px; color: var(--color-success); font-weight: 600; line-height: 1.25; }
 .bc-step-hint { font-size: 11.5px; color: var(--text-secondary); line-height: 1.3; min-height: 2.6em; }
 .bc-step[data-state="done"] .bc-step-dot { background: var(--color-success); border-color: var(--color-success); color: var(--bg-surface); }
 .bc-step[data-state="skipped"] { opacity: .62; }
@@ -60,10 +67,18 @@
 .bc-step[data-state="current"] .bc-step-dot { background: var(--color-primary); border-color: var(--color-primary); color: var(--bg-surface); }
 .bc-step.is-attention .bc-step-hint { color: var(--color-warning); font-weight: 600; }
 .bc-step.is-active { background: color-mix(in srgb, var(--color-primary) 8%, var(--bg-surface)); }
-@media (max-width: 1100px) {
+/* Narrow stepper (the home card, a half-width column, a small laptop):
+   stack the dot over the label and tighten the padding. */
+@container bcstepper (max-width: 1000px) {
+    .bc-step { padding: 8px 9px; }
+    .bc-step-top { flex-direction: column; align-items: flex-start; gap: 5px; }
+    .bc-step-label { font-size: 12.5px; }
+    .bc-step-hint { font-size: 11px; min-height: 0; }
+}
+@media (max-width: 760px) {
     .bc-stepper { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
-@media (max-width: 640px) {
+@media (max-width: 480px) {
     .bc-stepper { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
@@ -90,12 +105,10 @@
 .bc-spotlight-title { font-size: 22px; font-weight: 700; margin: 2px 0 6px; color: var(--text-primary); }
 .bc-spotlight-meta { font-size: 13px; color: var(--text-secondary); display: flex; flex-wrap: wrap; gap: 4px 14px; }
 .bc-spotlight-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-.bc-spotlight .bc-stepper { margin: 0; grid-template-columns: repeat(7, minmax(0, 1fr)); }
-.bc-spotlight .bc-step { padding: 8px; cursor: default; }
-/* Seven steps in half a card: stack the dot over the label and let it wrap. */
-.bc-spotlight .bc-step-top { flex-direction: column; align-items: flex-start; gap: 4px; }
-.bc-spotlight .bc-step-label { white-space: normal; font-size: 12px; line-height: 1.2; }
-.bc-spotlight .bc-step-hint { min-height: 0; font-size: 11px; }
+.bc-spotlight .bc-stepper { margin: 0; }
+.bc-spotlight .bc-step { cursor: default; }
+.bc-spotlight-now { margin-top: 10px; font-size: 13.5px; color: var(--text-primary); }
+.bc-spotlight-now strong { color: var(--color-primary); }
 @media (max-width: 1100px) {
     .bc-spotlight { grid-template-columns: 1fr; }
 }
@@ -230,3 +243,57 @@
 .bc-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; justify-content: space-between; margin-bottom: 10px; }
 .bc-toolbar-left, .bc-toolbar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .bc-empty { padding: 28px 16px; text-align: center; color: var(--text-secondary); font-size: 13.5px; }
+
+/* ── Guide panels ("what is this step / what do I do") ───────── */
+.bc-guide {
+    border: 1px solid color-mix(in srgb, var(--color-info) 30%, var(--border-color));
+    background: color-mix(in srgb, var(--color-info) 6%, var(--bg-surface));
+    border-radius: var(--radius-lg, 10px);
+    margin: 0 0 14px;
+}
+.bc-guide-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; }
+.bc-guide-head h3 { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-primary); flex: 1; }
+.bc-guide-ic { width: 22px; height: 22px; border-radius: 99px; display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px; color: var(--bg-surface); background: var(--color-info); flex: none; }
+.bc-guide-body { padding: 0 14px 12px 46px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.bc-guide-body h4 { margin: 0 0 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-tertiary); }
+.bc-guide-body p, .bc-guide-body li { font-size: 13px; line-height: 1.5; color: var(--text-secondary); margin: 0; }
+.bc-guide-body ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
+.bc-guide-foot { padding: 0 14px 12px 46px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12.5px; color: var(--text-secondary); }
+@media (max-width: 900px) { .bc-guide-body { grid-template-columns: 1fr; padding-left: 14px; } .bc-guide-foot { padding-left: 14px; } }
+
+/* ── How-it-works flow (home) ─────────────────────────────────── */
+.bc-flow { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; container-type: inline-size; }
+.bc-flow-step { position: relative; padding: 12px 10px; border-radius: var(--radius-lg, 10px); background: var(--bg-surface);
+    border: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.bc-flow-step::after { content: '→'; position: absolute; right: -8px; top: 18px; color: var(--text-tertiary); font-size: 12px; }
+.bc-flow-step:last-child::after { content: ''; }
+.bc-flow-num { width: 24px; height: 24px; border-radius: 99px; display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px; color: var(--bg-surface); background: var(--color-primary); }
+.bc-flow-title { font-weight: 700; font-size: 13px; color: var(--text-primary); }
+.bc-flow-text { font-size: 12px; line-height: 1.45; color: var(--text-secondary); }
+@media (max-width: 1100px) { .bc-flow { grid-template-columns: repeat(4, minmax(0, 1fr)); } .bc-flow-step::after { content: ''; } }
+@media (max-width: 600px) { .bc-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.bc-rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.bc-rule { font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); padding: 10px 12px; border-radius: 8px;
+    background: color-mix(in srgb, var(--text-primary) 4%, transparent); }
+.bc-rule strong { color: var(--text-primary); display: block; margin-bottom: 2px; font-size: 13px; }
+@media (max-width: 900px) { .bc-rules { grid-template-columns: 1fr; } }
+.bc-glossary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 20px; margin-top: 12px; }
+.bc-glossary div { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+.bc-glossary b { color: var(--text-primary); }
+@media (max-width: 900px) { .bc-glossary { grid-template-columns: 1fr; } }
+
+/* ── Preview drawer (Review / Delivery) ───────────────────────── */
+.bc-drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: var(--z-modal, 1000); }
+.bc-drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 96vw); z-index: calc(var(--z-modal, 1000) + 1);
+    background: var(--bg-surface); border-left: 1px solid var(--border-color-strong); box-shadow: var(--shadow-lg);
+    display: flex; flex-direction: column; }
+.bc-drawer-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border-color); }
+.bc-drawer-head strong { flex: 1; font-size: 14px; color: var(--text-primary); }
+.bc-drawer iframe { flex: 1; width: 100%; border: 0; background: var(--bg-surface); }
+
+/* ── Charge / customer tables ─────────────────────────────────── */
+.bc-amount { font-family: var(--font-mono); white-space: nowrap; text-align: right; }
+.bc-tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; border: 1px solid var(--border-color); color: var(--text-secondary); }
+.bc-chart { min-height: 280px; }

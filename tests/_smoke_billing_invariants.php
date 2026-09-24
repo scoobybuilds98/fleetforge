@@ -81,6 +81,14 @@ $failures = [];
 //   - has a credit_note_for_invoice_id reference — credit notes against
 //     another invoice can legitimately net to 0.
 //   - status='void' — voided drafts have a structured void_reason.
+//   - billing_type in (mileage_only, adjustment, credit_note) — close.php
+//     writes its true-up invoices as invoice_type='final' + billing_type=
+//     'mileage_only' and accepts $0 (close.php ~1579) (S-BILLING-MODULE-2).
+//   - the credit-overflow cap: when credits exceed the charges the generator
+//     caps the cappable credit lines at exactly $0.00 and moves the excess to
+//     a LIVE overflow credit note sourced from this invoice (InvoiceGenerator
+//     ~1844-1957 / ~2457-2522) — a designed $0, not a silent one
+//     (S-BILLING-MODULE-2, KNOWN ISSUE #114 root cause).
 // ────────────────────────────────────────────────────────────────────────────
 
 $rows = db_select(
@@ -89,8 +97,15 @@ $rows = db_select(
      WHERE i.status = 'draft'
        AND i.subtotal = 0
        AND i.invoice_type NOT IN ('credit_note', 'mileage_only', 'adjustment')
+       AND i.billing_type NOT IN ('mileage_only', 'adjustment', 'credit_note')
        AND i.credit_note_for_invoice_id IS NULL
        AND i.deleted_at IS NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM credit_notes cn
+           WHERE cn.source_invoice_id = i.id
+             AND cn.source IN ('mileage_overpayment', 'base_rental_reconciliation_overflow', 'hours_overpayment')
+             AND cn.status <> 'void' AND cn.deleted_at IS NULL
+       )
        AND NOT EXISTS (
            SELECT 1 FROM invoice_line_items li
            WHERE li.invoice_id = i.id
@@ -294,6 +309,12 @@ if ($rows) {
 //
 // MODEL_B_SHIP_DATE = '2026-05-12' (S-MILEAGE-2B C3 InvoiceGenerator drawdown
 // emit shipped 2026-05-12; commit a24cb49).
+//
+// S-BILLING-MODULE-2 (KNOWN ISSUE #114): the estimate model bills distance as
+// 'mileage_estimate' lines (true-up later), and a close-time overage is item
+// type 'mileage' — both ARE mileage lines. Draft edits re-insert lines without
+// touching the invoice's odometer/distance columns, so an estimate line on an
+// invoice that still carries a distance is legitimate.
 $rows = db_select(
     "SELECT i.id AS invoice_id, i.invoice_number, i.status AS invoice_status,
             i.lease_id, l.contract_number, i.period_distance_km,
@@ -314,7 +335,9 @@ $rows = db_select(
              'mileage_precharge',
              'mileage_credit',
              'mileage_usage',
-             'mileage_drawdown_credit'
+             'mileage_drawdown_credit',
+             'mileage_estimate',
+             'mileage'
            )
        )
      ORDER BY i.id"

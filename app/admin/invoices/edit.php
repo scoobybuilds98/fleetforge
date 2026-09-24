@@ -52,7 +52,7 @@ if ($invoice['status'] !== 'draft' || ($invoice['generation_source'] ?? '') === 
 }
 
 $lines = db_select(
-    "SELECT item_type, description, quantity, unit, unit_price, amount, is_credit, taxable
+    "SELECT id, item_type, description, quantity, unit, unit_price, amount, is_credit, taxable
        FROM invoice_line_items WHERE invoice_id = ? ORDER BY sort_order ASC, id ASC",
     [$invoiceId]
 );
@@ -192,6 +192,9 @@ function FF_InvoiceLineEditor() {
         init() {
             const seed = <?= json_encode(array_map(static function ($l) {
                 return [
+                    // S-BILLING-MODULE-2: round-trip the line id so the server
+                    // keeps a queued charge's reference on the edited line.
+                    'line_id'    => (int)$l['id'],
                     'item_type'  => $l['item_type'],
                     'description'=> $l['description'],
                     'quantity'   => (string)$l['quantity'],
@@ -259,6 +262,7 @@ function FF_InvoiceLineEditor() {
                 id: this.invoiceId,
                 updated_at: this.updatedAt,
                 lines: this.lines.map((ln) => ({
+                    line_id: ln.line_id || null,
                     item_type: ln.item_type,
                     description: ln.description,
                     quantity: ln.quantity,
