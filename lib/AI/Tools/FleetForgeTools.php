@@ -3360,9 +3360,9 @@ class FleetForgeTools
     private static function writeGate(?int $userId, ?array $entry): ?string
     {
         if (!settings_get('ai.write_enabled', false)) {
-            // S-AI-KNOWLEDGE: no Settings screen exists for this switch — the old text
-            // pointed at "Settings → AI", a page that doesn't exist.
-            return 'AI changes are switched off for this company, so I can\'t make or propose changes. Make the change on the record\'s own page (search_help can walk you through it).';
+            // S-AI-WRITE-SWITCH: the switch lives in Settings → Intelligence → AI Core
+            // (the old text pointed at "Settings → AI", which never existed).
+            return 'AI changes are switched off for this company, so I can\'t make or propose changes. Make the change on the record\'s own page (search_help can walk you through it), or ask an administrator to turn on "AI can propose changes" in Settings → Intelligence → AI Core.';
         }
         if ($userId === null) {
             return 'Write actions require an authenticated user.';
@@ -3554,9 +3554,9 @@ class FleetForgeTools
 
         // Gate: feature flag + auth + per-action permission.
         if (!settings_get('ai.write_enabled', false)) {
-            // S-AI-KNOWLEDGE: no Settings screen exists for this switch — the old text
-            // pointed at "Settings → AI", a page that doesn't exist.
-            return 'AI changes are switched off for this company, so I can\'t make or propose changes. Make the change on the record\'s own page (search_help can walk you through it).';
+            // S-AI-WRITE-SWITCH: the switch lives in Settings → Intelligence → AI Core
+            // (the old text pointed at "Settings → AI", which never existed).
+            return 'AI changes are switched off for this company, so I can\'t make or propose changes. Make the change on the record\'s own page (search_help can walk you through it), or ask an administrator to turn on "AI can propose changes" in Settings → Intelligence → AI Core.';
         }
         if ($userId === null) {
             return 'Write actions require an authenticated user.';

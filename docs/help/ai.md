@@ -55,6 +55,8 @@ The assistant can **propose** a change, but it never makes one by itself:
 2. A **Proposed change** card appears under the answer, saying exactly what will change.
 3. Click **Apply** to make the change, or **Cancel**. Field edits show an **Undo** button after Apply; status actions (sending or voiding an invoice, voiding a payment, changing a unit, reservation or work-order status, deactivating a yard) can't be undone.
 
+This is switched off until an administrator turns on **AI can propose changes** in **Settings → Intelligence → AI Core** and clicks **Save AI Settings**. While it's off, the assistant explains how to make the change yourself instead.
+
 It can edit descriptive fields (names, contacts, notes, locations, non-money dates) and run those status actions. It can't change money, rates or balances, close a lease, generate invoices, record payments or close a billing cycle — for those it walks you through doing it on the right screen.
 
 ---

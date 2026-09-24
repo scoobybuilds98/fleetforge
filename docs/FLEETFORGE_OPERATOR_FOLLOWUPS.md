@@ -118,9 +118,9 @@ Safety net: anything dated before go-live is refused as a NEW push until linked 
 **Surfaced by:** S-AI-KNOWLEDGE (2026-09-24), from the operator's "make sure the AI in our software is up-to-date with all the changes we have made. it should be able to help everyone regarding anything".
 **Why:** the assistant now answers how-to questions from the Help Center + SOP, knows the new modules (monthly billing, rates, portal, customer emails, QuickBooks status, Samsara location), and six lookups that gave wrong numbers are fixed. Also closes money leaks to dispatchers through the rates / unit / vendor / maintenance lookups.
 **Operator action:**
-1. Deploy `main` (PHP only; no migration, no `FF_ASSET_VERSION` bump): `sudo /var/www/fleetforge/bin/deploy.sh`.
+1. Deploy `main` and run migrations (PHP + one settings migration `202609250400_S-AI-WRITE-SWITCH`; no `FF_ASSET_VERSION` bump): `sudo /var/www/fleetforge/bin/deploy.sh`, then `php bin/migrate.php --apply` if the deploy doesn't run it.
 2. Open **AI Assistant** and ask one of each: *"How do I enter month-end readings?"*, *"What's left on this month's billing cycle?"*, *"Where is unit <number>?"*. Answers should name real screens/buttons and link the guide.
-3. **Decision — AI changes:** proposing changes (edit a note, change a unit's status, send/void an invoice…, always confirmed with an Apply button) is behind the `ai.write_enabled` setting, which is OFF and has **no screen** to turn it on. Leave it off (the AI then walks people through doing it themselves), or ask for a switch in Settings → Intelligence (small change) / have it set directly.
+3. **Decision — AI changes:** proposing changes (edit a note, change a unit's status, send/void an invoice…, always confirmed with an Apply button) is behind **Settings → Intelligence → AI Core → "AI can propose changes"** (added by S-AI-WRITE-SWITCH, ships OFF). Leave it off (the AI then walks people through doing it themselves), or tick it and **Save AI Settings**.
 4. Keep the Help Center and SOP current with every screen change — the assistant answers from them.
 **Note:** maintenance and vendor costs are now hidden from dispatchers in the AI even though the maintenance pages still show them (F92 decides the pages).
 **Done when:** deployed, the three questions answered well on prod, and the AI-changes decision made.

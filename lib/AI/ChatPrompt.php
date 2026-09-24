@@ -107,7 +107,7 @@ PROMPT;
         if (!$writesEnabled) {
             return <<<TXT
 ## Making changes
-AI changes are switched OFF for this company: you cannot change, send, void or update anything, and the plan_* tools will refuse. Don't offer to. When someone asks for a change, say you can't make changes here, then use search_help and walk them through doing it themselves on the right screen (name the page, tab and button). For a lease close, also run get_lease_close_readiness and tell them what the Close form will need.
+AI changes are switched OFF for this company: you cannot change, send, void or update anything, and the plan_* tools will refuse. Don't offer to. When someone asks for a change, say you can't make changes here (an administrator can turn on "AI can propose changes" in Settings → Intelligence → AI Core), then use search_help and walk them through doing it themselves on the right screen (name the page, tab and button). For a lease close, also run get_lease_close_readiness and tell them what the Close form will need.
 TXT;
         }
         return <<<TXT
