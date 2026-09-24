@@ -240,7 +240,7 @@ final class KindRegistry
         $json = json_encode((object) $store);
         \db_execute(
             "INSERT INTO settings (`key`, `value`, value_type, group_name, label, description, updated_by)
-             VALUES (?, ?, 'json', 'notifications', 'Needs attention: per-kind settings',
+             VALUES (?, ?, 'json', 'attention', 'Needs attention: per-kind settings',
                      'Roles / priority / WhatsApp overrides per kind (Settings → Notifications). Only non-default values are stored.', ?)
              ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_by = VALUES(updated_by)",
             [self::SETTING, $json, $userId]

@@ -42,6 +42,8 @@ $me = db_row(
             u.display_font_size, u.display_density,
             u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
             u.notification_preferences,
+            u.phone_e164, u.whatsapp_mode, u.whatsapp_summary_hour, u.whatsapp_quiet_start,
+            u.whatsapp_quiet_end, u.whatsapp_updates,
             u.created_at, u.updated_at,
             ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
@@ -100,6 +102,18 @@ foreach (\FleetForge\Attention\KindRegistry::kindsForRole((string) $me['role_slu
     $myAttentionKinds[] = \FleetForge\Attention\KindRegistry::get($_k)?->label() ?? $_k;
 }
 unset($_k);
+
+// S-ATTENTION-WHATSAPP: this person's WhatsApp choices (their own opt-in).
+$myWhatsApp = [
+    'connected'    => \FleetForge\Notifications\WhatsApp\WhatsAppClient::configured(),
+    'phone'        => (string) ($me['phone_e164'] ?? ''),
+    'mode'         => (string) ($me['whatsapp_mode'] ?? 'off'),
+    'summary_hour' => $me['whatsapp_summary_hour'] === null ? 7 : (int) $me['whatsapp_summary_hour'],
+    'quiet_start'  => $me['whatsapp_quiet_start'] === null ? 21 : (int) $me['whatsapp_quiet_start'],
+    'quiet_end'    => $me['whatsapp_quiet_end'] === null ? 7 : (int) $me['whatsapp_quiet_end'],
+    'updates'      => json_decode((string) ($me['whatsapp_updates'] ?? ''), true) ?: [],
+    'choices'      => \FleetForge\Notifications\WhatsApp\WhatsAppDeliveries::UPDATE_CHOICES,
+];
 
 $pageTitle = 'My Profile';
 require_once FF_ROOT . '/includes/header.php';
@@ -360,7 +374,7 @@ require_once FF_ROOT . '/includes/header.php';
          TAB — My notifications (S-ATTENTION-INBOX)
          ══════════════════════════════════════════════════════ -->
     <template x-if="tab === 'notifications'">
-        <div class="card ff-tab-animated" x-data="FF_MyNotifications(<?= e(json_encode(['categories' => $myNotifCategories, 'opted_out' => $myOptedOut])) ?>)">
+        <div class="card ff-tab-animated" x-data="FF_MyNotifications(<?= e(json_encode(['categories' => $myNotifCategories, 'opted_out' => $myOptedOut, 'wa' => $myWhatsApp])) ?>)">
             <div class="card-header"><span style="font-weight:600;">My notifications</span></div>
             <div class="card-body" style="display:grid;gap:22px;font-size:0.875rem;">
                 <section>
@@ -389,6 +403,64 @@ require_once FF_ROOT . '/includes/header.php';
                     <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
                         <button type="button" class="btn btn-primary btn-sm" :disabled="saving" @click="save()" x-text="saving ? 'Saving…' : 'Save'"></button>
                         <span class="text-sm" :class="error ? 'text-danger' : 'text-secondary'" x-text="error || status"></span>
+                    </div>
+                </section>
+                <section>
+                    <h3 style="font-size:0.9375rem;margin:0 0 4px;">WhatsApp</h3>
+                    <p class="text-secondary" style="margin:0 0 10px;">Get urgent items and a morning summary on your phone. Only you can turn this on for your number.</p>
+                    <p class="text-secondary" style="margin:0 0 10px;font-size:0.8125rem;" x-show="!wa.connected">WhatsApp isn't connected yet (your super admin sets it up in Settings → Notifications). You can save your choices now; they apply once it's on.</p>
+                    <div style="display:grid;gap:12px;max-width:560px;">
+                        <div class="form-group" style="margin:0;">
+                            <label class="form-label" for="wa-my-phone">WhatsApp number</label>
+                            <input id="wa-my-phone" class="form-control" inputmode="tel" autocomplete="tel" placeholder="+1 604 555 0142" x-model.trim="wa.phone">
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <span class="form-label">Send me on WhatsApp</span>
+                            <div class="att-filters" style="padding:0;">
+                                <button type="button" class="att-chip" :aria-pressed="wa.mode === 'off'" @click="wa.mode = 'off'">Nothing</button>
+                                <button type="button" class="att-chip" :aria-pressed="wa.mode === 'summary'" @click="wa.mode = 'summary'">Morning summary only</button>
+                                <button type="button" class="att-chip" :aria-pressed="wa.mode === 'urgent'" @click="wa.mode = 'urgent'">Urgent items + morning summary</button>
+                            </div>
+                        </div>
+                        <template x-if="wa.mode !== 'off'">
+                            <div style="display:grid;gap:12px;">
+                                <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;">
+                                    <label class="form-group" style="margin:0;">
+                                        <span class="form-label">Morning summary at</span>
+                                        <select class="form-select form-control-sm" x-model.number="wa.summary_hour">
+                                            <template x-for="h in hours" :key="'s' + h"><option :value="h" x-text="hourLabel(h)" :selected="h === wa.summary_hour"></option></template>
+                                        </select>
+                                    </label>
+                                    <label class="form-group" style="margin:0;">
+                                        <span class="form-label">Quiet from</span>
+                                        <select class="form-select form-control-sm" x-model.number="wa.quiet_start">
+                                            <template x-for="h in hours" :key="'q' + h"><option :value="h" x-text="hourLabel(h)" :selected="h === wa.quiet_start"></option></template>
+                                        </select>
+                                    </label>
+                                    <label class="form-group" style="margin:0;">
+                                        <span class="form-label">until</span>
+                                        <select class="form-select form-control-sm" x-model.number="wa.quiet_end">
+                                            <template x-for="h in hours" :key="'e' + h"><option :value="h" x-text="hourLabel(h)" :selected="h === wa.quiet_end"></option></template>
+                                        </select>
+                                    </label>
+                                </div>
+                                <p class="text-secondary" style="margin:0;font-size:0.8125rem;">Anything due in quiet hours waits until they end. Times are in your profile's time zone.</p>
+                                <div>
+                                    <span class="form-label">Also send me right away</span>
+                                    <div class="att-roles">
+                                        <template x-for="(label, type) in wa.choices" :key="type">
+                                            <label><input type="checkbox" :checked="wa.updates.includes(type)" @change="toggleUpdate(type, $event.target.checked)"> <span x-text="label"></span></label>
+                                        </template>
+                                    </div>
+                                </div>
+                                <p class="text-secondary" style="margin:0;font-size:0.8125rem;">By turning this on you agree to receive FleetForge work messages on WhatsApp at this number. Turn it off any time here.</p>
+                            </div>
+                        </template>
+                        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;">
+                            <button type="button" class="btn btn-primary btn-sm" :disabled="waSaving" @click="saveWhatsApp()" x-text="waSaving ? 'Saving…' : 'Save WhatsApp'"></button>
+                            <button type="button" class="btn btn-secondary btn-sm" x-show="wa.connected && wa.mode !== 'off'" :disabled="waSaving" @click="summaryNow()">Send me today's summary</button>
+                            <span class="text-sm" :class="waError ? 'text-danger' : 'text-secondary'" x-text="waError || waStatus"></span>
+                        </div>
                     </div>
                 </section>
             </div>
@@ -763,6 +835,57 @@ function FF_MyNotifications(init) {
         saving: false,
         status: '',
         error: '',
+        // S-ATTENTION-WHATSAPP
+        wa: init.wa,
+        hours: Array.from({ length: 24 }, (_, i) => i),
+        waSaving: false,
+        waStatus: '',
+        waError: '',
+
+        hourLabel(h) {
+            const ampm = h < 12 ? 'am' : 'pm';
+            const hh = h % 12 === 0 ? 12 : h % 12;
+            return hh + ':00 ' + ampm;
+        },
+
+        toggleUpdate(type, on) {
+            this.wa.updates = on ? [...new Set([...this.wa.updates, type])] : this.wa.updates.filter(t => t !== type);
+        },
+
+        async saveWhatsApp() {
+            if (this.waSaving) return;
+            this.waSaving = true;
+            this.waError = '';
+            this.waStatus = '';
+            try {
+                const res = await FF_Api.post(FF_Api.url('/api/v1/account/whatsapp.php'), {
+                    phone: this.wa.phone, mode: this.wa.mode, summary_hour: this.wa.summary_hour,
+                    quiet_start: this.wa.quiet_start, quiet_end: this.wa.quiet_end, updates: this.wa.updates,
+                }, { quiet: true });   // errors show inline
+                if (res?.success) {
+                    this.wa.phone = res.data.phone || '';
+                    this.waStatus = res.data.mode === 'off' ? 'Saved. WhatsApp is off for you.' : 'Saved.';
+                } else {
+                    this.waError = res?.error?.message || 'Could not save.';
+                }
+            } catch {
+                this.waError = 'Network error. Try again.';
+            } finally {
+                this.waSaving = false;
+            }
+        },
+
+        async summaryNow() {
+            this.waError = '';
+            this.waStatus = '';
+            try {
+                const res = await FF_Api.post(FF_Api.url('/api/v1/account/whatsapp.php'), { action: 'summary_now' }, { quiet: true });
+                if (res?.success) this.waStatus = 'Queued. It arrives within a minute (unless it\u2019s your quiet time).';
+                else this.waError = res?.error?.message || 'Could not queue it.';
+            } catch {
+                this.waError = 'Network error. Try again.';
+            }
+        },
 
         toggle(slug, on) {
             this.optedOut = on ? this.optedOut.filter(s => s !== slug) : [...new Set([...this.optedOut, slug])];
@@ -774,7 +897,7 @@ function FF_MyNotifications(init) {
             this.saving = true;
             this.error = '';
             try {
-                const res = await FF_Api.post(FF_Api.url('/api/v1/account/notification_preferences.php'), { opted_out: this.optedOut });
+                const res = await FF_Api.post(FF_Api.url('/api/v1/account/notification_preferences.php'), { opted_out: this.optedOut }, { quiet: true });
                 if (res?.success) {
                     this.optedOut = res.data.opted_out || [];
                     this.status = 'Saved.';

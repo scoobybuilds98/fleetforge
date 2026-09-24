@@ -158,7 +158,7 @@ class NotificationService
                     if ($group !== null && self::bumpGroup((int) $uid, $type, $group, $title)) {
                         continue;
                     }
-                    \db_insert('notifications', [
+                    $newId = \db_insert('notifications', [
                         'user_id'        => (int) $uid,
                         'portal_user_id' => null,
                         'title'          => $title,
@@ -171,6 +171,9 @@ class NotificationService
                         'group_key'      => $group !== null ? $type : null,
                         'severity'       => self::normalizeSeverity($severity),
                     ]);
+                    // S-ATTENTION-WHATSAPP: people who ticked this update type
+                    // also get it on WhatsApp (queued; never throws).
+                    \FleetForge\Notifications\WhatsApp\WhatsAppDeliveries::onUpdate((int) $uid, $type, $title, $message, $url, (int) $newId);
                 } catch (\Throwable $perRowError) {
                     error_log(
                         '[NotificationService] insert failed for user ' . $uid

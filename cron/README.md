@@ -56,6 +56,9 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 # items, escalate urgent items nobody has taken for 24h. Not switchable from
 # Settings (infrastructure, like the notification digest).
 5 * * * *     /usr/bin/php /var/www/fleetforge/cron/attention_sweep.php >> /var/www/fleetforge/logs/cron.log 2>&1
+# WhatsApp sender (S-ATTENTION-WHATSAPP) — every minute; does nothing until
+# WhatsApp is connected + switched on in Settings → Notifications.
+* * * * *     /usr/bin/php /var/www/fleetforge/cron/whatsapp_dispatch.php >> /var/www/fleetforge/logs/cron.log 2>&1
 
 # ── Compliance ────────────────────────────────────────────────────────────────
 # Compliance alerts — daily at 06:30 UTC

@@ -68,6 +68,12 @@ final class AttentionService
      */
     private static array $listeners = [];
 
+    /**
+     * Built-in delivery channels (WhatsApp) on/off — tests switch them off so
+     * engine checks never queue real messages.
+     */
+    private static bool $channels = true;
+
     // ────────────────────────────────────────────────────────────────────────
     // Listeners
     // ────────────────────────────────────────────────────────────────────────
@@ -94,6 +100,17 @@ final class AttentionService
     }
 
     /**
+     * Switch the built-in delivery channels (WhatsApp) on/off (tests).
+     *
+     * @param  bool $on
+     * @return void
+     */
+    public static function channels(bool $on): void
+    {
+        self::$channels = $on;
+    }
+
+    /**
      * Run listeners; a failing listener never breaks the item write.
      *
      * @param  string $event
@@ -109,6 +126,11 @@ final class AttentionService
             } catch (\Throwable $e) {
                 error_log('[Attention] listener failed on ' . $event . ' #' . ($row['id'] ?? '?') . ': ' . $e->getMessage());
             }
+        }
+        // S-ATTENTION-WHATSAPP: queue phone messages (never sends here — the
+        // caller may be mid-transaction; cron/whatsapp_dispatch.php sends).
+        if (self::$channels) {
+            \FleetForge\Notifications\WhatsApp\WhatsAppDeliveries::onAttentionEvent($event, $row, $kind);
         }
     }
 

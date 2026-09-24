@@ -16,6 +16,8 @@ declare(strict_types=1);
  *   3. Wakes snoozed items whose date has come.
  *   4. Escalates urgent items nobody has taken for
  *      notifications.escalate_after_hours (default 24) — once per item.
+ *   5. (S-ATTENTION-WHATSAPP) Queues each person's WhatsApp morning summary
+ *      when it's their summary hour.
  *
  * Infrastructure, like the notification digest: deliberately NOT in
  * config/cron_jobs.php (not switchable from Settings) — turning it off would
@@ -46,6 +48,16 @@ $start = microtime(true);
 try {
     $stats = AttentionService::sweepAll();
 
+    // S-ATTENTION-WHATSAPP: queue the morning summary for everyone whose
+    // summary hour (their timezone) is now. Send-once per person per day is
+    // enforced by the delivery dedupe key, so a re-run in the same hour is a
+    // no-op. cron/whatsapp_dispatch.php sends them.
+    try {
+        $stats['summaries'] = \FleetForge\Notifications\WhatsApp\WhatsAppDeliveries::enqueueSummaries();
+    } catch (\Throwable $e) {
+        $stats['errors'][] = 'summaries: ' . $e->getMessage();
+    }
+
     $changed = 0;
     $cleared = 0;
     $open    = 0;
@@ -56,12 +68,13 @@ try {
     }
     $ms    = (int) round((microtime(true) - $start) * 1000);
     $notes = "Attention sweep: {$open} open problem(s), {$changed} new/worse, {$cleared} closed, "
-           . ($stats['woke'] ?? 0) . ' woke, ' . ($stats['escalated'] ?? 0) . " escalated ({$ms}ms)"
+           . ($stats['woke'] ?? 0) . ' woke, ' . ($stats['escalated'] ?? 0) . ' escalated, '
+           . ($stats['summaries'] ?? 0) . " WhatsApp summaries queued ({$ms}ms)"
            . ($stats['errors'] ? ' — ERRORS: ' . implode(' | ', $stats['errors']) : '');
 
     // Hourly cron: only write the audit trail / log when something happened,
     // so the audit log isn't 24 identical rows a day.
-    if ($changed + $cleared + (int) ($stats['woke'] ?? 0) + (int) ($stats['escalated'] ?? 0) > 0 || $stats['errors']) {
+    if ($changed + $cleared + (int) ($stats['woke'] ?? 0) + (int) ($stats['escalated'] ?? 0) + (int) ($stats['summaries'] ?? 0) > 0 || $stats['errors']) {
         db_insert('audit_log', [
             'user_id'      => null,
             'user_name'    => 'system',

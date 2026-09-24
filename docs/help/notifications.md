@@ -40,6 +40,17 @@ Notifications are split into two lists so the important things don't get buried:
 1. If an **urgent** item sits for 24 hours with nobody on it, it's marked **Escalated** and goes to the owner (super admins). This happens once per item.
 2. Taking the item stops the clock.
 
+## WhatsApp on your phone
+
+1. Open your **Profile → Notifications** and scroll to **WhatsApp**.
+2. Enter your WhatsApp number (with the country code, e.g. +1 604 555 0142).
+3. Choose **Morning summary only**, or **Urgent items + morning summary**.
+4. Pick when the summary arrives and your **quiet hours** (anything due then waits until they end).
+5. Optionally tick updates you also want right away, such as **New leases** or **Payments received**.
+6. Click **Save WhatsApp**, then **Send me today's summary** to see what it looks like.
+
+Only urgent items and one summary a day come by WhatsApp; everything else stays in the app. An urgent item that's already been dealt with before it would have gone out is never sent late.
+
 ## Your own settings
 
 1. Open your **Profile → Notifications**.
@@ -57,4 +68,5 @@ Notifications are split into two lists so the important things don't get buried:
 - **Shared.** Take, give to, snooze, done and notes are team-wide and kept in the item's history with names and times.
 - **Who sees what.** Visibility is decided by role (Settings → Notifications). Customer requests go to the people Portal & Requests routing names. Money amounts are hidden from roles that can't see payments.
 - **Updates** are per person (your own read/unread), grouped when they arrive in bursts.
+- **WhatsApp** uses Meta's official WhatsApp Business Platform with two approved message templates. Messages are queued and sent by a job that runs every minute (`cron/whatsapp_dispatch.php`), which respects quiet hours and retries temporary failures. Each person turns it on for their own number; super admins connect it and see the delivery log in **Settings → Notifications**. Amounts are left out for people who can't see payments.
 </details>

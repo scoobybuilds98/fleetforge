@@ -49,7 +49,7 @@ $stored = KindRegistry::saveOverrides($kinds, $validRoles, $userId);
 
 db_execute(
     "INSERT INTO settings (`key`, `value`, value_type, group_name, label, description, updated_by)
-     VALUES ('notifications.escalate_after_hours', ?, 'integer', 'notifications',
+     VALUES ('notifications.escalate_after_hours', ?, 'integer', 'attention',
              'Escalate urgent items after (hours)',
              'An urgent Needs attention item nobody has taken after this many hours goes to super admins, once.', ?)
      ON DUPLICATE KEY UPDATE `value` = VALUES(`value`), updated_by = VALUES(updated_by)",

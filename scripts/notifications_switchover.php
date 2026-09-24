@@ -123,7 +123,7 @@ $open  = (int) db_row("SELECT COUNT(*) AS c FROM attention_items WHERE status IN
 // ── 4. Marker + audit ────────────────────────────────────────────────────────
 db_execute(
     "INSERT INTO settings (`key`, `value`, value_type, group_name, label, description)
-     VALUES ('notifications.switchover_at', ?, 'string', 'notifications', 'Notifications switch-over',
+     VALUES ('notifications.switchover_at', ?, 'string', 'attention', 'Notifications switch-over',
              'When scripts/notifications_switchover.php archived the old notifications (UTC).')
      ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)",
     [$now]
