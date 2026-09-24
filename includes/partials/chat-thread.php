@@ -66,6 +66,9 @@ $cxPlaceholder = $cxPlaceholder ?? "'Message'";
                                 x-text="confirmUnsend === m.id ? 'Unsend?' : 'Unsend'"></button>
                     </template>
                 </div>
+                <!-- S-CHAT-SEEN: under the newest message only, when it's on my side -->
+                <div class="cx-receipt" :class="{ 'is-seen': receipt && receipt.seen }"
+                     x-show="receipt && receipt.message_id === m.id" x-text="receipt ? receipt.text : ''"></div>
             </div>
         </div>
     </template>

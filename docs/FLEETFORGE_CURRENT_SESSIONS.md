@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-CHAT-SEEN** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Messages shows "Sent" / "Seen" under your newest message — "Seen by Mike and Sara" or "Seen by everyone" in groups, "Seen by Dana" when a customer's portal user reads it, and "Seen" for customers once your team has read theirs. It updates live. No migration.** Deploy with F100.
+
 **S-CHAT-DELETE** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-CHAT-DELETE-1). **Messages gets a trash button: "Delete chat" removes a conversation from your own Messages (the teammate or customer keeps theirs; it comes back if anyone writes again), and "Leave group" takes you out of a group (the last one out deletes it). One small migration.** Deploy with F100.
 
 **S-CHAT-REBUILD** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-CHAT-REBUILD-1..3). **Messages is rebuilt from scratch as simple texting, split into Team (direct messages and small groups) and Customers (one thread per customer, which their portal users see under Messages). Any lease, invoice, payment, unit, customer, reservation, work order or damage claim can be attached with the paper clip and shows as a live card: always its current status, amounts only for people allowed to see money, and a customer only ever sees their own records. "Message customer" and "Send in chat" on record pages, "Message us" in the portal. Replaces the Discord-style Team Chat, the separate Messenger and the mini widget. Migration drops the old tables (prod had one message; it's carried over).** Deploy with F100.

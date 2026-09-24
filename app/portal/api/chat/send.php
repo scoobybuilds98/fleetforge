@@ -31,4 +31,8 @@ try {
 }
 
 $page = Conversations::messages($cv, $portalViewer, $msgId - 1);
-portal_chat_ok(['conversation_id' => (int) $cv['id'], 'message' => $page['messages'][0] ?? null], 201);
+portal_chat_ok([
+    'conversation_id' => (int) $cv['id'],
+    'message'         => $page['messages'][0] ?? null,
+    'receipt'         => Conversations::receipt($cv, $portalViewer),
+], 201);

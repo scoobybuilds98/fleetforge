@@ -6,7 +6,9 @@
  * GET ?id=N&after=M         — only messages newer than M (poll; marks read)
  * GET ?id=N&before=M        — the page before M ("load earlier")
  *
- * Response: { conversation, messages[], has_more, attach_types[] }
+ * Response: { conversation, messages[], has_more, attach_types[], receipt }
+ * receipt = "Seen"/"Sent" for the newest message when it's on my side
+ * (Conversations::receipt); refreshed on every poll so it flips to Seen live.
  * Records on each message are resolved live for THIS user (money redacted
  * without payments.view; "No longer available" when deleted / not visible).
  *
@@ -37,6 +39,9 @@ if ($before === 0 && $page['messages']) {
 }
 
 $out = $page;
+if ($before === 0) {
+    $out['receipt'] = Conversations::receipt($cv, $viewer);   // "Seen" / "Sent" under the newest message
+}
 if ($after === 0 && $before === 0) {
     $out['conversation'] = Conversations::header($cv, $viewer);
     $types = RecordRefs::attachableTypes($viewer, $cv['kind'] === 'customer' ? (int) $cv['customer_id'] : null);

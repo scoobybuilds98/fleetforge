@@ -25,6 +25,8 @@ use FleetForge\Notifications\NotificationService;
  * staff reader only counts CUSTOMER messages (a colleague's reply isn't news)
  * and never anything from before their account existed.
  *
+ * Seen: receipt() under the newest message, from the same read marks.
+ *
  * Delete chat: per reader (conversation_reads.cleared_message_id) — hides
  * my history + drops the chat from my list until something newer arrives;
  * groups are left instead. Nobody else's copy changes (S-CHAT-DELETE).
@@ -358,12 +360,14 @@ final class Conversations
             // Read the newest id inside the transaction so a message landing
             // mid-delete stays visible rather than vanishing unseen.
             $last = (int) (\db_row('SELECT last_message_id AS m FROM conversations WHERE id = ? FOR UPDATE', [$convId])['m'] ?? 0);
+            // last_read_message_id is left alone: deleting a chat is not reading
+            // it, so the sender's "Seen" stays honest (unread counting already
+            // uses GREATEST(read, cleared)).
             \db_execute(
-                "INSERT INTO conversation_reads (conversation_id, {$col}, last_read_message_id, cleared_message_id) VALUES (?, ?, ?, ?)
+                "INSERT INTO conversation_reads (conversation_id, {$col}, last_read_message_id, cleared_message_id) VALUES (?, ?, 0, ?)
                  ON DUPLICATE KEY UPDATE
-                    last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id)),
-                    cleared_message_id   = GREATEST(COALESCE(cleared_message_id, 0), VALUES(cleared_message_id))",
-                [$convId, $who, $last, $last]
+                    cleared_message_id = GREATEST(COALESCE(cleared_message_id, 0), VALUES(cleared_message_id))",
+                [$convId, $who, $last]
             );
             return 'deleted';
         });
@@ -374,6 +378,79 @@ final class Conversations
             [$who, $convId]
         );
         return $result;
+    }
+
+    /**
+     * "Seen" receipt for the newest message, when it's on the viewer's side —
+     * like a phone, it sits under the last message only and disappears once
+     * the other side replies. Built from conversation_reads (no extra state):
+     *   direct            "Seen" / "Sent"
+     *   group             "Seen by Mike, Sara" / "Seen by everyone" / "Sent"
+     *   customer (staff)  "Seen by Dana" (the customer's portal users) / "Sent"
+     *                     — shown under a colleague's reply too: it's our side
+     *   customer (portal) "Seen" (any staff read it) / "Sent" — staff unnamed
+     * Unsent (deleted) last message → no receipt.
+     *
+     * @return array{message_id:int, text:string, seen:bool}|null
+     */
+    public static function receipt(array $cv, array $viewer): ?array
+    {
+        $convId = (int) $cv['id'];
+        $last = \db_row(
+            'SELECT id, sender_type, user_id, portal_user_id, deleted_at
+               FROM conversation_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 1',
+            [$convId]
+        );
+        if (!$last || $last['deleted_at'] !== null) return null;
+        $msgId = (int) $last['id'];
+
+        if ($viewer['side'] === 'portal') {
+            if ($last['sender_type'] !== 'customer') return null;
+            $seen = \db_count(
+                'SELECT COUNT(*) FROM conversation_reads WHERE conversation_id = ? AND user_id IS NOT NULL AND last_read_message_id >= ?',
+                [$convId, $msgId]
+            ) > 0;
+            return ['message_id' => $msgId, 'text' => $seen ? 'Seen' : 'Sent', 'seen' => $seen];
+        }
+
+        if ($cv['kind'] === 'customer') {
+            if ($last['sender_type'] !== 'staff') return null;
+            $readers = \db_select(
+                "SELECT pu.name FROM conversation_reads r
+                   JOIN portal_users pu ON pu.id = r.portal_user_id AND pu.customer_id = ?
+                  WHERE r.conversation_id = ? AND r.last_read_message_id >= ?
+                  ORDER BY pu.name",
+                [(int) $cv['customer_id'], $convId, $msgId]
+            );
+            $names = array_column($readers, 'name');
+            return ['message_id' => $msgId, 'text' => $names ? 'Seen by ' . self::nameList($names) : 'Sent', 'seen' => (bool) $names];
+        }
+
+        // Team: only my own newest message gets a receipt.
+        if ($last['sender_type'] !== 'staff' || (int) $last['user_id'] !== $viewer['user_id']) return null;
+        $others = \db_select(
+            "SELECT u.name, (COALESCE(r.last_read_message_id, 0) >= ?) AS seen
+               FROM conversation_members cm
+               JOIN users u ON u.id = cm.user_id
+               LEFT JOIN conversation_reads r ON r.conversation_id = cm.conversation_id AND r.user_id = cm.user_id
+              WHERE cm.conversation_id = ? AND cm.user_id <> ?
+              ORDER BY u.name",
+            [$msgId, $convId, $viewer['user_id']]
+        );
+        $seenBy = array_column(array_filter($others, fn($o) => (int) $o['seen'] === 1), 'name');
+        if (!$seenBy) return ['message_id' => $msgId, 'text' => 'Sent', 'seen' => false];
+        if ($cv['kind'] === 'direct') return ['message_id' => $msgId, 'text' => 'Seen', 'seen' => true];
+        $text = count($seenBy) === count($others) ? 'Seen by everyone' : 'Seen by ' . self::nameList($seenBy);
+        return ['message_id' => $msgId, 'text' => $text, 'seen' => true];
+    }
+
+    /** "Mike", "Mike and Sara", "Mike, Sara and 2 others" — first names keep it short. */
+    private static function nameList(array $names): string
+    {
+        $first = array_map(fn($n) => (string) (preg_split('/\s+/', trim((string) $n))[0] ?? $n), $names);
+        if (count($first) === 1) return $first[0];
+        if (count($first) <= 3) return implode(', ', array_slice($first, 0, -1)) . ' and ' . end($first);
+        return implode(', ', array_slice($first, 0, 2)) . ' and ' . (count($first) - 2) . ' others';
     }
 
     /** Highest message id this reader deleted (0 = never). */

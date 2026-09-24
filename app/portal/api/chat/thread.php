@@ -36,4 +36,8 @@ $page = Conversations::messages($cv, $portalViewer, $after, $before);
 if ($before === 0 && $page['messages']) {
     Conversations::markRead($cv, $portalViewer, (int) end($page['messages'])['id']);
 }
-portal_chat_ok($page + ['conversation_id' => (int) $cv['id'], 'attach_types' => $types]);
+portal_chat_ok($page + [
+    'conversation_id' => (int) $cv['id'],
+    'attach_types'    => $types,
+    'receipt'         => $before === 0 ? Conversations::receipt($cv, $portalViewer) : null,   // "Seen" once the team has read it
+]);

@@ -34,4 +34,7 @@ try {
 }
 
 $page = Conversations::messages($cv, $viewer, $msgId - 1);
-json_success(['message' => $page['messages'][0] ?? null], 201);
+json_success([
+    'message' => $page['messages'][0] ?? null,
+    'receipt' => Conversations::receipt($cv, $viewer),
+], 201);

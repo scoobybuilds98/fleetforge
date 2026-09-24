@@ -16,6 +16,7 @@
  *                money redaction for dispatchers, portal isolation, live status
  *   F. unread totals — staff badge (team / customers) and portal badge
  *   G. search — all 8 types execute against the real schema
+ *   J. seen receipts — Sent → Seen (DM), Seen by … / everyone (group), portal users by name, customer side unnamed (S-CHAT-SEEN)
  *   I. delete chat / leave group — mine only, others keep theirs, comes back on a new message (S-CHAT-DELETE)
  *   H. static — no code references the retired tables/endpoints
  *
@@ -309,6 +310,49 @@ try {
     Conversations::send(Conversations::find($ct, $portal), $portal, 'customer writes again', []);
     check('delete customer thread: the customer writing again brings it back', $inList($admin, $ct, 'customers')
         && count(Conversations::messages($ctNow, $admin)['messages']) === 1);
+
+    // ── J. Seen receipts (S-CHAT-SEEN) ─────────────────────────────────
+    echo "J. Seen receipts\n";
+    $rt = fn(int $id, array $v) => Conversations::receipt(Conversations::find($id, $v), $v);
+    $first = fn(array $v) => (string) preg_split('/\s+/', (string) db_row('SELECT name FROM users WHERE id = ?', [$v['user_id']])['name'])[0];
+    $sd = Conversations::openDirect($admin['user_id'], $disp['user_id']);
+    $sm = Conversations::send(Conversations::find($sd, $admin), $admin, 'seen test', []);
+    $r = $rt($sd, $admin);
+    check('seen: my newest DM message reads "Sent" before they open it', $r && $r['message_id'] === $sm && $r['text'] === 'Sent' && !$r['seen']);
+    check('seen: the recipient gets no receipt on my message', $rt($sd, $disp) === null);
+    Conversations::markRead(Conversations::find($sd, $disp), $disp, $sm);
+    check('seen: flips to "Seen" once they read it', ($rt($sd, $admin)['text'] ?? '') === 'Seen');
+    $reply = Conversations::send(Conversations::find($sd, $disp), $disp, 'got it', []);
+    check('seen: gone from my side once they reply', $rt($sd, $admin) === null);
+    check('seen: their reply now carries THEIR receipt', ($rt($sd, $disp)['message_id'] ?? 0) === $reply);
+    Conversations::unsend($reply, $disp);
+    check('seen: an unsent newest message has no receipt', $rt($sd, $disp) === null && $rt($sd, $admin) === null);
+
+    $dm2 = Conversations::openDirect($admin['user_id'], $acct['user_id']);
+    $m2 = Conversations::send(Conversations::find($dm2, $admin), $admin, 'will they read it', []);
+    Conversations::deleteForViewer(Conversations::find($dm2, $acct), $acct);
+    check('seen: deleting a chat is NOT seeing it (still "Sent")', ($rt($dm2, $admin)['text'] ?? '') === 'Sent');
+
+    $sg = Conversations::createGroup($admin['user_id'], 'Seen smoke', [$mgr['user_id'], $disp['user_id']]);
+    $gm = Conversations::send(Conversations::find($sg, $admin), $admin, 'group seen test', []);
+    check('seen: group newest message "Sent" before anyone reads', ($rt($sg, $admin)['text'] ?? '') === 'Sent');
+    Conversations::markRead(Conversations::find($sg, $mgr), $mgr, $gm);
+    check('seen: group "Seen by <first name>"', ($rt($sg, $admin)['text'] ?? '') === 'Seen by ' . $first($mgr), $rt($sg, $admin)['text'] ?? '');
+    Conversations::markRead(Conversations::find($sg, $disp), $disp, $gm);
+    check('seen: group "Seen by everyone" once all have read', ($rt($sg, $admin)['text'] ?? '') === 'Seen by everyone');
+
+    $ctRow2 = Conversations::find($ct, $admin);
+    $cm2 = Conversations::send($ctRow2, $admin, 'customer seen test', []);
+    check('seen: customer thread "Sent" before the customer opens it', ($rt($ct, $admin)['text'] ?? '') === 'Sent');
+    check('seen: a colleague sees the receipt on our side\'s message too', ($rt($ct, $disp)['message_id'] ?? 0) === $cm2);
+    Conversations::markRead(Conversations::find($ct, $portal), $portal, $cm2);
+    $puFirst = (string) preg_split('/\s+/', (string) db_row('SELECT name FROM portal_users WHERE id = ?', [$portal['portal_user_id']])['name'])[0];
+    check('seen: "Seen by <portal user>" once the customer reads', ($rt($ct, $admin)['text'] ?? '') === 'Seen by ' . $puFirst, $rt($ct, $admin)['text'] ?? '');
+    $pm2 = Conversations::send(Conversations::find($ct, $portal), $portal, 'customer asks', []);
+    check('seen: the customer\'s own message reads "Sent" in the portal', ($rt($ct, $portal)['text'] ?? '') === 'Sent');
+    Conversations::markRead($ctRow2, $disp, $pm2);
+    check('seen: "Seen" in the portal once any staff member reads it (no staff name)', ($rt($ct, $portal)['text'] ?? '') === 'Seen');
+    check('seen: the customer\'s message gives staff no receipt', $rt($ct, $admin) === null);
 
     // ── G. Search ──────────────────────────────────────────────────────
     echo "G. Search (every type, real schema)\n";

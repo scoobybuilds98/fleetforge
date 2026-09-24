@@ -17,6 +17,10 @@
  *   - message display fields (_day, _name, _time, _right, …) are precomputed
  *     in decorate() — no per-row function calls inside x-for.
  *
+ * Seen: the server returns `receipt` ("Seen" / "Sent" / "Seen by …") for the
+ * newest message when it's on my side; every poll refreshes it, so it flips
+ * to Seen live (S-CHAT-SEEN).
+ *
  * Polling: open thread every 4s (after=lastId), inbox every 15s (staff),
  * paused while the tab is hidden, caught up on refocus. The staff page posts
  * 'ff-chat-unread' so the topbar badge updates instantly.
@@ -83,6 +87,7 @@
             loadingEarlier: false,
             attachTypes: [],
             mobileThread: false,
+            receipt: null,                  // { message_id, text: 'Seen'|'Sent'|'Seen by …', seen } — server-built
 
             // ── composer ─────────────────────────────────────────────
             draft: '',
@@ -118,6 +123,7 @@
                 this.activeId = null;
                 this.conv = null;
                 this.messages = [];
+                this.receipt = null;
                 this.chips = [];
                 this.draft = '';
                 this.mobileThread = false;
@@ -231,6 +237,7 @@
                 this.hasMore = false;
                 this.error = '';
                 this.confirmUnsend = null;
+                this.receipt = null;
                 this.picker.open = false;
                 const item = [...this.lists.team, ...this.lists.customers].find(i => i.id === id);
                 if (item) { this.tab = item.kind === 'customer' ? 'customers' : 'team'; item.unread = 0; this.recount(); }
@@ -261,6 +268,7 @@
                     this.attachTypes = res.data.attach_types || [];
                     this.messages = this.decorate(res.data.messages || []);
                     this.hasMore = !!res.data.has_more;
+                    this.receipt = res.data.receipt || null;
                     this._after(() => this.scrollToEnd());
                 } catch (e) {
                     this.error = 'Couldn\'t open this conversation. Check your connection.';
@@ -304,6 +312,8 @@
                 try {
                     const res = await FF_Api.get(this.threadUrl('after=' + last));
                     if (!res || !res.success || convAtStart !== this.activeId) return;
+                    // The receipt can flip to "Seen" with no new message — always take it.
+                    this.receipt = res.data.receipt || null;
                     this.merge(res.data.messages || []);
                 } catch (e) { /* next tick retries */ }
             },
@@ -407,6 +417,7 @@
                     this.picker.open = false;
                     if (this._ref('input')) { this._ref('input').style.height = 'auto'; this._ref('input').focus(); }
                     if (res.data.message) this.merge([res.data.message]);
+                    this.receipt = res.data.receipt || null;
                 } catch (e) {
                     this.error = 'Message not sent — check your connection and try again.';
                 } finally {
@@ -420,6 +431,7 @@
                 const res = await FF_Api.post(FF_Api.url(this.api.unsend), { message_id: m.id }, { quiet: true }).catch(() => null);
                 if (!res || !res.success) { this.error = res?.error?.message || 'Couldn\'t unsend that message.'; return; }
                 this.messages = this.decorate(this.messages.map(x => x.id === m.id ? Object.assign({}, x, { body: '', records: [], deleted: true }) : x));
+                if (this.receipt && this.receipt.message_id === m.id) this.receipt = null;   // next poll recomputes
             },
 
             // ── attach picker ────────────────────────────────────────
