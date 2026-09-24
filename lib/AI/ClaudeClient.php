@@ -52,8 +52,13 @@ class ClaudeClient
     /** Path to AI log file (relative to project root) */
     private const LOG_FILE = 'logs/ai.log';
 
-    /** Max tool-use iterations to prevent infinite loops */
-    public const MAX_TOOL_ITERATIONS = 5;
+    /**
+     * Max tool-use iterations to prevent infinite loops.
+     * S-AI-KNOWLEDGE: 5 → 8 — mixed questions now chain a help lookup
+     * (search_help/read_help) with the data lookups, e.g. "why is this invoice
+     * so high?" = invoice + lease + pricing guide.
+     */
+    public const MAX_TOOL_ITERATIONS = 8;
 
     private string $apiKey;
     private string $model;

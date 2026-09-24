@@ -8,16 +8,20 @@ declare(strict_types=1);
  * Provides typewriter-style response delivery for the chat UI.
  *
  * POST /api/v1/ai/stream
- *   Body: { session_id?, message, context_type?, context_id? }
+ *   Body: { session_id?, message, context_type?, context_id?, page_path? }
  *   → SSE stream: data: {"type":"token","text":"..."}\n\n
  *                 data: {"type":"done","session_id":N,"message_id":N}\n\n
  *                 data: {"type":"tool_start","name":"..."}\n\n
  *                 data: {"type":"tool_end","name":"..."}\n\n
+ *                 data: {"type":"proposal","proposal":{...}}\n\n  (before done)
  *
  * Architecture:
  *   - Same logic as chat.php but streams text deltas via SSE
  *   - Tool calls happen server-side; client sees tool_start/tool_end events
  *   - Final message saved to DB same as non-streaming endpoint
+ *   - System prompt from lib/AI/ChatPrompt.php (shared with chat.php)
+ *   - A plan_* tool's pending-change proposal is emitted as a 'proposal'
+ *     event so the /ai page renders the same Apply card as the widget
  *   - Falls back to non-streaming if SSE isn't supported
  *
  * Permission: ai:view
@@ -59,6 +63,7 @@ $messageText = trim($body['message'] ?? '');
 $sessionId   = (int) ($body['session_id'] ?? 0);
 $contextType = trim($body['context_type'] ?? '');
 $contextId   = (int) ($body['context_id'] ?? 0);
+$pagePath    = \FleetForge\AI\ChatPrompt::cleanPagePath((string) ($body['page_path'] ?? ''));
 
 if ($messageText === '') {
     json_error('VALIDATION_ERROR', 'Message is required', 400);
@@ -150,7 +155,10 @@ function sendSSE(string $type, array $data = []): void
 }
 
 // ── Build system prompt and get tools ──────────────────────
-$systemPrompt = buildStreamSystemPrompt($userName, $contextType, $contextId);
+// S-AI-KNOWLEDGE: the shared prompt. The old local copy had drifted — it never
+// mentioned the write/action tools, credit applications, service requests,
+// documents or close readiness, so the /ai page under-sold what it could do.
+$systemPrompt = \FleetForge\AI\ChatPrompt::build($userName, $contextType, $contextId, $pagePath);
 $tools = \FleetForge\AI\ToolRegistry::getTools('chat');
 
 // ── Streaming tool-calling loop ────────────────────────────
@@ -158,6 +166,9 @@ $iteration      = 0;
 $maxIterations  = \FleetForge\AI\ClaudeClient::MAX_TOOL_ITERATIONS;
 $finalText      = '';
 $totalTokensAll = 0;
+// S-AI-KNOWLEDGE: a plan_* tool may persist a pending proposal; like chat.php,
+// the last one in the turn becomes the confirm card.
+$pendingProposalId = 0;
 
 // WHY: Single shared onChunk used by EVERY iteration. Without this, post-tool-call
 // answers (iter 1+) generate but never reach the client UI — the user reported
@@ -256,11 +267,19 @@ while ($iteration < $maxIterations) {
     foreach ($toolBlocks as $block) {
         sendSSE('tool_start', ['name' => $block['name']]);
 
+        // WHY $sessionId: plan_* tools stamp it on the proposal row (the old
+        // call omitted it, so /ai-page proposals were orphaned from the chat).
         $toolResult = \FleetForge\AI\ToolRegistry::execute(
             $block['name'],
             $block['input'] ?? [],
-            $userId
+            $userId,
+            $sessionId
         );
+
+        $decoded = json_decode($toolResult, true);
+        if (is_array($decoded) && !empty($decoded['requires_confirmation']) && !empty($decoded['proposal_id'])) {
+            $pendingProposalId = (int) $decoded['proposal_id'];
+        }
 
         $toolResults[] = [
             'type'        => 'tool_result',
@@ -301,61 +320,34 @@ db_update('ai_chat_sessions', [
     'last_message_at' => ff_now_utc(),
 ], 'id = ?', [$sessionId]);
 
+// ── Pending-change proposal (S-AI-KNOWLEDGE) ───────────────
+// Same shape as chat.php's `proposal`, re-read from the table (never the
+// loop's copy) and only while still actionable.
+if ($pendingProposalId > 0) {
+    $proposal = db_row(
+        "SELECT id, change_type, entity_type, summary, payload, affected_count, status, expires_at
+           FROM ai_pending_changes
+          WHERE id = ? AND user_id = ? AND status = 'pending'",
+        [$pendingProposalId, $userId]
+    );
+    if ($proposal) {
+        $pp = json_decode($proposal['payload'], true) ?: [];
+        sendSSE('proposal', ['proposal' => [
+            'id'             => (int) $proposal['id'],
+            'change_type'    => $proposal['change_type'],
+            'entity_type'    => $proposal['entity_type'],
+            'summary'        => $proposal['summary'],
+            'affected_count' => (int) $proposal['affected_count'],
+            'targets'        => $pp['targets'] ?? [],
+            'undoable'       => ($pp['kind'] ?? '') === 'action' ? false : true,
+            'expires_at'     => $proposal['expires_at'],
+        ]]);
+    }
+}
+
 // ── Send done event ────────────────────────────────────────
 sendSSE('done', [
     'session_id'  => $sessionId,
     'message_id'  => $assistantMsgId,
     'tokens_used' => $totalTokensAll,
 ]);
-
-// ════════════════════════════════════════════════════════════
-// Helper: system prompt (same as chat.php)
-// ════════════════════════════════════════════════════════════
-function buildStreamSystemPrompt(string $userName, string $contextType, int $contextId): string
-{
-    $today = date('Y-m-d');
-    $prompt = <<<PROMPT
-You are FleetForge AI, an intelligent assistant for a trailer and equipment leasing company. You help the team manage their fleet, customers, leases, invoices, payments, accounting, maintenance, damage claims, inspections, and reservations.
-
-Current date: {$today}
-User: {$userName}
-
-Your capabilities (use the matching tool — never guess):
-- Customers — search_customers, get_customer_details, get_customer_leases, get_customer_invoices
-- Equipment / fleet — get_fleet_summary, search_equipment, get_equipment_unit, get_yard_inventory, get_yards
-- Leases & reservations — get_active_leases, get_lease_details, get_reservations, get_reservation_details
-- Invoicing & AR — get_revenue_by_period, get_revenue_by_customer, get_overdue_invoices, get_ar_aging, get_payment_summary, get_recent_payments, get_credit_notes
-- Rates & pricing — get_rate_cards, get_rate_card_items, get_customer_rates
-- Maintenance & inspections — get_maintenance_summary, get_inspections, get_inspection_details
-- Damage & mileage — get_damage_claims, get_damage_claim_details, get_mileage_logs
-- Vendors & AP — search_vendors, get_vendor_details, get_vendor_bills, get_ap_aging
-- Accounting (GL/banking/tax) — get_chart_of_accounts, get_journal_entries, get_trial_balance, get_account_balance, get_bank_accounts, get_bank_transactions, get_tax_filing_periods, get_accounting_periods, get_budgets
-- Fixed assets & payoff — get_fixed_assets, get_fixed_asset_details, get_payoff_analysis, get_depreciation_summary, get_capex_requests
-- Collections — get_promise_to_pay, get_collection_notes
-- Compliance — get_expiring_documents
-- Dashboard — get_dashboard_kpis, get_fleet_summary
-
-Identifier patterns (very important):
-- Equipment unit numbers look like CHS-001, RFR-002, FLT-001, DRY-014, CON-003 — these are EQUIPMENT UNITS (chassis, reefer, flatbed, dry van, container), NOT customers. Use get_equipment_unit, search_equipment, get_payoff_analysis, or get_fixed_asset_details with the unit_number parameter.
-- Customer names are company names like "Acme Logistics" — use search_customers.
-- Fixed asset numbers look like FA-2026-00007 — use get_fixed_asset_details.
-- Invoice numbers look like INV-2026-... and lease numbers like LSE-2026-...
-- If a user asks how long a unit (e.g. "CHS-001") will take to pay off, call get_payoff_analysis with unit_number — do NOT search customers first.
-
-Guidelines:
-- Always use the available tools to look up real data before answering questions. Never guess or make up data.
-- If your first tool call returns "no results", consider whether the user meant a different entity type (unit vs customer vs asset) and retry with the right tool.
-- Be concise but thorough. Use bullet points and tables when presenting multiple data points.
-- When discussing financial data, always include the currency (CAD/USD) and format monetary values with dollar signs and two decimal places.
-- If a question is outside your capabilities, say so clearly.
-- If a tool returns an error, explain it to the user helpfully and suggest what to try next.
-- When referencing dates, use a clear format like "January 15, 2026".
-PROMPT;
-
-    if ($contextType !== '' && $contextId > 0) {
-        $prompt .= "\n\nContext: The user opened this chat from a {$contextType} page (ID: {$contextId}). "
-                 . "When relevant, focus your answers on this specific {$contextType}.";
-    }
-
-    return $prompt;
-}

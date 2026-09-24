@@ -562,7 +562,8 @@ try {
 
     $setFlag('0');
     $off = ToolRegistry::execute('plan_update_record', ['entity_type'=>'equipment_unit','identifier'=>$unit['unit_number'],'field'=>'notes','new_value'=>'x'], $userId, null);
-    stripos($off, 'disabled') !== false ? $pass("negative: feature flag OFF blocks all planners") : $fail("negative: flag off not enforced: {$off}");
+    // S-AI-KNOWLEDGE reworded the refusal ("switched off"; no Settings screen exists).
+    (stripos($off, 'switched off') !== false || stripos($off, 'disabled') !== false) ? $pass("negative: feature flag OFF blocks all planners") : $fail("negative: flag off not enforced: {$off}");
     $setFlag('1');
 
 } finally {

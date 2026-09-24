@@ -246,7 +246,7 @@ class SummaryEngine
             return match ($summaryType) {
                 'customer_insights'   => self::gatherCustomerContext($entityId, $userId),
                 'lease_summary'       => self::gatherLeaseContext($entityId, $userId),
-                'unit_analysis'       => self::gatherUnitContext($entityId),
+                'unit_analysis'       => self::gatherUnitContext($entityId, $userId),
                 'fleet_health'        => self::gatherFleetContext(),
                 'payment_risk'        => self::gatherPaymentRiskContext($entityId, $userId),
                 'accounting_overview' => self::gatherAccountingContext($userId),
@@ -322,10 +322,12 @@ class SummaryEngine
         return ['lease' => $details];
     }
 
-    private static function gatherUnitContext(int $unitId): array
+    private static function gatherUnitContext(int $unitId, ?int $userId): array
     {
-        $unit        = Tools\FleetForgeTools::run('get_equipment_unit', ['unit_id' => $unitId]);
-        $maintenance = Tools\FleetForgeTools::run('get_maintenance_summary', ['unit_id' => $unitId]);
+        // S-AI-KNOWLEDGE: pass the viewer so unit/maintenance money is redacted
+        // for non-financial roles, like the customer/lease contexts above.
+        $unit        = Tools\FleetForgeTools::run('get_equipment_unit', ['unit_id' => $unitId], $userId);
+        $maintenance = Tools\FleetForgeTools::run('get_maintenance_summary', ['unit_id' => $unitId], $userId);
 
         return [
             'unit'        => $unit,

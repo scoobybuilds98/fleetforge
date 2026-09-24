@@ -198,7 +198,32 @@ $isAdmin    = can('settings', 'view');
                 <!-- Messages list (centered column for readability, like Claude) -->
                 <div x-show="messages.length > 0 || sending" style="max-width:820px;margin:0 auto;">
                     <template x-for="(msg, idx) in messages" :key="idx">
-                        <div style="margin-bottom:20px;"
+                        <div>
+                        <!-- ── Confirm card for a pending AI change proposal (S-AI-KNOWLEDGE) ──
+                             Same card + classes as the floating widget (ai-chat-widget.php, loaded on
+                             every page where AI is usable); nothing changes until Apply. -->
+                        <div x-show="msg.type === 'proposal'" class="ff-chat-proposal" style="margin:0 0 20px 0;max-width:560px;">
+                            <div class="ff-chat-proposal-head">
+                                <span>Proposed change</span>
+                                <span class="ff-chat-proposal-count" x-show="msg.proposal?.affected_count > 1"
+                                      x-text="(msg.proposal?.affected_count || 0) + ' records'"></span>
+                            </div>
+                            <div class="ff-chat-proposal-body" x-text="msg.proposal?.summary"></div>
+                            <div class="ff-chat-proposal-actions" x-show="msg.proposalState === 'pending'">
+                                <button type="button" class="ff-chat-proposal-apply" @click="proposalAction(idx, 'apply')" :disabled="msg.busy">
+                                    <span x-text="msg.busy ? 'Applying…' : 'Apply'"></span>
+                                </button>
+                                <button type="button" class="ff-chat-proposal-cancel" @click="proposalAction(idx, 'cancel')" :disabled="msg.busy">Cancel</button>
+                            </div>
+                            <div class="ff-chat-proposal-result ff-chat-proposal-ok" x-show="msg.proposalState === 'applied'">
+                                <span>✓ Applied</span>
+                                <button type="button" class="ff-chat-proposal-undo" x-show="msg.proposal?.undoable !== false" @click="proposalAction(idx, 'undo')" :disabled="msg.busy">Undo</button>
+                            </div>
+                            <div class="ff-chat-proposal-result" x-show="msg.proposalState === 'undone'">↩ Reverted</div>
+                            <div class="ff-chat-proposal-result" x-show="msg.proposalState === 'cancelled'">Cancelled</div>
+                            <div class="ff-chat-proposal-result ff-chat-proposal-err" x-show="msg.proposalError" x-text="msg.proposalError"></div>
+                        </div>
+                        <div x-show="msg.type !== 'proposal'" style="margin-bottom:20px;"
                              :style="msg.role === 'user' ? 'display:flex;justify-content:flex-end;' : ''">
                             <div :style="msg.role === 'user'
                                 ? 'background:var(--color-primary);color:white;border-radius:14px 14px 4px 14px;padding:12px 16px;max-width:78%;box-shadow:0 1px 3px rgba(0,0,0,0.08);'
@@ -208,6 +233,7 @@ $isAdmin    = can('settings', 'view');
                                 <!-- Assistant message (rendered as markdown) -->
                                 <div x-show="msg.role === 'assistant'" x-html="renderMarkdown(msg.content)" class="ai-response"></div>
                             </div>
+                        </div>
                         </div>
                     </template>
 
@@ -864,6 +890,7 @@ function FF_AiChat() {
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let buffer = '';
+                let pendingProposal = null;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -881,9 +908,14 @@ function FF_AiChat() {
                             if (event.type === 'token') {
                                 this.streamText += event.text;
                                 this.scrollToBottom();
+                            } else if (event.type === 'proposal') {
+                                // S-AI-KNOWLEDGE: shown after the reply text on 'done'.
+                                pendingProposal = event.proposal || null;
                             } else if (event.type === 'tool_start') {
                                 this.toolRunning = true;
-                                this.toolName = event.name?.replace(/_/g, ' ') || 'data';
+                                // Help/SOP lookups read better as words than tool names.
+                                this.toolName = ({ search_help: 'the help guides', read_help: 'the help guides' })[event.name]
+                                    || event.name?.replace(/_/g, ' ') || 'data';
                             } else if (event.type === 'tool_end') {
                                 this.toolRunning = false;
                             } else if (event.type === 'done') {
@@ -893,6 +925,10 @@ function FF_AiChat() {
                                     role: 'assistant',
                                     content: this.streamText || 'No response generated.',
                                 });
+                                if (pendingProposal) {
+                                    this.messages.push(this.proposalMessage(pendingProposal));
+                                    pendingProposal = null;
+                                }
                                 this.streamText = '';
                                 this.loadSessions(); // refresh sidebar
                             } else if (event.type === 'error') {
@@ -955,6 +991,7 @@ function FF_AiChat() {
                 if (!r.error) {
                     this.currentSessionId = r.session_id;
                     this.messages.push({ role: 'assistant', content: r.content });
+                    if (r.proposal) this.messages.push(this.proposalMessage(r.proposal));
                     this.loadSessions();
                 } else {
                     // json_error puts the text at r.error.message, not r.message.
@@ -962,6 +999,40 @@ function FF_AiChat() {
                 }
             } catch(e) {
                 this.messages.push({ role: 'assistant', content: 'Failed to reach the AI service. Please try again.' });
+            }
+        },
+
+        // ── Write proposals (S-AI-KNOWLEDGE) ─────────────────────
+        // Mirrors the widget's apply/undo/cancel (ai-chat-widget.php).
+        // apply-change.php uses the enveloped json_success/json_error shape,
+        // so gate on r.success (FF_Api.post resolves on 4xx too).
+        proposalMessage(proposal) {
+            return { role: 'assistant', type: 'proposal', proposal, proposalState: 'pending', proposalError: '', busy: false };
+        },
+
+        async proposalAction(idx, action) {
+            const msg = this.messages[idx];
+            if (!msg || msg.busy) return;
+            msg.busy = true;
+            msg.proposalError = '';
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/ai/apply-change') ?>', {
+                    proposal_id: msg.proposal.id,
+                    action,
+                });
+                const code = r.error?.code;
+                if (r.success) {
+                    msg.proposalState = { apply: 'applied', undo: 'undone', cancel: 'cancelled' }[action];
+                } else if (action === 'cancel' && (code === 'CONFLICT' || code === 'EXPIRED')) {
+                    // Already not pending — it can't be applied, so show cancelled.
+                    msg.proposalState = 'cancelled';
+                } else {
+                    msg.proposalError = r.error?.message || 'Could not ' + action + ' the change.';
+                }
+            } catch (e) {
+                msg.proposalError = 'Failed to reach the server.';
+            } finally {
+                msg.busy = false;
             }
         },
 

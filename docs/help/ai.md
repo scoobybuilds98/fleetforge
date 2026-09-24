@@ -1,10 +1,15 @@
 ---
-description: Ask questions about your fleet, customers, leases, invoices, and financial data in plain English — plus AI-generated charts, document analysis, and anomaly alerts.
+description: Ask about your live data or how to do anything in FleetForge, in plain English — plus proposed changes you confirm, AI-generated charts, document analysis, and anomaly alerts.
 ---
 
 # AI Assistant
 
-A chat assistant that answers questions about your live FleetForge data — fleet, customers, leases, invoices, payments, accounting, maintenance, and compliance. It looks up the real records before answering rather than guessing. Marked **Beta**.
+A chat assistant for everyone on the team. It answers two kinds of question:
+
+- **About your data** — fleet, customers, leases, billing, invoices, payments, rates, accounting, QuickBooks, maintenance and compliance. It looks up the real records before answering rather than guessing.
+- **About how FleetForge works** — "how do I…", "where do I…", "why did it…". It reads the current Help Center guides and the office SOP, answers in steps using the real screen and button names, and links the page. When a guide changes, its answers change too.
+
+Marked **Beta**.
 
 ## Asking a question
 
@@ -27,22 +32,30 @@ A chat assistant that answers questions about your live FleetForge data — flee
 
 ## What it can answer
 
-The assistant has read-only access to most of FleetForge and picks the right lookup for your question. It can pull data on:
+It picks the right lookup for your question and respects your role — it only shows what you could see on the page yourself. If your role can't see money, it won't show amounts either.
 
-- **Customers** — search, account details, their leases and invoices.
-- **Equipment & fleet** — fleet summary, unit lookups by number (e.g. `CHS-001`, `RFR-002`, `DRY-014`), yard inventory.
-- **Leases & reservations** — active leases, lease details, upcoming reservations.
-- **Invoicing & AR** — revenue by period or customer, overdue invoices, AR aging, payments, credit notes.
-- **Rates & pricing** — rate cards, rate-card items, customer-specific rates.
-- **Maintenance & inspections** — work-order summaries, inspection records.
-- **Damage & mileage** — damage claims, mileage logs.
-- **Vendors & AP** — vendor lookups, bills, AP aging.
-- **Accounting** — chart of accounts, journal entries, trial balance, account and bank balances, tax periods, budgets.
-- **Fixed assets** — asset details, payoff analysis (e.g. "how long until `CHS-001` is paid off?"), depreciation, capex requests.
-- **Collections & compliance** — promise-to-pay, collection notes, expiring documents.
+- **How to do things** — any procedure in the Help Center or SOP: creating and closing leases, month-end billing and readings, sending invoices, credit notes, payments, changing prices, equipment, Samsara, the customer portal, customer emails, QuickBooks, month-end close. Try *"How do I enter month-end readings?"* or *"What happens when I send an invoice?"*
+- **Customers** — search, account details, their leases and invoices, credit applications, service requests, portal users and which customer emails they get.
+- **Equipment & fleet** — fleet summary, one unit by its number (e.g. `STL2026`), who has it, where it last reported in Samsara, units that stopped reporting, yard inventory.
+- **Leases & reservations** — active leases, one lease in full (rates, mileage mode, hourly billing, billing holds), whether a lease can be closed and what the Close form will need, reservations.
+- **Billing & invoices** — a month's billing cycle (readiness, what's left to bill, review flags, close checks), one invoice line by line, billing holds and one-off charges, revenue by month or customer (sent invoices only — drafts are listed separately), overdue invoices, AR aging, payments, credit notes.
+- **Rates & pricing** — standard prices, rate cards, what one customer pays for each equipment type, and a price check for a customer, type and dates.
+- **Maintenance & inspections** — work orders, inspections, damage claims.
+- **Vendors & AP** — vendors, bills, AP aging.
+- **Accounting & QuickBooks** — chart of accounts, journal entries, trial balance, P&L, balance sheet, cash flow, account and bank balances, tax periods, budgets, fixed assets and payoff, QuickBooks sync health.
 - **Dashboard** — the same KPIs shown on your home screen.
 
-> **Tip:** Be specific with identifiers. Unit numbers like `CHS-001` are equipment, company names like *Acme Logistics* are customers, `INV-2026-…` are invoices, and `LSE-2026-…` are leases — naming the exact record gets a faster, more accurate answer.
+> **Tip:** Name the record — a unit number like `STL2026`, a company name, or an invoice number like `INV-2026-02384`. When you open the chat from the floating button, it also knows which page you're on, so *"can this lease be closed?"* works from a lease page.
+
+## Making changes
+
+The assistant can **propose** a change, but it never makes one by itself:
+
+1. Ask for the change — e.g. *"Put unit STL2021 into maintenance"*, *"Change Acme's phone number to 604-555-0100"*, *"Send invoice INV-2026-02384"*.
+2. A **Proposed change** card appears under the answer, saying exactly what will change.
+3. Click **Apply** to make the change, or **Cancel**. Field edits show an **Undo** button after Apply; status actions (sending or voiding an invoice, voiding a payment, changing a unit, reservation or work-order status, deactivating a yard) can't be undone.
+
+It can edit descriptive fields (names, contacts, notes, locations, non-money dates) and run those status actions. It can't change money, rates or balances, close a lease, generate invoices, record payments or close a billing cycle — for those it walks you through doing it on the right screen.
 
 ---
 
@@ -73,7 +86,11 @@ Both an enabled toggle **and** a valid API key are required before chat, reports
 
 - **Provider & model** — every AI feature routes through `lib/AI/ClaudeClient.php`, which calls the Anthropic Messages API (`https://api.anthropic.com/v1/messages`). The model defaults to `claude-sonnet-4-6` and is overridable via the `ai.model` setting.
 - **Readiness gate** — the page computes `$aiReady = ai.enabled && ai.anthropic_api_key`. Credentials are read settings-table-first, `.env` second (the `ai.*` rows let admins rotate the key without redeploying). If either is missing, the not-configured card renders and no API calls are made.
-- **Tool-calling, real data** — chat sends a system prompt plus a tool registry (`lib/AI/ToolRegistry.php`). Claude requests a tool, the server runs the SQL lookup, returns the result, and loops — up to 5 iterations (`ClaudeClient::MAX_TOOL_ITERATIONS`) — before answering. Financial tools are gated behind the `payments:view` permission.
+- **Tool-calling, real data** — chat sends a system prompt plus a tool registry (`lib/AI/ToolRegistry.php`). Claude requests a tool, the server runs the SQL lookup, returns the result, and loops — up to 8 iterations (`ClaudeClient::MAX_TOOL_ITERATIONS`) — before answering. Money is redacted unless `can_view_financials()`; rates, QuickBooks, billing and other module tools also check that module's view permission.
+- **One system prompt** — `lib/AI/ChatPrompt.php` builds it for both the /ai page (`stream.php`) and the widget (`chat.php`): who the user is, their role and money visibility, today in company time, and the pages they can open (generated from `config/navigation.php`). It routes questions rather than listing every tool; each tool's own description lives with it.
+- **Product knowledge** — `search_help` / `read_help` (`lib/AI/Tools/KnowledgeTools.php`) search `docs/help/*.md` and the SOP (`docs/sop/*.md`) section by section at question time, so keeping those guides current keeps the assistant current. A new guide is picked up automatically.
+- **Tool modules** — tool families live in `lib/AI/Tools/*Tools.php` (knowledge, billing, operations) and register in `FleetForgeTools::MODULES`.
+- **Proposals** — `plan_*` tools write a pending row to `ai_pending_changes`; the confirm card calls `api/v1/ai/apply-change.php` (apply / undo / cancel). Both chat surfaces show the card.
 - **Streaming** — responses stream over Server-Sent Events (`api/v1/ai/stream.php`) for the typewriter effect; if SSE fails (e.g. a proxy blocks it) the page falls back to the non-streaming `api/v1/ai/chat.php`. A one-shot retry absorbs Anthropic rate-limit (HTTP 429) bursts, and partial answers are preserved if a stream is cut off mid-response.
 - **Sessions** — conversations are stored in `ai_chat_sessions` / `ai_chat_messages`, scoped by `user_id`; deleting a session cascades its messages. The last 20 messages are sent as context per request.
 - **Token tracking & limits** — every call is logged to `ai_query_log` with token counts and an estimated cost (~$3/M input, ~$15/M output). A per-user daily token budget is enforced before each call, and a per-user request rate limit guards the AI endpoints.

@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace FleetForge\AI;
 
 use FleetForge\AI\Tools\FleetForgeTools;
+use FleetForge\AI\Tools\KnowledgeTools;
 
 /**
  * lib/AI/ToolRegistry.php
@@ -113,6 +114,23 @@ class ToolRegistry
     // ────────────────────────────────────────────────────────────
     private static function rawDefinitions(): array
     {
+        // S-AI-KNOWLEDGE: tool MODULES (lib/AI/Tools/*Tools.php, each with
+        // definitions() + handles() + run()) register in FleetForgeTools::MODULES,
+        // so a new family of tools lives in its own file instead of growing this
+        // list forever. Order matters only for readability of the tool list the
+        // model sees: knowledge first ("how do I" is as common as "show me").
+        $defs = self::coreDefinitions();
+        foreach (FleetForgeTools::MODULES as $module) {
+            $defs = $module === KnowledgeTools::class
+                ? array_merge($module::definitions(), $defs)
+                : array_merge($defs, $module::definitions());
+        }
+        return $defs;
+    }
+
+    /** The original in-file tool list (S027 onward). */
+    private static function coreDefinitions(): array
+    {
         return [
             // ── Customer Tools ──────────────────────────────────
             [
@@ -122,7 +140,7 @@ class ToolRegistry
                     'type' => 'object',
                     'properties' => [
                         'query'  => ['type' => 'string', 'description' => 'Search term (name, email, or city)'],
-                        'status' => ['type' => 'string', 'enum' => ['active', 'inactive', 'suspended', ''], 'description' => 'Filter by status (empty = all)'],
+                        'status' => ['type' => 'string', 'enum' => ['active', 'inactive', 'pending', 'suspended', 'credit_hold', ''], 'description' => 'Filter by status (empty = all)'],
                     ],
                     'required' => [],
                 ],
@@ -160,7 +178,7 @@ class ToolRegistry
                     'type' => 'object',
                     'properties' => [
                         'customer_id' => ['type' => 'integer', 'description' => 'Customer ID'],
-                        'status'      => ['type' => 'string', 'enum' => ['draft', 'sent', 'paid', 'partial', 'overdue', 'void', 'cancelled', ''], 'description' => 'Filter by status'],
+                        'status'      => ['type' => 'string', 'enum' => ['draft', 'sent', 'partially_paid', 'paid', 'overdue', 'void', 'written_off', ''], 'description' => 'Filter by status'],
                     ],
                     'required' => ['customer_id'],
                 ],
@@ -253,25 +271,26 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_equipment_unit',
-                'description' => 'Get detailed info about a specific equipment unit including template, status, mileage, compliance dates, and GPS tracking.',
+                'description' => 'Get one equipment unit: type + category, brand, status, mileage, CVI/registration dates, Samsara tracking (name, odometer, last connected, last address), who has it now (current lease + customer), and (financial roles only) revenue/cost. Pass unit_number for fleet numbers like STL2026.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'unit_id' => ['type' => 'integer', 'description' => 'Equipment unit ID'],
+                        'unit_id'     => ['type' => 'integer', 'description' => 'Equipment unit numeric ID'],
+                        'unit_number' => ['type' => 'string', 'description' => 'Fleet/unit number, e.g. STL2026 or 36V203 (use this when you have the number, not the id)'],
                     ],
-                    'required' => ['unit_id'],
+                    'required' => [],
                 ],
                 '_tags' => ['chat', 'summary'],
             ],
             [
                 'name' => 'search_equipment',
-                'description' => 'Search equipment units by unit number, template name, status, or category. Returns up to 500 matches. NOTE: to COUNT units (e.g. "how many of each category" or "by status"), call get_fleet_summary instead — it returns by_status + by_category counts in one shot without listing rows.',
+                'description' => 'Search equipment units by unit number, VIN, equipment type, brand or Samsara name, filtered by status or category. Returns up to 500 matches. NOTE: to COUNT units (e.g. "how many of each category" or "by status"), call get_fleet_summary instead — it returns by_status + by_category counts in one shot without listing rows.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'query'    => ['type' => 'string', 'description' => 'Search term (unit number or template name)'],
+                        'query'    => ['type' => 'string', 'description' => 'Search term (unit number, VIN, type, brand or Samsara name)'],
                         'status'   => ['type' => 'string', 'enum' => ['available', 'on_lease', 'reserved', 'maintenance', 'inactive', 'decommissioned', ''], 'description' => 'Filter by status'],
-                        'category' => ['type' => 'string', 'description' => 'Template category filter (e.g. dry_van, reefer, flatbed)'],
+                        'category' => ['type' => 'string', 'description' => 'Category slug or label (e.g. dry_van, chassis, reefer, flatbed, combo)'],
                     ],
                     'required' => [],
                 ],
@@ -281,7 +300,7 @@ class ToolRegistry
             // ── Lease Tools ─────────────────────────────────────
             [
                 'name' => 'get_active_leases',
-                'description' => 'List all currently active leases with customer name, unit number, dates, rate, and status.',
+                'description' => 'List all currently active leases with customer name, unit number, dates, rates, billing cycle, mileage tracking mode, last billed date and (financial roles) open balance on sent invoices.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -293,7 +312,7 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_lease_details',
-                'description' => 'Get full details about a specific lease including customer, unit, billing terms, mileage, amendments, and status history.',
+                'description' => 'Get one lease: customer, unit, dates, billing cycle and billing position (last billed / next), rates, mileage tracking mode (samsara/manual/off) with odometer readings and daily estimate, hourly (engine-hours) billing, GPS/cartage/insurance/precharge charges, minimum billing days, active billing holds, and (financial roles) invoiced/paid/open balance from its sent invoices plus how many drafts it has.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -305,11 +324,12 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_lease_close_readiness',
-                'description' => "Assess whether a lease can be closed and what inputs the close would require. READ-ONLY — does not close anything. Returns can_close + blockers, whether a precharge refund is owed (and how much), whether it's an advance-billed lease needing reconciliation, and the list of decisions the operator must make. Use when asked \"can I close lease X?\" or \"what's needed to close this lease?\". Executing the close itself is still done via the lease Close form, not by you.",
+                'description' => "Assess whether a lease can be closed and what inputs the close would require. READ-ONLY — does not close anything. Returns can_close + blockers, whether a precharge refund is owed (and how much), whether it's an advance-billed lease needing reconciliation, a sent invoice already billing the return month (INVOICE_CONFLICT), the odometer / engine-hours readings its mileage mode and hourly rate require, active billing holds, and the list of decisions the operator must make. Use when asked \"can I close lease X?\" or \"what's needed to close this lease?\". Executing the close itself is still done via the lease Close form, not by you.",
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'lease_id' => ['type' => 'integer', 'description' => 'Lease ID'],
+                        'lease_id'    => ['type' => 'integer', 'description' => 'Lease ID'],
+                        'return_date' => ['type' => 'string', 'description' => 'Planned return date YYYY-MM-DD (default today)'],
                     ],
                     'required' => ['lease_id'],
                 ],
@@ -345,7 +365,7 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_overdue_invoices',
-                'description' => 'Get all currently overdue invoices with customer name, amount, days overdue, and due date.',
+                'description' => 'Get every invoice past its due date with a balance left (sent / partially paid / overdue — judged by due date, not only the overdue flag), with customer, amounts, days overdue and due date.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => (object) [],
@@ -399,6 +419,7 @@ class ToolRegistry
                     'type' => 'object',
                     'properties' => [
                         'unit_id' => ['type' => 'integer', 'description' => 'Optional: filter to specific unit'],
+                        'unit_number' => ['type' => 'string', 'description' => 'Unit/fleet number, e.g. STL2026 (alternative to unit_id)'],
                     ],
                     'required' => [],
                 ],
@@ -424,21 +445,23 @@ class ToolRegistry
             // ── Rate / Pricing Tools ────────────────────────────
             [
                 'name' => 'get_rate_cards',
-                'description' => 'List all rate cards (pricing templates) with effective dates and item counts. Use this when the user asks about rates, pricing, or rate cards in general.',
+                'description' => 'List rate cards — general cards (standard prices) and customer cards — with the customer, effective dates, in-force status (active/ending/upcoming/expired) and line count. Optional customer_id filter. For "what does X pay" use get_customer_rates; for "what are our standard prices" use get_rate_card_items with no id.',
                 'input_schema' => [
                     'type' => 'object',
-                    'properties' => (object) [],
+                    'properties' => [
+                        'customer_id' => ['type' => 'integer', 'description' => 'Only this customer\'s cards'],
+                    ],
                     'required' => [],
                 ],
                 '_tags' => ['chat', 'report'],
             ],
             [
                 'name' => 'get_rate_card_items',
-                'description' => 'Get all rates (daily/weekly/monthly/mileage) for a specific rate card by equipment type. If rate_card_id is omitted, returns the default rate card.',
+                'description' => 'Get the lines of one rate card (per equipment type or whole category: daily/weekly/monthly, mileage, hourly, GPS price, minimum days). With NO rate_card_id it returns the STANDARD price of every equipment type (what a customer without their own card pays).',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
-                        'rate_card_id' => ['type' => 'integer', 'description' => 'Rate card ID (omit for default card)'],
+                        'rate_card_id' => ['type' => 'integer', 'description' => 'Rate card ID (omit for the standard price book)'],
                     ],
                     'required' => [],
                 ],
@@ -446,11 +469,12 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_customer_rates',
-                'description' => 'Get custom negotiated rates for a specific customer (overrides standard rate card pricing).',
+                'description' => 'What one customer pays for every equipment type (their own card, else the standard price, as of a date) plus what their active leases are actually billed at. Use for "what does <customer> pay for a dry van", "is <customer> on custom pricing".',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
                         'customer_id' => ['type' => 'integer', 'description' => 'Customer ID'],
+                        'date'        => ['type' => 'string', 'description' => 'Price as of YYYY-MM-DD (default today)'],
                     ],
                     'required' => ['customer_id'],
                 ],
@@ -542,6 +566,7 @@ class ToolRegistry
                     'type' => 'object',
                     'properties' => [
                         'unit_id'         => ['type' => 'integer', 'description' => 'Optional: filter to specific equipment unit'],
+                        'unit_number' => ['type' => 'string', 'description' => 'Unit/fleet number, e.g. STL2026 (alternative to unit_id)'],
                         'lease_id'        => ['type' => 'integer', 'description' => 'Optional: filter to specific lease'],
                         'inspection_type' => ['type' => 'string', 'enum' => ['pre_lease', 'post_lease', 'periodic', 'damage', 'compliance', ''], 'description' => 'Inspection type filter'],
                     ],
@@ -592,11 +617,12 @@ class ToolRegistry
             // ── Mileage Tools ───────────────────────────────────
             [
                 'name' => 'get_mileage_logs',
-                'description' => 'Get recent mileage readings for an equipment unit or lease.',
+                'description' => 'Get rows from the legacy Mileage Logs page for a unit or lease. NOTE: billing readings no longer live here — for a lease\'s odometer use get_lease_details (odometer start/end, tracking mode) and for what was billed use the invoice (get_invoice_details).',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
                         'unit_id'  => ['type' => 'integer', 'description' => 'Optional: filter to specific equipment unit'],
+                        'unit_number' => ['type' => 'string', 'description' => 'Unit/fleet number, e.g. STL2026 (alternative to unit_id)'],
                         'lease_id' => ['type' => 'integer', 'description' => 'Optional: filter to specific lease'],
                     ],
                     'required' => [],
@@ -648,7 +674,7 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_trial_balance',
-                'description' => 'Get the trial balance — net debit/credit balance for every active GL account as of a specific date (only posted entries).',
+                'description' => 'Get the trial balance — net debit/credit balance for every active GL account as of a date (posted entries plus reversed originals, which their posted reversals offset).',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
@@ -660,12 +686,13 @@ class ToolRegistry
             ],
             [
                 'name' => 'get_account_balance',
-                'description' => 'Get the current net balance (debit minus credit) for a specific GL account by id or code.',
+                'description' => 'Get the net balance (debit minus credit) of one GL account by id or code, as of a date. Key codes: 1010 Cash CAD, 1020 Cash USD, 1030 Accounts Receivable, 1050 GST/HST receivable (ITCs), 2010 Accounts Payable, 2030 GST/HST Payable. Unsure of the code? call get_chart_of_accounts.',
                 'input_schema' => [
                     'type' => 'object',
                     'properties' => [
                         'account_id'   => ['type' => 'integer', 'description' => 'GL account ID'],
-                        'account_code' => ['type' => 'string', 'description' => 'GL account code (alternative to account_id)'],
+                        'account_code' => ['type' => 'string', 'description' => 'GL account code (alternative to account_id), e.g. 1030'],
+                        'as_of'        => ['type' => 'string', 'description' => 'As-of date YYYY-MM-DD (default today)'],
                     ],
                     'required' => [],
                 ],

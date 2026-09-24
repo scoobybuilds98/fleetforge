@@ -61,7 +61,7 @@ class FleetForgeTools
 
             // Fleet / Equipment tools
             'get_fleet_summary'        => self::getFleetSummary(),
-            'get_equipment_unit'       => self::getEquipmentUnit($input),
+            'get_equipment_unit'       => self::getEquipmentUnit($input, $userId),
             'search_equipment'         => self::searchEquipment($input),
 
             // Lease tools
@@ -81,13 +81,13 @@ class FleetForgeTools
             'get_expiring_documents'   => self::getExpiringDocuments($input),
 
             // Maintenance tools
-            'get_maintenance_summary'  => self::getMaintenanceSummary($input),
+            'get_maintenance_summary'  => self::getMaintenanceSummary($input, $userId),
 
             // Dashboard tools
             'get_dashboard_kpis'       => self::getDashboardKpis($userId),
 
             // ── Rate / Pricing tools (S028) ─────────────────────
-            'get_rate_cards'           => self::getRateCards(),
+            'get_rate_cards'           => self::getRateCards($input),
             'get_rate_card_items'      => self::getRateCardItems($input),
             'get_customer_rates'       => self::getCustomerRates($input),
 
@@ -100,8 +100,8 @@ class FleetForgeTools
             'get_yard_inventory'       => self::getYardInventory($input),
 
             // ── Vendor tools (S028) ─────────────────────────────
-            'search_vendors'           => self::searchVendors($input),
-            'get_vendor_details'       => self::getVendorDetails($input),
+            'search_vendors'           => self::searchVendors($input, $userId),
+            'get_vendor_details'       => self::getVendorDetails($input, $userId),
 
             // ── Inspection tools (S028) ─────────────────────────
             'get_inspections'          => self::getInspections($input),
@@ -164,8 +164,32 @@ class FleetForgeTools
             // ── Action planner (S-AI-ACTION-1) — lifecycle transitions ──
             'plan_action'              => self::planAction($input, $userId, $sessionId),
 
-            default => throw new \RuntimeException("Unknown tool: {$toolName}"),
+            default => self::runModule($toolName, $input, $userId, $sessionId),
         };
+    }
+
+    /**
+     * Tool modules — S-AI-KNOWLEDGE. Each class lives in lib/AI/Tools/ and
+     * exposes static definitions() (tool schemas), handles($name) and
+     * run($name, $input, $userId, $sessionId). ToolRegistry merges their
+     * definitions; run() falls through to them for any name not handled above.
+     * Add a new family of tools as a module rather than growing this file.
+     */
+    public const MODULES = [
+        KnowledgeTools::class,
+        OpsTools::class,
+        BillingTools::class,
+    ];
+
+    /** Route a tool name to the module that owns it. */
+    private static function runModule(string $toolName, array $input, ?int $userId, ?int $sessionId): mixed
+    {
+        foreach (self::MODULES as $module) {
+            if ($module::handles($toolName)) {
+                return $module::run($toolName, $input, $userId, $sessionId);
+            }
+        }
+        throw new \RuntimeException("Unknown tool: {$toolName}");
     }
 
     // ════════════════════════════════════════════════════════════
@@ -293,7 +317,7 @@ class FleetForgeTools
             "SELECT l.id, l.contract_number, l.unit_number_snapshot AS unit_number,
                     l.start_date, l.end_date, l.status,
                     l.monthly_rate, l.daily_rate, l.weekly_rate, l.currency,
-                    l.outstanding_balance
+                    " . self::LEASE_OPEN_BALANCE_SQL . " AS open_balance
              FROM leases l
              WHERE {$whereSql}
              ORDER BY l.start_date DESC
@@ -301,8 +325,8 @@ class FleetForgeTools
             $params
         );
 
-        // WHY: strip lease rates / balance for users without payments:view —
-        // parity with get_active_leases / get_lease_details.
+        // WHY: strip the balance for users without payments:view — parity with
+        // get_active_leases / get_lease_details (lease rates stay visible).
         return self::stripFinancials($rows, $userId);
     }
 
@@ -410,36 +434,76 @@ class FleetForgeTools
     // Detailed info about a specific equipment unit including
     // template, status, mileage, compliance dates, GPS config.
     // ────────────────────────────────────────────────────────────
-    private static function getEquipmentUnit(array $input): array|string
+    private static function getEquipmentUnit(array $input, ?int $userId = null): array|string
     {
-        $unitId = (int) ($input['unit_id'] ?? 0);
-        if ($unitId <= 0) return 'Error: unit_id is required.';
+        // S-AI-KNOWLEDGE: accept a unit NUMBER too. The model routinely passed
+        // "36V203" as unit_id, and (int) "36V203" === 36 — so it silently
+        // answered about a DIFFERENT unit. Non-numeric ids resolve by number.
+        $unitId  = 0;
+        $rawId   = trim((string) ($input['unit_id'] ?? ''));
+        $number  = trim((string) ($input['unit_number'] ?? ''));
+        if ($rawId !== '' && ctype_digit($rawId)) {
+            $unitId = (int) $rawId;
+        } elseif ($number === '' && $rawId !== '') {
+            $number = $rawId;
+        }
+        if ($unitId <= 0 && $number !== '') {
+            $unitId = (int) (db_row(
+                "SELECT id FROM equipment_units WHERE unit_number = ? AND deleted_at IS NULL LIMIT 1",
+                [$number]
+            )['id'] ?? 0);
+            if ($unitId <= 0) {
+                return "No equipment unit numbered {$number}. Try search_equipment with part of the number.";
+            }
+        }
+        if ($unitId <= 0) return 'Error: unit_id or unit_number is required.';
 
+        // S-AI-KNOWLEDGE: current model — Category→Type taxonomy (type = the
+        // template; category label from equipment_categories), brand on the
+        // unit, Samsara identity = samsara_vehicle_id + samsara_entity_type
+        // (gps_device_id is dead), MVI/insurance no longer tracked.
         $row = db_row(
             "SELECT eu.id, eu.unit_number, eu.vin, eu.year, eu.status,
                     eu.ownership_type, eu.yard_location, eu.mileage,
                     eu.license_plate, eu.license_state,
-                    eu.cvi_expiry, eu.registration_expiry, eu.mvi_expiry, eu.insurance_expiry,
-                    eu.tracking_provider, eu.gps_device_id,
+                    eu.cvi_expiry, eu.registration_expiry,
+                    eu.tracking_provider, eu.samsara_entity_type, eu.samsara_vehicle_name,
+                    eu.samsara_odometer_km, eu.samsara_last_connected_at, eu.samsara_last_location_address,
                     eu.health_score, eu.lease_count, eu.total_revenue, eu.total_maintenance_cost,
                     eu.acquired_date, eu.acquisition_cost,
+                    eu.decommissioned_date, eu.decommission_reason,
                     eu.notes, eu.created_at,
-                    et.name AS template_name, et.category, eb.label AS brand, et.model
+                    et.name AS equipment_type, ec.label AS category, et.category AS category_slug,
+                    eb.label AS brand, et.model
              FROM equipment_units eu
-             LEFT JOIN equipment_templates et ON et.id = eu.template_id
-             LEFT JOIN equipment_brands eb ON eb.id = eu.brand_id
+             LEFT JOIN equipment_templates et  ON et.id = eu.template_id
+             LEFT JOIN equipment_categories ec ON ec.id = et.category_id
+             LEFT JOIN equipment_brands eb     ON eb.id = eu.brand_id
              WHERE eu.id = ? AND eu.deleted_at IS NULL",
             [$unitId]
         );
+        if ($row === null) return "No equipment unit found with ID {$unitId}.";
 
-        return $row ?? "No equipment unit found with ID {$unitId}.";
+        // Who has it now (on_lease/reserved answers "where is X / who has X").
+        $row['current_lease'] = db_row(
+            "SELECT l.id AS lease_id, l.contract_number, l.status, l.start_date, l.end_date,
+                    c.id AS customer_id, c.company_name AS customer
+               FROM leases l
+               JOIN customers c ON c.id = l.customer_id
+              WHERE l.equipment_unit_id = ? AND l.status IN ('active', 'pending') AND l.deleted_at IS NULL
+              ORDER BY l.start_date DESC LIMIT 1",
+            [$unitId]
+        );
+        $row['samsara_last_connected_at_note'] = 'UTC';
+
+        return self::stripFinancials([$row], $userId)[0];
     }
 
     // ────────────────────────────────────────────────────────────
     // searchEquipment
     //
-    // Search equipment units by unit number, template name,
-    // status, or category. Returns up to MAX_ROWS matches.
+    // Search equipment units by unit number, VIN, type, brand or Samsara
+    // name, with status / category filters. Returns up to MAX_ROWS matches.
     // ────────────────────────────────────────────────────────────
     private static function searchEquipment(array $input): array
     {
@@ -452,10 +516,11 @@ class FleetForgeTools
         $params = [];
 
         if ($query !== '') {
-            $where[]  = '(eu.unit_number LIKE ? OR et.name LIKE ?)';
+            // S-AI-KNOWLEDGE: VIN, brand and Samsara name too — staff search by
+            // whatever is painted on the trailer or shown in Samsara.
+            $where[]  = '(eu.unit_number LIKE ? OR et.name LIKE ? OR eu.vin LIKE ? OR eb.label LIKE ? OR eu.samsara_vehicle_name LIKE ?)';
             $like     = "%{$query}%";
-            $params[] = $like;
-            $params[] = $like;
+            array_push($params, $like, $like, $like, $like, $like);
         }
 
         if ($status !== '') {
@@ -464,8 +529,9 @@ class FleetForgeTools
         }
 
         if ($category !== '') {
-            $where[]  = 'et.category = ?';
-            $params[] = $category;
+            // Slug (dry_van) or label (Dry Van) — `category` is the retained mirror.
+            $where[]  = '(et.category = ? OR ec.slug = ? OR ec.label = ?)';
+            array_push($params, $category, $category, $category);
         }
 
         $whereSql = implode(' AND ', $where);
@@ -473,9 +539,11 @@ class FleetForgeTools
         return db_select(
             "SELECT eu.id, eu.unit_number, eu.status, eu.mileage,
                     eu.yard_location, eu.ownership_type,
-                    et.name AS template_name, et.category
+                    et.name AS equipment_type, ec.label AS category, eb.label AS brand
              FROM equipment_units eu
-             LEFT JOIN equipment_templates et ON et.id = eu.template_id
+             LEFT JOIN equipment_templates et  ON et.id = eu.template_id
+             LEFT JOIN equipment_categories ec ON ec.id = et.category_id
+             LEFT JOIN equipment_brands eb     ON eb.id = eu.brand_id
              WHERE {$whereSql}
              ORDER BY eu.unit_number ASC
              LIMIT {$limit}",
@@ -508,13 +576,17 @@ class FleetForgeTools
 
         $whereSql = implode(' AND ', $where);
 
+        // S-AI-KNOWLEDGE: open_balance is summed from the lease's SENT invoices.
+        // leases.outstanding_balance is non-canonical (incremented on send,
+        // never decremented by payments) — 38 of 140 active leases disagreed.
         $rows = db_select(
             "SELECT l.id, l.contract_number,
                     l.company_name_snapshot AS customer_name,
                     l.unit_number_snapshot AS unit_number,
                     l.start_date, l.end_date, l.status,
-                    l.monthly_rate, l.daily_rate, l.currency,
-                    l.outstanding_balance
+                    l.monthly_rate, l.daily_rate, l.currency, l.billing_cycle,
+                    l.mileage_tracking_mode, l.last_billed_date,
+                    " . self::LEASE_OPEN_BALANCE_SQL . " AS open_balance
              FROM leases l
              WHERE {$whereSql}
              ORDER BY l.start_date DESC
@@ -536,20 +608,39 @@ class FleetForgeTools
         $leaseId = (int) ($input['lease_id'] ?? 0);
         if ($leaseId <= 0) return 'Error: lease_id is required.';
 
+        // S-AI-KNOWLEDGE: brought up to the current lease model — mileage
+        // tracking mode (THE odometer gate: samsara vs manual vs none), hourly
+        // (engine/reefer hours) billing, daily estimates, GPS/cartage/precharge
+        // charges, minimum billing days, billing position, and money summed from
+        // invoices (leases.total_* / outstanding_balance are non-canonical).
         $row = db_row(
             "SELECT l.id, l.contract_number, l.status,
                     l.customer_id, l.company_name_snapshot AS customer_name,
                     l.equipment_unit_id, l.unit_number_snapshot AS unit_number,
-                    l.template_name_snapshot AS template_name,
-                    l.start_date, l.end_date, l.actual_return_date,
-                    l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
-                    l.mileage_rate, l.mileage_unit,
-                    l.estimated_mileage, l.actual_mileage,
-                    l.mileage_at_start, l.mileage_at_end,
-                    l.billing_cycle, l.po_number,
-                    l.discount_type, l.discount_value,
+                    l.template_name_snapshot AS equipment_type,
+                    l.start_date, l.end_date, l.minimum_end_date, l.actual_return_date,
+                    l.billing_cycle, l.advance_billing_periods, l.po_number,
+                    l.last_billed_date, l.next_billing_date,
+                    l.daily_rate, l.weekly_rate, l.monthly_rate, l.rate_notes,
+                    l.currency, l.exchange_rate_to_cad, l.minimum_billing_days,
+                    l.mileage_tracking_mode, l.mileage_rate, l.mileage_unit,
+                    l.estimated_mileage, l.estimated_mileage_per_day,
+                    l.odometer_start_km, l.odometer_start_source, l.odometer_end_km, l.total_distance_km,
+                    l.hourly_rate, l.engine_hours_at_start, l.engine_hours_at_end, l.estimated_engine_hours_per_day,
+                    l.gps_opt_in, l.gps_cost, l.cartage_amount, l.cartage_billed_at,
                     l.insurance_opt_in, l.insurance_cost,
-                    l.total_invoiced, l.total_paid, l.outstanding_balance,
+                    l.precharge_enabled, l.precharge_amount, l.precharge_balance,
+                    l.discount_type, l.discount_value,
+                    l.tax_exempt, l.closed_at, l.cancellation_reason,
+                    (SELECT COALESCE(SUM(i.total_amount), 0) FROM invoices i
+                      WHERE i.lease_id = l.id AND i.deleted_at IS NULL
+                        AND i.status NOT IN ('draft', 'void', 'written_off')) AS invoiced_sent,
+                    (SELECT COALESCE(SUM(i.amount_paid), 0) FROM invoices i
+                      WHERE i.lease_id = l.id AND i.deleted_at IS NULL
+                        AND i.status NOT IN ('draft', 'void', 'written_off')) AS paid,
+                    " . self::LEASE_OPEN_BALANCE_SQL . " AS open_balance,
+                    (SELECT COUNT(*) FROM invoices i
+                      WHERE i.lease_id = l.id AND i.deleted_at IS NULL AND i.status = 'draft') AS draft_invoices,
                     l.notes, l.created_at
              FROM leases l
              WHERE l.id = ? AND l.deleted_at IS NULL",
@@ -560,20 +651,43 @@ class FleetForgeTools
             return "No lease found with ID {$leaseId}.";
         }
 
-        // WHY: Strip dollar fields for users who can't view payments
+        // Billing holds stop the Monthly Billing workbench from billing it.
+        try {
+            $holds = \FleetForge\Billing\Cycle\BillingHolds::list('active', null, $leaseId);
+            $row['active_billing_holds'] = array_map(
+                static fn (array $h): string => \FleetForge\Billing\Cycle\BillingHolds::describe($h),
+                $holds
+            );
+        } catch (\Throwable) {
+            $row['active_billing_holds'] = null; // never fail the lookup on this
+        }
+
+        // WHY: invoice money is hidden from roles without payments:view. The
+        // lease's own RATES stay — dispatchers see them by design.
         if (!self::canViewFinancials($userId)) {
-            $financialKeys = [
-                'daily_rate', 'weekly_rate', 'monthly_rate', 'mileage_rate',
-                'insurance_cost', 'discount_value',
-                'total_invoiced', 'total_paid', 'outstanding_balance',
-            ];
-            foreach ($financialKeys as $key) {
+            foreach (['invoiced_sent', 'paid', 'open_balance', 'precharge_balance', 'discount_value'] as $key) {
                 unset($row[$key]);
             }
         }
 
         return $row;
     }
+
+    /**
+     * Canonical per-lease open balance: what's still owed on the lease's SENT
+     * invoices (drafts aren't owed; void/written-off aren't collectible).
+     * Correlated subquery over alias `l`.
+     */
+    /**
+     * Past due by date: sent/partially-paid/overdue, a balance left, due date
+     * before company-local today (bind ff_today()). Alias `i`. Doesn't rely on
+     * the invoice_overdue job having flipped the status (it has an off switch).
+     */
+    private const OVERDUE_SQL = "i.status IN ('sent', 'partially_paid', 'overdue') AND i.balance_due > 0 AND i.due_date < ?";
+
+    private const LEASE_OPEN_BALANCE_SQL = "(SELECT COALESCE(SUM(i.balance_due), 0) FROM invoices i
+                      WHERE i.lease_id = l.id AND i.deleted_at IS NULL
+                        AND i.status IN ('sent', 'partially_paid', 'overdue'))";
 
     // ────────────────────────────────────────────────────────────
     // getLeaseCloseReadiness
@@ -595,6 +709,7 @@ class FleetForgeTools
                     l.equipment_unit_id, l.unit_number_snapshot AS unit_number,
                     l.start_date, l.end_date, l.last_billed_date,
                     l.mileage_at_start, l.odometer_start_km,
+                    l.mileage_tracking_mode, l.mileage_rate_km, l.hourly_rate, l.engine_hours_at_start,
                     l.precharge_enabled, l.precharge_amount, l.precharge_balance,
                     l.precharge_invoiced_at, l.precharge_refund_method, l.precharge_refund_settled_at
              FROM leases l
@@ -636,6 +751,52 @@ class FleetForgeTools
             $requiredInputs[] = 'reconciliation_mode (refund_unused or no_refund) for the prepaid advance invoices';
         }
 
+        // S-AI-KNOWLEDGE: mirror the rest of close.php's read side.
+        // Return date defaults to today, like the Close form.
+        $returnDate = \FleetForge\RateCards\RateCardItems::validDate($input['return_date'] ?? null) ?? ff_today();
+        if ($returnDate < (string) $lease['start_date']) {
+            $blockers[] = "Return date {$returnDate} is before the lease start ({$lease['start_date']}).";
+        }
+
+        // A SENT (or paid / written-off) full-month invoice already covering the
+        // return month makes close.php refuse with INVOICE_CONFLICT — only drafts
+        // are replaced automatically.
+        $monthInvoice = db_row(
+            "SELECT invoice_number, status FROM invoices
+              WHERE lease_id = ? AND billing_type = 'full_month' AND deleted_at IS NULL AND status <> 'void'
+                AND YEAR(billing_period_start) = YEAR(?) AND MONTH(billing_period_start) = MONTH(?)
+              ORDER BY id DESC LIMIT 1",
+            [$leaseId, $returnDate, $returnDate]
+        );
+        $notes = [];
+        if ($monthInvoice !== null && $monthInvoice['status'] !== 'draft') {
+            $blockers[] = "Invoice {$monthInvoice['invoice_number']} ({$monthInvoice['status']}) already bills the return month — the close will be refused (INVOICE_CONFLICT). Resolve it first (credit note), or pick a return date in another month.";
+        } elseif ($monthInvoice !== null) {
+            $notes[] = "Draft {$monthInvoice['invoice_number']} for the return month will be replaced by the close's final invoice.";
+        }
+
+        // Odometer: the lease's mileage_tracking_mode decides (THE odometer gate).
+        $mode = (string) ($lease['mileage_tracking_mode'] ?? 'off');
+        if ($mode === 'manual' && bccomp((string) ($lease['mileage_rate_km'] ?? '0'), '0', 4) > 0) {
+            $requiredInputs[] = 'closing odometer reading (mileage is tracked MANUALLY — without it $0 mileage is billed); it must be ≥ the starting odometer';
+        } elseif ($mode === 'samsara') {
+            $notes[] = 'Closing odometer comes from Samsara (can be overridden on the form).';
+        } elseif ($mode === 'off') {
+            $notes[] = 'Mileage tracking is off for this lease — no odometer needed.';
+        }
+        if (bccomp((string) ($lease['hourly_rate'] ?? '0'), '0', 2) > 0) {
+            $requiredInputs[] = 'engine/reefer hours reading at close (hourly billing trues up to it; without it the estimate is not trued up)'
+                . ($lease['engine_hours_at_start'] === null ? ' — note: no starting engine-hours reading is on file' : '');
+        }
+
+        try {
+            foreach (\FleetForge\Billing\Cycle\BillingHolds::list('active', null, $leaseId) as $h) {
+                $notes[] = 'Billing hold: ' . \FleetForge\Billing\Cycle\BillingHolds::describe($h);
+            }
+        } catch (\Throwable) {
+            // informational only
+        }
+
         $result = [
             'lease_id'                 => (int) $lease['id'],
             'contract_number'          => $lease['contract_number'],
@@ -652,8 +813,11 @@ class FleetForgeTools
             'has_start_odometer'       => $lease['odometer_start_km'] !== null,
             'last_billed_date'         => $lease['last_billed_date'],
             'end_date'                 => $lease['end_date'],
+            'return_date_checked'      => $returnDate,
+            'mileage_tracking_mode'    => $mode,
             'required_inputs_for_close'=> $requiredInputs,
-            'note'                     => 'Read-only readiness check. Executing the close still happens via the lease Close form (it needs odometer + refund decisions the AI cannot make on its own yet).',
+            'notes'                    => $notes,
+            'note'                     => 'Read-only readiness check. The close itself is done on the lease page (Close lease) — search_help "closing a lease" for the steps.',
         ];
 
         // Gate dollar amounts behind payments:view (mirrors other tools).
@@ -921,7 +1085,7 @@ class FleetForgeTools
         // rows × exchange_rate_to_cad via the canonical ReportBuilder::cad() so the
         // AI numbers match the Reports module. Latent until a USD invoice exists.
         $cad = static fn(string $c): string => \FleetForge\Reports\ReportBuilder::cad($c, 'i');
-        return db_select(
+        $months = db_select(
             "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS month,
                     COUNT(*) AS invoice_count,
                     SUM(" . $cad('i.total_amount') . ") AS total_invoiced,
@@ -929,12 +1093,40 @@ class FleetForgeTools
                     SUM(" . $cad('i.balance_due') . ") AS total_outstanding
              FROM invoices i
              WHERE i.invoice_date BETWEEN ? AND ?
-               AND i.status NOT IN ('void', 'written_off')
+               -- S-AI-KNOWLEDGE: draft is NOT revenue (reporting policy — only
+               -- Send posts revenue). Counting drafts overstated months that
+               -- hadn't been sent yet (Aug 2026: $114.5k vs $59.4k).
+               AND i.status NOT IN ('void', 'written_off', 'draft')
                AND i.deleted_at IS NULL
              GROUP BY DATE_FORMAT(i.invoice_date, '%Y-%m')
              ORDER BY month ASC",
             [$dateFrom, $dateTo]
         );
+        return [
+            'months' => $months,
+            'drafts_not_yet_revenue' => self::draftTotals($dateFrom, $dateTo),
+            'note' => 'Revenue = sent invoices (draft, void and written-off excluded), in CAD.',
+        ];
+    }
+
+    /**
+     * Unsent drafts in a date range (count + CAD total) — S-AI-KNOWLEDGE.
+     * WHY: revenue excludes drafts, so a month billed but not yet sent reads
+     * low (prod had every invoice in draft). Returning drafts alongside lets
+     * the assistant explain the gap instead of reporting a bare $0.
+     */
+    private static function draftTotals(string $dateFrom, string $dateTo): array
+    {
+        $row = db_row(
+            "SELECT COUNT(*) AS invoice_count,
+                    COALESCE(SUM(" . \FleetForge\Reports\ReportBuilder::cad('i.total_amount', 'i') . "), 0) AS total
+             FROM invoices i
+             WHERE i.invoice_date BETWEEN ? AND ?
+               AND i.status = 'draft'
+               AND i.deleted_at IS NULL",
+            [$dateFrom, $dateTo]
+        );
+        return ['invoice_count' => (int) ($row['invoice_count'] ?? 0), 'total' => (string) ($row['total'] ?? '0')];
     }
 
     // ────────────────────────────────────────────────────────────
@@ -966,7 +1158,7 @@ class FleetForgeTools
                     SUM(" . $cad('i.balance_due') . ") AS outstanding
              FROM invoices i
              WHERE i.invoice_date BETWEEN ? AND ?
-               AND i.status NOT IN ('void', 'written_off')
+               AND i.status NOT IN ('void', 'written_off', 'draft') -- draft ≠ revenue (S-AI-KNOWLEDGE)
                AND i.deleted_at IS NULL
              GROUP BY i.customer_id, i.company_name_snapshot
              ORDER BY total_billed DESC
@@ -991,19 +1183,21 @@ class FleetForgeTools
 
         // Business DATE vs company-local today: SQL CURDATE() is the UTC day
         // (session pinned +00:00), so days_overdue ran +1 every Pacific evening (ff_today).
+        // S-AI-KNOWLEDGE: past-due by DATE (OVERDUE_SQL), not status='overdue' —
+        // that flag is set by the invoice_overdue job, which can be switched off.
         return db_select(
             "SELECT i.id, i.invoice_number,
                     i.company_name_snapshot AS customer_name,
                     i.total_amount, i.amount_paid, i.balance_due,
                     i.currency, i.due_date,
                     DATEDIFF(?, i.due_date) AS days_overdue,
-                    i.contract_number_snapshot AS contract_number
+                    i.contract_number_snapshot AS contract_number, i.status
              FROM invoices i
-             WHERE i.status = 'overdue'
+             WHERE " . self::OVERDUE_SQL . "
                AND i.deleted_at IS NULL
              ORDER BY days_overdue DESC
              LIMIT {$limit}",
-            [ff_today()]
+            [ff_today(), ff_today()]
         );
     }
 
@@ -1135,7 +1329,7 @@ class FleetForgeTools
 
         $limit    = ToolRegistry::MAX_ROWS;
         $deadline = date('Y-m-d', strtotime("+{$daysAhead} days"));
-        $today    = date('Y-m-d');
+        $today    = ff_today();
 
         // WHY: UNION ALL across the tracked compliance date columns to capture all expiry types
         // days_until_expiry binds company-local today (ff_today): SQL CURDATE() is the
@@ -1179,14 +1373,14 @@ class FleetForgeTools
     // Work order stats: open/in-progress/completed counts, total
     // costs, and recent work orders. Optional unit_id filter.
     // ────────────────────────────────────────────────────────────
-    private static function getMaintenanceSummary(array $input): array
+    private static function getMaintenanceSummary(array $input, ?int $userId = null): array
     {
-        $unitId = (int) ($input['unit_id'] ?? 0);
+        $unitId = self::resolveUnitId($input);
 
         $where  = ['wo.deleted_at IS NULL'];
         $params = [];
 
-        if ($unitId > 0) {
+        if ($unitId !== 0) {
             $where[]  = 'wo.equipment_unit_id = ?';
             $params[] = $unitId;
         }
@@ -1230,12 +1424,20 @@ class FleetForgeTools
             $params
         );
 
-        return [
+        $out = [
             'total_work_orders' => $totalOrders,
             'total_cost'        => round($totalCost, 2),
             'by_status'         => $byStatus,
             'recent_orders'     => $recent,
         ];
+        // S-AI-KNOWLEDGE: dispatchers see maintenance pages but not money.
+        if (!self::canViewFinancials($userId)) {
+            unset($out['total_cost']);
+            foreach ($out['by_status'] as &$b) { unset($b['cost']); }
+            unset($b);
+            $out['recent_orders'] = self::stripFinancials($out['recent_orders'], $userId);
+        }
+        return $out;
     }
 
     // ════════════════════════════════════════════════════════════
@@ -1252,7 +1454,7 @@ class FleetForgeTools
     private static function getDashboardKpis(?int $userId): array
     {
         $monthStart = date('Y-m-01');
-        $today      = date('Y-m-d');
+        $today      = ff_today();
         $in30Days   = date('Y-m-d', strtotime('+30 days'));
 
         // Active leases
@@ -1279,13 +1481,14 @@ class FleetForgeTools
                         COALESCE(SUM(" . \FleetForge\Reports\ReportBuilder::cad('amount_paid') . "), 0) AS collected
                  FROM invoices
                  WHERE invoice_date >= ? AND invoice_date <= ?
-                   AND status NOT IN ('void', 'written_off')
+                   AND status NOT IN ('void', 'written_off', 'draft') -- draft ≠ revenue (S-AI-KNOWLEDGE)
                    AND deleted_at IS NULL",
                 [$monthStart, $today]
             );
             $monthRevenue = [
                 'invoiced'  => (float) ($rev['invoiced'] ?? 0),
                 'collected' => (float) ($rev['collected'] ?? 0),
+                'drafts_not_yet_revenue' => self::draftTotals($monthStart, $today),
             ];
         }
 
@@ -1331,52 +1534,83 @@ class FleetForgeTools
     // Lists all rate cards with item counts and effective dates.
     // Used by the AI when answering rate/pricing questions.
     // ────────────────────────────────────────────────────────────
-    private static function getRateCards(): array
+    private static function getRateCards(array $input = []): array|string
     {
-        return db_select(
-            "SELECT rc.id, rc.name, rc.description, rc.is_default,
-                    rc.effective_from, rc.effective_to,
+        if (!\can('rates', 'view')) {
+            return self::ratesDenied();
+        }
+        $today      = ff_today();
+        $customerId = (int) ($input['customer_id'] ?? 0);
+
+        // S-AI-KNOWLEDGE: after S-RATES-MODULE almost every card belongs to one
+        // customer — without customer + in-force status the list was a wall of
+        // look-alike names the model couldn't tell apart.
+        $rows = db_select(
+            "SELECT rc.id, rc.name, rc.customer_id, c.company_name AS customer,
+                    rc.is_default, rc.effective_from, rc.effective_to,
                     (SELECT COUNT(*) FROM rate_card_items WHERE rate_card_id = rc.id) AS item_count
              FROM rate_cards rc
-             WHERE rc.deleted_at IS NULL
-             ORDER BY rc.is_default DESC, rc.name ASC"
+             LEFT JOIN customers c ON c.id = rc.customer_id
+             WHERE rc.deleted_at IS NULL" . ($customerId > 0 ? " AND rc.customer_id = ?" : "") . "
+             ORDER BY rc.customer_id IS NOT NULL, rc.is_default DESC, rc.name ASC",
+            $customerId > 0 ? [$customerId] : []
         );
+        foreach ($rows as &$r) {
+            $r['in_force'] = \FleetForge\RateCards\RateCardItems::status($r, $today); // active|ending|upcoming|expired
+            $r['kind']     = $r['customer_id'] === null ? 'general (standard prices)' : 'customer card';
+        }
+        unset($r);
+        return $rows;
     }
 
     // ────────────────────────────────────────────────────────────
     // getRateCardItems
     //
-    // Returns all rate items for a specific rate card. If no
-    // rate_card_id is given, falls back to the default rate card.
+    // The lines of one rate card. With no rate_card_id, returns the standard
+    // price of every equipment type (the Rates page's price book) — the old
+    // fallback to the is_default card returned a minimum-days-only card with
+    // no prices at all.
     // ────────────────────────────────────────────────────────────
     private static function getRateCardItems(array $input): array|string
     {
+        if (!\can('rates', 'view')) {
+            return self::ratesDenied();
+        }
         $cardId = (int) ($input['rate_card_id'] ?? 0);
+        $today  = ff_today();
 
-        // WHY: AI may ask "what are our rates?" without specifying a card — fall back to default.
         if ($cardId <= 0) {
-            $default = db_row(
-                "SELECT id FROM rate_cards WHERE is_default = 1 AND deleted_at IS NULL LIMIT 1"
-            );
-            if ($default === null) return 'No default rate card found. Please specify rate_card_id.';
-            $cardId = (int) $default['id'];
+            return self::standardPriceBook($today);
         }
 
         $card = db_row(
-            "SELECT id, name, description, is_default, effective_from, effective_to
-             FROM rate_cards WHERE id = ? AND deleted_at IS NULL",
+            "SELECT rc.id, rc.name, rc.description, rc.customer_id, c.company_name AS customer,
+                    rc.is_default, rc.effective_from, rc.effective_to
+             FROM rate_cards rc
+             LEFT JOIN customers c ON c.id = rc.customer_id
+             WHERE rc.id = ? AND rc.deleted_at IS NULL",
             [$cardId]
         );
         if ($card === null) return "No rate card found with ID {$cardId}.";
+        $card['in_force'] = \FleetForge\RateCards\RateCardItems::status($card, $today);
 
+        // A line is for one equipment TYPE (template) or, when template is
+        // NULL, for the whole category.
         $items = db_select(
-            "SELECT equipment_type, daily_rate, weekly_rate, monthly_rate,
-                    mileage_rate, mileage_unit, currency, notes
-             FROM rate_card_items
-             WHERE rate_card_id = ?
-             ORDER BY equipment_type ASC",
+            "SELECT rci.equipment_type AS category, et.name AS equipment_type,
+                    rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
+                    rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price,
+                    rci.minimum_days, rci.currency, rci.notes
+             FROM rate_card_items rci
+             LEFT JOIN equipment_templates et ON et.id = rci.equipment_template_id
+             WHERE rci.rate_card_id = ?
+             ORDER BY rci.equipment_type ASC, et.name ASC",
             [$cardId]
         );
+        foreach ($items as &$it) {
+            $it['equipment_type'] ??= '(whole category)';
+        }
+        unset($it);
 
         return ['rate_card' => $card, 'items' => $items];
     }
@@ -1384,25 +1618,84 @@ class FleetForgeTools
     // ────────────────────────────────────────────────────────────
     // getCustomerRates
     //
-    // Customer-specific negotiated rates, read from that customer's
-    // rate cards (S-RATES-CONSOLIDATE: per-type overrides retired —
-    // customer pricing lives on customer-owned rate cards).
+    // What one customer pays for each equipment type today — S-AI-KNOWLEDGE.
+    // Reads RateInsights::customerPrices(), which prices through RateResolver
+    // (customer card → general card → type default, by effective date) and
+    // adds what the customer's ACTIVE leases actually pay. The old query read
+    // only the customer's own card lines, so a customer with no card (or an
+    // expired one) came back as [] and dates were ignored.
     // ────────────────────────────────────────────────────────────
     private static function getCustomerRates(array $input): array|string
     {
+        if (!\can('rates', 'view')) {
+            return self::ratesDenied();
+        }
         $customerId = (int) ($input['customer_id'] ?? 0);
         if ($customerId <= 0) return 'Error: customer_id is required.';
+        $date = \FleetForge\RateCards\RateCardItems::validDate($input['date'] ?? null) ?? ff_today();
 
-        return db_select(
-            "SELECT rci.equipment_type, rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-                    rci.mileage_rate, rci.mileage_unit, rci.currency,
-                    rc.name AS rate_card, rc.effective_from, rc.effective_to
-             FROM rate_card_items rci
-             JOIN rate_cards rc ON rc.id = rci.rate_card_id
-             WHERE rc.customer_id = ? AND rc.deleted_at IS NULL
-             ORDER BY rci.equipment_type ASC, rc.effective_from DESC",
-            [$customerId]
-        );
+        $all = \FleetForge\RateCards\RateInsights::customerPrices($customerId, $date);
+        $out = [];
+        foreach ($all['prices'] ?? [] as $p) {
+            $price = $p['price'] ?? [];
+            $row = [
+                'equipment_type' => $p['name'],
+                'category'       => $p['category_label'] ?? $p['category'],
+                'pays'           => self::compactPrice($price),
+                'from'           => $price['source_label'] ?? '',
+                'is_customer_price' => ($price['source'] ?? '') === 'customer',
+            ];
+            if (!empty($p['lease'])) {
+                // What their active leases on this type are actually billed at
+                // (a lease keeps the price it was created with).
+                $row['active_leases_pay'] = self::compactPrice($p['lease']) + ['lease_count' => $p['lease']['count'] ?? null];
+            }
+            $out[] = $row;
+        }
+        return [
+            'customer_id' => $customerId,
+            'date'        => $date,
+            'prices'      => $out,
+            'note'        => 'A lease keeps the price it was created with; card changes apply to new leases or from the date a price change is made (Rates → Change prices).',
+        ];
+    }
+
+    /** Price fields only, nulls dropped — keeps tool output small. */
+    private static function compactPrice(array $p): array
+    {
+        $keep = ['daily_rate', 'weekly_rate', 'monthly_rate', 'mileage_rate', 'mileage_unit', 'hourly_rate', 'gps_price', 'minimum_days', 'currency'];
+        return array_filter(array_intersect_key($p, array_flip($keep)), static fn ($v): bool => $v !== null && $v !== '');
+    }
+
+    /** Standard (no-customer-card) price per equipment type, compact. */
+    private static function standardPriceBook(string $today): array
+    {
+        $book = \FleetForge\RateCards\RateInsights::priceBook($today);
+        $out  = [];
+        foreach ($book['groups'] ?? [] as $g) {
+            foreach ($g['types'] ?? [] as $t) {
+                $out[] = [
+                    'category'       => $g['label'],
+                    'equipment_type' => $t['name'],
+                    'standard_price' => self::compactPrice($t['standard'] ?? []),
+                    'from'           => $t['standard']['source_label'] ?? '',
+                    'customer_deals' => $t['deals']['customers'] ?? 0,
+                    'units'          => $t['units'] ?? null,
+                    'on_rent'        => $t['on_rent'] ?? null,
+                ];
+            }
+        }
+        return [
+            'date'            => $today,
+            'standard_prices' => $out,
+            'note'            => 'Standard = what a customer without their own card pays. Customer-specific prices: get_customer_rates.',
+        ];
+    }
+
+    /** Uniform denial for the rates-module tools. */
+    private static function ratesDenied(): array
+    {
+        return ['error' => true, 'message' => 'Your role cannot see the Rates module (price lists). A manager or accountant can. You can still see the rates on a specific lease.'];
     }
 
     // ════════════════════════════════════════════════════════════
@@ -1533,7 +1826,7 @@ class FleetForgeTools
     //
     // Search vendors by name/contact/email and optional vendor_type.
     // ────────────────────────────────────────────────────────────
-    private static function searchVendors(array $input): array
+    private static function searchVendors(array $input, ?int $userId = null): array
     {
         $query = trim($input['query'] ?? '');
         $type  = trim($input['vendor_type'] ?? '');
@@ -1557,7 +1850,7 @@ class FleetForgeTools
 
         $whereSql = implode(' AND ', $where);
 
-        return db_select(
+        $rows = db_select(
             "SELECT v.id, v.name, v.vendor_type, v.contact_name, v.email, v.phone,
                     v.city, v.state, v.hourly_rate, v.rating, v.is_preferred, v.total_spent
              FROM vendors v
@@ -1566,6 +1859,20 @@ class FleetForgeTools
              LIMIT {$limit}",
             $params
         );
+        return array_map(static fn (array $r): array => self::stripVendorMoney($r, $userId), $rows);
+    }
+
+    /**
+     * Vendor money (hourly_rate, total_spent) is hidden from non-financial
+     * roles — S-AI-KNOWLEDGE. hourly_rate isn't in stripFinancials' list
+     * because a LEASE hourly rate is dispatcher-visible; a vendor's isn't.
+     */
+    private static function stripVendorMoney(array $row, ?int $userId): array
+    {
+        if (!self::canViewFinancials($userId)) {
+            unset($row['hourly_rate'], $row['total_spent']);
+        }
+        return $row;
     }
 
     // ────────────────────────────────────────────────────────────
@@ -1573,7 +1880,7 @@ class FleetForgeTools
     //
     // Full vendor profile.
     // ────────────────────────────────────────────────────────────
-    private static function getVendorDetails(array $input): array|string
+    private static function getVendorDetails(array $input, ?int $userId = null): array|string
     {
         $vendorId = (int) ($input['vendor_id'] ?? 0);
         if ($vendorId <= 0) return 'Error: vendor_id is required.';
@@ -1588,7 +1895,7 @@ class FleetForgeTools
             [$vendorId]
         );
 
-        return $row ?? "No vendor found with ID {$vendorId}.";
+        return $row === null ? "No vendor found with ID {$vendorId}." : self::stripVendorMoney($row, $userId);
     }
 
     // ════════════════════════════════════════════════════════════
@@ -1602,7 +1909,7 @@ class FleetForgeTools
     // ────────────────────────────────────────────────────────────
     private static function getInspections(array $input): array
     {
-        $unitId  = (int) ($input['unit_id'] ?? 0);
+        $unitId  = self::resolveUnitId($input);
         $leaseId = (int) ($input['lease_id'] ?? 0);
         $type    = trim($input['inspection_type'] ?? '');
         $limit   = ToolRegistry::MAX_ROWS;
@@ -1610,7 +1917,7 @@ class FleetForgeTools
         $where  = ['1=1'];
         $params = [];
 
-        if ($unitId > 0)  { $where[] = 'i.equipment_unit_id = ?'; $params[] = $unitId; }
+        if ($unitId !== 0) { $where[] = 'i.equipment_unit_id = ?'; $params[] = $unitId; }
         if ($leaseId > 0) { $where[] = 'i.lease_id = ?';          $params[] = $leaseId; }
         if ($type !== '') { $where[] = 'i.inspection_type = ?';   $params[] = $type; }
 
@@ -1746,14 +2053,14 @@ class FleetForgeTools
     // ────────────────────────────────────────────────────────────
     private static function getMileageLogs(array $input): array
     {
-        $unitId  = (int) ($input['unit_id'] ?? 0);
+        $unitId  = self::resolveUnitId($input);
         $leaseId = (int) ($input['lease_id'] ?? 0);
         $limit   = ToolRegistry::MAX_ROWS;
 
         $where  = ['1=1'];
         $params = [];
 
-        if ($unitId > 0)  { $where[] = 'ml.equipment_unit_id = ?'; $params[] = $unitId; }
+        if ($unitId !== 0) { $where[] = 'ml.equipment_unit_id = ?'; $params[] = $unitId; }
         if ($leaseId > 0) { $where[] = 'ml.lease_id = ?';          $params[] = $leaseId; }
 
         $whereSql = implode(' AND ', $where);
@@ -1861,7 +2168,7 @@ class FleetForgeTools
         }
 
         $dateFrom = $input['date_from'] ?? date('Y-m-01');
-        $dateTo   = $input['date_to']   ?? date('Y-m-d');
+        $dateTo   = $input['date_to']   ?? ff_today();
         $status   = trim($input['status'] ?? '');
         $limit    = ToolRegistry::MAX_ROWS;
 
@@ -1900,21 +2207,27 @@ class FleetForgeTools
             return 'Access denied: you do not have permission to view financial data.';
         }
 
-        $asOf = $input['as_of_date'] ?? date('Y-m-d');
+        $asOf = (string) ($input['as_of_date'] ?? ff_today());
 
+        // S-AI-KNOWLEDGE: the date/status filter used to sit on the SECOND LEFT
+        // JOIN (je), so lines were summed whatever their entry's date or status
+        // — a 2025-12-31 trial balance showed 2026 activity. Lines now join
+        // through a filtered derived table, so only in-range ledger lines count.
+        // posted + reversed: a reversed original is OFFSET by its posted
+        // reversal, not removed (AccountingService::LEDGER_STATUSES_SQL).
         return db_select(
             "SELECT a.code, a.name, a.account_type, a.normal_balance,
                     COALESCE(SUM(jel.debit), 0)  AS total_debit,
                     COALESCE(SUM(jel.credit), 0) AS total_credit,
                     COALESCE(SUM(jel.debit - jel.credit), 0) AS balance
              FROM acc_accounts a
-             LEFT JOIN acc_journal_entry_lines jel ON jel.account_id = a.id
-             LEFT JOIN acc_journal_entries je      ON je.id = jel.journal_entry_id
-                AND je.entry_date <= ?
-                -- posted + reversed: a reversed original is OFFSET by its posted
-                -- reversal, not removed — counting only 'posted' left the reversal
-                -- alone and negated the entry (AccountingService::LEDGER_STATUSES_SQL).
-                AND je.status IN ('posted', 'reversed')
+             LEFT JOIN (
+                 SELECT l.account_id, l.debit, l.credit
+                   FROM acc_journal_entry_lines l
+                   JOIN acc_journal_entries je ON je.id = l.journal_entry_id
+                  WHERE je.entry_date <= ?
+                    AND je.status IN (" . \FleetForge\Accounting\AccountingService::LEDGER_STATUSES_SQL . ")
+             ) jel ON jel.account_id = a.id
              WHERE a.is_active = 1 AND a.is_header = 0
              GROUP BY a.id, a.code, a.name, a.account_type, a.normal_balance
              HAVING balance != 0
@@ -1939,7 +2252,18 @@ class FleetForgeTools
             $code = trim($input['account_code'] ?? '');
             if ($code === '') return 'Error: account_id or account_code is required.';
             $a = db_row("SELECT id FROM acc_accounts WHERE code = ?", [$code]);
-            if ($a === null) return "No account found with code {$code}.";
+            if ($a === null) {
+                // S-AI-KNOWLEDGE: offer the real chart instead of a dead end
+                // (the model guessed '1100' for AR; ours is 1030).
+                $near = db_select(
+                    "SELECT code, name FROM acc_accounts
+                      WHERE is_active = 1 AND is_header = 0 AND (code LIKE ? OR name LIKE ?)
+                      ORDER BY code LIMIT 15",
+                    [substr($code, 0, 2) . '%', '%' . $code . '%']
+                );
+                return ['error' => true, 'message' => "No account with code {$code}.", 'similar_accounts' => $near,
+                        'hint' => 'Common: 1010 Cash CAD, 1020 Cash USD, 1030 Accounts Receivable, 2010 Accounts Payable, 2030 GST/HST Payable. get_chart_of_accounts lists all.'];
+            }
             $accountId = (int) $a['id'];
         }
 
@@ -1949,6 +2273,7 @@ class FleetForgeTools
             [$accountId]
         );
         if ($account === null) return "No account found with ID {$accountId}.";
+        $asOf = (string) ($input['as_of'] ?? ff_today());
 
         $balance = db_row(
             "SELECT COALESCE(SUM(jel.debit), 0)  AS total_debit,
@@ -1956,11 +2281,13 @@ class FleetForgeTools
                     COALESCE(SUM(jel.debit - jel.credit), 0) AS net_balance
              FROM acc_journal_entry_lines jel
              JOIN acc_journal_entries je ON je.id = jel.journal_entry_id
-             WHERE jel.account_id = ? AND je.status IN ('posted', 'reversed')",
-            [$accountId]
+             WHERE jel.account_id = ?
+               AND je.entry_date <= ?
+               AND je.status IN (" . \FleetForge\Accounting\AccountingService::LEDGER_STATUSES_SQL . ")",
+            [$accountId, $asOf]
         );
 
-        return array_merge($account, $balance ?? []);
+        return array_merge($account, ['as_of' => $asOf], $balance ?? []);
     }
 
     // ════════════════════════════════════════════════════════════
@@ -2079,7 +2406,7 @@ class FleetForgeTools
 
         $accountId = (int) ($input['bank_account_id'] ?? 0);
         $dateFrom  = $input['date_from'] ?? date('Y-m-01');
-        $dateTo    = $input['date_to']   ?? date('Y-m-d');
+        $dateTo    = $input['date_to']   ?? ff_today();
         $limit     = ToolRegistry::MAX_ROWS;
 
         $where  = ['t.transaction_date BETWEEN ? AND ?'];
@@ -2381,14 +2708,20 @@ class FleetForgeTools
 
         // ── Total revenue from linked leases/invoices ───────────
         $revenueRow = db_row(
-            "SELECT COALESCE(SUM(ili.amount), 0) AS total
+            // S-AI-KNOWLEDGE: same filter + CAD conversion as the payoff page
+            // (api/v1/accounting/fixed_assets/payoff.php) — this copy had drifted
+            // (counted drafts, summed USD at face value), so the AI's payoff
+            // answer disagreed with the page for the same unit.
+            "SELECT COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                                 THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                                 ELSE ili.amount END), 0) AS total
              FROM invoice_line_items ili
              JOIN invoices i ON i.id = ili.invoice_id
              JOIN leases   l ON l.id = i.lease_id
              WHERE l.equipment_unit_id = ?
                AND l.deleted_at IS NULL
                AND i.deleted_at IS NULL
-               AND i.status NOT IN ('void', 'written_off')
+               AND i.status NOT IN ('void', 'written_off', 'draft')
                AND ili.is_credit = 0",
             [$eqUnitId]
         );
@@ -2439,14 +2772,16 @@ class FleetForgeTools
         // a day ahead every Pacific evening. Param order: unit id, then today.
         $monthlyRows = db_select(
             "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS ym,
-                    COALESCE(SUM(ili.amount), 0) AS revenue
+                    COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                                 THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                                 ELSE ili.amount END), 0) AS revenue
              FROM invoice_line_items ili
              JOIN invoices i ON i.id = ili.invoice_id
              JOIN leases   l ON l.id = i.lease_id
              WHERE l.equipment_unit_id = ?
                AND l.deleted_at IS NULL
                AND i.deleted_at IS NULL
-               AND i.status NOT IN ('void', 'written_off')
+               AND i.status NOT IN ('void', 'written_off', 'draft')
                AND ili.is_credit = 0
                AND i.invoice_date >= (? - INTERVAL 13 MONTH)
              GROUP BY ym",
@@ -2866,6 +3201,31 @@ class FleetForgeTools
     // Returns true if the user has payments:view permission.
     // Null userId (system/cron) always gets access.
     // ────────────────────────────────────────────────────────────
+    private static function resolveUnitId(array $input): int
+    {
+        // S-AI-KNOWLEDGE: the model passes fleet numbers ("STL2026") as unit_id;
+        // (int) "36V203" === 36 silently answered about another unit. Digits =
+        // id; anything else (or unit_number) is looked up by number. Returns -1
+        // for a number that doesn't exist so filters match nothing instead of
+        // falling back to "every unit". 0 = no unit given.
+        $raw    = trim((string) ($input['unit_id'] ?? ''));
+        $number = trim((string) ($input['unit_number'] ?? ''));
+        if ($raw !== '' && ctype_digit($raw)) {
+            return (int) $raw;
+        }
+        if ($number === '') {
+            $number = $raw;
+        }
+        if ($number === '') {
+            return 0;
+        }
+        $id = (int) (db_row(
+            "SELECT id FROM equipment_units WHERE unit_number = ? AND deleted_at IS NULL LIMIT 1",
+            [$number]
+        )['id'] ?? 0);
+        return $id > 0 ? $id : -1;
+    }
+
     private static function canViewFinancials(?int $userId): bool
     {
         // WHY: System/cron calls (no user) always have full access
@@ -2875,7 +3235,7 @@ class FleetForgeTools
         // Leading backslash forces global namespace resolution — without it,
         // PHP tries FleetForge\AI\Tools\can() first and can fail in edge
         // cases (opcache, autoloader interference, partial bootstrap).
-        return \can('payments', 'view');
+        return \can_view_financials(); // the one shared predicate (includes/auth.php)
     }
 
     // ────────────────────────────────────────────────────────────
@@ -2897,9 +3257,13 @@ class FleetForgeTools
 
         // WHY: These keys contain dollar amounts that dispatchers shouldn't see
         $financialKeys = [
+            // S-AI-KNOWLEDGE: lease daily/weekly/monthly rates are NOT here —
+            // they're dispatcher-visible by design (can_view_financials() docs;
+            // the lease pages show them). Unit/vendor/maintenance money is.
             'total_amount', 'amount_paid', 'balance_due',
-            'monthly_rate', 'daily_rate', 'weekly_rate',
-            'outstanding_balance', 'total_invoiced', 'total_paid',
+            'outstanding_balance', 'total_invoiced', 'total_paid', 'open_balance', 'invoiced_sent',
+            'acquisition_cost', 'total_maintenance_cost', 'total_cost', 'total_spent',
+            'labor_cost', 'parts_cost', 'cost',
             'credit_limit', 'total_revenue', 'account_credit_balance',
             'subtotal', 'tax_total', 'discount_amount',
             // Damage-claim money (list handlers rely on stripFinancials; detail
@@ -2933,7 +3297,7 @@ class FleetForgeTools
             return 'Access denied: you do not have permission to view financial reports.';
         }
         $from = (string) ($input['from'] ?? date('Y-01-01'));
-        $to   = (string) ($input['to']   ?? date('Y-m-d'));
+        $to   = (string) ($input['to']   ?? ff_today());
         $report = \FleetForge\Accounting\ReportingService::profitAndLoss($from, $to);
         // Strip drill-down JE-line ids — large arrays inflate token cost
         foreach (['revenue', 'direct_costs', 'operating_expenses', 'other'] as $g) {
@@ -2948,7 +3312,7 @@ class FleetForgeTools
         if (!self::canViewFinancials($userId)) {
             return 'Access denied: you do not have permission to view financial reports.';
         }
-        $asOf = (string) ($input['as_of'] ?? date('Y-m-d'));
+        $asOf = (string) ($input['as_of'] ?? ff_today());
         return \FleetForge\Accounting\ReportingService::balanceSheet($asOf);
     }
 
@@ -2958,7 +3322,7 @@ class FleetForgeTools
             return 'Access denied: you do not have permission to view financial reports.';
         }
         $from = (string) ($input['from'] ?? date('Y-01-01'));
-        $to   = (string) ($input['to']   ?? date('Y-m-d'));
+        $to   = (string) ($input['to']   ?? ff_today());
         return \FleetForge\Accounting\ReportingService::cashFlow($from, $to);
     }
 
@@ -2972,7 +3336,7 @@ class FleetForgeTools
             return 'budget_id is required.';
         }
         $from = (string) ($input['from'] ?? date('Y-01-01'));
-        $to   = (string) ($input['to']   ?? date('Y-m-d'));
+        $to   = (string) ($input['to']   ?? ff_today());
         try {
             return \FleetForge\Accounting\BudgetService::variance($budgetId, $from, $to);
         } catch (\Throwable $e) {
@@ -2996,7 +3360,9 @@ class FleetForgeTools
     private static function writeGate(?int $userId, ?array $entry): ?string
     {
         if (!settings_get('ai.write_enabled', false)) {
-            return 'AI write actions are currently disabled. An administrator can enable them in Settings → AI.';
+            // S-AI-KNOWLEDGE: no Settings screen exists for this switch — the old text
+            // pointed at "Settings → AI", a page that doesn't exist.
+            return 'AI changes are switched off for this company, so I can\'t make or propose changes. Make the change on the record\'s own page (search_help can walk you through it).';
         }
         if ($userId === null) {
             return 'Write actions require an authenticated user.';
@@ -3188,7 +3554,9 @@ class FleetForgeTools
 
         // Gate: feature flag + auth + per-action permission.
         if (!settings_get('ai.write_enabled', false)) {
-            return 'AI write actions are currently disabled. An administrator can enable them in Settings → AI.';
+            // S-AI-KNOWLEDGE: no Settings screen exists for this switch — the old text
+            // pointed at "Settings → AI", a page that doesn't exist.
+            return 'AI changes are switched off for this company, so I can\'t make or propose changes. Make the change on the record\'s own page (search_help can walk you through it).';
         }
         if ($userId === null) {
             return 'Write actions require an authenticated user.';

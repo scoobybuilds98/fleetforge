@@ -50,6 +50,33 @@ final class BillingReadiness
      */
     public static function run(array $cycle): array
     {
+        ['checks' => $checks, 'summary' => $summary] = self::evaluate($cycle);
+
+        $now = \ff_now_utc();
+        try {
+            \db_execute(
+                "UPDATE billing_cycles SET readiness_checked_at = ?, readiness_summary = ? WHERE id = ?",
+                [$now, json_encode($summary), $cycle['id']]
+            );
+        } catch (\Throwable $e) {
+            error_log('[BillingReadiness] could not persist summary: ' . $e->getMessage());
+        }
+
+        return ['checks' => $checks, 'summary' => $summary, 'checked_at' => $now];
+    }
+
+    /**
+     * Run every check WITHOUT saving anything — the read half of run().
+     *
+     * WHY split (S-AI-KNOWLEDGE): the AI assistant's get_billing_cycle tool
+     * must be read-only, but run() stamps readiness_checked_at on the cycle
+     * (which also marks the Prepare step as done). evaluate() gives the exact
+     * same report without the write, so there's one copy of the 27 checks.
+     *
+     * @return array{checks: array, summary: array{blocker:int, warning:int, info:int, acknowledged:int, passed:int}}
+     */
+    public static function evaluate(array $cycle): array
+    {
         $ctx = [
             'cycle'   => $cycle,
             'start'   => (string) $cycle['period_start'],
@@ -122,17 +149,7 @@ final class BillingReadiness
             return [$ao, -$a['count']] <=> [$bo, -$b['count']];
         });
 
-        $now = \ff_now_utc();
-        try {
-            \db_execute(
-                "UPDATE billing_cycles SET readiness_checked_at = ?, readiness_summary = ? WHERE id = ?",
-                [$now, json_encode($summary), $cycle['id']]
-            );
-        } catch (\Throwable $e) {
-            error_log('[BillingReadiness] could not persist summary: ' . $e->getMessage());
-        }
-
-        return ['checks' => $checks, 'summary' => $summary, 'checked_at' => $now];
+        return ['checks' => $checks, 'summary' => $summary];
     }
 
     // ─────────────────────────────────────────────────────────────────────

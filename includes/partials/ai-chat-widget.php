@@ -734,6 +734,8 @@ function FF_AiChatWidget() {
                 const r = await FF_Api.post('<?= base_url('api/v1/ai/chat') ?>', {
                     session_id: this.widgetSessionId || undefined,
                     message: text,
+                    // S-AI-KNOWLEDGE: lets "this lease" / "this screen" resolve.
+                    page_path: window.location.pathname + window.location.search,
                 });
                 // WHY: FF_Api returns raw JSON — no envelope. Fields are top-level
                 if (!r.error) {
