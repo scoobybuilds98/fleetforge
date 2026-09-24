@@ -142,6 +142,21 @@ function makeDirector(page, ctx) {
         await sleep(ctx.dry ? 50 : pause);
       }
     },
+    /**
+     * Open a record-page tab by its label (S-RECORD-REDESIGN). Less-used tabs
+     * sit behind a "More" tab (.tab-more) — open it first when the label is
+     * not a visible tab of its own.
+     */
+    async tab(name, opts = {}) {
+      const direct = page.locator('.tab-bar > button.tab-btn').filter({ hasText: name }).first();
+      if (await direct.isVisible().catch(() => false)) return d.click(direct, opts);
+      const more = page.locator('.tab-more > button.tab-btn').first();
+      if (await more.isVisible().catch(() => false)) {
+        await d.click(more, { pause: 350 });
+        return d.click(page.locator('.tab-more-item').filter({ hasText: name }).first(), opts);
+      }
+      return d.click(`button.tab-btn:has-text("${name}")`, opts);
+    },
     /** Click a sidebar entry by its visible label (falls back to direct URL). */
     async nav(label, url) {
       const link = page.locator(`aside a, nav a, .sidebar a`).filter({ hasText: new RegExp(`^\\s*${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`) }).first();

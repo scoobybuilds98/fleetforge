@@ -1,0 +1,372 @@
+/* ============================================================
+   FleetForge — Background palettes (S-BACKGROUNDS)
+   ------------------------------------------------------------
+   Loaded right after app.css by every page shell (admin, embed,
+   portal, sign-in screens). The shell writes the palette chosen in
+   Settings → Design → Background (`brand.background`, registry
+   config/backgrounds.php, helper ff_background()) to
+   <html data-bg="…">. Each palette re-defines only the neutral
+   tokens: page, cards, wells, text greys, borders, inputs, table
+   and topbar tints, and the always-dark sidebar. Brand, status and
+   accent colours are untouched, so the brand override still works.
+
+   Three blocks per palette:
+     html[data-bg=x]                         sidebar background (dark in both
+                                             themes). The sidebar's TEXT and
+                                             icon colours are never changed —
+                                             operator: keep the original font
+                                             colour (app.css tokens).
+     html[data-bg=x]:not([data-theme=light]) the dark theme
+     html[data-bg=x][data-theme=light]       the light theme
+   (0,2,1) out-ranks app.css's :root / [data-theme] blocks (0,1,0)
+   whatever the load order. Any token set for dark MUST also be set
+   for light, or the dark value would leak — hence the split blocks.
+
+   'espresso' (the original warm Atelier palette) has no block:
+   app.css already is that palette.
+   ============================================================ */
+
+/* ── Midnight — cool blue-black ink (the default; made for the steel-blue brand) ── */
+html[data-bg="midnight"] {
+    --sidebar-bg:            #05080C;
+}
+html[data-bg="midnight"]:not([data-theme="light"]) {
+    --bg-body:               #070A0F;
+    --bg-surface:            #10151D;
+    --bg-surface-2:          #18202B;
+    --bg-surface-hover:      #212B38;
+    --bg-muted:              #18202B;
+    --bg-secondary:          #18202B;
+    --bg-input:              #18202B;
+    --bg-hover:              #212B38;
+    --text-primary:          #EBF0F6;
+    --text-secondary:        #9AA6B5;
+    --text-tertiary:         #6B7788;
+    --text-muted:            #6B7788;
+    --text-disabled:         #4C5664;
+    --border-color:          #222C39;
+    --border-color-strong:   #334152;
+    --border-strong:         #2C3746;
+    --topbar-bg:             rgba(7, 10, 15, 0.72);
+    --topbar-border:         #19212B;
+    --topbar-text:           #EBF0F6;
+    --scrollbar-thumb:       #2C3746;
+    --table-header-bg:       #141A22;
+    --table-row-hover:       #19212B;
+    --table-border:          #1C2430;
+    --table-stripe:          #0D1219;
+    --input-bg:              rgba(120, 140, 165, 0.16);
+    --input-bg-focus:        rgba(120, 140, 165, 0.28);
+    --input-focus-bg:        rgba(120, 140, 165, 0.28);
+    --input-border:          #2C3746;
+    --input-placeholder:     rgba(220, 228, 238, 0.40);
+    --label-text:            rgba(220, 228, 238, 0.66);
+    --segment-track-bg:      rgba(120, 140, 165, 0.18);
+    --segment-active-bg:     #3A4656;
+    --segment-inactive-text: rgba(220, 228, 238, 0.62);
+}
+html[data-bg="midnight"][data-theme="light"] {
+    --bg-body:               #F3F6F9;
+    --bg-surface:            #FFFFFF;
+    --bg-surface-2:          #EDF1F6;
+    --bg-surface-hover:      #EDF1F6;
+    --bg-muted:              #EDF1F6;
+    --bg-secondary:          #EDF1F6;
+    --bg-input:              #EDF1F6;
+    --bg-hover:              #E3E9F0;
+    --text-primary:          #111827;
+    --text-secondary:        #4B5565;
+    --text-tertiary:         #7B8595;
+    --text-disabled:         #A3ACB9;
+    --border-color:          #E2E8EF;
+    --border-color-strong:   #CBD4DF;
+    --topbar-bg:             rgba(243, 246, 249, 0.72);
+    --topbar-border:         #E2E8EF;
+    --topbar-text:           #111827;
+    --scrollbar-thumb:       #CBD4DF;
+    --table-header-bg:       #EDF1F6;
+    --table-row-hover:       #EDF1F6;
+    --table-border:          #E2E8EF;
+    --table-stripe:          #F7F9FB;
+    --input-bg:              rgba(110, 125, 150, 0.12);
+    --input-bg-focus:        rgba(110, 125, 150, 0.22);
+    --input-focus-bg:        rgba(110, 125, 150, 0.22);
+    --input-border:          #CBD4DF;
+    --segment-track-bg:      rgba(110, 125, 150, 0.14);
+}
+
+/* ── Graphite — true neutral charcoal ── */
+html[data-bg="graphite"] {
+    --sidebar-bg:            #060607;
+}
+html[data-bg="graphite"]:not([data-theme="light"]) {
+    --bg-body:               #09090B;
+    --bg-surface:            #141417;
+    --bg-surface-2:          #1C1C20;
+    --bg-surface-hover:      #25252A;
+    --bg-muted:              #1C1C20;
+    --bg-secondary:          #1C1C20;
+    --bg-input:              #1C1C20;
+    --bg-hover:              #25252A;
+    --text-primary:          #F2F2F4;
+    --text-secondary:        #A1A1AA;
+    --text-tertiary:         #71717A;
+    --text-muted:            #71717A;
+    --text-disabled:         #52525B;
+    --border-color:          #232328;
+    --border-color-strong:   #36363D;
+    --border-strong:         #303036;
+    --topbar-bg:             rgba(9, 9, 11, 0.72);
+    --topbar-border:         #1C1C20;
+    --topbar-text:           #F2F2F4;
+    --scrollbar-thumb:       #33333A;
+    --table-header-bg:       #18181B;
+    --table-row-hover:       #1E1E22;
+    --table-border:          #222227;
+    --table-stripe:          #111113;
+    --input-bg:              rgba(130, 130, 140, 0.16);
+    --input-bg-focus:        rgba(130, 130, 140, 0.28);
+    --input-focus-bg:        rgba(130, 130, 140, 0.28);
+    --input-border:          #303036;
+    --input-placeholder:     rgba(228, 228, 231, 0.40);
+    --label-text:            rgba(228, 228, 231, 0.66);
+    --segment-track-bg:      rgba(130, 130, 140, 0.18);
+    --segment-active-bg:     #4A4A52;
+    --segment-inactive-text: rgba(228, 228, 231, 0.62);
+}
+html[data-bg="graphite"][data-theme="light"] {
+    --bg-body:               #F4F4F5;
+    --bg-surface:            #FFFFFF;
+    --bg-surface-2:          #F0F0F2;
+    --bg-surface-hover:      #F0F0F2;
+    --bg-muted:              #F0F0F2;
+    --bg-secondary:          #F0F0F2;
+    --bg-input:              #F0F0F2;
+    --bg-hover:              #E6E6E9;
+    --text-primary:          #18181B;
+    --text-secondary:        #52525B;
+    --text-tertiary:         #82828C;
+    --text-disabled:         #A8A8B0;
+    --border-color:          #E4E4E7;
+    --border-color-strong:   #D0D0D6;
+    --topbar-bg:             rgba(244, 244, 245, 0.72);
+    --topbar-border:         #E4E4E7;
+    --topbar-text:           #18181B;
+    --scrollbar-thumb:       #D0D0D6;
+    --table-header-bg:       #F0F0F2;
+    --table-row-hover:       #F0F0F2;
+    --table-border:          #E4E4E7;
+    --table-stripe:          #F8F8F9;
+    --input-bg:              rgba(118, 118, 128, 0.12);
+    --input-bg-focus:        rgba(118, 118, 128, 0.22);
+    --input-focus-bg:        rgba(118, 118, 128, 0.22);
+    --input-border:          #D0D0D6;
+    --segment-track-bg:      rgba(118, 118, 128, 0.14);
+}
+
+/* ── Navy — deep saturated blue ── */
+html[data-bg="navy"] {
+    --sidebar-bg:            #030713;
+}
+html[data-bg="navy"]:not([data-theme="light"]) {
+    --bg-body:               #050A18;
+    --bg-surface:            #0C152A;
+    --bg-surface-2:          #122039;
+    --bg-surface-hover:      #1A2A47;
+    --bg-muted:              #122039;
+    --bg-secondary:          #122039;
+    --bg-input:              #122039;
+    --bg-hover:              #1A2A47;
+    --text-primary:          #E8EEFA;
+    --text-secondary:        #97A6C3;
+    --text-tertiary:         #65759A;
+    --text-muted:            #65759A;
+    --text-disabled:         #47557A;
+    --border-color:          #182643;
+    --border-color-strong:   #26395E;
+    --border-strong:         #22345A;
+    --topbar-bg:             rgba(5, 10, 24, 0.72);
+    --topbar-border:         #111C33;
+    --topbar-text:           #E8EEFA;
+    --scrollbar-thumb:       #22345A;
+    --table-header-bg:       #0F1A31;
+    --table-row-hover:       #14223D;
+    --table-border:          #16243F;
+    --table-stripe:          #0A1224;
+    --input-bg:              rgba(110, 140, 200, 0.16);
+    --input-bg-focus:        rgba(110, 140, 200, 0.28);
+    --input-focus-bg:        rgba(110, 140, 200, 0.28);
+    --input-border:          #22345A;
+    --input-placeholder:     rgba(215, 225, 245, 0.40);
+    --label-text:            rgba(215, 225, 245, 0.66);
+    --segment-track-bg:      rgba(110, 140, 200, 0.18);
+    --segment-active-bg:     #2E4470;
+    --segment-inactive-text: rgba(215, 225, 245, 0.62);
+}
+html[data-bg="navy"][data-theme="light"] {
+    --bg-body:               #F1F5FC;
+    --bg-surface:            #FFFFFF;
+    --bg-surface-2:          #EAF0FA;
+    --bg-surface-hover:      #EAF0FA;
+    --bg-muted:              #EAF0FA;
+    --bg-secondary:          #EAF0FA;
+    --bg-input:              #EAF0FA;
+    --bg-hover:              #DEE7F5;
+    --text-primary:          #0D1B33;
+    --text-secondary:        #465775;
+    --text-tertiary:         #7686A3;
+    --text-disabled:         #A2AEC4;
+    --border-color:          #DCE4F1;
+    --border-color-strong:   #C4D0E4;
+    --topbar-bg:             rgba(241, 245, 252, 0.72);
+    --topbar-border:         #DCE4F1;
+    --topbar-text:           #0D1B33;
+    --scrollbar-thumb:       #C4D0E4;
+    --table-header-bg:       #EAF0FA;
+    --table-row-hover:       #EAF0FA;
+    --table-border:          #DCE4F1;
+    --table-stripe:          #F6F9FE;
+    --input-bg:              rgba(100, 125, 175, 0.12);
+    --input-bg-focus:        rgba(100, 125, 175, 0.22);
+    --input-focus-bg:        rgba(100, 125, 175, 0.22);
+    --input-border:          #C4D0E4;
+    --segment-track-bg:      rgba(100, 125, 175, 0.14);
+}
+
+/* ── Obsidian — pure black, crisp cards ── */
+html[data-bg="obsidian"] {
+    --sidebar-bg:            #000000;
+}
+html[data-bg="obsidian"]:not([data-theme="light"]) {
+    --bg-body:               #000000;
+    --bg-surface:            #0E0E0F;
+    --bg-surface-2:          #161618;
+    --bg-surface-hover:      #1E1E21;
+    --bg-muted:              #161618;
+    --bg-secondary:          #161618;
+    --bg-input:              #161618;
+    --bg-hover:              #1E1E21;
+    --text-primary:          #F5F5F5;
+    --text-secondary:        #A3A3A3;
+    --text-tertiary:         #737373;
+    --text-muted:            #737373;
+    --text-disabled:         #525252;
+    --border-color:          #1F1F22;
+    --border-color-strong:   #333337;
+    --border-strong:         #2E2E32;
+    --topbar-bg:             rgba(0, 0, 0, 0.72);
+    --topbar-border:         #161618;
+    --topbar-text:           #F5F5F5;
+    --scrollbar-thumb:       #2E2E32;
+    --table-header-bg:       #121214;
+    --table-row-hover:       #18181A;
+    --table-border:          #1C1C1F;
+    --table-stripe:          #0A0A0B;
+    --input-bg:              rgba(140, 140, 140, 0.16);
+    --input-bg-focus:        rgba(140, 140, 140, 0.28);
+    --input-focus-bg:        rgba(140, 140, 140, 0.28);
+    --input-border:          #2E2E32;
+    --input-placeholder:     rgba(235, 235, 235, 0.40);
+    --label-text:            rgba(235, 235, 235, 0.66);
+    --segment-track-bg:      rgba(140, 140, 140, 0.18);
+    --segment-active-bg:     #454549;
+    --segment-inactive-text: rgba(235, 235, 235, 0.62);
+}
+html[data-bg="obsidian"][data-theme="light"] {
+    --bg-body:               #FAFAFA;
+    --bg-surface:            #FFFFFF;
+    --bg-surface-2:          #F4F4F4;
+    --bg-surface-hover:      #F4F4F4;
+    --bg-muted:              #F4F4F4;
+    --bg-secondary:          #F4F4F4;
+    --bg-input:              #F4F4F4;
+    --bg-hover:              #EBEBEB;
+    --text-primary:          #0A0A0A;
+    --text-secondary:        #525252;
+    --text-tertiary:         #858585;
+    --text-disabled:         #ABABAB;
+    --border-color:          #E8E8E8;
+    --border-color-strong:   #D4D4D4;
+    --topbar-bg:             rgba(250, 250, 250, 0.72);
+    --topbar-border:         #E8E8E8;
+    --topbar-text:           #0A0A0A;
+    --scrollbar-thumb:       #D4D4D4;
+    --table-header-bg:       #F4F4F4;
+    --table-row-hover:       #F4F4F4;
+    --table-border:          #E8E8E8;
+    --table-stripe:          #FBFBFB;
+    --input-bg:              rgba(120, 120, 120, 0.12);
+    --input-bg-focus:        rgba(120, 120, 120, 0.22);
+    --input-focus-bg:        rgba(120, 120, 120, 0.22);
+    --input-border:          #D4D4D4;
+    --segment-track-bg:      rgba(120, 120, 120, 0.14);
+}
+
+/* ── Pine — dark green-teal ── */
+html[data-bg="pine"] {
+    --sidebar-bg:            #030907;
+}
+html[data-bg="pine"]:not([data-theme="light"]) {
+    --bg-body:               #050D0B;
+    --bg-surface:            #0D1916;
+    --bg-surface-2:          #13231F;
+    --bg-surface-hover:      #1A2E29;
+    --bg-muted:              #13231F;
+    --bg-secondary:          #13231F;
+    --bg-input:              #13231F;
+    --bg-hover:              #1A2E29;
+    --text-primary:          #E9F2EF;
+    --text-secondary:        #98ABA5;
+    --text-tertiary:         #667A74;
+    --text-muted:            #667A74;
+    --text-disabled:         #4A5A55;
+    --border-color:          #182824;
+    --border-color-strong:   #263D37;
+    --border-strong:         #22362F;
+    --topbar-bg:             rgba(5, 13, 11, 0.72);
+    --topbar-border:         #12201C;
+    --topbar-text:           #E9F2EF;
+    --scrollbar-thumb:       #22362F;
+    --table-header-bg:       #0F1C19;
+    --table-row-hover:       #14241F;
+    --table-border:          #172622;
+    --table-stripe:          #0A1411;
+    --input-bg:              rgba(120, 160, 150, 0.16);
+    --input-bg-focus:        rgba(120, 160, 150, 0.28);
+    --input-focus-bg:        rgba(120, 160, 150, 0.28);
+    --input-border:          #22362F;
+    --input-placeholder:     rgba(220, 235, 230, 0.40);
+    --label-text:            rgba(220, 235, 230, 0.66);
+    --segment-track-bg:      rgba(120, 160, 150, 0.18);
+    --segment-active-bg:     #2F4A43;
+    --segment-inactive-text: rgba(220, 235, 230, 0.62);
+}
+html[data-bg="pine"][data-theme="light"] {
+    --bg-body:               #F2F6F4;
+    --bg-surface:            #FFFFFF;
+    --bg-surface-2:          #EAF1EE;
+    --bg-surface-hover:      #EAF1EE;
+    --bg-muted:              #EAF1EE;
+    --bg-secondary:          #EAF1EE;
+    --bg-input:              #EAF1EE;
+    --bg-hover:              #DFE9E5;
+    --text-primary:          #0F1D19;
+    --text-secondary:        #475A54;
+    --text-tertiary:         #778A84;
+    --text-disabled:         #A3B2AD;
+    --border-color:          #DDE7E3;
+    --border-color-strong:   #C6D4CF;
+    --topbar-bg:             rgba(242, 246, 244, 0.72);
+    --topbar-border:         #DDE7E3;
+    --topbar-text:           #0F1D19;
+    --scrollbar-thumb:       #C6D4CF;
+    --table-header-bg:       #EAF1EE;
+    --table-row-hover:       #EAF1EE;
+    --table-border:          #DDE7E3;
+    --table-stripe:          #F7FAF9;
+    --input-bg:              rgba(100, 140, 125, 0.12);
+    --input-bg-focus:        rgba(100, 140, 125, 0.22);
+    --input-focus-bg:        rgba(100, 140, 125, 0.22);
+    --input-border:          #C6D4CF;
+    --segment-track-bg:      rgba(100, 140, 125, 0.14);
+}

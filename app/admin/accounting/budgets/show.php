@@ -3,12 +3,26 @@
 /**
  * app/admin/accounting/budgets/show.php
  *
- * Budget detail view: header card + 12-month editable grid + variance
+ * Budget detail view: header + 12-month editable grid + variance
  * report drill-down. Editable amounts inline (Alpine $watch on each cell
  * → debounced save to update.php). Approve / archive controls. AI
  * "Explain Variance" button calls the budget_variance summary type.
  *
- * @session S036
+ * Layout (S-RECORD-REDESIGN):
+ *   The Alpine component (budgetShow) opens ABOVE the header so the status
+ *   badge and actions are live there: Approve / Move to Draft (primary),
+ *   Variance Report; Explain Variance (AI) in the More menu.
+ *   header  — ModuleHero entity: budget name + live status badge; year ·
+ *             version · created chips
+ *   nav     — the accounting sub-nav, directly under the header
+ *   strip   — revenue · expenses · budgeted net · lines — all LIVE (Alpine),
+ *             so they move as cells are edited
+ *   main    — AI narrative · the 12-month grid · Add account / Save bar
+ *   rail    — Needs attention (unsaved changes, draft, empty, archived,
+ *             net loss) · Quarterly shape (live revenue / expense / net per
+ *             quarter) · Budget facts · Related links
+ *
+ * @session S036, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
@@ -65,69 +79,97 @@ $availableAccounts = db_select(
 
 $canEdit = can('journal_entries', 'edit') && $budget['status'] !== 'archived';
 
+// Other budgets for the same year (versions to compare against).
+$siblings = db_select(
+    "SELECT id, name, version, status FROM acc_budgets WHERE year = ? AND id <> ? ORDER BY is_active DESC, id ASC LIMIT 5",
+    [(int) $budget['year'], $id]
+);
+
 $pageTitle = 'Budget ' . $budget['name'];
 require_once FF_ROOT . '/includes/header.php';
+
+// ── Header (S-RECORD-REDESIGN) ──────────────────────────────────────────────
+$heroFacts = [
+    \FleetForge\Sop\SopIcons::svg('calendar-days') . 'FY <b>' . (int) $budget['year'] . '</b>',
+    \FleetForge\Sop\SopIcons::svg('chart-pie') . e(ucfirst((string) $budget['version'])) . ' version',
+    // created_at is a UTC stamp (S-UTC-STAMPS) — show the company-local day.
+    \FleetForge\Sop\SopIcons::svg('users') . e($budget['created_by_name'] ?? 'system') . ' · ' . e(format_datetime($budget['created_at'], 'M j, Y')),
+];
 ?>
+<?php ob_start(); /* secondary actions → the header's More menu */ ?>
+    <button type="button" class="btn btn-secondary btn-sm" @click="aiVariance()" :disabled="aiLoading" x-text="aiLoading ? 'Thinking…' : 'Explain Variance'">Explain Variance</button>
+    <a href="<?= base_url('accounting/budgets') ?>">All budgets</a>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+    <?php if ($canEdit): ?>
+        <button class="btn btn-success btn-sm" @click="setStatus('active')" x-show="status==='draft'">Approve</button>
+        <button class="btn btn-secondary btn-sm" @click="setStatus('draft')" x-show="status==='active'">Move to Draft</button>
+    <?php endif; ?>
+    <a class="btn btn-secondary btn-sm" :href="varianceUrl()">Variance Report</a>
+    <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
 
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/dashboard') ?>">Accounting</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/budgets') ?>">Budgets</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current"><?= e($budget['name']) ?></span>
-</nav>
-
-<div class="page-header">
-    <h1 class="page-header-title h4">
-        <?= e($budget['name']) ?>
-        <span style="font-weight:400;color:var(--text-secondary);font-size:0.85rem;margin-left:6px;"><?= (int) $budget['year'] ?> · <?= e($budget['version']) ?></span>
-    </h1>
-    <div class="page-header-actions">
-        <a class="btn btn-secondary btn-sm" href="<?= base_url('accounting/budgets') ?>">← Back</a>
-    </div>
-</div>
+<!-- The component opens ABOVE the header so the status badge + actions are live there. -->
+<div x-data="budgetShow(<?= (int) $id ?>, <?= htmlspecialchars(json_encode($budget['updated_at']), ENT_QUOTES) ?>)">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => match ((string) $budget['status']) { 'draft' => 'warning', 'archived' => 'info', default => 'success' },
+    'icon'       => 'chart-pie',
+    'mark'       => (string) (int) $budget['year'],
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Accounting', base_url('accounting/dashboard')], ['Budgets', base_url('accounting/budgets')], [(string) $budget['name'], null]],
+    'eyebrow'    => 'Budget',
+    'title_html' => e($budget['name']) . ' <span class="badge" :class="statusBadge(status)" x-text="status">' . e($budget['status']) . '</span>',
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="budgetShow(<?= (int) $id ?>, <?= htmlspecialchars(json_encode($budget['updated_at']), ENT_QUOTES) ?>)">
+<!-- KEY NUMBERS (S-RECORD-REDESIGN) — live: they follow the grid as cells
+     are edited (before saving). Revenue = revenue + other income; expenses =
+     cost of revenue + operating + other expense. -->
+<div class="stat-grid stat-grid--4 ff-stats">
+    <div class="stat-card stat-card--green">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-arrow-trending-up"/></svg></span>
+        <div class="stat-label">Revenue</div>
+        <div class="stat-value font-mono" x-text="money(sumType('rev'))">—</div>
+    </div>
+    <div class="stat-card stat-card--amber">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Expenses</div>
+        <div class="stat-value font-mono" x-text="money(sumType('exp'))">—</div>
+    </div>
+    <div class="stat-card" :class="sumType('rev') - sumType('exp') < 0 ? 'stat-card--red' : 'stat-card--blue'">
+        <span class="stat-icon" :class="sumType('rev') - sumType('exp') < 0 ? 'stat-icon--red' : 'stat-icon--blue'"><svg><use href="#icon-chart-bar"/></svg></span>
+        <div class="stat-label">Budgeted net</div>
+        <div class="stat-value font-mono" x-text="money(sumType('rev') - sumType('exp'))">—</div>
+        <div class="stat-delta" x-text="sumType('rev') > 0 ? Math.round((sumType('rev') - sumType('exp')) / sumType('rev') * 100) + '% margin' : ''"></div>
+    </div>
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Lines</div>
+        <div class="stat-value font-mono" x-text="lines.length"><?= count($lines) ?></div>
+        <div class="stat-delta" x-text="dirty.size ? 'unsaved' : 'saved'"></div>
+    </div>
+</div>
 
-    <div class="card" style="padding:18px;margin-bottom:14px;">
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;align-items:start;">
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Status</div>
-                <div><span class="badge" :class="statusBadge(status)" x-text="status"></span></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Lines</div>
-                <div class="font-mono" x-text="lines.length"></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Created</div>
-                <div><?= e($budget['created_by_name'] ?? 'system') ?> <span style="font-size:0.7rem;color:var(--text-secondary);"><?= e(substr((string) $budget['created_at'], 0, 10)) ?></span></div>
-            </div>
-            <div style="text-align:right;">
-                <?php if ($canEdit): ?>
-                    <button class="btn btn-success btn-sm" @click="setStatus('active')" x-show="status==='draft'">Approve</button>
-                    <button class="btn btn-secondary btn-sm" @click="setStatus('draft')" x-show="status==='active'">Move to Draft</button>
-                <?php endif; ?>
-                <a class="btn btn-secondary btn-sm" :href="varianceUrl()">Variance Report</a>
-                <button class="btn btn-secondary btn-sm" @click="aiVariance()" :disabled="aiLoading" x-text="aiLoading ? 'Thinking…' : 'Explain Variance'">Explain Variance</button>
-            </div>
+<div class="rec-layout">
+<div class="rec-main">
+
+    <div x-show="aiText" x-cloak class="card">
+        <div class="card-header"><h3 class="card-title">AI narrative</h3></div>
+        <div class="card-body" style="white-space:pre-wrap;font-size:0.8125rem;line-height:1.5;" x-text="aiText"></div>
+    </div>
+
+    <div class="card">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+            <h3 class="card-title">Monthly budget</h3>
+            <span x-show="saveMsg" x-cloak style="font-size:0.75rem;color:var(--color-success);" x-text="saveMsg"></span>
         </div>
-        <div x-show="saveMsg" x-cloak style="margin-top:10px;font-size:0.75rem;color:var(--color-success);" x-text="saveMsg"></div>
-    </div>
-
-    <div x-show="aiText" x-cloak class="card" style="padding:14px;margin-bottom:14px;background:var(--bg-elev);border-left:3px solid var(--color-accent);">
-        <div style="font-weight:600;font-size:0.85rem;margin-bottom:6px;">AI Narrative</div>
-        <div style="white-space:pre-wrap;font-size:0.8125rem;line-height:1.5;" x-text="aiText"></div>
-    </div>
-
-    <div class="card" style="overflow-x:auto;">
-        <table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+        <div class="card-body" style="padding:0;overflow-x:auto;">
+        <table class="table" style="width:100%;font-size:0.78rem;">
             <thead>
-                <tr style="border-bottom:2px solid var(--border-default);">
+                <tr>
                     <th style="padding:6px 8px;text-align:left;min-width:160px;">Account</th>
                     <template x-for="m in months" :key="m">
                         <th style="padding:6px 8px;text-align:right;text-transform:uppercase;font-size:0.7rem;" x-text="m"></th>
@@ -140,7 +182,7 @@ require_once FF_ROOT . '/includes/header.php';
             </thead>
             <tbody>
                 <template x-for="(line, li) in lines" :key="line.account_id">
-                    <tr style="border-bottom:1px solid var(--border-default);">
+                    <tr>
                         <td style="padding:6px 8px;font-family:var(--font-mono);" x-text="line.code + ' — ' + line.account_name"></td>
                         <template x-for="m in months" :key="m">
                             <td style="padding:2px;text-align:right;">
@@ -160,24 +202,75 @@ require_once FF_ROOT . '/includes/header.php';
                 </template>
             </tbody>
         </table>
+        </div>
     </div>
 
     <?php if ($canEdit): ?>
-    <div class="card" style="padding:14px;margin-top:14px;display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
-        <div style="flex:1;min-width:260px;">
-            <label style="display:block;font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:3px;">Add account</label>
-            <select x-model="newAccountId" class="form-input" style="width:100%;padding:7px 9px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
-                <option value="">— Select account —</option>
-                <?php foreach ($availableAccounts as $a): ?>
-                    <option value="<?= (int) $a['id'] ?>" data-code="<?= e($a['code']) ?>" data-name="<?= e($a['name']) ?>" data-type="<?= e($a['account_type']) ?>"><?= e($a['code'] . ' — ' . $a['name']) ?> (<?= e($a['account_type']) ?>)</option>
-                <?php endforeach; ?>
-            </select>
+    <div class="card">
+        <div class="card-body" style="display:flex;flex-wrap:wrap;gap:10px;align-items:end;">
+            <div style="flex:1;min-width:260px;">
+                <label style="display:block;font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:3px;">Add account</label>
+                <select x-model="newAccountId" class="form-input" style="width:100%;padding:7px 9px;border:1px solid var(--border-default);border-radius:4px;background:var(--bg-input);color:var(--text-primary);font-size:0.8125rem;">
+                    <option value="">— Select account —</option>
+                    <?php foreach ($availableAccounts as $a): ?>
+                        <option value="<?= (int) $a['id'] ?>" data-code="<?= e($a['code']) ?>" data-name="<?= e($a['name']) ?>" data-type="<?= e($a['account_type']) ?>"><?= e($a['code'] . ' — ' . $a['name']) ?> (<?= e($a['account_type']) ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button class="btn btn-primary btn-sm" @click="addAccount()" :disabled="!newAccountId">+ Add Line</button>
+            <button class="btn btn-success btn-sm" @click="saveAll()" :disabled="saving" x-text="saving ? 'Saving…' : 'Save All Changes'">Save All Changes</button>
         </div>
-        <button class="btn btn-primary btn-sm" @click="addAccount()" :disabled="!newAccountId">+ Add Line</button>
-        <button class="btn btn-success btn-sm" @click="saveAll()" :disabled="saving" x-text="saving ? 'Saving…' : 'Save All Changes'">Save All Changes</button>
     </div>
     <?php endif; ?>
-</div>
+
+</div><!-- /rec-main -->
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the budget at a glance. Mostly live (Alpine):
+// the grid is edited in place, so the attention list and the quarterly
+// shape read the component's state rather than the page-load numbers.
+$R = \FleetForge\Ui\RecordUi::class;
+$staticAlerts = [];
+if ($budget['status'] === 'archived') {
+    $staticAlerts[] = '<li class="is-info"><span>Archived — read-only.</span></li>';
+}
+$attention = '<ul class="rec-alerts">'
+    . '<li class="is-warning" x-show="dirty.size" x-cloak><span><b>Unsaved changes</b> — press Save All Changes before leaving.</span></li>'
+    . '<li class="is-info" x-show="status === \'draft\'"><span>Draft — <b>Approve</b> it to make it the active budget for FY ' . (int) $budget['year'] . '.</span></li>'
+    . '<li class="is-warning" x-show="lines.length === 0" x-cloak><span>No lines yet — add revenue and expense accounts below the grid.</span></li>'
+    . '<li class="is-danger" x-show="lines.length && sumType(\'rev\') - sumType(\'exp\') < 0" x-cloak><span>Budgets a <b>net loss</b> of <span x-text="money(sumType(\'exp\') - sumType(\'rev\'))"></span>.</span></li>'
+    . implode('', $staticAlerts)
+    . '</ul>'
+    . '<p class="rec-alerts-ok" x-show="!dirty.size && status !== \'draft\' && lines.length && sumType(\'rev\') - sumType(\'exp\') >= 0' . ($budget['status'] === 'archived' ? ' && false' : '') . '" x-cloak>All clear — nothing needs attention.</p>';
+$rail = [];
+$rail[] = $R::card('Needs attention', $attention, ['icon' => 'exclamation-triangle']);
+
+// Quarterly shape — revenue / expense / net per quarter, live.
+$qRows = '';
+foreach ([1, 2, 3, 4] as $q) {
+    $qRows .= '<div><dt>Q' . $q . '</dt><dd class="mono"><span x-text="money(quarter(' . $q . ', \'rev\'))"></span> · <span x-text="money(quarter(' . $q . ', \'exp\'))"></span><br><b :style="quarter(' . $q . ', \'rev\') - quarter(' . $q . ', \'exp\') < 0 ? \'color:var(--color-danger)\' : \'\'" x-text="money(quarter(' . $q . ', \'rev\') - quarter(' . $q . ', \'exp\'))"></b></dd></div>';
+}
+$rail[] = $R::card('By quarter', '<p class="text-secondary" style="margin:0 0 6px;font-size:11.5px;">Revenue · expenses, then net</p><dl class="rec-kv">' . $qRows . '</dl>', ['icon' => 'chart-bar', 'class' => 'rec-card--accent']);
+
+$rail[] = $R::card('Budget', $R::kv([
+    ['Fiscal year', (string) (int) $budget['year']],
+    ['Version', e(ucfirst((string) $budget['version']))],
+    ['Status', '<span x-text="status">' . e($budget['status']) . '</span>'],
+    ['Created', e($budget['created_by_name'] ?? 'system') . '<br><span class="text-secondary">' . e(format_datetime($budget['created_at'])) . '</span>'],
+    ['Updated', !empty($budget['updated_at']) ? e(format_datetime($budget['updated_at'])) : null],
+    ['Notes', !empty($budget['notes']) ? nl2br(e($budget['notes'])) : null],
+]), ['icon' => 'chart-pie']);
+
+$rel = [['All budgets', base_url('accounting/budgets'), 'list-bullet']];
+foreach ($siblings as $s) {
+    $rel[] = [$s['name'], base_url('accounting/budgets/show?id=' . (int) $s['id']), 'chart-pie', ucfirst((string) $s['version']) . ' · ' . $s['status']];
+}
+$rail[] = $R::card('FY ' . (int) $budget['year'] . ' budgets', $R::links($rel), ['icon' => 'document-duplicate']);
+?>
+<aside class="rec-rail" aria-label="Budget at a glance">
+    <?= implode("\n    ", $rail) ?>
+</aside>
+</div><!-- /rec-layout -->
+</div><!-- /x-data budgetShow -->
 
 <script>
 // WHY json_encode + JSON_HEX_* (not htmlspecialchars): these values land inside a
@@ -186,6 +279,9 @@ require_once FF_ROOT . '/includes/header.php';
 // that left the whole Alpine component undefined. The JSON_HEX_* flags escape
 // < > & ' " as \u00XX so a budget name/note can't close the script tag.
 function budgetShow(budgetId, updatedAt) {
+    // S-RECORD-REDESIGN: account types behind the live strip / quarterly totals.
+    const REV_TYPES = ['revenue', 'other_income'];
+    const EXP_TYPES = ['cost_of_revenue', 'operating_expense', 'other_expense'];
     return {
         budgetId: budgetId,
         updatedAt: updatedAt,
@@ -212,7 +308,26 @@ function budgetShow(budgetId, updatedAt) {
         annualTotal(line) {
             return this.months.reduce((a, m) => a + (parseFloat(line[m] || '0') || 0), 0).toFixed(2);
         },
-        touchLine(li) { this.dirty.add(li); },
+        // Sum of the lines of one side ('rev' | 'exp') over the given months
+        // (display only — the saved amounts are recomputed server-side).
+        sumType(side, months) {
+            const types = side === 'rev' ? REV_TYPES : EXP_TYPES;
+            const ms = months || this.months;
+            let t = 0;
+            for (const l of this.lines) {
+                if (!types.includes(l.account_type)) continue;
+                for (const m of ms) t += parseFloat(l[m] || '0') || 0;
+            }
+            return Math.round(t * 100) / 100;
+        },
+        quarter(q, side) {
+            return this.sumType(side, this.months.slice((q - 1) * 3, q * 3));
+        },
+        money(n) {
+            const v = Number(n) || 0;
+            return (v < 0 ? '-$' : '$') + Math.abs(v).toLocaleString('en-CA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        },
+        touchLine(li) { this.dirty.add(li); this.dirty = new Set(this.dirty); },
         addAccount() {
             const opt = document.querySelector('option[value="' + this.newAccountId + '"]');
             if (!opt) return;
@@ -223,6 +338,7 @@ function budgetShow(budgetId, updatedAt) {
             this.months.forEach(m => row[m] = 0);
             this.lines.push(row);
             this.dirty.add(this.lines.length - 1);
+            this.dirty = new Set(this.dirty);
             this.newAccountId = '';
         },
         removeLine(li) {
@@ -250,7 +366,7 @@ function budgetShow(budgetId, updatedAt) {
                 if (j && j.success) {
                     this.updatedAt = j.data.updated_at;
                     this.saveMsg = 'Saved.';
-                    this.dirty.clear();
+                    this.dirty = new Set();
                     setTimeout(() => { this.saveMsg = ''; }, 3000);
                 } else {
                     this.saveMsg = (j && j.error && j.error.message) || 'Save failed.';

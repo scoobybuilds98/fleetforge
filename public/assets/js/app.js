@@ -980,9 +980,132 @@ window.FF_Guidance = FF_Guidance;
         table.dataset.labelled = '1';
     }
 
-    function labelAllTables() {
-        document.querySelectorAll('table').forEach(labelCellsIn);
+    // ── FF_TableFit (S-TABLES-REDESIGN) ─────────────────────────
+    // Reads each table's header row once and tags the TABLE (not the
+    // cells, so rows Alpine renders later are covered by plain CSS):
+    //   .ff-nw-cN    short values — IDs, dates, amounts, statuses,
+    //                counts — that must never fold onto two lines;
+    //   .ff-wrap-cN  free text (Description, Notes, Address …): wraps,
+    //                but never collapses into a sliver;
+    //   .ff-title-cN the record's name column (first real column):
+    //                a floor width so it stays readable;
+    //   .ff-act      the last column holds row actions (View / Edit).
+    // Everything else (names, types, places) wraps only when space runs
+    // out, so a list fits its card at laptop widths. The first version
+    // kept EVERY cell on one line; at 1280px the customers, invoices and
+    // leases lists grew 160–350px wider than their card and the View /
+    // Edit buttons slid out of sight.
+    // If a table still overflows its scroll container it gets
+    // .ff-overflow, which pins the actions column to the right edge.
+    // Tables with no scrollable ancestor get no nowrap columns — they
+    // would push a narrow card wider than the page.
+    const FREE_TEXT = /\b(description|descr|notes?|memo|details?|message|subject|reason|summary|comments?|remarks?|item|items|address|narration|explanation|activity|changes?|event|body|what|purpose|instructions?)\b/i;
+    const SHORT_VALUE = /(#|%|\b(no|num|number|id|ref|reference|date|dates|due|issued|created|updated|modified|start|starts|started|end|ends|ended|return|returned|returning|period|expires?|expiry|since|amount|amt|total|balance|outstanding|owing|owed|paid|subtotal|tax|gst|pst|hst|rate|price|cost|value|deposit|credit|debit|fee|qty|quantity|count|days|age|miles|km|odometer|mileage|hours|hrs|status|risk|phone|vin|plate|year|currency|terms|leases|invoice|contract|score|priority|severity|method|stage)\b)/i;
+    function scrollAncestor(el) {
+        let n = el.parentElement;
+        for (let depth = 0; n && depth < 5; depth++, n = n.parentElement) {
+            const ox = getComputedStyle(n).overflowX;
+            if (ox === 'auto' || ox === 'scroll') return n;
+        }
+        return null;
     }
+    function hasScrollAncestor(el) { return scrollAncestor(el) !== null; }
+    function isSelectColumn(th) {
+        return th.classList.contains('th-checkbox') || !!th.querySelector('input[type="checkbox"]');
+    }
+    function checkOverflow(table, scroller) {
+        table.classList.toggle('ff-overflow', scroller.scrollWidth > scroller.clientWidth + 1);
+    }
+    const overflowWatch = typeof ResizeObserver === 'function'
+        ? new ResizeObserver(function (entries) {
+            for (const en of entries) {
+                const t = en.target.tagName === 'TABLE' ? en.target : en.target.querySelector('table.ff-fit');
+                if (t && t._ffScroller) checkOverflow(t, t._ffScroller);
+            }
+        })
+        : null;
+    // The card around a list table (the table, or its scroll box, is the
+    // card's own child or sits alone in a .card-body): tables.css trims the
+    // card's padding so the rows run close to the edge, and the list wears
+    // its module's colour — the page hero's .ff-acc--* (module-chrome.css;
+    // it sets only --acc) is copied onto the card and the toolbar above it,
+    // so the header capsule, hover and selection pick it up. Needs no scroll
+    // box: only the one-line column rules do.
+    function markListCard(table, scroller) {
+        const box = scroller || table;
+        const up = box.parentElement;
+        let listCard = null;
+        if (box.classList.contains('card-body') && up && up.classList.contains('card')) {
+            listCard = up;
+        } else if (up && up.classList.contains('card')) {
+            listCard = up;
+        } else if (up && up.classList.contains('card-body') && up.parentElement
+            && up.parentElement.classList.contains('card') && up.children.length === 1) {
+            listCard = up.parentElement;
+        }
+        if (!listCard) return;
+        listCard.classList.add('ff-table-card');
+        const hero = document.querySelector('.ff-hero');
+        const acc = hero && Array.from(hero.classList).find(function (c) { return c.indexOf('ff-acc--') === 0; });
+        if (acc) {
+            listCard.classList.add(acc);
+            const bar = listCard.previousElementSibling;
+            if (bar && bar.classList.contains('table-toolbar')) bar.classList.add(acc);
+        }
+    }
+    function fitColumns(table) {
+        if (table.dataset.ffFitted === '1') return;
+        if (!table.classList.contains('table') && !table.classList.contains('data-table')) return;
+        if (table.classList.contains('spec-table') || table.hasAttribute('data-no-fit')) return;
+        const head = table.tHead;
+        if (!head || !head.rows.length) return;
+        table.dataset.ffFitted = '1';
+        let scroller = scrollAncestor(table);
+        markListCard(table, scroller);
+        // A list table placed straight in its card had no scroll box and was
+        // clipped by the card; a list card scrolls sideways (tables.css), so
+        // look again — the card itself is now the scroll box.
+        if (!scroller) scroller = scrollAncestor(table);
+        if (!scroller) return;
+        const cells = Array.from(head.rows[head.rows.length - 1].cells);
+        let col = 1;
+        let titled = false;
+        cells.forEach(function (th, i) {
+            const span = th.colSpan || 1;
+            const text = (th.textContent || '').replace(/\s+/g, ' ').trim();
+            const cls = [];
+            if (isSelectColumn(th)) {
+                cls.push('ff-nw-c');
+            } else if (FREE_TEXT.test(text)) {
+                cls.push('ff-wrap-c');
+            } else {
+                // An ID title ("Invoice #") is both the title and short; a bare
+                // row number ("#", "ID") is never the name column.
+                if (!titled && text && !/^(#|id|no\.?)$/i.test(text)) { cls.push('ff-title-c'); titled = true; }
+                if (SHORT_VALUE.test(text)) cls.push('ff-nw-c');
+            }
+            cls.forEach(function (c) {
+                for (let k = 0; k < span && col + k <= 16; k++) table.classList.add(c + (col + k));
+            });
+            if (i === cells.length - 1 && i > 0 && (text === '' || /^actions?$/i.test(text))) {
+                table.classList.add('ff-act');
+            }
+            col += span;
+        });
+        table.classList.add('ff-fit');
+        table._ffScroller = scroller;
+        checkOverflow(table, scroller);
+        if (overflowWatch) {
+            overflowWatch.observe(table);
+            overflowWatch.observe(scroller);
+        }
+    }
+
+    function labelAllTables() {
+        document.querySelectorAll('table').forEach(function (t) { labelCellsIn(t); fitColumns(t); });
+    }
+
+    window.FF_TableFit = fitColumns;
 
     // Initial pass.
     if (document.readyState === 'loading') {
@@ -1000,9 +1123,9 @@ window.FF_Guidance = FF_Guidance;
             for (const node of m.addedNodes) {
                 if (node.nodeType !== 1) continue;
                 if (node.tagName === 'TABLE') {
-                    labelCellsIn(node);
+                    labelCellsIn(node); fitColumns(node);
                 } else if (node.querySelectorAll) {
-                    node.querySelectorAll('table').forEach(labelCellsIn);
+                    node.querySelectorAll('table').forEach(function (t) { labelCellsIn(t); fitColumns(t); });
                 }
             }
         }
@@ -5340,6 +5463,33 @@ window.FF_TabHash = (function () {
             this.write(nextTab);
             requestAnimationFrame(function () {
                 window.scrollTo({ top: 0, behavior: 'instant' });
+            });
+        },
+
+        /**
+         * S-RECORD-REDESIGN — onSwitch for a page whose tab bar is sticky
+         * (.tab-bar--sticky, record pages). Jumping to the very top threw
+         * the tab bar back down under the hero on every click; instead,
+         * only when the reader has scrolled past the tab bar's natural
+         * spot, scroll back to exactly where it sticks — the bar stays put
+         * and the new tab starts right under it.
+         * @param {HTMLElement} bar  the tab bar. Its un-stuck position is read
+         *                           from an empty `.tab-anchor` placed right
+         *                           before it (a stuck bar's own rect is where
+         *                           it sticks, not where it sits); without one,
+         *                           from its parent's top.
+         */
+        onSwitchKeep: function (prevTab, nextTab, bar) {
+            this.save(prevTab);
+            this.write(nextTab);
+            requestAnimationFrame(function () {
+                if (!bar || !bar.parentElement) return;
+                var prev = bar.previousElementSibling;
+                var anchor = (prev && prev.classList.contains('tab-anchor')) ? prev : bar.parentElement;
+                var stick = parseFloat(getComputedStyle(bar).top);
+                var off = isNaN(stick) ? 72 : stick;
+                var y = anchor.getBoundingClientRect().top + window.scrollY - off;
+                if (window.scrollY > y) window.scrollTo({ top: y, behavior: 'instant' });
             });
         },
 

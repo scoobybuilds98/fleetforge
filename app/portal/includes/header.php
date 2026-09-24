@@ -92,7 +92,7 @@ $_firstName = !empty($_portalUser['name'])
 $_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
 ?>
 <!DOCTYPE html>
-<html lang="en" data-theme="<?= e($_theme) ?>">
+<html lang="en" data-theme="<?= e($_theme) ?>" data-bg="<?= e(ff_background()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -104,6 +104,8 @@ $_dateLabel = $_now->format('l, F j, Y'); // e.g. "Sunday, June 7, 2026"
     <link rel="preload" href="<?= asset_url('assets/fonts/Geist[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="<?= asset_url('assets/fonts/GeistMono[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <?php
     // S-LUX-4: mirror the admin/login brand-colour override so the customer
     // portal honours the white-label chain (was default-orange while admin +

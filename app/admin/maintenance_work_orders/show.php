@@ -6,8 +6,26 @@ declare(strict_types=1);
  *
  * Work order detail page — view, edit, status transitions, line items CRUD.
  *
- * Server-renders hero section (WO#, status badge, unit, vendor).
- * Alpine.js handles:
+ * Layout (S-RECORD-REDESIGN):
+ *   - Entity hero: WO number + status + priority badges, the job title, and
+ *     unit / vendor / work type / requested-date facts. The header holds the
+ *     status transitions (Start Work, Waiting Parts, Resume, Complete); Cancel
+ *     work order (now behind a confirm), "New work order for this unit" and
+ *     Delete sit in the More menu.
+ *   - Key-numbers strip: total cost, labour, parts & other, days open (or how
+ *     long it took), scheduled date (late / in N days).
+ *   - Main column: Complete prompt (resolution notes, shown when Complete is
+ *     clicked), Work Order Details (view/edit), Line Items, Activity.
+ *   - Right rail: Needs attention (late vs schedule, waiting on parts,
+ *     emergency, no vendor / nobody assigned, completed with no costs, unit on
+ *     lease, other open work orders on the unit, no vendor bill), Unit (links
+ *     equipment/show + the lease it is on), Vendor (links vendors/show),
+ *     Related (damage claims raised against this work order, vendor bills —
+ *     money roles with Payables access only —, the unit's work orders),
+ *     Summary (type, dates, people).
+ *
+ * Server-renders the hero, strip and rail. Alpine.js (woShow(), opened ABOVE
+ * the hero so header buttons reach it) handles:
  *   - Inline edit mode (D19 optimistic lock via updated_at)
  *   - Status transition buttons per state machine
  *   - Line items panel: add / update / delete
@@ -21,7 +39,7 @@ declare(strict_types=1);
  *           api/v1/maintenance_work_orders/{show,update,update_status,delete}.php
  *           api/v1/maintenance_work_orders/line_items/{add,update,delete}.php
  * @decisions D5/D7/D19/D30/D32
- * @session  S015, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS
+ * @session  S015, S-DROPDOWN-RETROFIT-2B-FINISH-FORMS, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -83,43 +101,55 @@ $nextStatuses = $transitions[$wo['status']] ?? [];
 
 $isEditable = !in_array($wo['status'], ['completed', 'cancelled']);
 
-$pageTitle = $wo['work_order_number'];
-$helpModuleSlug = 'maintenance';
-require_once FF_ROOT . '/includes/header.php';
-?>
+// ── S-RECORD-REDESIGN: strip + rail context ──────────────────────────────────
+$today    = ff_today();   // company-local business day (never SQL CURDATE())
+$isOpenWo = in_array($wo['status'], ['open', 'in_progress', 'waiting_parts'], true);
+// Days open: requested → completed (or today while still open). Calendar days.
+$woStart   = $wo['requested_date'] ?: ff_utc_to_local((string) $wo['created_at']);  // created_at is UTC
+$woEnd     = $wo['status'] === 'completed' ? ($wo['completed_date'] ?: $today) : $today;
+$daysOpen  = $woStart ? max(0, (int) round((strtotime($woEnd) - strtotime($woStart)) / 86400)) : null;
+// Schedule: how late (negative) / how far away a still-open job is.
+$schedDays = ($wo['scheduled_date'] && $isOpenWo)
+    ? (int) round((strtotime($wo['scheduled_date']) - strtotime($today)) / 86400) : null;
+$isLate    = $schedDays !== null && $schedDays < 0;
+// Line-item counts per strip segment (labour vs parts/sublet/other — the same
+// split line_items/add.php uses to roll up labor_cost / parts_cost).
+$labourLines = count(array_filter($lineItems, static fn ($li) => $li['item_type'] === 'labor'));
+$partLines   = count($lineItems) - $labourLines;
+// The lease the unit is on right now (maintenance on a rented unit needs the
+// customer looped in).
+$unitLease = db_row(
+    "SELECT l.id, l.contract_number, COALESCE(c.company_name, l.company_name_snapshot) AS customer_name
+       FROM leases l
+       LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
+      WHERE l.equipment_unit_id = ? AND l.status = 'active' AND l.deleted_at IS NULL
+      ORDER BY l.start_date DESC LIMIT 1",
+    [(int) $wo['equipment_unit_id']]
+);
+// Other open work orders on the same unit.
+$otherOpenWos = (int) (db_row(
+    "SELECT COUNT(*) AS n FROM maintenance_work_orders
+      WHERE equipment_unit_id = ? AND id <> ? AND deleted_at IS NULL
+        AND status IN ('open','in_progress','waiting_parts')",
+    [(int) $wo['equipment_unit_id'], $woId]
+)['n'] ?? 0);
+// Damage claims raised against this work order (damage_claims.work_order_id).
+$woClaims = db_select(
+    "SELECT id, claim_number, status FROM damage_claims
+      WHERE work_order_id = ? AND deleted_at IS NULL ORDER BY id ASC",
+    [$woId]
+);
+// Vendor bills linked to this job (acc_bills.work_order_id) — money, so only
+// for financial roles that can open Payables.
+$canSeeWoBills = can_view_financials() && can('accounts_payable', 'view');
+$woBills = $canSeeWoBills ? db_select(
+    "SELECT id, bill_number, status, total_amount, balance_due, currency
+       FROM acc_bills WHERE work_order_id = ? AND status <> 'void' ORDER BY id ASC",
+    [$woId]
+) : [];
 
-<!-- Hero header ──────────────────────────────────────────────────────────── -->
-<div class="page-header" style="align-items:flex-start;gap:16px;">
-    <div>
-        <div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:4px;">
-            <a href="<?= base_url('maintenance_work_orders') ?>" class="text-secondary">Work Orders</a>
-            &rsaquo; <?= e($wo['work_order_number']) ?>
-        </div>
-        <h1 class="page-header-title" style="margin:0;">
-            <?= e($wo['work_order_number']) ?>
-            <span class="badge <?= e(statusBadgeClass($wo['status'])) ?>"
-                  style="font-size:0.75rem;vertical-align:middle;margin-left:8px;">
-                <?= e(statusLabel($wo['status'])) ?>
-            </span>
-        </h1>
-        <div class="text-secondary" style="margin-top:4px;">
-            <?= e($wo['title']) ?>
-        </div>
-    </div>
-
-    <div class="page-header-actions">
-        <?= help_button('maintenance') ?>
-        <?php if (can('maintenance', 'delete') && in_array($wo['status'], ['open', 'cancelled'])): ?>
-        <button class="btn btn-danger btn-sm"
-                onclick="document.getElementById('delete-modal').style.display='flex'">
-            Delete
-        </button>
-        <?php endif; ?>
-    </div>
-</div>
-
-<?php
-// Helper functions used in server-rendered sections
+// Helper functions used in server-rendered sections (moved above the header
+// so the hero can use them — S-RECORD-REDESIGN).
 function statusBadgeClass(string $s): string {
     return [
         'open'          => 'badge-info',
@@ -141,39 +171,156 @@ function statusLabel(string $s): string {
 function priorityBadgeClass(string $p): string {
     return ['emergency' => 'badge-danger', 'high' => 'badge-warning', 'medium' => 'badge-info', 'low' => 'badge-neutral'][$p] ?? 'badge-neutral';
 }
+
+$pageTitle = $wo['work_order_number'];
+$helpModuleSlug = 'maintenance';
+require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<!-- ── KPI tiles ─────────────────────────────────────────────────────────── -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<?php
+// ── Header (S-RECORD-REDESIGN) ────────────────────────────────────────────────
+$unitLabel  = trim(($wo['unit_year'] ?? '') . ' ' . ($wo['brand'] ?? '') . ' ' . ($wo['model'] ?? ''));
+$heroFacts  = [];
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('truck') . '<a href="' . e(base_url('equipment/show')) . '?id=' . (int) $wo['equipment_unit_id'] . '" style="color:inherit;">Unit <b>' . e($wo['unit_number']) . '</b></a>' . ($unitLabel !== '' ? ' · ' . e($unitLabel) : '');
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('building-storefront') . ($wo['vendor_id'] ? e($wo['vendor_name']) : 'No vendor');
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('wrench-screwdriver') . e(ucwords(str_replace('_', ' ', (string) $wo['work_type'])));
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . 'Requested ' . e(format_date($wo['requested_date']));
+?>
+<?php ob_start(); /* secondary + destructive actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <?php if (can('maintenance', 'create')): ?>
+        <a href="<?= base_url('maintenance_work_orders/create') ?>?unit_id=<?= (int) $wo['equipment_unit_id'] ?>" class="btn btn-secondary btn-sm">New work order for this unit</a>
+        <?php endif; ?>
+        <?php if (in_array('cancelled', $nextStatuses, true) && can('maintenance', 'edit')): ?>
+        <?php /* Cancelled is terminal (no transitions out), so this now asks
+                 first — it used to fire on one click from the Transition bar. */ ?>
+        <button type="button" class="btn btn-danger btn-sm" :disabled="transitioning"
+                @click="FF_Confirm.ask('Cancel this work order? A cancelled work order cannot be reopened.').then(ok => { if (ok) transitionStatus('cancelled'); })">
+            Cancel work order
+        </button>
+        <?php endif; ?>
+        <?php if (can('maintenance', 'delete') && in_array($wo['status'], ['open', 'cancelled'])): ?>
+        <button type="button" class="btn btn-danger btn-sm"
+                onclick="document.getElementById('delete-modal').style.display='flex'">
+            Delete
+        </button>
+        <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('maintenance') ?>
+        <?php if (!empty($nextStatuses) && can('maintenance', 'edit')): ?>
+        <?php foreach ($nextStatuses as $next):
+            if ($next === 'cancelled') { continue; } // → More menu
+            $btnClass = match($next) {
+                'in_progress'   => 'btn-primary',
+                'completed'     => 'btn-success',
+                'waiting_parts' => 'btn-warning',
+                default         => 'btn-secondary',
+            };
+            $btnLabel = match($next) {
+                'in_progress'   => $wo['status'] === 'waiting_parts' ? '▶ Resume Work' : '▶ Start Work',
+                'completed'     => '✓ Complete',
+                'waiting_parts' => '⏸ Waiting Parts',
+                default         => ucwords(str_replace('_', ' ', $next)),
+            };
+        ?>
+        <button type="button" class="btn <?= e($btnClass) ?> btn-sm"
+                :disabled="transitioning"
+                @click="transitionStatus('<?= e($next) ?>')">
+            <?= e($btnLabel) ?>
+        </button>
+        <?php endforeach; ?>
+        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
 
-    <div class="stat-card">
-        <div class="stat-label">Priority</div>
-        <div class="stat-value">
-            <span class="badge <?= e(priorityBadgeClass($wo['priority'])) ?>">
-                <?= e(ucfirst($wo['priority'])) ?>
-            </span>
-        </div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Labour Cost</div>
-        <div class="stat-value font-mono"><?= format_currency($wo['labor_cost']) ?></div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Parts Cost</div>
-        <div class="stat-value font-mono"><?= format_currency($wo['parts_cost']) ?></div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Total Cost</div>
-        <div class="stat-value font-mono"><?= format_currency($wo['total_cost']) ?></div>
-    </div>
-
-</div>
-
-<!-- ── Main content: detail + line items ─────────────────────────────────── -->
+<!-- ── Alpine component — opens ABOVE the hero (S-RECORD-REDESIGN) so the
+     header's status buttons call woShow()'s methods. ───────────────────── -->
 <div x-data="woShow()">
+
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'warning',
+    'icon'       => 'wrench-screwdriver',
+    'mark'       => (string) $wo['work_order_number'],
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Work Orders', base_url('maintenance_work_orders')], [(string) $wo['work_order_number'], null]],
+    'eyebrow'    => 'Work order',
+    'title_html' => e($wo['work_order_number'])
+        . ' <span class="badge badge-no-dot ' . e(statusBadgeClass($wo['status'])) . '" style="font-size:0.75rem;vertical-align:middle;margin-left:6px;">' . e(statusLabel($wo['status'])) . '</span>'
+        . ' <span class="badge badge-no-dot ' . e(priorityBadgeClass($wo['priority'])) . '" style="font-size:0.75rem;vertical-align:middle;" title="Priority">' . e(ucfirst($wo['priority'])) . '</span>',
+    'subtitle'   => e($wo['title']),
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
+
+<!-- ============================================================
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN): what the job
+     costs so far (and how it splits), how long it has been open, and
+     whether it is on schedule. Priority moved to a badge in the title
+     (it is not a number). Cost figures keep the page's existing
+     visibility (maintenance:view).
+     ============================================================ -->
+<div class="stat-grid stat-grid--5 ff-stats">
+    <a class="stat-card stat-card--blue" href="#wo-line-items" title="All line items">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Total cost</div>
+        <div class="stat-value font-mono"><?= e(format_currency($wo['total_cost'])) ?></div>
+        <div class="stat-delta"><?= count($lineItems) ?> line item<?= count($lineItems) === 1 ? '' : 's' ?></div>
+    </a>
+
+    <div class="stat-card stat-card--amber">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-wrench"/></svg></span>
+        <div class="stat-label">Labour</div>
+        <div class="stat-value font-mono"><?= e(format_currency($wo['labor_cost'])) ?></div>
+        <div class="stat-delta"><?= $labourLines ?> line<?= $labourLines === 1 ? '' : 's' ?></div>
+    </div>
+
+    <div class="stat-card stat-card--purple" title="Parts, sublet and other charges">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-tag"/></svg></span>
+        <div class="stat-label">Parts &amp; other</div>
+        <div class="stat-value font-mono"><?= e(format_currency($wo['parts_cost'])) ?></div>
+        <div class="stat-delta"><?= $partLines ?> line<?= $partLines === 1 ? '' : 's' ?></div>
+    </div>
+
+    <?php if ($wo['status'] === 'completed'): ?>
+    <div class="stat-card stat-card--green">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
+        <div class="stat-label">Took</div>
+        <div class="stat-value font-mono"><?= $daysOpen !== null ? $daysOpen . ' day' . ($daysOpen === 1 ? '' : 's') : '—' ?></div>
+        <div class="stat-delta">done <?= $wo['completed_date'] ? e(format_date($wo['completed_date'])) : '—' ?></div>
+    </div>
+    <?php elseif ($wo['status'] === 'cancelled'): ?>
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-x-circle"/></svg></span>
+        <div class="stat-label">Days open</div>
+        <div class="stat-value">Cancelled</div>
+        <div class="stat-delta">requested <?= e(format_date($wo['requested_date'])) ?></div>
+    </div>
+    <?php else: ?>
+    <div class="stat-card <?= $daysOpen !== null && $daysOpen > 14 ? 'stat-card--red' : 'stat-card--teal' ?>">
+        <span class="stat-icon <?= $daysOpen !== null && $daysOpen > 14 ? 'stat-icon--red' : 'stat-icon--teal' ?>"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Days open</div>
+        <div class="stat-value font-mono"><?= $daysOpen !== null ? number_format($daysOpen) : '—' ?></div>
+        <div class="stat-delta">since <?= e(format_date($woStart)) ?></div>
+    </div>
+    <?php endif; ?>
+
+    <div class="stat-card <?= $isLate ? 'stat-card--red' : 'stat-card--slate' ?>">
+        <span class="stat-icon <?= $isLate ? 'stat-icon--red' : 'stat-icon--slate' ?>"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Scheduled</div>
+        <div class="stat-value"<?= $isLate ? ' style="color:var(--color-danger);"' : '' ?>><?= $wo['scheduled_date'] ? e(format_date($wo['scheduled_date'])) : 'Not scheduled' ?></div>
+        <div class="stat-delta"><?php
+            if ($schedDays === null) {
+                echo $wo['scheduled_date'] ? e(statusLabel($wo['status'])) : 'no date set';
+            } elseif ($schedDays < 0) {
+                echo '<span class="text-danger">' . (-$schedDays) . ' day' . ($schedDays === -1 ? '' : 's') . ' late</span>';
+            } elseif ($schedDays === 0) {
+                echo 'today';
+            } else {
+                echo 'in ' . $schedDays . ' day' . ($schedDays === 1 ? '' : 's');
+            }
+        ?></div>
+    </div>
+</div>
 
     <!-- Global error banners -->
     <template x-if="staleError">
@@ -185,64 +332,40 @@ function priorityBadgeClass(string $p): string {
         <div class="alert alert-success" x-text="success" style="margin-bottom:16px;"></div>
     </template>
 
-    <!-- ── Status Transitions ──────────────────────────────────────────── -->
-    <?php if (!empty($nextStatuses) && can('maintenance', 'edit')): ?>
-    <div class="card" style="margin-bottom:16px;">
-        <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-            <span class="text-secondary" style="font-size:0.875rem;">Transition:</span>
+<div class="rec-layout">
+<div class="rec-main" style="display:flex;flex-direction:column;gap:16px;">
 
-            <?php foreach ($nextStatuses as $next): ?>
-            <?php
-            $btnClass = match($next) {
-                'in_progress'   => 'btn-primary',
-                'completed'     => 'btn-success',
-                'cancelled'     => 'btn-danger',
-                'waiting_parts' => 'btn-warning',
-                default         => 'btn-secondary',
-            };
-            $btnLabel = match($next) {
-                'in_progress'   => '▶ Start Work',
-                'completed'     => '✓ Complete',
-                'cancelled'     => '✕ Cancel',
-                'waiting_parts' => '⏸ Waiting Parts',
-                default         => ucwords(str_replace('_', ' ', $next)),
-            };
-            ?>
-            <button class="btn <?= e($btnClass) ?> btn-sm"
-                    @click="transitionStatus('<?= e($next) ?>')">
-                <?= e($btnLabel) ?>
-            </button>
-            <?php endforeach; ?>
-
-            <!-- Completion notes prompt (shown only when completing) -->
-            <template x-if="showResolutionNotes">
-                <div style="width:100%;margin-top:8px;">
-                    <label class="form-label">Resolution Notes (optional)</label>
-                    <textarea class="form-control" rows="2"
-                              x-model="resolutionNotes"
-                              placeholder="Describe what was done…"></textarea>
-                    <div style="margin-top:8px;display:flex;gap:8px;">
-                        <button class="btn btn-success btn-sm"
-                                @click="confirmComplete()"
-                                :disabled="transitioning">
-                            <span x-text="transitioning ? 'Completing…' : 'Confirm Complete'"></span>
-                        </button>
-                        <button class="btn btn-secondary btn-sm"
-                                @click="showResolutionNotes = false; pendingStatus = null;">
-                            Cancel
-                        </button>
-                    </div>
+    <?php if (in_array('completed', $nextStatuses, true) && can('maintenance', 'edit')): ?>
+    <!-- ── Complete prompt — shown when the header's "Complete" is clicked
+         (it used to open inside the old Transition card). ─────────────── -->
+    <template x-if="showResolutionNotes">
+        <div class="card wo-complete">
+            <div class="card-header"><h2 class="card-title">Complete this work order</h2></div>
+            <div class="card-body">
+                <label class="form-label" for="wo-resolution-notes">Resolution Notes (optional)</label>
+                <textarea id="wo-resolution-notes" class="form-control" rows="2"
+                          x-model="resolutionNotes"
+                          placeholder="Describe what was done…"></textarea>
+                <div style="margin-top:8px;display:flex;gap:8px;">
+                    <button class="btn btn-success btn-sm"
+                            @click="confirmComplete()"
+                            :disabled="transitioning">
+                        <span x-text="transitioning ? 'Completing…' : 'Confirm Complete'"></span>
+                    </button>
+                    <button class="btn btn-secondary btn-sm"
+                            @click="showResolutionNotes = false; pendingStatus = null;">
+                        Cancel
+                    </button>
                 </div>
-            </template>
-
+            </div>
         </div>
-    </div>
+    </template>
     <?php endif; ?>
 
     <!-- ── Work Order Details (View / Edit) ───────────────────────────── -->
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <h3 style="margin:0;font-size:1rem;">Work Order Details</h3>
+            <h2 class="card-title">Work Order Details</h2>
             <?php if ($isEditable && can('maintenance', 'edit')): ?>
             <button class="btn btn-secondary btn-sm"
                     x-show="!editing"
@@ -260,9 +383,10 @@ function priorityBadgeClass(string $p): string {
 
         <div class="card-body">
 
-            <!-- View mode -->
+            <!-- View mode (S-RECORD-REDESIGN: hairline rows; who/when moved to
+                 the rail's Summary card) -->
             <template x-if="!editing">
-                <dl class="detail-grid">
+                <dl class="rec-dl">
                     <dt>Unit</dt>
                     <dd>
                         <a href="<?= base_url('equipment/show') ?>?id=<?= e($wo['equipment_unit_id']) ?>"
@@ -271,11 +395,10 @@ function priorityBadgeClass(string $p): string {
                         </a>
                         <?php
                         // S-UNIT-STATUS-COLOR 2026-05-14: live equipment_unit.status
-                        // badge next to the unit number. Data is already fetched
-                        // by the existing SELECT at line 43 as eu.status AS
-                        // unit_status — no query extension needed. Routes through
-                        // the shared helper at includes/functions.php so the
-                        // color mapping stays in lockstep with DESIGN_DETAILS.md §9.
+                        // badge next to the unit number (eu.status AS unit_status in
+                        // the page query). Routes through the shared helper at
+                        // includes/functions.php so the color mapping stays in
+                        // lockstep with DESIGN_DETAILS.md §9.
                         if (!empty($wo['unit_status'])):
                         ?>
                         <span class="badge badge-no-dot text-xs <?= unit_status_badge_class($wo['unit_status']) ?>"
@@ -283,13 +406,19 @@ function priorityBadgeClass(string $p): string {
                             <?= e(str_replace('_', ' ', $wo['unit_status'])) ?>
                         </span>
                         <?php endif; ?>
-                        <?php if ($wo['unit_year'] || $wo['brand'] || $wo['model']): ?>
-                        <span class="text-secondary"> — <?= e(trim($wo['unit_year'] . ' ' . $wo['brand'] . ' ' . $wo['model'])) ?></span>
+                        <?php if ($unitLabel !== ''): ?>
+                        <span class="text-secondary"> — <?= e($unitLabel) ?></span>
                         <?php endif; ?>
                     </dd>
 
+                    <dt>Title</dt>
+                    <dd><?= e($wo['title']) ?></dd>
+
                     <dt>Work Type</dt>
                     <dd><?= e(ucwords(str_replace('_', ' ', $wo['work_type']))) ?></dd>
+
+                    <dt>Priority</dt>
+                    <dd><span class="badge badge-no-dot <?= e(priorityBadgeClass($wo['priority'])) ?>"><?= e(ucfirst($wo['priority'])) ?></span></dd>
 
                     <dt>Vendor</dt>
                     <dd>
@@ -306,14 +435,14 @@ function priorityBadgeClass(string $p): string {
                     </dd>
 
                     <dt>Requested Date</dt>
-                    <dd><?= e($wo['requested_date'] ?? '—') ?></dd>
+                    <dd><?= $wo['requested_date'] ? e(format_date($wo['requested_date'])) : '—' ?></dd>
 
                     <dt>Scheduled Date</dt>
-                    <dd><?= e($wo['scheduled_date'] ?? '—') ?></dd>
+                    <dd><?= $wo['scheduled_date'] ? e(format_date($wo['scheduled_date'])) : '—' ?></dd>
 
                     <?php if ($wo['completed_date']): ?>
                     <dt>Completed Date</dt>
-                    <dd><?= e($wo['completed_date']) ?></dd>
+                    <dd><?= e(format_date($wo['completed_date'])) ?></dd>
                     <?php endif; ?>
 
                     <dt>Odometer</dt>
@@ -341,20 +470,8 @@ function priorityBadgeClass(string $p): string {
                     <dt>Resolution Notes</dt>
                     <dd style="white-space:pre-wrap;"><?= e($wo['resolution_notes']) ?></dd>
                     <?php endif; ?>
-
-                    <dt>Created By</dt>
-                    <dd><?= e($wo['created_by_name'] ?? 'System') ?></dd>
-
-                    <dt>Created</dt>
-                    <dd><?= format_datetime($wo['created_at']) ?></dd>
-
-                    <?php if ($wo['completed_by_name']): ?>
-                    <dt>Completed By</dt>
-                    <dd><?= e($wo['completed_by_name']) ?></dd>
-                    <?php endif; ?>
                 </dl>
             </template>
-
             <!-- Edit mode -->
             <template x-if="editing">
                 <form id="wo-edit-form" @submit.prevent="saveEdit()" novalidate>
@@ -485,9 +602,9 @@ function priorityBadgeClass(string $p): string {
     </div><!-- /card -->
 
     <!-- ── Line Items ─────────────────────────────────────────────────── -->
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card" id="wo-line-items">
         <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-            <h3 style="margin:0;font-size:1rem;">Line Items</h3>
+            <h2 class="card-title">Line Items</h2>
             <?php if ($isEditable && can('maintenance', 'edit')): ?>
             <button class="btn btn-secondary btn-sm" @click="showAddItem = !showAddItem">
                 + Add Item
@@ -623,6 +740,115 @@ function priorityBadgeClass(string $p): string {
 
         </div>
     </div><!-- /line items card -->
+
+    <!-- ── Activity Log ───────────────────────────────────────────── -->
+    <div class="card">
+        <div class="card-header"><h2 class="card-title">Activity</h2></div>
+        <div class="card-body">
+            <?php $activityEntityType = 'work_order'; $activityEntityId = $woId; ?>
+            <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+        </div>
+    </div>
+
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the work order at a glance ──────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$railW = [];
+
+// 1. Needs attention.
+$alertsW = [];
+if ($isLate) {
+    $alertsW[] = ['danger', 'Scheduled for ' . e(format_date($wo['scheduled_date'])) . ' — ' . (-$schedDays) . ' day' . ($schedDays === -1 ? '' : 's') . ' late.'];
+}
+if ($wo['status'] === 'waiting_parts') {
+    $alertsW[] = ['warning', 'Waiting on parts — <b>Resume Work</b> when they arrive.'];
+}
+if ($isOpenWo && $wo['priority'] === 'emergency') {
+    $alertsW[] = ['danger', 'Emergency priority — the unit may be off the road.'];
+}
+if ($isOpenWo && !$wo['vendor_id']) {
+    $alertsW[] = ['info', 'No vendor assigned — set one if the work goes to an outside shop.'];
+}
+if ($isOpenWo && !$wo['assigned_to']) {
+    $alertsW[] = ['info', 'Nobody is assigned to this work order.'];
+}
+if ($wo['status'] === 'completed' && count($lineItems) === 0) {
+    $alertsW[] = ['warning', 'Completed with no line items — the job shows no cost.'];
+}
+if ($isOpenWo && $unitLease) {
+    $alertsW[] = ['info', 'The unit is on lease <a href="' . e(base_url('leases/show')) . '?id=' . (int) $unitLease['id'] . '">' . e($unitLease['contract_number']) . '</a>' . ($unitLease['customer_name'] ? ' (' . e($unitLease['customer_name']) . ')' : '') . ' — coordinate the repair with the customer.'];
+}
+if ($otherOpenWos > 0) {
+    $alertsW[] = ['info', '<a href="' . e(base_url('maintenance_work_orders')) . '?equipment_unit_id=' . (int) $wo['equipment_unit_id'] . '">' . $otherOpenWos . ' other open work order' . ($otherOpenWos === 1 ? '' : 's') . '</a> on this unit.'];
+}
+if ($canSeeWoBills && $wo['status'] === 'completed' && $wo['vendor_id'] && !$woBills && bccomp((string) $wo['total_cost'], '0', 2) > 0) {
+    $alertsW[] = ['info', 'No vendor bill is linked to this job yet (Payables → Bills).'];
+}
+$railW[] = $R::card('Needs attention', $R::alerts($alertsW, $wo['status'] === 'completed' ? 'Done — nothing needs attention.' : 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Unit.
+$unitBody = $R::entity(
+    'Unit ' . (string) $wo['unit_number'],
+    base_url('equipment/show') . '?id=' . (int) $wo['equipment_unit_id'],
+    e($unitLabel !== '' ? $unitLabel : ucwords(str_replace('_', ' ', (string) ($wo['unit_category'] ?? ''))))
+        . (!empty($wo['unit_status']) ? ' · ' . e(str_replace('_', ' ', (string) $wo['unit_status'])) : ''),
+    '',
+    'truck'
+);
+$unitKv = $R::kv([
+    ['Odometer', $wo['mileage_at_service'] ? e(number_format((int) $wo['mileage_at_service'])) . ' km' : null, 'mono'],
+    ['On lease', $unitLease ? '<a href="' . e(base_url('leases/show')) . '?id=' . (int) $unitLease['id'] . '">' . e($unitLease['contract_number']) . '</a>' : 'No', ''],
+    ['Customer', $unitLease && $unitLease['customer_name'] ? e($unitLease['customer_name']) : null],
+]);
+$railW[] = $R::card('Unit', $unitBody . ($unitKv !== '' ? '<div style="margin-top:10px;">' . $unitKv . '</div>' : ''),
+    ['icon' => 'truck', 'link' => ['History', base_url('equipment/show') . '?id=' . (int) $wo['equipment_unit_id'] . '#maintenance']]);
+
+// 3. Vendor.
+if ($wo['vendor_id']) {
+    $vendBody = $R::entity(
+        (string) $wo['vendor_name'],
+        base_url('vendors/show') . '?id=' . (int) $wo['vendor_id'],
+        $wo['vendor_contact'] ? e($wo['vendor_contact']) : 'Vendor',
+        \FleetForge\Ui\ModuleHero::initials((string) $wo['vendor_name'])
+    );
+    $vendKv = $R::kv([
+        ['Phone', $wo['vendor_phone'] ? '<a href="tel:' . e(preg_replace('/[^0-9+]/', '', (string) $wo['vendor_phone'])) . '">' . e($wo['vendor_phone']) . '</a>' : null],
+    ]);
+    $railW[] = $R::card('Vendor', $vendBody . ($vendKv !== '' ? '<div style="margin-top:10px;">' . $vendKv . '</div>' : ''), ['icon' => 'building-storefront']);
+} else {
+    $railW[] = $R::card('Vendor', '<p class="text-secondary" style="margin:0;font-size:12.5px;">No vendor — in-house work' . ($isEditable && can('maintenance', 'edit') ? ' (Edit to set one)' : '') . '.</p>', ['icon' => 'building-storefront']);
+}
+
+// 4. Related records.
+$relW = [];
+foreach ($woClaims as $cl) {
+    $relW[] = ['Damage claim ' . $cl['claim_number'], base_url('damage_claims/show') . '?id=' . (int) $cl['id'], 'exclamation-triangle', ucwords(str_replace('_', ' ', (string) $cl['status']))];
+}
+foreach ($woBills as $b) {
+    $relW[] = ['Bill ' . $b['bill_number'], base_url('accounting/bills/show') . '?id=' . (int) $b['id'], 'receipt-percent',
+        str_replace('_', ' ', (string) $b['status']) . ' · ' . format_currency($b['total_amount'], $b['currency'] === 'USD' ? 'US$' : '$')];
+}
+$relW[] = ['Work orders for this unit', base_url('maintenance_work_orders') . '?equipment_unit_id=' . (int) $wo['equipment_unit_id'], 'clipboard-document-list', $otherOpenWos > 0 ? $otherOpenWos . ' other open' : ''];
+if (can('maintenance', 'create') && in_array($wo['work_type'], ['repair', 'body_damage', 'breakdown'], true) && !$woClaims) {
+    $relW[] = ['Report damage for this unit', base_url('damage_claims/create') . '?unit_id=' . (int) $wo['equipment_unit_id'] . ($unitLease ? '&lease_id=' . (int) $unitLease['id'] : ''), 'plus'];
+}
+$railW[] = $R::card('Related', $R::links($relW), ['icon' => 'document-duplicate']);
+
+// 5. Summary — type, dates and people (the old detail rows' who/when).
+$railW[] = $R::card('Summary', $R::kv([
+    ['Requested', $wo['requested_date'] ? e(format_date($wo['requested_date'])) : null],
+    ['Scheduled', $wo['scheduled_date'] ? e(format_date($wo['scheduled_date'])) : 'Not scheduled'],
+    ['Completed', $wo['completed_date'] ? e(format_date($wo['completed_date'])) . ($wo['completed_by_name'] ? ' · ' . e($wo['completed_by_name']) : '') : null],
+    ['Assigned to', $wo['assigned_to_name'] ? e($wo['assigned_to_name']) : 'Nobody'],
+    ['Created', e(format_datetime($wo['created_at'])) . ' · ' . e($wo['created_by_name'] ?? 'System')],
+]), ['icon' => 'document-text']);
+?>
+<aside class="rec-rail" aria-label="Work order at a glance">
+    <?= implode("\n    ", $railW) ?>
+</aside>
+</div><!-- /rec-layout -->
 
 </div><!-- /Alpine component -->
 
@@ -812,6 +1038,12 @@ function woShow() {
             if (newStatus === 'completed') {
                 this.pendingStatus       = 'completed';
                 this.showResolutionNotes = true;
+                // The prompt renders at the top of the main column (the button
+                // lives in the header — S-RECORD-REDESIGN): bring it into view.
+                this.$nextTick(() => {
+                    const ta = document.getElementById('wo-resolution-notes');
+                    if (ta) { ta.scrollIntoView({ block: 'center' }); ta.focus({ preventScroll: true }); }
+                });
                 return;
             }
             this._doTransition(newStatus, null, null);
@@ -922,13 +1154,19 @@ function woShow() {
 }
 </script>
 
-<!-- ── Activity Log ───────────────────────────────────────────── -->
-<div class="card" style="margin-top:24px;">
-    <div class="card-header"><h3 class="card-title">Activity</h3></div>
-    <div class="card-body">
-        <?php $activityEntityType = 'work_order'; $activityEntityId = $woId; ?>
-        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
-    </div>
-</div>
+<!-- ── Page styles (S-RECORD-REDESIGN) — tokens only ─────────────────────── -->
+<style>
+/* The Complete prompt opens at the top of the main column when the
+   header's "Complete" is clicked — tint it so it reads as the next step. */
+.rec-main .card.wo-complete {
+    border-color: color-mix(in srgb, var(--color-success) 45%, var(--border-color));
+    background:
+        radial-gradient(360px 120px at 0% 0%, color-mix(in srgb, var(--color-success) 10%, transparent), transparent 70%),
+        var(--bg-surface);
+}
+/* Hero fact chip links (unit) inherit the chip colour; underline on hover. */
+.ff-hero-fact a { text-decoration: none; }
+.ff-hero-fact a:hover { text-decoration: underline; }
+</style>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

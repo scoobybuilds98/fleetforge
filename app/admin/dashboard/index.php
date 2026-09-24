@@ -77,6 +77,8 @@ $dashUrls = [
     'compliance'  => base_url('compliance'),
     'claims'      => base_url('damage_claims'),
     'workorders'  => base_url('maintenance_work_orders') . '?status=open',
+    'requests'    => base_url('requests') . '?status=open',
+    'idleUnits'   => base_url('equipment') . '?status=available',
     'panel'       => [
         'money'  => [
             'overdue'     => base_url('invoices') . '?status=overdue',
@@ -92,6 +94,13 @@ $dashUrls = [
             'top'      => base_url('leases') . '?status=active&sort=rate_desc',
         ],
     ],
+];
+
+// S-DASHBOARD-ATTN-2: attention cards that link into a module only show to
+// roles that can open it (the sidebar would show those modules locked).
+$dashCan = [
+    'requests' => can('customers', 'view'),
+    'units'    => can('equipment', 'view'),
 ];
 
 // Section order: money people start with money; everyone else with leases.
@@ -220,13 +229,17 @@ $dashLoading = static function (int $height): string {
         <div class="dash-attn-head">
             <h2 id="dash-attn-title" class="dash-h2">Needs attention</h2>
             <span class="dash-attn-count" x-show="attnReady" style="display:none;"
-                  x-text="attn.length ? attn.length + (attn.length === 1 ? ' thing' : ' things') + ' to look at' : 'All clear'"></span>
+                  x-text="attn.length ? (attn.length > 5 && !attnAll ? 'the 5 most urgent of ' + attn.length : attn.length + (attn.length === 1 ? ' thing' : ' things') + ' to look at') : 'All clear'"></span>
+            <!-- Operator: "way too many tiles … just 4-5 is fine" — the five most
+                 urgent show; the rest are one click away, never dropped. -->
+            <button type="button" class="dash-attn-more" x-show="attnReady && attn.length > 5" style="display:none;"
+                    @click="attnAll = !attnAll" x-text="attnAll ? 'Show fewer' : 'Show all ' + attn.length"></button>
         </div>
         <div class="dash-attn-grid">
             <template x-if="!attnReady">
                 <div class="dash-attn-skel" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
             </template>
-            <template x-for="a in attn" :key="a.key">
+            <template x-for="a in (attnAll ? attn : attn.slice(0, 5))" :key="a.key">
                 <a class="dash-attn-card" :class="'dash-tone--' + a.tone" :href="a.href">
                     <span class="dash-attn-ic" aria-hidden="true"><svg><use :href="'#icon-' + a.icon"/></svg></span>
                     <span class="dash-attn-num" x-text="a.count"></span>
@@ -880,6 +893,7 @@ function FF_Dashboard() {
         // ── S-DASHBOARD-REDESIGN state ─────────────────────────
         urls:      <?= json_encode($dashUrls, JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>,
         sections:  <?= json_encode(array_column($dashSections, 0)) ?>,
+        can:       <?= json_encode($dashCan) ?>,
         spy:       '',
         tab:       { money: 'overdue', leases: 'active' },
         // Rows pre-shaped by buildLists() — one form for every panel.
@@ -892,7 +906,9 @@ function FF_Dashboard() {
                       expiring: 'No leases end this month.', recent: 'No leases started in the last 7 days.', top: 'No active leases.' },
         },
         attn:      [],
+        attnAll:   false,   // show every card, not just the 5 most urgent
         attnReady: false,
+        _idleCard: null,
         summary:   '',
         // Ring arcs as inline styles (stroke-dasharray/offset) — start empty so they sweep in.
         pulse:     { lease: '', avail: '', other: '', otherCount: 0 },
@@ -1368,7 +1384,7 @@ function FF_Dashboard() {
                 idle: (t.idle_units || []).map(r => {
                     const days = (r.idle_days === null || r.idle_days === undefined) ? null : n(r.idle_days);
                     const tone = days === null ? 'info' : (days > 60 ? 'danger' : (days > 30 ? 'warn' : 'info'));
-                    return { key: 'u' + r.id, href: U.unit + r.id, id: r.unit_number, who: r.type || 'Unit',
+                    return { key: 'u' + r.id, d: days, href: U.unit + r.id, id: r.unit_number, who: r.type || 'Unit',
                         sub: [r.category, r.yard].filter(Boolean).join(' · '), tone, pill: pillOf(tone),
                         pillText: days === null ? 'Not leased yet' : 'Idle ' + days + (days === 1 ? ' day' : ' days'),
                         meta: r.idle_since ? 'Since ' + this.fmtDate(r.idle_since) : '' };
@@ -1419,7 +1435,8 @@ function FF_Dashboard() {
             };
             this.pulse = { lease: arc(on), avail: arc(av), other: arc(other), otherCount: other };
 
-            // Needs attention — most urgent first; only what applies.
+            // Needs attention — most urgent first; only what applies. The
+            // push ORDER is the urgency ranking: the page shows the first 5.
             const od = k.overdue_invoices || {};
             if (n(od.count)) out.push({ key: 'overdue', tone: 'danger', icon: 'exclamation-triangle', count: n(od.count),
                 label: n(od.count) === 1 ? 'Overdue invoice' : 'Overdue invoices',
@@ -1434,11 +1451,28 @@ function FF_Dashboard() {
                 if (L.money.drafts.length) out.push({ key: 'drafts', tone: 'warn', icon: 'document-text',
                     count: count(L.money.drafts), label: L.money.drafts.length === 1 ? 'Draft invoice' : 'Draft invoices',
                     detail: 'Check them and send', cta: 'Send invoices', href: U.drafts });
+                // S-DASHBOARD-ATTN-2: units ready to rent but earning nothing for 30+ days.
+                const idle = L.idle.filter(r => r.d !== null && r.d >= 30);
+                if (this.can.units && idle.length) {
+                    const longest = idle.reduce((m, r) => Math.max(m, r.d), 0);
+                    this._idleCard = { key: 'idle', tone: 'warn', icon: 'tag',
+                        count: idle.length >= 8 ? '8+' : idle.length,
+                        label: idle.length === 1 ? 'Unit idle 30+ days' : 'Units idle 30+ days',
+                        detail: 'Ready to rent but not earning — the longest for ' + longest + ' days',
+                        cta: 'See available units', href: U.idleUnits };
+                } else {
+                    this._idleCard = null;
+                }
                 const week = L.leases.returns.filter(r => r.d <= 7);
                 if (week.length) out.push({ key: 'returns', tone: 'info', icon: 'truck',
                     count: week.length >= 10 ? '10+' : week.length, label: week.length === 1 ? 'Return this week' : 'Returns this week',
                     detail: 'Plan the yard space and check-in inspections', cta: 'See returns', href: U.returns });
             }
+            // S-DASHBOARD-ATTN-2: customers waiting on a reply in the portal.
+            const sr = n(k.open_service_requests);
+            if (this.can.requests && sr) out.push({ key: 'requests', tone: 'info', icon: 'pencil-square', count: sr,
+                label: sr === 1 ? 'Customer waiting on a reply' : 'Customers waiting on a reply',
+                detail: 'Open service requests from the customer portal', cta: 'Reply', href: U.requests });
             if (pk) out.push({ key: 'pickups', tone: 'info', icon: 'map-pin', count: pk,
                 label: pk === 1 ? 'Pickup today' : 'Pickups today', detail: 'Units going out today',
                 cta: 'Open reservations', href: U.pickups });
@@ -1451,6 +1485,7 @@ function FF_Dashboard() {
                 label: n(k.open_work_orders) === 1 ? 'Open work order' : 'Open work orders',
                 detail: 'Units in the shop or waiting for repair', cta: 'Open maintenance', href: U.workorders });
 
+            if (this.tablesLoaded && this._idleCard) out.push(this._idleCard);
             this.attn      = out;
             this.attnReady = this.tablesLoaded || this.tablesError;
         },

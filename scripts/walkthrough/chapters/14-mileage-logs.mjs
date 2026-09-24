@@ -128,7 +128,7 @@ export default {
       say: 'The Mileage Log tab lists the readings logged against this lease, including the one we just recorded. Plus Record Mileage here fills in the lease for you.',
       caption: 'The Mileage Log tab lists the readings logged against this lease, including the one we just recorded. + Record Mileage here fills in the lease for you.',
       run: async (d) => {
-        await d.click('button.tab-btn:has-text("Mileage Log")');
+        await d.tab('Mileage Log');
         await d.wait(1500);
         await d.highlight('.card:has(.card-title:has-text("Mileage Log"))', 'Lease mileage history', 2600);
       },

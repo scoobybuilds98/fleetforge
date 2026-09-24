@@ -358,7 +358,7 @@ if ($loginLogoUrl === '') {
 $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url($loginFavicon, 86400) : '';
 ?>
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-bg="<?= e(ff_background()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -375,6 +375,8 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
     <link rel="preload" href="<?= asset_url('assets/fonts/GeistMono[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
 
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
     <!-- Brand color injection — mirrors includes/header.php so the
          login card uses the customer's primary color for focus

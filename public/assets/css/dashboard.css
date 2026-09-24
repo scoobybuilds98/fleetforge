@@ -71,6 +71,11 @@
 .dash-attn-head { display: flex; align-items: baseline; gap: 12px; margin: 0 2px 12px; }
 .dash-h2 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--text-primary); }
 .dash-attn-count { font-size: 13px; color: var(--text-tertiary); }
+.dash-attn-more {
+    margin-left: auto; padding: 4px 10px; border: 1px solid var(--border-color); border-radius: 999px;
+    background: transparent; color: var(--text-secondary); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+}
+.dash-attn-more:hover { border-color: var(--border-color-strong); color: var(--text-primary); }
 .dash-attn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 12px; }
 .dash-attn-card {
     position: relative; overflow: hidden;

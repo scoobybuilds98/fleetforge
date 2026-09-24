@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
+**Last updated:** 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
 
 ---
 
@@ -102,15 +102,33 @@ Safety net: anything dated before go-live is refused as a NEW push until linked 
 
 ---
 
-### F90 — Re-record training chapter 1 and tell staff the menu changed 🟡 OPEN (after deploying the redesign)
+### F91 — Choose the background palette after deploying 🟡 OPEN (right after the deploy)
 
-**Surfaced by:** S-DASHBOARD-REDESIGN / S-DASHBOARD-VIZ / S-SHELL-REDESIGN (2026-09-24).
-**Why:** the dashboard, sidebar and top bar were redesigned. The recorded Getting Started video still shows the old dashboard (carousels, 12-tile row) and the flat menu. The chapter's script (`scripts/walkthrough/chapters/01-getting-started.mjs`) is already rewritten for the new layout.
+**Surfaced by:** S-BACKGROUNDS (2026-09-24).
+**Why:** the new default palette is **Midnight** (cool blue-black, chosen for the steel-blue brand). Production has never saved a choice, so deploying switches every user from the original warm Espresso look to Midnight.
+**Operator action:** after the deploy, open **Settings → Design → Background** as a super admin, click through the palettes (the page previews instantly) and **Save** the one you want — **Espresso** keeps the old look.
+**Done when:** a palette is saved (or Midnight is accepted as is).
+
+---
+
+### F92 — Decide whether dispatchers should see repair costs 🟢 DECISION (no deadline)
+
+**Surfaced by:** S-RECORD-REDESIGN (2026-09-24).
+**Why:** the redesigned work-order and damage-claim pages hide every NEW money figure (recovery invoice paid/balance, vendor bills) from roles without financial access, but the existing labour / parts / total cost and the estimated / actual repair and customer-liable amounts still show to anyone who can view maintenance or damage claims — dispatchers included — as they always have.
+**Operator action:** decide whether those should be money-gated too; if yes, ask for it (a small change on both pages + their APIs).
+**Done when:** decided.
+
+---
+
+### F90 — Re-record the training videos that show the redesigned screens 🟡 OPEN (after deploying the redesign)
+
+**Surfaced by:** S-DASHBOARD-REDESIGN / S-DASHBOARD-VIZ / S-SHELL-REDESIGN; widened by S-LIST-COMPACT / S-RECORD-REDESIGN / S-PAYOFF-ONE-PAGE / S-SETTINGS-REDESIGN (2026-09-24).
+**Why:** the dashboard, sidebar, top bar, list pages, every profile page (header actions, tabs, right-hand panel), the Payoff tab (the separate payoff page is gone) and Settings were redesigned. The recorded videos show the old screens. The chapter scripts are already updated: chapter 1 rewritten, tab clicks go through the new `d.tab()` helper, chapter 3's payoff steps rewritten for the single Payoff tab.
 **Operator action:**
 1. Deploy `main` (no migration).
-2. On DEV: `node scripts/walkthrough/record.mjs 01 --dry` (selector check), then record chapter 1 as usual.
-3. Tell staff: the menu is now grouped (Rentals, Billing, Fleet, Fleet care, Insights, Learn) and has a **Find a page** box at the top.
-**Done when:** the new chapter 1 video is live on the Training page.
+2. On DEV: `node scripts/walkthrough/record.mjs <NN> --dry` for each chapter below (selector check), then record them as usual — at least 01, 02, 03, 07, 08, 09, 11, 12, 13, 16, 17, 19, 32, 33.
+3. Tell staff: the menu is grouped (Rentals, Billing, Fleet, Fleet care, Insights, Learn); on a profile page the main actions are in the header and the rest under **More**.
+**Done when:** the re-recorded videos are live on the Training page.
 
 ---
 

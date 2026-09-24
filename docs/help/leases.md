@@ -60,7 +60,7 @@ Use the three tabs to filter: **Active & Pending**, **Closed**, or **All**.
 
 A lease starts in **Pending** status. Nothing is invoiced until it is activated.
 
-1. Open the lease and click **Activate Lease** (below the KPI tiles).
+1. Open the lease and click **Activate Lease** (in the header, next to Edit Lease).
 2. The unit status changes from *Reserved* to *On Lease*, and billing begins.
 3. If you set advance billing periods, Invoice 1 is generated immediately with those prepaid months included.
 
@@ -69,16 +69,19 @@ A lease starts in **Pending** status. Nothing is invoiced until it is activated.
 ## Finding a lease
 
 1. Go to **Leases** in the sidebar.
-2. Type a contract number, company name, or unit number in the search box.
-3. Use the tab bar to narrow to **Active & Pending** or **Closed** leases.
-4. Use the **Status** filter (on the All tab) and sort controls to refine further.
-5. Click the contract number or **View** to open the lease profile.
+2. The tiles at the top are the lists you work from — **On rent now** (with monthly revenue if your role sees money), **Ending within 30 days** (and how many are already past their end date), **Starting this week** and **Billing behind** (active leases with days not invoiced yet). Click one to show exactly those leases; click the chip in the toolbar (or the tile again) to go back.
+3. Type a contract number, company name, or unit number in the search box.
+4. The **Active & Pending / Closed / All** tabs sit in the table's toolbar, next to search, sort and the page arrows.
+5. Use the **Status** filter (on the All tab) and sort controls to refine further.
+6. Click the contract number or **View** to open the lease profile.
 
 ---
 
 ## Viewing a lease profile
 
-Open a lease to see its full profile. The KPI tiles at the top show **Total Invoiced**, **Total Paid**, **Outstanding balance**, and **Currency** — each is clickable and drills through to the relevant records.
+Open a lease to see its full profile. Every lease action is in the header — **Activate Lease**, **Close Lease**, **Reopen Lease**, **Edit Lease** and **Generate Invoice** as the status allows, with **Email Customer**, **AI Analysis** and **Delete** under **More**.
+
+The tiles below show **Days on rent**, **Billed through** (red with the number of unbilled days when billing is behind), **Next invoice**, and — for roles that see money — **Outstanding** and **Paid**. The panel on the right shows what needs attention (billing behind, past the end date, a missing starting odometer, overdue or draft invoices), the billing summary, the customer and the unit.
 
 Use the tabs to navigate:
 
@@ -95,7 +98,7 @@ Use the tabs to navigate:
 
 ## Generating an invoice for a lease
 
-1. Open the lease and click **Generate Invoice** (below the KPI tiles).
+1. Open the lease and click **Generate Invoice** (in the header, or the Billing panel on the right).
 2. This takes you to the invoice create form with the lease pre-selected.
 3. Set the billing period and complete the form.
 

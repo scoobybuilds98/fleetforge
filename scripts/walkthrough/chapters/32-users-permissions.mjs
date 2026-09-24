@@ -81,7 +81,7 @@ export default {
       say: 'Now, roles. Go back to Users and open the Default Permissions tab.',
       run: async (d) => {
         await d.click('a:has-text("Cancel")', { nav: true });
-        await d.click(tab('Default Permissions'));
+        await d.tab('Default Permissions');
         await d.wait(700);
       },
     },
@@ -136,7 +136,7 @@ export default {
     {
       say: "Sometimes one person needs an exception. Back on the Team tab, open that user's profile. We'll open Frank Dispatcher.",
       run: async (d) => {
-        await d.click(tab('Team'));
+        await d.tab('Team');
         await d.type('[x-model="filters.q"]', 'Frank');
         await d.wait(1300);
         await d.click('table tbody tr:has-text("Frank Dispatcher") a:has-text("View")', { nav: true });
@@ -200,7 +200,7 @@ export default {
       say: 'Now the Lockout tab. Open Settings and choose Lockout. Only super admins can see this tab at all.',
       run: async (d) => {
         await d.nav('Settings', '/settings');
-        await d.click(tab('Lockout'));
+        await d.tab('Lockout');
         await d.wait(700);
       },
     },
@@ -219,7 +219,7 @@ export default {
       say: 'Two-factor sign-in is set on the Integrations tab, in the Security and M F A card. Tick the roles that must use an authenticator app.',
       caption: 'Two-factor sign-in is set on the Integrations tab, in the Security / MFA card. Tick the roles that must use an authenticator app.',
       run: async (d) => {
-        await d.click(tab('Integrations'));
+        await d.tab('Integrations');
         await d.wait(700);
         await d.highlight('.card:has(.card-header:has-text("Security / MFA"))', 'MFA requirements', 2600);
       },

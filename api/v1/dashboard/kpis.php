@@ -41,7 +41,9 @@ require_auth_api();
 // ── Cache lookup ───────────────────────────────────────────────
 // KPI cache key is constant — no per-user parameters.
 // TTL: 5 minutes per spec §8 caching strategy.
-$cacheKey    = 'dashboard_kpis';
+// S-DASHBOARD-ATTN-2: versioned so the added open_service_requests field is
+// served at once instead of after the old 5-minute cache row expires.
+$cacheKey    = 'dashboard_kpis|v2-service-requests';
 $cacheHash   = hash('sha256', $cacheKey);
 $cacheTtlMin = 5;
 // S-LOCAL-DAY-TS: report_cache.generated_at/expires_at are UTC — cron/cache_cleanup.php
@@ -189,6 +191,13 @@ $openDamageClaims = (int) db_count(
       WHERE status NOT IN ('closed','voided') AND deleted_at IS NULL"
 );
 
+// ── KPI 13: Customer service requests waiting (S-DASHBOARD-ATTN-2) ──
+// Portal requests still open or being reviewed — a customer is waiting on a
+// reply. Count only (no money); feeds the dashboard's Needs attention row.
+$openServiceRequests = (int) db_count(
+    "SELECT COUNT(*) FROM portal_service_requests WHERE status IN ('open','in_review')"
+);
+
 // ── KPI 10: Sent (Unpaid) Invoices ────────────────────────────
 $sentInvoices = (int) db_count(
     "SELECT COUNT(*) FROM invoices
@@ -230,6 +239,7 @@ $payload = [
     'available_units'     => $availableUnits,
     'open_work_orders'    => $openWorkOrders,
     'open_damage_claims'  => $openDamageClaims,
+    'open_service_requests' => $openServiceRequests,
     'sent_invoices'       => $sentInvoices,
     'monthly_collections' => $monthlyCollections,
     'active_reservations' => $activeReservations,

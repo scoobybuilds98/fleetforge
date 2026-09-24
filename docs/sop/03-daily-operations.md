@@ -31,7 +31,7 @@ Dispatcher and manager, every morning:
    - **Billing Contact**: **Invoice Email** is the address batch invoicing uses first.
    - **Commercial Terms**: Currency, Mileage Unit, **Payment Terms** (e.g. "Net 30"), Credit Limit, Billing Cycle, Discount.
 2. Press **Create Customer**.
-3. Set **GPS Revenue Presentation** on the customer's **Overview** tab: **Regulatory** card → **Edit**, choose Net (Agent) or Gross (Principal).
+3. Set **GPS Revenue Presentation** on the customer's **Overview** tab: **Tax & regulatory** card → **Edit**, choose Net (Agent) or Gross (Principal).
 4. **Portal access**: {{Users › Portal Users @/users?tab=portal}} → choose the customer → **Create & Invite**.
 5. **Credit application**: customer → **Credit Application** tab → **+ Send Application**. When it comes back, {{Credit Applications @/credit_applications}} → **View** → set an Outcome in **Review**. Tick "Apply credit limit to customer record" if it should change the customer, then **Save Review**.
 

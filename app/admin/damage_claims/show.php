@@ -4,20 +4,32 @@ declare(strict_types=1);
 /**
  * app/admin/damage_claims/show.php
  *
- * Damage Claim detail page. Sections:
- *   - Summary header (claim #, status badge, severity, unit, customer)
- *   - Detail card (description, location, costs, linked records)
- *   - Photo gallery (with upload form and per-photo delete)
- *   - Status transition panel (inline form)
- *   - Notes / Resolution notes edit form
- *   - Delete button (reported/assessed only)
+ * Damage Claim detail page (S-RECORD-REDESIGN record layout):
+ *   - Entity hero: claim number + status + severity badges, the damage
+ *     location, and unit / customer / lease / reported-date facts. The header
+ *     holds "Change Status" (toggles the status panel at the top of the main
+ *     column); Delete (reported/assessed only) sits in the More menu.
+ *   - Key-numbers strip: estimated repair, actual repair (vs the estimate),
+ *     customer liable (+ insurance), recovery invoice (paid / balance for
+ *     money roles; its status only for everyone else), days open.
+ *   - Main column: Change Status panel, Claim Details (view / edit form),
+ *     Photos (gallery + upload), Activity.
+ *   - Right rail: Needs attention (liable amount not invoiced, invoiced with no
+ *     link, recovery invoice draft / overdue / paid-but-claim-open, no photos,
+ *     no estimate, no work order on a repair, customer not linked), Recovery
+ *     (invoice link + status; paid meter, balance and GL entry for money
+ *     roles), Unit, Customer (+ lease), Related (inspection, work order,
+ *     vendor), Summary.
  *
  * Recovery invoice link (bug #8): the status panel requires picking the
  * customer's (sent) recovery invoice when moving to 'invoiced', and the edit
  * form can set / fix the link — damage_claims/update.php validates it and fires
  * AutoEntryBridge::onDamageRecoveryBilled so the recovery is classified in the
  * GL. Options are the claim customer's non-void invoices, rendered server-side;
- * amounts only for users who pass can_view_financials().
+ * amounts only for users who pass can_view_financials() — the same gate holds
+ * the recovery invoice's paid / balance figures in the strip and rail. The
+ * claim's own estimate / actual / liable / insurance figures keep the page's
+ * existing visibility (maintenance:view).
  *
  * All writes go through Alpine.js → API endpoints.
  * File upload uses FormData (multipart) to upload_photo.php.
@@ -29,7 +41,7 @@ declare(strict_types=1);
  *           api/v1/damage_claims/show.php, update.php, upload_photo.php, delete_photo.php,
  *           delete.php
  * @decisions D5/D9/D19/D30/D32
- * @session  S012
+ * @session  S012, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -115,7 +127,9 @@ if ($claim['customer_id']) {
     );
 }
 $linkedInvoice = $claim['invoice_id']
-    ? db_row("SELECT id, invoice_number, status FROM invoices WHERE id = ?", [$claim['invoice_id']])
+    // S-RECORD-REDESIGN: + dates / amounts for the strip + Recovery rail card
+    // (amounts are rendered only for can_view_financials() users).
+    ? db_row("SELECT id, invoice_number, status, invoice_date, due_date, total_amount, amount_paid, balance_due, currency FROM invoices WHERE id = ?", [$claim['invoice_id']])
     : null;
 // Live GL classification for this claim (idempotency marker of the bridge).
 $recoveryJe = db_row(
@@ -221,6 +235,33 @@ $severityLabel = match($claim['severity']) {
     default      => $claim['severity'],
 };
 
+// ── S-RECORD-REDESIGN: strip + rail context ──────────────────────────────────
+$today      = ff_today();   // company-local business day (never SQL CURDATE())
+$isClosed   = in_array($claim['status'], ['resolved', 'written_off'], true);
+// created_at is a UTC DATETIME — the business day it was reported is local.
+$claimStart = $claim['created_at'] ? ff_utc_to_local((string) $claim['created_at']) : null;
+$daysOpen   = $claimStart ? max(0, (int) round((strtotime($today) - strtotime($claimStart)) / 86400)) : null;
+$liable     = (string) ($claim['customer_liable_amount'] ?? '');
+$hasLiable  = $liable !== '' && bccomp($liable, '0', 2) > 0;
+// Recovery invoice state (the link is damage_claims.invoice_id).
+$recInv       = $linkedInvoice;
+$recStatus    = $recInv['status'] ?? null;
+$recOpen      = $recInv && in_array($recStatus, ['sent', 'partially_paid', 'overdue'], true)
+                && bccomp((string) $recInv['balance_due'], '0', 2) > 0;
+$recOverdue   = $recOpen && !empty($recInv['due_date']) && $recInv['due_date'] < $today;
+$recPaid      = $recInv && $recStatus === 'paid';
+$recCur       = ($recInv['currency'] ?? 'CAD') === 'USD' ? 'US$' : '$';
+$recPaidPct   = ($recInv && bccomp((string) $recInv['total_amount'], '0', 2) > 0)
+    ? (float) bcmul(bcdiv((string) $recInv['amount_paid'], (string) $recInv['total_amount'], 6), '100', 2) : 0.0;
+// Linked inspection's number (the claim row only carries the id).
+$claimInspection = $claim['inspection_id']
+    ? db_row("SELECT id, inspection_number, inspection_type, inspection_date FROM inspections WHERE id = ?", [(int) $claim['inspection_id']])
+    : null;
+$claimWorkOrder = $claim['work_order_id']
+    ? db_row("SELECT id, work_order_number, status FROM maintenance_work_orders WHERE id = ? AND deleted_at IS NULL", [(int) $claim['work_order_id']])
+    : null;
+$customerDisplay = $claim['customer_company_name'] ?? $claim['customer_name'] ?? null;
+$unitDesc = trim(($claim['year'] ? $claim['year'] . ' ' : '') . ($claim['brand'] ?? '') . ($claim['model'] ? ' ' . $claim['model'] : ''));
 $pageTitle = e($claim['claim_number']) . ' — Damage Claim';
 $helpModuleSlug = 'damage-claims';
 require_once FF_ROOT . '/includes/header.php';
@@ -228,97 +269,134 @@ require_once FF_ROOT . '/includes/header.php';
 
 <div x-data="damageClaimShow()">
 
-<!-- ── Page header ───────────────────────────────────────────────────────── -->
-<div class="page-header" style="flex-wrap:wrap;gap:8px;">
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <a href="<?= base_url('damage_claims') ?>" class="btn btn-secondary btn-sm">← Back</a>
-        <h1 class="page-header-title" style="margin:0;"><?= e($claim['claim_number']) ?></h1>
-        <span class="<?= $statusBadgeClass ?>"><?= $statusLabel ?></span>
-        <span class="<?= $severityBadgeClass ?>"><?= $severityLabel ?></span>
-    </div>
-    <div class="page-header-actions">
-        <?= help_button('damage-claims') ?>
-        <?php if (can('maintenance', 'edit') && $nextStates): ?>
-        <button class="btn btn-secondary btn-sm"
-                @click="showStatusPanel = !showStatusPanel">
-            Change Status
-        </button>
-        <?php endif; ?>
+<?php
+// ── Header (S-RECORD-REDESIGN) ────────────────────────────────────────────────
+$heroFacts = [];
+if ($claim['equipment_unit_id']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('truck') . '<a href="' . e(base_url('equipment/show')) . '?id=' . (int) $claim['equipment_unit_id'] . '">Unit <b>' . e($claim['unit_number'] ?? ('#' . $claim['equipment_unit_id'])) . '</b></a>' . ($unitDesc !== '' ? ' · ' . e($unitDesc) : '');
+}
+if ($customerDisplay) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('user-group') . ($claim['customer_id']
+        ? '<a href="' . e(base_url('customers/show')) . '?id=' . (int) $claim['customer_id'] . '">' . e($customerDisplay) . '</a>'
+        : e($customerDisplay));
+}
+if ($claim['lease_id']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . '<a href="' . e(base_url('leases/show')) . '?id=' . (int) $claim['lease_id'] . '">Lease ' . e($claim['contract_number'] ?? ('#' . $claim['lease_id'])) . '</a>';
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . 'Reported ' . e(format_date($claimStart));
+?>
+<?php ob_start(); /* destructive actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
         <?php if (can('maintenance', 'delete') && in_array($claim['status'], ['reported', 'assessed'], true)): ?>
-        <button class="btn btn-danger btn-sm"
+        <button type="button" class="btn btn-danger btn-sm"
                 @click="confirmDelete = true">
             Delete
         </button>
         <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('damage-claims') ?>
+        <?php if (can('maintenance', 'edit') && $nextStates): ?>
+        <button type="button" class="btn btn-primary btn-sm"
+                @click="showStatusPanel = !showStatusPanel; if (showStatusPanel) $nextTick(() => document.getElementById('dc-status-panel')?.scrollIntoView({ block: 'nearest' }))"
+                :aria-expanded="showStatusPanel ? 'true' : 'false'">
+            Change Status
+        </button>
+        <?php endif; ?>
+        <?php if (can('maintenance', 'edit')): ?>
+        <button type="button" class="btn btn-secondary btn-sm"
+                @click="showEditForm = true; $nextTick(() => document.getElementById('dc-details')?.scrollIntoView({ block: 'start' }))">
+            Edit
+        </button>
+        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'danger',
+    'icon'       => 'exclamation-triangle',
+    'mark'       => (string) $claim['claim_number'],
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Damage Claims', base_url('damage_claims')], [(string) $claim['claim_number'], null]],
+    'eyebrow'    => 'Damage claim',
+    'title_html' => e($claim['claim_number'])
+        . ' <span class="' . $statusBadgeClass . '" style="font-size:0.75rem;vertical-align:middle;margin-left:6px;">' . e($statusLabel) . '</span>'
+        . ' <span class="' . $severityBadgeClass . '" style="font-size:0.75rem;vertical-align:middle;" title="Severity">' . e($severityLabel) . '</span>',
+    'subtitle'   => $claim['damage_location'] ? e($claim['damage_location']) : e(mb_strimwidth((string) $claim['description'], 0, 120, '…')),
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
+
+<!-- ============================================================
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN): what the
+     damage costs, what the customer owes for it, and how much of that
+     has come back. Unit + customer moved to the header / rail.
+     Recovery paid / balance: can_view_financials() only.
+     ============================================================ -->
+<?php
+$estimate = $claim['estimated_repair_cost'];
+$actual   = $claim['actual_repair_cost'];
+$variance = ($estimate !== null && $actual !== null) ? bcsub((string) $actual, (string) $estimate, 2) : null;
+?>
+<div class="stat-grid stat-grid--5 ff-stats">
+    <div class="stat-card stat-card--amber">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-wrench"/></svg></span>
+        <div class="stat-label">Est. repair</div>
+        <div class="stat-value font-mono"><?= $estimate !== null ? e(format_currency($estimate)) : '—' ?></div>
+        <div class="stat-delta"><?= $estimate !== null ? 'estimate' : 'not assessed' ?></div>
+    </div>
+
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-check-circle"/></svg></span>
+        <div class="stat-label">Actual repair</div>
+        <div class="stat-value font-mono"><?= $actual !== null ? e(format_currency($actual)) : '—' ?></div>
+        <div class="stat-delta"><?php
+            if ($actual === null) {
+                echo 'pending';
+            } elseif ($variance === null || bccomp($variance, '0', 2) === 0) {
+                echo 'as estimated';
+            } else {
+                echo e(format_currency(ltrim($variance, '-'))) . (bccomp($variance, '0', 2) > 0 ? ' over' : ' under') . ' estimate';
+            }
+        ?></div>
+    </div>
+
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Customer liable</div>
+        <div class="stat-value font-mono"><?= $hasLiable ? e(format_currency($liable)) : '—' ?></div>
+        <div class="stat-delta"><?= $claim['insurance_claim_amount'] ? 'insurance ' . e(format_currency($claim['insurance_claim_amount'])) : 'no insurance claim' ?></div>
+    </div>
+
+    <?php
+    $recTone = !$recInv ? ($hasLiable && !$isClosed ? 'red' : 'slate') : ($recPaid ? 'green' : ($recOverdue ? 'red' : 'amber'));
+    ?>
+    <<?= $recInv ? 'a href="' . e(base_url('invoices/show')) . '?id=' . (int) $recInv['id'] . '" title="Open the recovery invoice"' : 'div' ?> class="stat-card stat-card--<?= $recTone ?>">
+        <span class="stat-icon stat-icon--<?= $recTone ?>"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Recovered</div>
+        <?php if (!$recInv): ?>
+        <div class="stat-value">Not invoiced</div>
+        <div class="stat-delta"><?= $hasLiable && !$isClosed ? 'no recovery invoice' : '—' ?></div>
+        <?php elseif ($canSeeMoney): ?>
+        <div class="stat-value font-mono"><?= e(format_currency($recInv['amount_paid'], $recCur)) ?></div>
+        <div class="stat-delta"><?= $recPaid ? 'paid in full' : e(format_currency($recInv['balance_due'], $recCur)) . ' due' . ($recOverdue ? ' · overdue' : '') ?></div>
+        <?php else: ?>
+        <div class="stat-value"><?= e(ucwords(str_replace('_', ' ', (string) $recStatus))) ?></div>
+        <div class="stat-delta"><?= e($recInv['invoice_number']) ?></div>
+        <?php endif; ?>
+    </<?= $recInv ? 'a' : 'div' ?>>
+
+    <div class="stat-card <?= $isClosed ? 'stat-card--green' : (($daysOpen ?? 0) > 30 ? 'stat-card--red' : 'stat-card--slate') ?>">
+        <span class="stat-icon <?= $isClosed ? 'stat-icon--green' : (($daysOpen ?? 0) > 30 ? 'stat-icon--red' : 'stat-icon--slate') ?>"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label"><?= $isClosed ? 'Closed' : 'Days open' ?></div>
+        <div class="stat-value<?= $isClosed ? '' : ' font-mono' ?>"><?= $isClosed ? e($statusLabel) : ($daysOpen !== null ? number_format($daysOpen) : '—') ?></div>
+        <div class="stat-delta">reported <?= e(format_date($claimStart)) ?></div>
     </div>
 </div>
 
-<!-- ── Summary tiles ─────────────────────────────────────────────────────── -->
-<div class="stat-grid" style="margin-bottom:24px;">
-
-    <div class="stat-card">
-        <div class="stat-label">Equipment Unit</div>
-        <div class="stat-value">
-            <?php if ($claim['equipment_unit_id']): ?>
-            <a href="<?= base_url('equipment/show') ?>?id=<?= e($claim['equipment_unit_id']) ?>"
-               class="link">
-                <?= e($claim['unit_number'] ?? 'Unit #' . $claim['equipment_unit_id']) ?>
-            </a>
-            <?php else: ?>
-            —
-            <?php endif; ?>
-        </div>
-        <div class="stat-delta"><?= $claim['brand'] ? e(($claim['year'] ? $claim['year'] . ' ' : '') . $claim['brand'] . ($claim['model'] ? ' ' . $claim['model'] : '')) : '' ?></div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Customer</div>
-        <div class="stat-value">
-            <?php if ($claim['customer_id']): ?>
-            <a href="<?= base_url('customers/show') ?>?id=<?= e($claim['customer_id']) ?>"
-               class="link">
-                <?= e($claim['customer_company_name'] ?? 'Customer #' . $claim['customer_id']) ?>
-            </a>
-            <?php elseif ($claim['customer_name']): ?>
-            <?= e($claim['customer_name']) ?>
-            <?php else: ?>
-            —
-            <?php endif; ?>
-        </div>
-        <div class="stat-delta">
-            <?php if ($claim['lease_id']): ?>
-            Lease: <a href="<?= base_url('leases/show') ?>?id=<?= e($claim['lease_id']) ?>" class="link">
-                <?= e($claim['contract_number'] ?? '#' . $claim['lease_id']) ?>
-            </a>
-            <?php endif; ?>
-        </div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Est. Repair Cost</div>
-        <div class="stat-value font-mono">
-            <?= $claim['estimated_repair_cost'] ? format_currency($claim['estimated_repair_cost']) : '—' ?>
-        </div>
-        <div class="stat-delta">
-            <?= $claim['actual_repair_cost'] ? 'Actual: ' . format_currency($claim['actual_repair_cost']) : 'Actual: pending' ?>
-        </div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Customer Liable</div>
-        <div class="stat-value font-mono">
-            <?= $claim['customer_liable_amount'] ? format_currency($claim['customer_liable_amount']) : '—' ?>
-        </div>
-        <div class="stat-delta">
-            <?= $claim['insurance_claim_amount'] ? 'Insurance: ' . format_currency($claim['insurance_claim_amount']) : '' ?>
-        </div>
-    </div>
-
-</div>
-
+<div class="rec-layout">
+<div class="rec-main" style="display:flex;flex-direction:column;gap:16px;">
 <!-- ── Status transition panel ───────────────────────────────────────────── -->
 <?php if (can('maintenance', 'edit') && $nextStates): ?>
-<div class="card" x-show="showStatusPanel" style="margin-bottom:24px;display:none;">
+<div class="card" id="dc-status-panel" x-show="showStatusPanel" style="display:none;">
     <div class="card-header">
         <h2 class="card-title">Change Status</h2>
     </div>
@@ -390,7 +468,7 @@ require_once FF_ROOT . '/includes/header.php';
 <?php endif; ?>
 
 <!-- ── Detail card ───────────────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:24px;">
+<div class="card" id="dc-details">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
         <h2 class="card-title">Claim Details</h2>
         <?php if (can('maintenance', 'edit')): ?>
@@ -403,9 +481,11 @@ require_once FF_ROOT . '/includes/header.php';
 
         <!-- View mode -->
         <div x-show="!showEditForm">
-            <dl class="detail-grid">
-                <dt>Claim Number</dt>
-                <dd class="font-mono"><?= e($claim['claim_number']) ?></dd>
+            <dl class="rec-dl">
+                <?php /* S-RECORD-REDESIGN: claim number (header), reported by / at and
+                         last updated (rail Summary) no longer repeat here. */ ?>
+                <dt>Severity</dt>
+                <dd><span class="<?= $severityBadgeClass ?>"><?= e($severityLabel) ?></span></dd>
 
                 <dt>Damage Location</dt>
                 <dd><?= $claim['damage_location'] ? e($claim['damage_location']) : '—' ?></dd>
@@ -417,7 +497,7 @@ require_once FF_ROOT . '/includes/header.php';
                 <dd>
                     <?php if ($claim['work_order_id']): ?>
                     <a href="<?= base_url('maintenance_work_orders/show') ?>?id=<?= e($claim['work_order_id']) ?>"
-                       class="link">#<?= e($claim['work_order_id']) ?></a>
+                       class="link"><?= e($claimWorkOrder['work_order_number'] ?? ('#' . $claim['work_order_id'])) ?></a>
                     <?php else: ?>—<?php endif; ?>
                 </dd>
 
@@ -445,14 +525,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <?php else: ?>—<?php endif; ?>
                 </dd>
 
-                <dt>Reported By</dt>
-                <dd><?= $claim['reported_by_name'] ? e($claim['reported_by_name']) : '—' ?></dd>
-
-                <dt>Reported At</dt>
-                <dd class="font-mono"><?= format_datetime($claim['created_at']) ?></dd>
-
-                <dt>Last Updated</dt>
-                <dd class="font-mono"><?= format_datetime($claim['updated_at']) ?></dd>
+                <?php if ($claimInspection): ?>
+                <dt>Inspection</dt>
+                <dd><a href="<?= base_url('inspections/show') ?>?id=<?= (int) $claimInspection['id'] ?>" class="link"><?= e($claimInspection['inspection_number'] ?? ('#' . $claimInspection['id'])) ?></a>
+                    <span class="text-secondary">· <?= e(format_date($claimInspection['inspection_date'])) ?></span></dd>
+                <?php endif; ?>
             </dl>
 
             <?php if ($claim['notes']): ?>
@@ -612,7 +689,7 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 
 <!-- ── Photo gallery ─────────────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:24px;">
+<div class="card">
     <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
         <h2 class="card-title">Photos <span class="badge badge-neutral" x-text="photos.length"></span></h2>
         <?php if (can('maintenance', 'edit')): ?>
@@ -698,6 +775,141 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header"><h2 class="card-title">Activity</h2></div>
+    <div class="card-body">
+        <?php $activityEntityType = 'damage_claim'; $activityEntityId = $id; ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the claim at a glance ───────────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$railD = [];
+
+// 1. Needs attention. Amounts only for money roles.
+$alertsD = [];
+if (!$isClosed && $hasLiable && !$claim['invoice_id'] && $claim['status'] !== 'invoiced') {
+    $alertsD[] = ['warning', 'The customer is liable' . ($canSeeMoney ? ' for <b>' . e(format_currency($liable)) . '</b>' : '') . ' but no recovery invoice is linked yet.'];
+}
+if ($claim['status'] === 'invoiced' && !$claim['invoice_id']) {
+    $alertsD[] = ['danger', 'Marked invoiced with no recovery invoice linked — <b>Edit</b> the claim and pick it so the recovery posts to the ledger.'];
+}
+if ($recInv && $recStatus === 'draft') {
+    $alertsD[] = ['info', 'Recovery invoice <a href="' . e(base_url('invoices/show')) . '?id=' . (int) $recInv['id'] . '">' . e($recInv['invoice_number']) . '</a> is still a draft — the recovery posts when it is sent.'];
+}
+if ($recOverdue) {
+    $alertsD[] = ['danger', 'Recovery invoice <a href="' . e(base_url('invoices/show')) . '?id=' . (int) $recInv['id'] . '">' . e($recInv['invoice_number']) . '</a> is overdue'
+        . ($canSeeMoney ? ' — ' . e(format_currency($recInv['balance_due'], $recCur)) . ' owing' : '') . '.'];
+}
+if ($recPaid && !$isClosed) {
+    $alertsD[] = ['success', 'The recovery invoice is paid — mark the claim <b>Resolved</b>.'];
+}
+if (!$claim['customer_id'] && !$isClosed) {
+    $alertsD[] = ['warning', 'Not linked to a customer account' . ($claim['customer_name'] ? ' (typed as “' . e($claim['customer_name']) . '”)' : '') . ' — a recovery invoice can\'t be linked until it is.'];
+}
+if (!$photoData && !$isClosed) {
+    $alertsD[] = ['info', 'No photos yet — add damage photos as evidence.'];
+}
+if ($claim['estimated_repair_cost'] === null && !in_array($claim['status'], ['reported', 'resolved', 'written_off'], true)) {
+    $alertsD[] = ['info', 'No repair estimate recorded.'];
+}
+if ($claim['status'] === 'repair_ordered' && !$claim['work_order_id']) {
+    $alertsD[] = ['info', 'Repair ordered but no work order is linked.'];
+}
+$railD[] = $R::card('Needs attention', $R::alerts($alertsD, $isClosed ? 'Closed — nothing needs attention.' : 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Recovery — the invoice that bills the damage back to the customer.
+if ($recInv) {
+    $recBody = '';
+    if ($canSeeMoney) {
+        $recBody .= $R::meter('Paid', e(round($recPaidPct)) . '%', $recPaidPct, $recPaidPct >= 99.99 ? 'ok' : ($recOverdue ? 'danger' : 'info'),
+            e(format_currency($recInv['amount_paid'], $recCur)) . ' of ' . e(format_currency($recInv['total_amount'], $recCur)) . ' ' . e($recInv['currency'] ?? ''));
+    }
+    $recBody .= $R::kv([
+        ['Invoice', '<a href="' . e(base_url('invoices/show')) . '?id=' . (int) $recInv['id'] . '">' . e($recInv['invoice_number']) . '</a>'],
+        ['Status', '<span class="badge badge-no-dot ' . ($recPaid ? 'badge-success' : ($recOverdue ? 'badge-danger' : 'badge-neutral')) . '">' . e(ucwords(str_replace('_', ' ', (string) $recStatus))) . '</span>'],
+        ['Balance', $canSeeMoney && !$recPaid ? e(format_currency($recInv['balance_due'], $recCur)) : null, 'mono'],
+        ['Due', !empty($recInv['due_date']) && !$recPaid ? e(format_date($recInv['due_date'])) : null],
+        ['Liable', $canSeeMoney && $hasLiable ? e(format_currency($liable)) : null, 'mono'],
+        ['Ledger', $canSeeMoney ? ($recoveryJe ? 'Posted · ' . e($recoveryJe['entry_number']) : 'Not posted yet') : null],
+    ]);
+    $railD[] = $R::card('Recovery', $recBody, ['icon' => 'banknotes', 'class' => 'rec-card--accent']);
+} elseif (!$isClosed && ($hasLiable || $claim['status'] === 'invoiced')) {
+    $railD[] = $R::card('Recovery', '<p class="text-secondary" style="margin:0;font-size:12.5px;line-height:1.5;">No recovery invoice linked. '
+        . ($claim['customer_id'] ? 'Create and send the invoice from the customer\'s account, then link it with <b>Edit</b> (or <b>Change Status → Invoiced</b> once the repair is ordered).' : 'Link a customer first (Edit → Customer).')
+        . '</p>' . ($claim['customer_id'] && can('invoices', 'view') ? '<div style="margin-top:10px;">' . $R::links([['Customer\'s invoices', base_url('invoices') . '?customer_id=' . (int) $claim['customer_id'], 'document-duplicate']]) . '</div>' : ''),
+        ['icon' => 'banknotes', 'class' => 'rec-card--accent']);
+}
+
+// 3. Unit.
+if ($claim['equipment_unit_id']) {
+    $railD[] = $R::card('Unit', $R::entity(
+        'Unit ' . (string) ($claim['unit_number'] ?? $claim['equipment_unit_id']),
+        base_url('equipment/show') . '?id=' . (int) $claim['equipment_unit_id'],
+        e($unitDesc !== '' ? $unitDesc : 'Equipment unit'),
+        '',
+        'truck'
+    ), ['icon' => 'truck', 'link' => ['Claims', base_url('equipment/show') . '?id=' . (int) $claim['equipment_unit_id'] . '#damage_claims']]);
+}
+
+// 4. Customer (+ the lease the damage happened on).
+if ($customerDisplay || $claim['lease_id']) {
+    $cBody = '';
+    if ($customerDisplay) {
+        $cBody .= $R::entity(
+            (string) $customerDisplay,
+            $claim['customer_id'] ? base_url('customers/show') . '?id=' . (int) $claim['customer_id'] : '',
+            $claim['customer_id'] ? 'Customer' : 'Not linked to an account',
+            \FleetForge\Ui\ModuleHero::initials((string) $customerDisplay)
+        );
+    }
+    if ($claim['lease_id']) {
+        $cBody .= ($cBody !== '' ? '<div style="margin-top:10px;">' : '<div>') . $R::entity(
+            'Lease ' . (string) ($claim['contract_number'] ?? $claim['lease_id']),
+            base_url('leases/show') . '?id=' . (int) $claim['lease_id'],
+            'The lease the damage happened on',
+            '',
+            'calendar-days'
+        ) . '</div>';
+    }
+    $railD[] = $R::card('Customer', $cBody, ['icon' => 'user-group']);
+}
+
+// 5. Related records.
+$relD = [];
+if ($claimInspection) {
+    $relD[] = ['Inspection ' . ($claimInspection['inspection_number'] ?? ('#' . $claimInspection['id'])), base_url('inspections/show') . '?id=' . (int) $claimInspection['id'], 'clipboard-document-check', format_date($claimInspection['inspection_date'])];
+} elseif ($claim['inspection_id']) {
+    $relD[] = ['Inspection #' . (int) $claim['inspection_id'], base_url('inspections/show') . '?id=' . (int) $claim['inspection_id'], 'clipboard-document-check'];
+}
+if ($claim['work_order_id']) {
+    $relD[] = ['Work order ' . ($claimWorkOrder['work_order_number'] ?? ('#' . $claim['work_order_id'])), base_url('maintenance_work_orders/show') . '?id=' . (int) $claim['work_order_id'], 'wrench-screwdriver',
+        $claimWorkOrder ? ucwords(str_replace('_', ' ', (string) $claimWorkOrder['status'])) : ''];
+}
+if ($claim['vendor_id']) {
+    $relD[] = [(string) $claim['vendor_name'], base_url('vendors/show') . '?id=' . (int) $claim['vendor_id'], 'building-storefront', 'Repair shop'];
+}
+if ($relD) {
+    $railD[] = $R::card('Related', $R::links($relD), ['icon' => 'document-duplicate']);
+}
+
+// 6. Summary.
+$railD[] = $R::card('Summary', $R::kv([
+    ['Severity', '<span class="' . $severityBadgeClass . '">' . e($severityLabel) . '</span>'],
+    ['Location', $claim['damage_location'] ? e($claim['damage_location']) : null],
+    ['Reported', e(format_datetime($claim['created_at'])) . ($claim['reported_by_name'] ? ' · ' . e($claim['reported_by_name']) : '')],
+    ['Updated', e(format_datetime($claim['updated_at']))],
+]), ['icon' => 'document-text']);
+?>
+<aside class="rec-rail" aria-label="Damage claim at a glance">
+    <?= implode("\n    ", $railD) ?>
+</aside>
+</div><!-- /rec-layout -->
 <!-- ── Delete confirm modal ───────────────────────────────────────────────── -->
 <template x-if="confirmDelete">
     <div class="modal-backdrop" style="z-index:1000;" @click.self="confirmDelete = false">
@@ -982,13 +1194,18 @@ function damageClaimShow() {
 }
 </script>
 
-<!-- ── Activity Log ───────────────────────────────────────────── -->
-<div class="card" style="margin-top:24px;">
-    <div class="card-header"><h3 class="card-title">Activity</h3></div>
-    <div class="card-body">
-        <?php $activityEntityType = 'damage_claim'; $activityEntityId = $id; ?>
-        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
-    </div>
-</div>
+<!-- ── Page styles (S-RECORD-REDESIGN) — tokens only ─────────────────────── -->
+<style>
+/* Hero fact links (unit, customer, lease) keep the chip colour. */
+.ff-hero-fact a { color: inherit; text-decoration: none; }
+.ff-hero-fact a:hover { text-decoration: underline; }
+/* The status panel opens under the strip when the header's Change Status is
+   clicked — tint it so it reads as the pending action. */
+#dc-status-panel {
+    border-color: color-mix(in srgb, var(--acc, var(--color-primary)) 40%, var(--border-color));
+    scroll-margin-top: calc(var(--topbar-height, 60px) + 16px);
+}
+#dc-details { scroll-margin-top: calc(var(--topbar-height, 60px) + 16px); }
+</style>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

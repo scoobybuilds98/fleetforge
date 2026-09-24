@@ -9,6 +9,26 @@ declare(strict_types=1);
  *   Section 8:    Tires — full per-position table (brakes/tread/brand/org/wheels)
  *   Section 9:    Trailer Condition — 7-item checklist with legend codes
  *
+ * Layout (S-RECORD-REDESIGN):
+ *   - Entity hero: inspection number + status + type badges; unit (linked),
+ *     lease (linked), customer, date and inspector as facts. The header holds
+ *     the status transitions (Mark Complete / Sign Off / Re-open) and
+ *     "+ Create Damage Claim"; "New inspection for this unit" and Delete sit
+ *     in the More menu.
+ *   - Key-numbers strip: overall condition (+ score), issues found (sections
+ *     damaged / missing / fair + flagged checklist items — jumps to Findings),
+ *     mileage, reefer hours, CVI expiry (days left / expired).
+ *   - Main column: Findings (all 9 sections at a glance with jump links, plus
+ *     the flagged checklist items), the 9 section cards (unchanged), General
+ *     Notes, Activity.
+ *   - Right rail: Needs attention (damage found with no claim, still a draft,
+ *     awaiting sign-off, CVI expired / expiring, dirty before a lease, fuel
+ *     not full on return), Unit (links equipment/show), Lease & customer,
+ *     Damage claims raised from this inspection, Related inspections (the
+ *     other inspection(s) on the same lease — pre vs post — and this unit's
+ *     previous inspection), Details (type, date, inspector, fuel, cleanliness,
+ *     photos, signed).
+ *
  * Status transitions: draft→complete, complete→signed, complete→draft (reopen, manager only).
  * "Create Damage Claim" button visible on complete/signed inspections.
  * Photo upload per section via raw fetch() + FormData (FF_Api.post does not support multipart).
@@ -18,7 +38,7 @@ declare(strict_types=1);
  *           api/v1/inspections/sections/update.php
  *           api/v1/inspections/photos/{upload,delete}.php
  * @decisions D7/D19/D30/D32, Trap 5 (MIME), Trap 7 (no file_path in API)
- * @session  S016
+ * @session  S016, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -36,8 +56,8 @@ if (!$id) {
 // ── Fetch inspection with all joins
 $insp = db_row(
     "SELECT
-        i.*, eu.unit_number, eb.label AS brand, et.model, et.category AS unit_type,
-        l.contract_number, c.company_name AS customer_name,
+        i.*, eu.unit_number, eb.label AS brand, et.model, et.category AS unit_type, eu.status AS unit_status,
+        l.contract_number, l.customer_id, l.status AS lease_status, c.company_name AS customer_name,
         u.name AS inspected_by_user_name
      FROM inspections i
      LEFT JOIN equipment_units     eu ON eu.id = i.equipment_unit_id AND eu.deleted_at IS NULL
@@ -84,139 +104,230 @@ $isImmutable = in_array($insp['status'], ['complete', 'signed'], true);
 $canEdit     = can('inspections', 'edit') && !($insp['status'] === 'signed');
 $canDelete   = can('inspections', 'delete');
 
+// ── S-RECORD-REDESIGN: strip + rail context ──────────────────────────────────
+$today = ff_today();   // company-local business day (never SQL CURDATE())
+$condLabels = ['ok'=>'OK','fair'=>'Fair','damaged'=>'Damaged','missing'=>'Missing','na'=>'N/A'];
+$condBadge  = ['ok'=>'badge-success','fair'=>'badge-warning','damaged'=>'badge-danger','missing'=>'badge-danger','na'=>'badge-neutral'];
+$trailerItemLabels = [
+    'mud_flaps' => 'Mud Flaps', 'lights' => 'Lights', 'canlocks' => 'Canlocks',
+    'landing_gear' => 'Landing Gear (L/G)', 'inflation' => 'Inflation',
+    'tray_skirts' => 'Tray / Skirts', 'rub_rail' => 'Rub Rail',
+];
+$trailerCodeLabels = ['C'=>'Cut','D'=>'Dent','S'=>'Scratch','B'=>'Bruise','P'=>'Patch','H'=>'Hole','missing'=>'Missing'];
+// Findings: sections that are damaged / missing (serious) or fair (minor),
+// plus Trailer Condition checklist items carrying a damage code.
+$secSerious = 0;
+$secMinor   = 0;
+$flaggedChecklist = [];
+foreach ($sections as $s) {
+    if (in_array($s['condition'], ['damaged', 'missing'], true)) {
+        $secSerious++;
+    } elseif ($s['condition'] === 'fair') {
+        $secMinor++;
+    }
+    if ($s['section_name'] === 'Trailer Condition' && is_array($s['section_data'])) {
+        foreach ($s['section_data'] as $k => $entry) {
+            $code = is_array($entry) ? (string) ($entry['code'] ?? 'ok') : 'ok';
+            if (isset($trailerCodeLabels[$code])) {
+                $flaggedChecklist[] = ['section_id' => (int) $s['id'], 'item' => $trailerItemLabels[$k] ?? ucwords(str_replace('_', ' ', (string) $k)),
+                                       'code' => $code, 'notes' => (string) ($entry['notes'] ?? '')];
+            }
+        }
+    }
+}
+$issueCount = $secSerious + $secMinor + count($flaggedChecklist);
+$damageFound = $secSerious > 0 || $flaggedChecklist !== [] || in_array($insp['overall_condition'], ['poor', 'damaged'], true);
+// CVI expiry: days left (negative = expired).
+$cviDays = $insp['cvi_expiry'] ? (int) round((strtotime($insp['cvi_expiry']) - strtotime($today)) / 86400) : null;
+// Damage claims raised from this inspection (damage_claims.inspection_id).
+$inspClaims = db_select(
+    "SELECT id, claim_number, status, severity FROM damage_claims
+      WHERE inspection_id = ? AND deleted_at IS NULL ORDER BY id ASC",
+    [$id]
+);
+// Related inspections: the other inspection(s) on the same lease (pre vs post
+// — the comparison a damage dispute needs) and this unit's previous one.
+$leaseInspections = $insp['lease_id'] ? db_select(
+    "SELECT id, inspection_number, inspection_type, inspection_date, overall_condition, status
+       FROM inspections WHERE lease_id = ? AND id <> ? ORDER BY inspection_date ASC, id ASC LIMIT 5",
+    [(int) $insp['lease_id'], $id]
+) : [];
+$prevUnitInspection = db_row(
+    "SELECT id, inspection_number, inspection_type, inspection_date, overall_condition
+       FROM inspections
+      WHERE equipment_unit_id = ? AND id <> ?
+        AND (inspection_date < ? OR (inspection_date = ? AND id < ?))
+      ORDER BY inspection_date DESC, id DESC LIMIT 1",
+    [(int) $insp['equipment_unit_id'], $id, $insp['inspection_date'], $insp['inspection_date'], $id]
+);
+$typeLabel   = ['pre_lease'=>'Pre-Lease','post_lease'=>'Post-Lease','periodic'=>'Periodic','damage'=>'Damage','compliance'=>'Compliance'];
+$typeBadge   = ['pre_lease'=>'badge-info','post_lease'=>'badge-warning','periodic'=>'badge-neutral','damage'=>'badge-danger','compliance'=>'badge-success'];
+$statusBadge = ['draft' => 'badge-warning', 'complete' => 'badge-info', 'signed' => 'badge-success'];
+$statusLabel = ['draft' => 'Draft', 'complete' => 'Complete', 'signed' => 'Signed'];
+$fuelLabels  = ['empty'=>'Empty','quarter'=>'1/4','half'=>'1/2','three_quarter'=>'3/4','full'=>'Full'];
+$canCreateClaim = in_array($insp['status'], ['complete', 'signed'], true) && can('inspections', 'create');
+$createClaimUrl = base_url('damage_claims/create') . '?inspection_id=' . (int) $id . '&unit_id=' . (int) $insp['equipment_unit_id']
+    . ($insp['lease_id'] ? '&lease_id=' . (int) $insp['lease_id'] : '');
+
 $pageTitle = $insp['inspection_number'] ?? ('Inspection #' . $id);
 $helpModuleSlug = 'inspections';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<!-- ── Hero header ──────────────────────────────────────────────────────── -->
-<div class="page-header" style="align-items:flex-start;gap:16px;flex-wrap:wrap;">
-    <div>
-        <a href="<?= base_url('inspections') ?>" class="btn btn-secondary btn-sm">Back</a>
-    </div>
-    <div style="flex:1;">
-        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-            <h1 class="page-header-title" style="margin:0;">
-                <?= e($insp['inspection_number'] ?? ('Inspection #' . $id)) ?>
-            </h1>
-            <?php
-            $statusBadge = ['draft' => 'badge-warning', 'complete' => 'badge-info', 'signed' => 'badge-success'];
-            $statusLabel = ['draft' => 'Draft', 'complete' => 'Complete', 'signed' => 'Signed'];
-            ?>
-            <span class="badge <?= $statusBadge[$insp['status']] ?? 'badge-neutral' ?>">
-                <?= $statusLabel[$insp['status']] ?? e($insp['status']) ?>
-            </span>
-            <?php
-            $typeBadge = ['pre_lease'=>'badge-info','post_lease'=>'badge-warning','periodic'=>'badge-neutral','damage'=>'badge-danger','compliance'=>'badge-success'];
-            $typeLabel = ['pre_lease'=>'Pre-Lease','post_lease'=>'Post-Lease','periodic'=>'Periodic','damage'=>'Damage','compliance'=>'Compliance'];
-            ?>
-            <span class="badge <?= $typeBadge[$insp['inspection_type']] ?? 'badge-neutral' ?>">
-                <?= $typeLabel[$insp['inspection_type']] ?? e($insp['inspection_type']) ?>
-            </span>
-        </div>
-        <div style="margin-top:6px;font-size:0.875rem;color:var(--text-secondary);display:flex;gap:16px;flex-wrap:wrap;">
-            <span>Unit: <strong><?= e($insp['unit_number']) ?></strong><?= $insp['brand'] ? ' — ' . e($insp['brand']) . ' ' . e($insp['model']) : '' ?></span>
-            <?php if ($insp['contract_number']): ?>
-            <span>Lease: <a href="<?= base_url('leases/show') ?>?id=<?= (int)$insp['lease_id'] ?>" class="link"><?= e($insp['contract_number']) ?></a></span>
-            <?php endif; ?>
-            <?php if ($insp['customer_name']): ?>
-            <span>Customer: <?= e($insp['customer_name']) ?></span>
-            <?php endif; ?>
-            <span>Date: <?= e(format_date($insp['inspection_date'])) ?></span>
-            <?php if ($insp['inspected_by']): ?>
-            <span>Inspector: <?= e($insp['inspected_by']) ?></span>
-            <?php endif; ?>
-        </div>
-    </div>
-    <!-- Action buttons -->
-    <div class="page-header-actions">
-        <?= help_button('inspections') ?>
-        <?php if ($insp['status'] === 'complete' && can('inspections', 'create')): ?>
-        <a href="<?= base_url('damage_claims/create') ?>?inspection_id=<?= (int)$id ?>&unit_id=<?= (int)$insp['equipment_unit_id'] ?><?= $insp['lease_id'] ? '&lease_id=' . (int)$insp['lease_id'] : '' ?>"
-           class="btn btn-danger btn-sm">+ Create Damage Claim</a>
-        <?php endif; ?>
-        <?php if ($insp['status'] === 'signed' && can('inspections', 'create')): ?>
-        <a href="<?= base_url('damage_claims/create') ?>?inspection_id=<?= (int)$id ?>&unit_id=<?= (int)$insp['equipment_unit_id'] ?><?= $insp['lease_id'] ? '&lease_id=' . (int)$insp['lease_id'] : '' ?>"
-           class="btn btn-danger btn-sm">+ Create Damage Claim</a>
+<?php
+// ── Header (S-RECORD-REDESIGN) ────────────────────────────────────────────────
+$unitDesc  = trim(($insp['brand'] ?? '') . ' ' . ($insp['model'] ?? ''));
+$heroFacts = [];
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('truck') . '<a href="' . e(base_url('equipment/show')) . '?id=' . (int) $insp['equipment_unit_id'] . '">Unit <b>' . e($insp['unit_number']) . '</b></a>' . ($unitDesc !== '' ? ' · ' . e($unitDesc) : '');
+if ($insp['contract_number']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . '<a href="' . e(base_url('leases/show')) . '?id=' . (int) $insp['lease_id'] . '">Lease ' . e($insp['contract_number']) . '</a>';
+}
+if ($insp['customer_name']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('user-group') . e($insp['customer_name']);
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . e(format_date($insp['inspection_date']));
+if ($insp['inspected_by']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('users') . e($insp['inspected_by']);
+}
+?>
+<?php ob_start(); /* secondary + destructive actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <?php if (can('inspections', 'create')): ?>
+        <a href="<?= base_url('inspections/create') ?>?unit_id=<?= (int) $insp['equipment_unit_id'] ?>" class="btn btn-secondary btn-sm">New inspection for this unit</a>
         <?php endif; ?>
         <?php if ($canDelete && $insp['status'] === 'draft'): ?>
-        <button class="btn btn-secondary btn-sm" onclick="deleteInspection()">Delete</button>
+        <button type="button" class="btn btn-danger btn-sm" onclick="deleteInspection()">Delete</button>
         <?php endif; ?>
-    </div>
-</div>
-
-<!-- ── Header KPI tiles ──────────────────────────────────────────────────── -->
-<div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card">
-        <div class="stat-label">Overall Condition</div>
-        <div class="stat-value"><?= $insp['overall_condition'] ? e(ucfirst($insp['overall_condition'])) : '—' ?></div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Mileage at Inspection</div>
-        <div class="stat-value font-mono"><?= $insp['mileage_at_inspection'] ? e(number_format((int)$insp['mileage_at_inspection'])) : '—' ?></div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Reefer Hours</div>
-        <div class="stat-value font-mono"><?= $insp['reefer_hours'] !== null ? e(number_format((int)$insp['reefer_hours'])) : '—' ?></div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Fuel Level</div>
-        <div class="stat-value">
-            <?php
-            $fuelLabels = ['empty'=>'Empty','quarter'=>'1/4','half'=>'1/2','three_quarter'=>'3/4','full'=>'Full'];
-            echo $insp['fuel_level'] ? e($fuelLabels[$insp['fuel_level']] ?? $insp['fuel_level']) : '—';
-            ?>
-        </div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">CVI Expiry</div>
-        <div class="stat-value font-mono"><?= $insp['cvi_expiry'] ? e(format_date($insp['cvi_expiry'])) : '—' ?></div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-label">Cleanliness</div>
-        <div class="stat-value">
-            <?php if ($insp['is_clean'] === null): ?>—
-            <?php elseif ((int)$insp['is_clean'] === 1): ?>
-                <span class="badge badge-success">Clean</span>
-            <?php else: ?>
-                <span class="badge badge-warning">Dirty</span>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('inspections') ?>
+        <?php /* Status transitions — moved up from the old "Status transitions"
+                 card (S-RECORD-REDESIGN). Same global handlers. */ ?>
+        <?php if (can('inspections', 'edit')): ?>
+            <?php if ($insp['status'] === 'draft'): ?>
+            <button type="button" class="btn btn-primary btn-sm" onclick="transitionStatus('complete')">Mark Complete</button>
+            <?php elseif ($insp['status'] === 'complete'): ?>
+            <button type="button" class="btn btn-success btn-sm" onclick="transitionStatus('signed')">Sign Off</button>
+            <?php if (can('inspections', 'settings')): ?>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="transitionStatus('draft')">Re-open (Draft)</button>
             <?php endif; ?>
+            <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($canCreateClaim): ?>
+        <a href="<?= e($createClaimUrl) ?>" class="btn btn-danger btn-sm">+ Create Damage Claim</a>
+        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'info',
+    'icon'       => 'clipboard-document-check',
+    'mark'       => (string) ($insp['inspection_number'] ?? ('#' . $id)),
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Inspections', base_url('inspections')], [(string) ($insp['inspection_number'] ?? ('Inspection #' . $id)), null]],
+    'eyebrow'    => 'Inspection',
+    'title_html' => e($insp['inspection_number'] ?? ('Inspection #' . $id))
+        . ' <span class="badge ' . ($statusBadge[$insp['status']] ?? 'badge-neutral') . '" style="font-size:0.75rem;vertical-align:middle;margin-left:6px;">' . e($statusLabel[$insp['status']] ?? $insp['status']) . '</span>'
+        . ' <span class="badge ' . ($typeBadge[$insp['inspection_type']] ?? 'badge-neutral') . '" style="font-size:0.75rem;vertical-align:middle;">' . e($typeLabel[$insp['inspection_type']] ?? $insp['inspection_type']) . '</span>',
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
+
+<!-- ============================================================
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN): the verdict
+     (condition + how many things were flagged) and the readings that
+     drive billing / compliance. Fuel + cleanliness moved to the rail.
+     ============================================================ -->
+<?php
+$condTone = match ($insp['overall_condition']) {
+    'excellent', 'good' => 'green',
+    'fair'              => 'amber',
+    'poor', 'damaged'   => 'red',
+    default             => 'slate',
+};
+$cviTone = $cviDays === null ? 'slate' : ($cviDays < 0 ? 'red' : ($cviDays <= 30 ? 'amber' : 'green'));
+?>
+<div class="stat-grid stat-grid--5 ff-stats">
+    <div class="stat-card stat-card--<?= $condTone ?>">
+        <span class="stat-icon stat-icon--<?= $condTone ?>"><svg><use href="#icon-shield-check"/></svg></span>
+        <div class="stat-label">Condition</div>
+        <div class="stat-value"><?= $insp['overall_condition'] ? e(ucfirst($insp['overall_condition'])) : 'Not rated' ?></div>
+        <div class="stat-delta"><?= $insp['condition_score'] !== null ? 'score ' . (int) $insp['condition_score'] . '/100' : 'overall' ?></div>
+    </div>
+
+    <a class="stat-card <?= $secSerious > 0 || $flaggedChecklist ? 'stat-card--red' : ($issueCount > 0 ? 'stat-card--amber' : 'stat-card--green') ?>" href="#insp-findings" title="Jump to the findings">
+        <span class="stat-icon <?= $secSerious > 0 || $flaggedChecklist ? 'stat-icon--red' : ($issueCount > 0 ? 'stat-icon--amber' : 'stat-icon--green') ?>"><svg><use href="#icon-exclamation-triangle"/></svg></span>
+        <div class="stat-label">Issues found</div>
+        <div class="stat-value font-mono"><?= $issueCount ?></div>
+        <div class="stat-delta"><?= $issueCount === 0 ? 'all sections OK' : $secSerious . ' damaged · ' . $secMinor . ' fair · ' . count($flaggedChecklist) . ' checklist' ?></div>
+    </a>
+
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-truck"/></svg></span>
+        <div class="stat-label">Mileage</div>
+        <div class="stat-value font-mono"><?= $insp['mileage_at_inspection'] ? e(number_format((int)$insp['mileage_at_inspection'])) : '—' ?></div>
+        <div class="stat-delta"><?= $insp['mileage_at_inspection'] ? 'km at inspection' : 'not recorded' ?></div>
+    </div>
+
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Reefer hours</div>
+        <div class="stat-value font-mono"><?= $insp['reefer_hours'] !== null ? e(number_format((int)$insp['reefer_hours'])) : '—' ?></div>
+        <div class="stat-delta"><?= $insp['reefer_hours'] !== null ? 'engine hours' : 'not recorded' ?></div>
+    </div>
+
+    <div class="stat-card stat-card--<?= $cviTone ?>">
+        <span class="stat-icon stat-icon--<?= $cviTone ?>"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">CVI expiry</div>
+        <div class="stat-value"<?= $cviDays !== null && $cviDays < 0 ? ' style="color:var(--color-danger);"' : '' ?>><?= $insp['cvi_expiry'] ? e(format_date($insp['cvi_expiry'])) : '—' ?></div>
+        <div class="stat-delta"><?php
+            if ($cviDays === null) {
+                echo 'not recorded';
+            } elseif ($cviDays < 0) {
+                echo '<span class="text-danger">expired ' . (-$cviDays) . ' day' . ($cviDays === -1 ? '' : 's') . ' ago</span>';
+            } elseif ($cviDays === 0) {
+                echo 'expires today';
+            } else {
+                echo $cviDays . ' day' . ($cviDays === 1 ? '' : 's') . ' left';
+            }
+        ?></div>
+    </div>
+</div>
+
+<div class="rec-layout">
+<div class="rec-main" style="display:flex;flex-direction:column;gap:16px;">
+
+<!-- Status-transition errors (the buttons live in the header). -->
+<span id="status-msg" style="font-size:0.875rem;"></span>
+
+<!-- ── Findings — every section at a glance (S-RECORD-REDESIGN). Chips jump
+     to the section card; a condition saved on this page updates its chip
+     (saveConditionNotes). ────────────────────────────────────────────── -->
+<div class="card" id="insp-findings">
+    <div class="card-header" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <h2 class="card-title">Findings</h2>
+        <span class="text-secondary text-sm" style="margin-left:auto;"><?= count($sections) ?> sections · <?= count($photos) ?> photo<?= count($photos) === 1 ? '' : 's' ?></span>
+    </div>
+    <div class="card-body">
+        <div class="insp-chips">
+            <?php foreach ($sections as $s): $sid = (int) $s['id']; ?>
+            <a class="insp-chip" href="#section-<?= $sid ?>">
+                <span class="insp-chip-name"><?= e($s['section_name']) ?></span>
+                <span class="badge <?= $condBadge[$s['condition']] ?? 'badge-neutral' ?>" id="find-badge-<?= $sid ?>"><?= $condLabels[$s['condition']] ?? e($s['condition']) ?></span>
+            </a>
+            <?php endforeach; ?>
         </div>
+        <?php if ($flaggedChecklist): ?>
+        <div style="margin-top:14px;">
+            <div class="text-secondary" style="font-size:12px;font-weight:600;margin-bottom:6px;">Trailer checklist — flagged items</div>
+            <dl class="rec-dl">
+                <?php foreach ($flaggedChecklist as $fc): ?>
+                <dt><a href="#section-<?= (int) $fc['section_id'] ?>" class="link"><?= e($fc['item']) ?></a></dt>
+                <dd><span class="badge badge-warning"><?= e($trailerCodeLabels[$fc['code']] ?? $fc['code']) ?></span><?= $fc['notes'] !== '' ? ' <span class="text-secondary">— ' . e($fc['notes']) . '</span>' : '' ?></dd>
+                <?php endforeach; ?>
+            </dl>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
-
-<!-- ── Status transition buttons ─────────────────────────────────────────── -->
-<?php if (can('inspections', 'edit')): ?>
-<div class="card" style="margin-bottom:24px;">
-    <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-        <span class="text-secondary" style="font-size:0.875rem;">Status transitions:</span>
-
-        <?php if ($insp['status'] === 'draft'): ?>
-        <button class="btn btn-primary btn-sm"
-                onclick="transitionStatus('complete')">
-            Mark Complete
-        </button>
-
-        <?php elseif ($insp['status'] === 'complete'): ?>
-        <button class="btn btn-success btn-sm"
-                onclick="transitionStatus('signed')">
-            Sign Off
-        </button>
-        <?php if (can('inspections', 'settings')): ?>
-        <button class="btn btn-secondary btn-sm"
-                onclick="transitionStatus('draft')">
-            Re-open (Draft)
-        </button>
-        <?php endif; ?>
-
-        <?php elseif ($insp['status'] === 'signed'): ?>
-        <span class="badge badge-success">Signed <?= $insp['signed_at'] ? '— ' . e(format_datetime($insp['signed_at'])) : '' ?></span>
-        <?php endif; ?>
-
-        <span id="status-msg" style="font-size:0.875rem;"></span>
-    </div>
-</div>
-<?php endif; ?>
 
 <!-- ── Sections ───────────────────────────────────────────────────────────── -->
 <?php foreach ($sections as $sec):
@@ -227,9 +338,9 @@ require_once FF_ROOT . '/includes/header.php';
     $condLabels = ['ok'=>'OK','fair'=>'Fair','damaged'=>'Damaged','missing'=>'Missing','na'=>'N/A'];
     $condBadge  = ['ok'=>'badge-success','fair'=>'badge-warning','damaged'=>'badge-danger','missing'=>'badge-danger','na'=>'badge-neutral'];
 ?>
-<div class="card" style="margin-bottom:20px;" id="section-<?= $secId ?>">
+<div class="card" id="section-<?= $secId ?>">
     <div class="card-header" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <h3 style="margin:0;font-size:1rem;font-weight:600;"><?= e($sec['section_name']) ?></h3>
+        <h2 class="card-title"><?= e($sec['section_name']) ?></h2>
         <span class="badge <?= $condBadge[$sec['condition']] ?? 'badge-neutral' ?>" id="sec-badge-<?= $secId ?>">
             <?= $condLabels[$sec['condition']] ?? e($sec['condition']) ?>
         </span>
@@ -442,13 +553,140 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 <?php endforeach; ?>
 
-<!-- ── General notes + delete ────────────────────────────────────────────── -->
+<!-- ── General notes ─────────────────────────────────────────────────────── -->
 <?php if ($insp['notes']): ?>
-<div class="card" style="margin-bottom:20px;">
-    <div class="card-header"><h3 style="margin:0;font-size:1rem;">General Notes</h3></div>
-    <div class="card-body"><p style="white-space:pre-wrap;"><?= e($insp['notes']) ?></p></div>
+<div class="card">
+    <div class="card-header"><h2 class="card-title">General Notes</h2></div>
+    <div class="card-body"><p style="white-space:pre-wrap;margin:0;"><?= e($insp['notes']) ?></p></div>
 </div>
 <?php endif; ?>
+
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header"><h2 class="card-title">Activity</h2></div>
+    <div class="card-body">
+        <?php
+        $activityEntityType = 'inspection';
+        $activityEntityId   = $id;
+        $activityOriginAt   = $insp['created_at'];
+        // inspections has no created_by FK; use the linked inspector name as the origin label.
+        $activityOriginBy   = $insp['inspected_by_user_name'] ?? $insp['inspected_by'] ?? null;
+        ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the inspection at a glance ──────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$railI = [];
+
+// 1. Needs attention.
+$alertsIn = [];
+if ($damageFound && !$inspClaims) {
+    $what = $secSerious > 0
+        ? $secSerious . ' section' . ($secSerious === 1 ? '' : 's') . ' damaged / missing'
+        : ($flaggedChecklist ? count($flaggedChecklist) . ' checklist item' . (count($flaggedChecklist) === 1 ? '' : 's') . ' flagged' : 'condition rated ' . e((string) $insp['overall_condition']));
+    $alertsIn[] = ['danger', 'Damage found (' . $what . ') and no damage claim yet — '
+        . ($canCreateClaim ? '<a href="' . e($createClaimUrl) . '">create one</a>.' : ($insp['status'] === 'draft' ? 'mark the inspection complete, then create one.' : 'raise one if the customer is liable.'))];
+}
+if ($insp['status'] === 'draft') {
+    $alertsIn[] = ['warning', 'Still a draft — <b>Mark Complete</b> when every section is filled in.'];
+} elseif ($insp['status'] === 'complete') {
+    $alertsIn[] = ['info', 'Complete — awaiting <b>Sign Off</b>.'];
+}
+if ($cviDays !== null && $cviDays < 0) {
+    $alertsIn[] = ['danger', 'CVI expired on ' . e(format_date($insp['cvi_expiry'])) . '.'];
+} elseif ($cviDays !== null && $cviDays <= 30) {
+    $alertsIn[] = ['warning', 'CVI expires in ' . $cviDays . ' day' . ($cviDays === 1 ? '' : 's') . ' (' . e(format_date($insp['cvi_expiry'])) . ').'];
+}
+if ($insp['inspection_type'] === 'pre_lease' && $insp['is_clean'] !== null && (int) $insp['is_clean'] === 0) {
+    $alertsIn[] = ['warning', 'Marked <b>dirty</b> before going out on lease.'];
+}
+if ($insp['inspection_type'] === 'post_lease' && $insp['fuel_level'] && $insp['fuel_level'] !== 'full') {
+    $alertsIn[] = ['info', 'Returned with fuel at ' . e($fuelLabels[$insp['fuel_level']] ?? $insp['fuel_level']) . ' — check for a fuel charge on the lease.'];
+}
+if ($insp['inspection_type'] === 'post_lease' && $insp['is_clean'] !== null && (int) $insp['is_clean'] === 0) {
+    $alertsIn[] = ['info', 'Returned dirty — check for a wash charge on the lease.'];
+}
+$railI[] = $R::card('Needs attention', $R::alerts($alertsIn, 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Unit.
+$railI[] = $R::card('Unit', $R::entity(
+    'Unit ' . (string) $insp['unit_number'],
+    base_url('equipment/show') . '?id=' . (int) $insp['equipment_unit_id'],
+    e($unitDesc !== '' ? $unitDesc : ucwords(str_replace('_', ' ', (string) ($insp['unit_type'] ?? '')))) . (!empty($insp['unit_status']) ? ' · ' . e(str_replace('_', ' ', (string) $insp['unit_status'])) : ''),
+    '',
+    'truck'
+), ['icon' => 'truck', 'link' => ['Inspections', base_url('equipment/show') . '?id=' . (int) $insp['equipment_unit_id'] . '#inspections']]);
+
+// 3. Lease & customer.
+if ($insp['lease_id'] && $insp['contract_number']) {
+    $lcBody = $R::entity(
+        'Lease ' . (string) $insp['contract_number'],
+        base_url('leases/show') . '?id=' . (int) $insp['lease_id'],
+        e(ucfirst((string) ($insp['lease_status'] ?? ''))),
+        '',
+        'calendar-days'
+    );
+    if ($insp['customer_name']) {
+        $lcBody .= '<div style="margin-top:10px;">' . $R::entity(
+            (string) $insp['customer_name'],
+            $insp['customer_id'] ? base_url('customers/show') . '?id=' . (int) $insp['customer_id'] : '',
+            'Customer',
+            \FleetForge\Ui\ModuleHero::initials((string) $insp['customer_name'])
+        ) . '</div>';
+    }
+    $railI[] = $R::card('Lease & customer', $lcBody, ['icon' => 'user-group']);
+}
+
+// 4. Damage claims raised from this inspection.
+if ($inspClaims) {
+    $clLinks = [];
+    foreach ($inspClaims as $cl) {
+        $clLinks[] = [$cl['claim_number'], base_url('damage_claims/show') . '?id=' . (int) $cl['id'], 'exclamation-triangle',
+            ucwords(str_replace('_', ' ', (string) $cl['status'])) . ' · ' . ucwords(str_replace('_', ' ', (string) $cl['severity']))];
+    }
+    $railI[] = $R::card('Damage claims', $R::links($clLinks), ['icon' => 'exclamation-triangle'] + ($canCreateClaim ? ['link' => ['+ New', $createClaimUrl]] : []));
+} elseif ($canCreateClaim) {
+    $railI[] = $R::card('Damage claims', '<p class="text-secondary" style="margin:0 0 8px;font-size:12.5px;">No claim raised from this inspection.</p>'
+        . $R::links([['Create damage claim', $createClaimUrl, 'plus']]), ['icon' => 'exclamation-triangle']);
+}
+
+// 5. Related inspections — pre vs post on the same lease + the unit's last one.
+$relIn = [];
+foreach ($leaseInspections as $li) {
+    $relIn[] = [($typeLabel[$li['inspection_type']] ?? $li['inspection_type']) . ' · ' . ($li['inspection_number'] ?? ('#' . $li['id'])),
+        base_url('inspections/show') . '?id=' . (int) $li['id'], 'clipboard-document-check',
+        format_date($li['inspection_date']) . ($li['overall_condition'] ? ' · ' . ucfirst((string) $li['overall_condition']) : '')];
+}
+if ($prevUnitInspection && !in_array((int) $prevUnitInspection['id'], array_map(static fn ($x) => (int) $x['id'], $leaseInspections), true)) {
+    $relIn[] = ['Previous: ' . ($prevUnitInspection['inspection_number'] ?? ('#' . $prevUnitInspection['id'])),
+        base_url('inspections/show') . '?id=' . (int) $prevUnitInspection['id'], 'clock',
+        format_date($prevUnitInspection['inspection_date']) . ($prevUnitInspection['overall_condition'] ? ' · ' . ucfirst((string) $prevUnitInspection['overall_condition']) : '')];
+}
+if ($relIn) {
+    $railI[] = $R::card('Related inspections', $R::links($relIn), ['icon' => 'clipboard-document-list']);
+}
+
+// 6. Details — the readings the strip doesn't carry + who / when.
+$railI[] = $R::card('Details', $R::kv([
+    ['Type', e($typeLabel[$insp['inspection_type']] ?? $insp['inspection_type'])],
+    ['Date', e(format_date($insp['inspection_date']))],
+    ['Inspector', $insp['inspected_by'] ? e($insp['inspected_by']) . ($insp['inspected_by_user_name'] && $insp['inspected_by_user_name'] !== $insp['inspected_by'] ? ' <span class="text-secondary">(' . e($insp['inspected_by_user_name']) . ')</span>' : '') : ($insp['inspected_by_user_name'] ? e($insp['inspected_by_user_name']) : null)],
+    ['Fuel', $insp['fuel_level'] ? e($fuelLabels[$insp['fuel_level']] ?? $insp['fuel_level']) : '—'],
+    ['Cleanliness', $insp['is_clean'] === null ? '—' : ((int) $insp['is_clean'] === 1 ? '<span class="badge badge-success">Clean</span>' : '<span class="badge badge-warning">Dirty</span>')],
+    ['Photos', (string) count($photos)],
+    ['Signed', $insp['status'] === 'signed' ? ($insp['signed_at'] ? e(format_datetime($insp['signed_at'])) : 'Yes') : null],
+    ['Created', e(format_datetime($insp['created_at']))],
+]), ['icon' => 'document-text']);
+?>
+<aside class="rec-rail" aria-label="Inspection at a glance">
+    <?= implode("\n    ", $railI) ?>
+</aside>
+</div><!-- /rec-layout -->
 
 <script>
 const INSP_ID        = <?= (int)$id ?>;
@@ -491,6 +729,12 @@ function saveConditionNotes(secId) {
                 if (badge) {
                     badge.className = 'badge ' + (classes[condEl.value] ?? 'badge-neutral');
                     badge.textContent = labels[condEl.value] ?? condEl.value;
+                }
+                // S-RECORD-REDESIGN: keep the Findings chip in step.
+                const chip = document.getElementById('find-badge-' + secId);
+                if (chip) {
+                    chip.className = 'badge ' + (classes[condEl.value] ?? 'badge-neutral');
+                    chip.textContent = labels[condEl.value] ?? condEl.value;
                 }
                 if (msg) { msg.style.color = 'var(--color-success)'; msg.textContent = 'Saved.'; setTimeout(() => { if(msg) msg.textContent = ''; }, 2000); }
             }
@@ -670,19 +914,39 @@ async function deleteInspection() {
 }
 </script>
 
-<!-- ── Activity Log ───────────────────────────────────────────── -->
-<div class="card" style="margin-top:24px;">
-    <div class="card-header"><h3 class="card-title">Activity</h3></div>
-    <div class="card-body">
-        <?php
-        $activityEntityType = 'inspection';
-        $activityEntityId   = $id;
-        $activityOriginAt   = $insp['created_at'];
-        // inspections has no created_by FK; use the linked inspector name as the origin label.
-        $activityOriginBy   = $insp['inspected_by_user_name'] ?? $insp['inspected_by'] ?? null;
-        ?>
-        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
-    </div>
-</div>
+<!-- ── Page styles (S-RECORD-REDESIGN) — tokens only ─────────────────────── -->
+<style>
+/* Findings: the 9 sections as jump chips. */
+.insp-chips {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 8px;
+}
+.insp-chip {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 12.5px;
+    font-weight: 550;
+    text-decoration: none;
+    transition: border-color .15s ease, background .15s ease;
+}
+.insp-chip:hover {
+    border-color: color-mix(in srgb, var(--acc, var(--color-primary)) 50%, var(--border-color));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 7%, transparent);
+}
+.insp-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Section cards are jump targets — clear the sticky topbar. */
+.rec-main [id^="section-"], #insp-findings { scroll-margin-top: calc(var(--topbar-height, 60px) + 16px); }
+/* Hero fact links (unit, lease) keep the chip colour. */
+.ff-hero-fact a { color: inherit; text-decoration: none; }
+.ff-hero-fact a:hover { text-decoration: underline; }
+</style>
 
 <?php require_once FF_ROOT . '/includes/footer.php'; ?>

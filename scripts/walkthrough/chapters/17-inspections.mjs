@@ -98,7 +98,7 @@ export default {
     }),
     S('Inspections are usually started from the lease. Here is a pending lease for Summit Carriers. Open its Inspections tab.', async (d) => {
       await d.goto(LEASE);
-      await d.click('button.tab-btn:has-text("Inspections")');
+      await d.tab('Inspections');
       await d.wait(1200);
     }),
     S('Use Pre-Lease Inspection before the unit leaves the yard, and Post-Lease Inspection when it comes back. Click Pre-Lease Inspection.', async (d) => {
@@ -203,13 +203,13 @@ export default {
     }),
     S('Back on the lease, the Inspections tab now lists this report. At check-in, create the post-lease inspection from the same tab and compare the two.', async (d) => {
       await d.goto(LEASE);
-      await d.click('button.tab-btn:has-text("Inspections")');
+      await d.tab('Inspections');
       await d.wait(1500);
       if (await d.exists('.tab-table-container table', 2000)) await d.highlight('.tab-table-container table', 'Inspections on this lease', 2200);
     }),
     S('The same history is on each unit’s equipment page under its Inspections tab, across every lease it has been on.', async (d) => {
       await d.goto('/equipment/show?id=23');
-      await d.click('button.tab-btn:has-text("Inspections")');
+      await d.tab('Inspections');
       await d.wait(1800);
     }),
   ],

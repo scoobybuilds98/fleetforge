@@ -67,7 +67,7 @@ export default {
       say: 'Portal logins are managed in Users, on the Portal Users tab. These are your customers’ contacts, completely separate from staff accounts.',
       run: async (d) => {
         await d.nav('Users', '/users');
-        await d.click(tab('Portal Users'));
+        await d.tab('Portal Users');
         await d.wait(900);
       },
     },

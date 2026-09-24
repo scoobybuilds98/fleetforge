@@ -143,7 +143,7 @@ export default {
     {
       say: 'Lease History starts with Days on Rent: how many calendar days the unit was actually out on lease in the chosen range. Overlapping leases are merged, so a day is never counted twice.',
       run: async (d) => {
-        await d.click(tab('Lease History'));
+        await d.tab('Lease History');
         await d.wait(1600);
         await d.highlight('.card:has(.card-title:text-is("Days on Rent"))', 'Calendar occupancy, not billed days', 2600);
       },
@@ -155,77 +155,70 @@ export default {
     {
       say: 'Compliance lists the C V I and registration expiry dates, the days remaining, and the renewal interval. These dates also drive the Compliance Alerts on the dashboard.',
       caption: 'Compliance lists the CVI and registration expiry dates, the days remaining, and the renewal interval. These dates also drive the Compliance Alerts on the dashboard.',
-      run: async (d) => { await d.click(tab('Compliance')); await d.wait(1200); await d.highlight('.card:has(.card-title:text-is("Compliance Documents & Expiry"))', 'Expiry dates', 2000); },
+      run: async (d) => { await d.tab('Compliance'); await d.wait(1200); await d.highlight('.card:has(.card-title:text-is("Compliance Documents & Expiry"))', 'Expiry dates', 2000); },
     },
     {
       say: 'Documents holds the paperwork for this unit, such as the C V I certificate, registration and insurance. Use Upload to add a file.',
       caption: 'Documents holds the paperwork for this unit, such as the CVI certificate, registration and insurance. Use Upload to add a file.',
-      run: async (d) => { await d.click(tab('Documents')); await d.wait(1200); },
+      run: async (d) => { await d.tab('Documents'); await d.wait(1200); },
     },
     {
-      say: 'Payoff Analysis appears when the unit is linked to a fixed asset in Accounting. It compares what the unit cost with the net revenue it has earned, and projects when it will be paid off.',
-      run: async (d) => { await d.click(tab('Payoff Analysis')); await d.wait(2000); await d.scroll(400); await d.scroll(-400); },
-    },
-    {
-      say: 'Click View Full Analysis for the complete payoff page. The top row shows the total invested, gross revenue, net revenue after costs, and how much is still to recover.',
+      say: 'The Payoff tab appears when the unit is linked to a fixed asset in Accounting, for roles that can see money. It is the whole payoff story on one page: how much of the unit has paid for itself, what is still to recover, and when it should be paid off.',
       run: async (d) => {
-        await d.click('a:has-text("View Full Analysis")', { nav: true });
-        await d.wait(1200);
-        await d.highlight('.card:has(:text-is("Still to Recover"))', 'Invested · earned · still to recover', 3000);
+        await d.tab('Payoff'); await d.wait(2000);
+        await d.highlight('.po-hero', 'Paid off · still to recover · payoff date', 3000);
       },
     },
     {
-      say: 'Payoff Projections estimate when the unit will be paid off, using the last twelve, six or three months of net revenue. Click a scenario to redraw the chart, or type your own monthly figure under Custom Projection.',
-      caption: 'Payoff Projections estimate when the unit will be paid off, using the last 12, 6 or 3 months of net revenue. Click a scenario to redraw the chart, or type your own monthly figure under Custom Projection.',
+      say: 'The projections use the last twelve, six or three months of net revenue. Click a scenario to re-project, or type your own monthly figure and any one-time costs under What if.',
+      caption: 'The projections use the last 12, 6 or 3 months of net revenue. Click a scenario to re-project, or type your own monthly figure and any one-time costs under What if.',
       run: async (d) => {
-        await d.scroll(350);
-        await d.click('.card:has-text("12-month rolling avg")');
+        await d.page.locator('.po-scen').first().scrollIntoViewIfNeeded();
+        await d.click('.po-scen-card:has-text("Conservative")');
         await d.wait(1500);
-        await d.hover('[x-model="customMonthly"]', 900);
-        await d.scroll(450);
+        await d.hover('.po-whatif [x-model="payoffCustomMonthly"]', 900);
       },
     },
     {
-      say: 'Cost Structure breaks down the purchase price with taxes, delivery and setup, the monthly insurance and licensing costs, financing terms if the unit is financed, and depreciation.',
+      say: 'The charts compare what has been recovered with the target, and what the unit earned against what it cost each month. Below, the money is itemised: acquisition, earnings and spending to date, fixed costs, financing if any, and book value. Only sent invoices count, never drafts.',
       run: async (d) => {
-        await d.page.locator('h2:text-is("Cost Structure")').first().scrollIntoViewIfNeeded();
-        await d.wait(600);
-        await d.highlight('.card:has(.card-title:text-is("Acquisition Cost"))', 'Acquisition cost', 1600);
-        if (await d.exists('.card:has(.card-title:text-is("Financing"))', 800)) await d.hover('.card:has(.card-title:text-is("Financing"))', 900);
-        await d.hover('.card:has(.card-title:text-is("Depreciation"))', 900);
+        await d.page.locator('.po-charts').first().scrollIntoViewIfNeeded();
+        await d.wait(1500);
+        await d.page.locator('.po-money').first().scrollIntoViewIfNeeded();
+        await d.highlight('.po-money .card:has(.card-title:text-is("Acquisition"))', 'Acquisition cost', 1600);
+        await d.hover('.po-money .card:has(.card-title:text-is("Book value"))', 900);
       },
     },
     {
-      say: 'The summary subtracts maintenance, damage claims, financing and fixed costs from revenue. Only sent invoices count, never drafts. Below are revenue by lease, a monthly profit and loss, and every work order and claim.',
+      say: 'Revenue by lease shows which rentals paid for the unit, and Month by month is a two-year operating profit and loss.',
       run: async (d) => {
-        await d.highlight('.card.earnings-summary', 'Revenue minus costs', 2400);
-        await d.page.locator('h2:text-is("Revenue by Lease")').first().scrollIntoViewIfNeeded();
-        await d.wait(900);
-        await d.scroll(700);
+        await d.page.locator('.po-table-card').first().scrollIntoViewIfNeeded();
+        await d.wait(1200);
+        await d.scroll(600);
         await d.wait(600);
-        await d.click('a:has-text("Back to Unit"), button:has-text("Back to Unit")', { nav: true });
+        await d.page.evaluate(() => window.scrollTo(0, 0));
       },
     },
     {
       say: 'Damage Claims, Maintenance and Inspections show every claim, work order and inspection for this unit, and each has a button to start a new one already linked to it.',
       run: async (d) => {
-        await d.click(tab('Damage Claims')); await d.wait(1200);
-        await d.click(tab('Maintenance')); await d.wait(1200);
-        await d.click(tab('Inspections')); await d.wait(1100);
+        await d.tab('Damage Claims'); await d.wait(1200);
+        await d.tab('Maintenance'); await d.wait(1200);
+        await d.tab('Inspections'); await d.wait(1100);
       },
     },
     {
       say: 'Mileage Log holds odometer readings, Status Log records every status change, and Activity is the audit trail of edits and who made them.',
       run: async (d) => {
-        await d.click(tab('Mileage Log')); await d.wait(900);
-        await d.click(tab('Status Log')); await d.wait(900);
-        await d.click(tab('Activity')); await d.wait(900);
+        await d.tab('Mileage Log'); await d.wait(900);
+        await d.tab('Status Log'); await d.wait(900);
+        await d.tab('Activity'); await d.wait(900);
       },
     },
     {
       say: 'Samsara Mapping links the unit to a Samsara vehicle or trailer. Once linked, G P S data syncs every five minutes. Sync Now and Unlink live here; an unlinked unit shows a picker instead.',
       run: async (d) => {
-        await d.click(tab('Samsara Mapping')); await d.wait(1500);
+        await d.tab('Samsara Mapping'); await d.wait(1500);
         await d.hover('button:has-text("Sync Now")', 900);
         await d.hover('button:has-text("Unlink")', 800);
       },

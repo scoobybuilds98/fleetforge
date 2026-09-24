@@ -1,0 +1,572 @@
+/* ============================================================
+   FleetForge — Tables (S-TABLES-REDESIGN)
+   ------------------------------------------------------------
+   Loaded after app.css by includes/header.php and header_embed.php.
+   Restyles every admin table class — .table, .data-table,
+   .spec-table — plus their wrappers, the list toolbar and the
+   pagination bar. Visual only: no widths are forced on any specific
+   page, and the density setting (compact / spacious,
+   body[data-density] … in app.css, higher specificity) still wins.
+
+   The look (desktop, ≥768px):
+   • a list's filter toolbar and its table card join into one panel;
+   • the header row is a rounded capsule of micro-labels;
+   • rows have no boxes — inset hairlines between them, and the
+     hovered or selected row lights up as a rounded strip;
+   • the record's name (first column) reads as a title, row actions
+     (View / Edit) are small outlined pills;
+   • totals sit in a capsule that mirrors the header.
+   Phones keep app.css's stacked card rows (.table-stack).
+
+   Column fitting: app.js (FF_TableFit) reads each header row and tags
+   the table: .ff-nw-cN (IDs, dates, amounts, statuses — one line),
+   .ff-wrap-cN (Description, Notes, Address … — wraps, never a
+   sliver), .ff-title-cN (the name column — a floor width), .ff-act
+   (last column holds row actions) and .ff-overflow (the table is
+   still wider than its scroll box — the actions column pins to the
+   right edge so View / Edit never scroll out of sight).
+
+   Rules: tokens only; the brand override reaches every accent.
+   ============================================================ */
+
+.table,
+.data-table {
+    --tbl-line:        color-mix(in srgb, var(--border-color) 90%, transparent);
+    /* --acc: the module colour when FF_TableFit copied the page hero's
+       .ff-acc--* onto the list card; the brand colour everywhere else. */
+    --tbl-acc:         var(--acc, var(--color-primary));
+    --tbl-head:        var(--bg-surface-2);
+    --tbl-hover:       color-mix(in srgb, var(--tbl-acc) 8%, transparent);
+    --tbl-hover-solid: color-mix(in srgb, var(--tbl-acc) 8%, var(--bg-surface));
+    --tbl-sel:         color-mix(in srgb, var(--tbl-acc) 14%, transparent);
+    --tbl-sel-solid:   color-mix(in srgb, var(--tbl-acc) 14%, var(--bg-surface));
+    --tbl-radius:      10px;
+    font-size: 13.5px;
+    background: transparent;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Containers ──────────────────────────────────────────────── */
+.table-wrapper,
+.table-container {
+    border-radius: 14px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    box-shadow: var(--shadow-ambient, none);
+    overflow-x: auto;
+}
+/* Inside a card the card is the frame — no box-in-a-box. */
+.card .table-wrapper,
+.card .table-container,
+.card .table-responsive { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.table-wrapper::-webkit-scrollbar,
+.table-responsive::-webkit-scrollbar,
+.table-container::-webkit-scrollbar { height: 8px; }
+
+/* A list card (tagged by FF_TableFit, or recognised under its toolbar
+   while the rows are still loading): rows run close to the frame. It
+   scrolls sideways rather than clipping (a .card is overflow:hidden) —
+   for a table placed straight in the card that is its only scroll box. */
+.card.ff-table-card,
+.table-toolbar + .card:has(:is(table.table, .skeleton-row, .empty-state)) { padding: 10px; }
+.card.ff-table-card { overflow-x: auto; }
+.card.ff-table-card > .empty-state { margin: 14px; }
+
+/* ── The list panel: filter toolbar + table card read as one ─── */
+.table-toolbar:has(+ .card :is(table.table, .skeleton-row, .empty-state)) {
+    margin-bottom: 0;
+    padding: 14px 16px;
+    border: 1px solid var(--border-color);
+    border-bottom: 0;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    background:
+        radial-gradient(520px 140px at 0% 0%, color-mix(in srgb, var(--acc, var(--color-primary)) 9%, transparent), transparent 70%),
+        var(--bg-surface);
+}
+.table-toolbar + .card:has(:is(table.table, .skeleton-row, .empty-state)) {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+    border-top: 1px solid var(--border-color);
+}
+.table-toolbar-right > .text-secondary.text-sm {
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--bg-surface-2);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+}
+.table-toolbar-right > .text-secondary.text-sm:empty { display: none; }
+
+/* ── Status tabs inside the table toolbar (S-LIST-COMPACT) ─────
+   A list's status tabs (Active & Pending / Closed / All …) sit in the
+   table's own heading as a segmented control, next to search and sort. */
+.table-toolbar .tab-bar {
+    display: inline-flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    width: auto;
+    gap: 2px;
+    padding: 3px;
+    margin: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 11px;
+    background: var(--bg-surface-2);
+    box-shadow: none;
+}
+.table-toolbar .tab-bar .tab-btn {
+    height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    gap: 7px;
+}
+.table-toolbar .tab-bar .tab-btn:hover { background: color-mix(in srgb, var(--bg-surface) 60%, transparent); color: var(--text-primary); }
+.table-toolbar .tab-bar .tab-btn.is-active,
+.table-toolbar .tab-bar .tab-btn[aria-selected="true"] {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), inset 0 0 0 1px var(--border-color);
+}
+.table-toolbar .tab-bar .tab-badge {
+    height: 18px;
+    min-width: 20px;
+    padding: 0 6px;
+    border: 0;
+    background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.table-toolbar .tab-bar .tab-btn.is-active .tab-badge {
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 18%, transparent);
+    color: color-mix(in srgb, var(--acc, var(--color-primary)) 80%, var(--text-primary));
+}
+
+/* The summary tile a list is narrowed to — click to clear. */
+.ff-focus-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 10px 0 12px;
+    border: 1px solid color-mix(in srgb, var(--acc, var(--color-primary)) 40%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 12%, transparent);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.ff-focus-chip:hover { border-color: var(--acc, var(--color-primary)); }
+.ff-focus-chip span[aria-hidden] { color: var(--text-secondary); font-size: 11px; }
+
+/* Compact pager in the toolbar (includes/partials/pagination-bar.php,
+   $position = 'toolbar'): ‹ [page] / N › */
+.ff-pager {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    height: 32px;
+    padding: 0 2px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-surface);
+    flex: 0 0 auto;
+}
+.ff-pager-btn {
+    width: 28px;
+    height: 26px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 17px;
+    line-height: 1;
+    cursor: pointer;
+}
+.ff-pager-btn:hover:not(:disabled) { background: var(--bg-surface-2); color: var(--text-primary); }
+.ff-pager-btn:disabled { opacity: .35; cursor: default; }
+.ff-pager-input {
+    width: 3.2em;
+    height: 24px;
+    padding: 0 4px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12.5px;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    -moz-appearance: textfield;
+}
+.ff-pager-input::-webkit-inner-spin-button,
+.ff-pager-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.ff-pager-input:focus { outline: none; border-color: var(--color-primary); }
+.ff-pager-of { padding: 0 4px 0 2px; font-size: 12.5px; color: var(--text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── Header ──────────────────────────────────────────────────── */
+.table thead th,
+.data-table thead th {
+    padding: 10px 12px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    color: var(--text-tertiary);
+    background: var(--tbl-head);
+    border-bottom: 0;
+    vertical-align: middle;
+}
+/* A list's header capsule is tinted with its module colour. */
+.ff-table-card .table > thead > tr > th,
+.ff-table-card .data-table > thead > tr > th {
+    background: color-mix(in srgb, var(--tbl-acc) 9%, var(--bg-surface-2));
+    color: color-mix(in srgb, var(--tbl-acc) 30%, var(--text-secondary));
+}
+.th-sortable { transition: color .15s ease; }
+.th-sortable:hover { color: var(--tbl-acc, var(--color-primary)); }
+
+/* ── Body ────────────────────────────────────────────────────── */
+.table tbody td,
+.data-table tbody td {
+    padding: 12px 12px;
+    line-height: 1.4;
+}
+/* Record links in a cell; the name column's link reads as a title. */
+.table tbody td a:not(.btn):not(.badge),
+.data-table tbody td a:not(.btn):not(.badge) {
+    color: var(--color-primary);
+    font-weight: 600;
+    text-decoration: none;
+    text-underline-offset: 3px;
+}
+.table tbody td a:not(.btn):not(.badge):hover,
+.data-table tbody td a:not(.btn):not(.badge):hover { text-decoration: underline; }
+
+/* A floor width for the record's name (only where the cell holds a link —
+   a "Type" column of badges on invoice lines needs none). */
+.ff-title-c1 > tbody > tr > td:nth-child(1):has(> a:not(.btn)),
+.ff-title-c2 > tbody > tr > td:nth-child(2):has(> a:not(.btn)),
+.ff-title-c3 > tbody > tr > td:nth-child(3):has(> a:not(.btn)),
+.ff-title-c4 > tbody > tr > td:nth-child(4):has(> a:not(.btn)) { min-width: 160px; }
+.ff-title-c1 > tbody > tr > td:nth-child(1) a:not(.btn):not(.badge),
+.ff-title-c2 > tbody > tr > td:nth-child(2) a:not(.btn):not(.badge),
+.ff-title-c3 > tbody > tr > td:nth-child(3) a:not(.btn):not(.badge),
+.ff-title-c4 > tbody > tr > td:nth-child(4) a:not(.btn):not(.badge) {
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 650;
+    letter-spacing: -0.005em;
+}
+/* The line under a name (an email, a unit type) never sets the column's
+   width: zero intrinsic width, then stretched to the cell, cut with "…". */
+.ff-title-c1 > tbody > tr > td:nth-child(1) > div.text-xs,
+.ff-title-c2 > tbody > tr > td:nth-child(2) > div.text-xs,
+.ff-title-c3 > tbody > tr > td:nth-child(3) > div.text-xs,
+.ff-title-c4 > tbody > tr > td:nth-child(4) > div.text-xs {
+    width: 0;
+    min-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ff-title-c1 > tbody > tr > td:nth-child(1) a:not(.btn):not(.badge):hover,
+.ff-title-c2 > tbody > tr > td:nth-child(2) a:not(.btn):not(.badge):hover,
+.ff-title-c3 > tbody > tr > td:nth-child(3) a:not(.btn):not(.badge):hover,
+.ff-title-c4 > tbody > tr > td:nth-child(4) a:not(.btn):not(.badge):hover { color: var(--tbl-acc); text-decoration: none; }
+
+/* Secondary text inside a cell (emails, sub-lines). */
+.table td .text-muted,
+.table td .text-secondary,
+.table td .text-xs,
+.data-table td .text-muted,
+.data-table td .text-secondary { font-size: 12px; }
+.table td .text-xs.text-secondary,
+.data-table td .text-xs.text-secondary { color: var(--text-tertiary); margin-top: 1px; }
+
+/* Money + numbers line up. */
+.table td.text-right,
+.table th.text-right,
+.data-table td.text-right,
+.data-table th.text-right { font-variant-numeric: tabular-nums; }
+
+/* Row actions: small outlined pills that light up with the row. */
+.table td .btn-sm,
+.data-table td .btn-sm { padding: 4px 10px; }
+.table tbody td .btn-ghost,
+.data-table tbody td .btn-ghost {
+    padding: 4px 10px;
+    line-height: 18px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+.table tbody td .btn-ghost + .btn-ghost,
+.data-table tbody td .btn-ghost + .btn-ghost { margin-left: 4px; }
+.table tbody tr:hover td .btn-ghost,
+.data-table tbody tr:hover td .btn-ghost { border-color: var(--border-color-strong); color: var(--text-primary); }
+.table tbody td .btn-ghost:hover,
+.data-table tbody td .btn-ghost:hover {
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 10%, var(--bg-surface));
+}
+
+/* Totals. */
+.table tfoot td, .table tfoot th,
+.data-table tfoot td, .data-table tfoot th {
+    padding: 12px 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    background: var(--tbl-head);
+}
+
+/* Variants */
+.table-sm thead th { padding: 8px 12px; }
+.table-sm tbody td, .table-sm tfoot td { padding: 7px 12px; }
+
+/* Empty / message rows (one cell across the table) always wrap. */
+.table td[colspan], .data-table td[colspan] { white-space: normal; }
+
+/* ── Desktop geometry: capsule header, rounded row strips ────── */
+@media (min-width: 768px) {
+    .table,
+    .data-table { border-collapse: separate; border-spacing: 0; }
+
+    .table > thead > tr > th:first-child,
+    .data-table > thead > tr > th:first-child { border-radius: var(--tbl-radius) 0 0 var(--tbl-radius); padding-left: 14px; }
+    .table > thead > tr > th:last-child,
+    .data-table > thead > tr > th:last-child  { border-radius: 0 var(--tbl-radius) var(--tbl-radius) 0; padding-right: 14px; }
+    .table > thead > tr > th:only-child,
+    .data-table > thead > tr > th:only-child  { border-radius: var(--tbl-radius); }
+
+    /* Rows: transparent; the cells carry the hairline (an inset line —
+       the rounded end cells clip it short of the edge) and the tint. */
+    .table > tbody > tr,
+    .data-table > tbody > tr,
+    .table > tbody > tr:hover,
+    .data-table > tbody > tr:hover { background: transparent; border-bottom: 0; }
+    .table > tbody > tr > td,
+    .data-table > tbody > tr > td {
+        border-bottom: 0;
+        background-color: transparent;
+        background-image: linear-gradient(var(--tbl-line), var(--tbl-line));
+        background-size: 100% 1px;
+        background-position: 0 100%;
+        background-repeat: no-repeat;
+        background-clip: padding-box;
+        transition: background-color .12s ease;
+    }
+    .table > tbody > tr > td:first-child,
+    .data-table > tbody > tr > td:first-child { border-radius: var(--tbl-radius) 0 0 var(--tbl-radius); padding-left: 14px; }
+    .table > tbody > tr > td:last-child,
+    .data-table > tbody > tr > td:last-child  { border-radius: 0 var(--tbl-radius) var(--tbl-radius) 0; padding-right: 14px; }
+    .table > tbody > tr > td:only-child,
+    .data-table > tbody > tr > td:only-child  { border-radius: var(--tbl-radius); }
+    .table > tbody > tr:last-child > td,
+    .data-table > tbody > tr:last-child > td { background-image: none; }
+    /* Breathing room under the header capsule. */
+    .table > thead + tbody > tr:first-child > td,
+    .data-table > thead + tbody > tr:first-child > td { border-top: 4px solid transparent; }
+
+    /* Hover: the row becomes a rounded strip (its neighbour's line hides). */
+    .table > tbody > tr:hover > td,
+    .data-table > tbody > tr:hover > td,
+    .table-hover > tbody > tr:hover > td,
+    .table > tbody > tr.table-row-link:hover > td {
+        background-color: var(--tbl-hover);
+        background-image: none;
+    }
+    .table > tbody > tr:has(+ tr:hover) > td,
+    .data-table > tbody > tr:has(+ tr:hover) > td { background-image: none; }
+
+    /* Selected rows (bulk-select checkboxes): a stronger strip + a rail. */
+    .table > tbody > tr:has(> td input[type="checkbox"]:checked) > td,
+    .data-table > tbody > tr:has(> td input[type="checkbox"]:checked) > td,
+    .table > tbody > tr.ff-row-selected > td {
+        background-color: var(--tbl-sel);
+        background-image: none;
+    }
+    .table > tbody > tr:has(+ tr > td input[type="checkbox"]:checked) > td { background-image: none; }
+    .table > tbody > tr:has(> td input[type="checkbox"]:checked) > td:first-child,
+    .data-table > tbody > tr:has(> td input[type="checkbox"]:checked) > td:first-child,
+    .table > tbody > tr.ff-row-selected > td:first-child {
+        box-shadow: inset 3px 0 0 var(--tbl-acc);
+    }
+
+    /* Striped variant: alternate strips instead of lines. */
+    .table-striped > tbody > tr > td { background-image: none; }
+    .table-striped > tbody > tr:nth-child(even) > td { background-color: color-mix(in srgb, var(--bg-surface-2) 55%, transparent); }
+    .table-striped > tbody > tr:hover > td { background-color: var(--tbl-hover); }
+
+    /* Totals capsule mirrors the header. */
+    .table > tfoot > tr > td:first-child, .table > tfoot > tr > th:first-child,
+    .data-table > tfoot > tr > td:first-child, .data-table > tfoot > tr > th:first-child { border-radius: var(--tbl-radius) 0 0 var(--tbl-radius); padding-left: 14px; }
+    .table > tfoot > tr > td:last-child, .table > tfoot > tr > th:last-child,
+    .data-table > tfoot > tr > td:last-child, .data-table > tfoot > tr > th:last-child { border-radius: 0 var(--tbl-radius) var(--tbl-radius) 0; padding-right: 14px; }
+    .table > tfoot > tr:first-child > td,
+    .table > tfoot > tr:first-child > th,
+    .data-table > tfoot > tr:first-child > td,
+    .data-table > tfoot > tr:first-child > th { border-top: 4px solid transparent; background-clip: padding-box; }
+
+    /* Pagination: a footer strip across the bottom of a list card. */
+    .card.ff-table-card > .pagination {
+        margin: 8px -10px -10px;
+        padding: 12px 18px;
+        border-top: 1px solid var(--border-color);
+        background: color-mix(in srgb, var(--bg-surface-2) 35%, transparent);
+    }
+}
+
+/* ── Column fitting (tagged by FF_TableFit in app.js) ─────────── */
+/* Short values never fold; badges, buttons, money and mono IDs stay
+   whole in any column. Everything else wraps only when space runs out. */
+.ff-fit > thead > tr > th { white-space: nowrap; }
+.ff-fit td .badge,
+.ff-fit td .btn,
+.ff-fit td .currency,
+.ff-fit td .font-mono,
+.ff-fit td.text-right { white-space: nowrap; }
+.ff-nw-c1  > tbody > tr > td:nth-child(1),
+.ff-nw-c2  > tbody > tr > td:nth-child(2),
+.ff-nw-c3  > tbody > tr > td:nth-child(3),
+.ff-nw-c4  > tbody > tr > td:nth-child(4),
+.ff-nw-c5  > tbody > tr > td:nth-child(5),
+.ff-nw-c6  > tbody > tr > td:nth-child(6),
+.ff-nw-c7  > tbody > tr > td:nth-child(7),
+.ff-nw-c8  > tbody > tr > td:nth-child(8),
+.ff-nw-c9  > tbody > tr > td:nth-child(9),
+.ff-nw-c10 > tbody > tr > td:nth-child(10),
+.ff-nw-c11 > tbody > tr > td:nth-child(11),
+.ff-nw-c12 > tbody > tr > td:nth-child(12),
+.ff-nw-c13 > tbody > tr > td:nth-child(13),
+.ff-nw-c14 > tbody > tr > td:nth-child(14),
+.ff-nw-c15 > tbody > tr > td:nth-child(15),
+.ff-nw-c16 > tbody > tr > td:nth-child(16) { white-space: nowrap; }
+.ff-fit > tbody > tr > td[colspan] { white-space: normal; }
+.ff-act > tbody > tr > td:last-child { white-space: nowrap; text-align: right; }
+/* Free-text columns: wrap, but never collapse into a sliver. */
+.ff-wrap-c1  > tbody > tr > td:nth-child(1),
+.ff-wrap-c2  > tbody > tr > td:nth-child(2),
+.ff-wrap-c3  > tbody > tr > td:nth-child(3),
+.ff-wrap-c4  > tbody > tr > td:nth-child(4),
+.ff-wrap-c5  > tbody > tr > td:nth-child(5),
+.ff-wrap-c6  > tbody > tr > td:nth-child(6),
+.ff-wrap-c7  > tbody > tr > td:nth-child(7),
+.ff-wrap-c8  > tbody > tr > td:nth-child(8),
+.ff-wrap-c9  > tbody > tr > td:nth-child(9),
+.ff-wrap-c10 > tbody > tr > td:nth-child(10),
+.ff-wrap-c11 > tbody > tr > td:nth-child(11),
+.ff-wrap-c12 > tbody > tr > td:nth-child(12),
+.ff-wrap-c13 > tbody > tr > td:nth-child(13),
+.ff-wrap-c14 > tbody > tr > td:nth-child(14),
+.ff-wrap-c15 > tbody > tr > td:nth-child(15),
+.ff-wrap-c16 > tbody > tr > td:nth-child(16) {
+    white-space: normal;
+    min-width: 180px;
+    max-width: 420px;
+}
+
+/* Still too wide for its box: the actions column pins to the right
+   edge (opaque, with a soft edge shadow) so View / Edit stay in reach. */
+@media (min-width: 768px) {
+    .ff-overflow.ff-act > thead > tr > th:last-child,
+    .ff-overflow.ff-act > tbody > tr > td:last-child {
+        position: sticky;
+        right: 0;
+        z-index: 1;
+    }
+    .ff-overflow.ff-act > tbody > tr > td:last-child {
+        background-color: var(--bg-surface);
+        box-shadow: -14px 0 14px -14px rgba(0, 0, 0, 0.5);
+    }
+    .ff-overflow.ff-act > tbody > tr:hover > td:last-child { background-color: var(--tbl-hover-solid); }
+    /* !important: app.css paints selected cells with a translucent
+       `background … !important`, which would let scrolled cells show through. */
+    .ff-overflow.ff-act > tbody > tr:has(> td input[type="checkbox"]:checked) > td:last-child,
+    .ff-overflow.ff-act > tbody > tr.ff-row-selected > td:last-child { background: var(--tbl-sel-solid) !important; }
+}
+
+/* ── Key / value tables on record pages ──────────────────────── */
+/* `table.` / `.card.` prefixes: equipment/show.php re-declares these
+   rules in its own <style> block, which loads after this file. */
+table.spec-table tr:nth-child(even) { background: transparent; }
+table.spec-table tr { border-bottom: 1px dashed color-mix(in srgb, var(--border-color) 90%, transparent); }
+table.spec-table tr:last-child { border-bottom: 0; }
+table.spec-table td { padding: 11px 18px; background-image: none; border-radius: 0; }
+table.spec-table .spec-label {
+    color: var(--text-tertiary);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .01em;
+}
+table.spec-table .spec-value { color: var(--text-primary); font-weight: 550; }
+table.spec-table tr:hover { background: color-mix(in srgb, var(--color-primary) 4%, transparent); }
+table.spec-table { border-collapse: collapse; }
+
+/* Key/value cards: a soft brand-tinted header instead of a solid band. */
+.card.spec-card { border: 1px solid var(--border-color); box-shadow: var(--shadow-ambient, none); }
+.card.spec-card > .card-header {
+    background: linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 13%, var(--bg-surface)), var(--bg-surface) 75%);
+    border-bottom: 1px solid var(--border-color);
+    padding: 12px 18px;
+}
+.card.spec-card > .card-header .card-title {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--text-primary);
+    font-size: 11px; font-weight: 700; letter-spacing: .1em;
+}
+.card.spec-card > .card-header .card-title::before {
+    content: ''; width: 8px; height: 8px; border-radius: 3px;
+    background: var(--color-primary);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--color-primary) 60%, transparent);
+}
+
+/* ── Pagination bar ──────────────────────────────────────────── */
+.pagination { padding: 12px 20px; }
+.page-btn {
+    min-width: 34px; height: 34px; border-radius: 10px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-surface);
+    transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.page-btn:hover:not(:disabled) { border-color: var(--color-primary); color: var(--text-primary); }
+.page-btn.is-active, .page-btn[aria-current="page"] {
+    background: var(--color-primary); border-color: var(--color-primary); color: var(--text-on-primary);
+}
+.pagination-input { border-radius: 10px; height: 34px; }
+
+/* ── Phones: stacked tables (app.css .table-stack) wrap freely ── */
+@media (max-width: 767px) {
+    .ff-fit > tbody > tr > td { white-space: normal; }
+    /* The toolbar's status tabs take the full row and scroll if they must. */
+    .table-toolbar .tab-bar { width: 100%; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+    .table-toolbar .tab-bar .tab-btn { flex: 1 0 auto; justify-content: center; }
+    .table-toolbar:has(+ .card :is(table.table, .skeleton-row, .empty-state)) { border-radius: var(--radius-xl) var(--radius-xl) 0 0; padding: 12px; }
+}
+
+/* ── Print: plain, ink-friendly ──────────────────────────────── */
+@media print {
+    .table thead th, .data-table thead th,
+    .table tfoot td, .data-table tfoot td { background: none; }
+    .table > tbody > tr > td, .data-table > tbody > tr > td {
+        background: none !important;
+        border-bottom: 1px solid var(--border-color);
+        border-radius: 0 !important;
+        box-shadow: none !important;
+    }
+    .ff-fit td, .ff-fit th { white-space: normal !important; }
+    .table-toolbar { border: 0; background: none; }
+}

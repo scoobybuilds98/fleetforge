@@ -113,7 +113,7 @@ $_appName   = settings_get('company.name', 'FleetForge');
 $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
 ?>
 <!DOCTYPE html>
-<html lang="en" data-theme="<?= e($_theme) ?>">
+<html lang="en" data-theme="<?= e($_theme) ?>" data-bg="<?= e(ff_background()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -125,9 +125,15 @@ $_timezone  = settings_get('company.timezone', APP_TIMEZONE);
     <title><?= e($_pageTitle) ?> — <?= e($_appName) ?></title>
 
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <link rel="stylesheet" href="<?= asset_url('assets/css/animations.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <!-- S-MODULE-CHROME: embedded record pages (batch invoicing) render the same hero + KPI tiles -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/module-chrome.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-TABLES-REDESIGN: every admin table (.table/.data-table/.spec-table), wrappers, pagination -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/tables.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-RECORD-REDESIGN: record pages — tabs, main + rail layout, rail cards, More menu -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/records.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
     <?php
     // Brand override — same as header.php, so an embedded invoice matches

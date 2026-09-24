@@ -227,7 +227,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 ?>
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-bg="<?= e(ff_background()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -237,6 +237,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?= ff_favicon_tags() ?>
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <?php
     // S-LUX-4: mirror the login brand-colour override so the whole auth family
     // honours the white-label chain (these screens rendered default-orange while

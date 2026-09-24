@@ -62,6 +62,10 @@
  *                                  custom_projection when provided
  *          extra_costs (optional, comma-separated amounts) — one-time
  *                                  upcoming costs that reduce payoff
+ *          detail     (optional, 1) — add `detail`: fixed costs, financing,
+ *                                  depreciation, revenue by lease, 24-month
+ *                                  operating P&L, ratios (S-PAYOFF-ONE-PAGE —
+ *                                  the unit page's Payoff tab)
  * @auth    Session required; require_permission('fixed_assets','view')
  * @returns 200 { asset, acquisition, totals, scenarios, monthly_data,
  *                custom_projection? } | 404 | 422
@@ -224,8 +228,13 @@ if ((int) ($asset['is_financed'] ?? 0) === 1
 // and credit notes (is_credit = 1) which subtract, not add.
 // Soft-deleted rows are filtered on every joined table per the
 // project-wide SOFT DELETE rule.
+// S-PAYOFF-ONE-PAGE: USD invoices convert at their frozen exchange_rate_to_cad
+// (reporting policy: CAD canonical). The retired equipment/payoff.php page did
+// this and the API did not, so one unit showed two different revenue figures.
 $revenueRow = db_row(
-    "SELECT COALESCE(SUM(ili.amount), 0) AS total
+    "SELECT COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                              THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                              ELSE ili.amount END), 0) AS total
      FROM invoice_line_items ili
      JOIN invoices i     ON i.id = ili.invoice_id
      JOIN leases  l      ON l.id = i.lease_id
@@ -242,6 +251,7 @@ $revenueRow = db_row(
 );
 $totalRevenue = (string) ($revenueRow['total'] ?? '0.00');
 if ($totalRevenue === '') $totalRevenue = '0.00';
+$totalRevenue = $bcround($totalRevenue, 2);
 
 // ── Total maintenance cost ─────────────────────────────────────
 $mntRow = db_row(
@@ -295,7 +305,9 @@ if (bccomp($adjustedTargetCost, '0', 2) > 0) {
 // the month the work was performed.
 $monthlyRows = db_select(
     "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS ym,
-            COALESCE(SUM(ili.amount), 0) AS revenue
+            COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                              THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                              ELSE ili.amount END), 0) AS revenue
      FROM invoice_line_items ili
      JOIN invoices i ON i.id = ili.invoice_id
      JOIN leases   l ON l.id = i.lease_id
@@ -460,6 +472,149 @@ $selectedAvg = match ($period) {
 };
 $selectedProjection = $projectFor($selectedAvg);
 
+// ── Detail (S-PAYOFF-ONE-PAGE) ────────────────────────────────
+// ?detail=1 adds what only the retired equipment/payoff.php page showed, so
+// the unit page's Payoff tab is the ONE payoff page: fixed operating costs,
+// financing, depreciation, revenue by lease, a 24-month operating P&L and a
+// few ratios. Omitted by default (the Fixed Assets modal doesn't need it).
+$detail = null;
+if (($_GET['detail'] ?? '') === '1') {
+    $finPmt = (string) ($asset['financing_monthly_payment'] ?? '');
+    $finPmt = $finPmt === '' ? '0.00' : $finPmt;
+    $finRem = (int) ($asset['financing_remaining_months'] ?? 0);
+
+    $byLease = db_select(
+        "SELECT l.id, l.contract_number, l.start_date, l.end_date, l.actual_return_date, l.status,
+                COALESCE(c.company_name, l.company_name_snapshot) AS customer_name, l.customer_id,
+                COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                                  THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                                  ELSE ili.amount END), 0) AS revenue
+           FROM leases l
+           LEFT JOIN customers c ON c.id = l.customer_id AND c.deleted_at IS NULL
+           LEFT JOIN invoices i ON i.lease_id = l.id AND i.deleted_at IS NULL
+                               AND i.status NOT IN ('void','written_off','draft')
+           LEFT JOIN invoice_line_items ili ON ili.invoice_id = i.id AND ili.is_credit = 0
+          WHERE l.equipment_unit_id = ? AND l.deleted_at IS NULL AND l.status <> 'cancelled'
+          GROUP BY l.id
+          ORDER BY l.start_date DESC",
+        [$eqUnitId]
+    );
+    $leasesOut = [];
+    foreach ($byLease as $r) {
+        $leasesOut[] = [
+            'id'            => (int) $r['id'],
+            'contract_number' => $r['contract_number'],
+            'customer_id'   => $r['customer_id'] !== null ? (int) $r['customer_id'] : null,
+            'customer_name' => $r['customer_name'],
+            'start_date'    => $r['start_date'],
+            'end_date'      => $r['actual_return_date'] ?: $r['end_date'],
+            'status'        => $r['status'],
+            'revenue'       => $bcround((string) $r['revenue'], 2),
+        ];
+    }
+
+    // 24-month operating P&L (revenue − maintenance − damage; fixed costs and
+    // financing are shown separately), newest first, months with activity.
+    $pnlStart = (new DateTimeImmutable('first day of this month'))->modify('-23 months');
+    $pRev = [];
+    foreach (db_select(
+        "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS ym,
+                COALESCE(SUM(CASE WHEN i.currency = 'USD'
+                                  THEN ili.amount * COALESCE(i.exchange_rate_to_cad, 1)
+                                  ELSE ili.amount END), 0) AS rev
+           FROM invoice_line_items ili
+           JOIN invoices i ON i.id = ili.invoice_id
+           JOIN leases   l ON l.id = i.lease_id
+          WHERE l.equipment_unit_id = ? AND l.deleted_at IS NULL
+            AND i.deleted_at IS NULL AND i.status NOT IN ('void','written_off','draft')
+            AND ili.is_credit = 0 AND i.invoice_date >= ?
+          GROUP BY ym",
+        [$eqUnitId, $pnlStart->format('Y-m-d')]
+    ) as $r) { $pRev[$r['ym']] = (string) $r['rev']; }
+    $pMnt = [];
+    foreach (db_select(
+        "SELECT DATE_FORMAT(COALESCE(completed_date, requested_date), '%Y-%m') AS ym,
+                COALESCE(SUM(total_cost), 0) AS cost
+           FROM maintenance_work_orders
+          WHERE equipment_unit_id = ? AND status = 'completed' AND deleted_at IS NULL
+            AND COALESCE(completed_date, requested_date) >= ?
+          GROUP BY ym",
+        [$eqUnitId, $pnlStart->format('Y-m-d')]
+    ) as $r) { $pMnt[$r['ym']] = (string) $r['cost']; }
+    // damage_claims.created_at is UTC — bucket by the LOCAL month in PHP.
+    $pDmg = [];
+    foreach (db_select(
+        "SELECT created_at, COALESCE(actual_repair_cost, estimated_repair_cost, 0) AS cost
+           FROM damage_claims WHERE equipment_unit_id = ? AND deleted_at IS NULL AND created_at >= ?",
+        [$eqUnitId, ff_local_month_start_utc($pnlStart->format('Y-m-d'))]
+    ) as $r) {
+        $ym = ff_utc_to_local((string) $r['created_at'], 'Y-m');
+        $pDmg[$ym] = bcadd($pDmg[$ym] ?? '0.00', (string) $r['cost'], 2);
+    }
+    $pnl = [];
+    for ($m = new DateTimeImmutable('first day of this month'); $m >= $pnlStart; $m = $m->modify('-1 month')) {
+        $ym  = $m->format('Y-m');
+        $rev = $bcround($pRev[$ym] ?? '0', 2);
+        $mnt = $bcround($pMnt[$ym] ?? '0', 2);
+        $dmg = $bcround($pDmg[$ym] ?? '0', 2);
+        if (bccomp($rev, '0', 2) === 0 && bccomp($mnt, '0', 2) === 0 && bccomp($dmg, '0', 2) === 0) {
+            continue;
+        }
+        $pnl[] = ['month' => $ym, 'revenue' => $rev, 'maintenance' => $mnt, 'damage' => $dmg,
+                  'net' => bcsub(bcsub($rev, $mnt, 2), $dmg, 2)];
+    }
+
+    // Days on lease since acquisition (calendar days, leases clipped to the
+    // acquisition date and to today) — for revenue per rented day.
+    $acqForDays = $acquiredDate !== '' ? $acquiredDate : null;
+    $dayRow = db_row(
+        "SELECT COALESCE(SUM(GREATEST(0, DATEDIFF(LEAST(COALESCE(actual_return_date, end_date, ?), ?),
+                                               GREATEST(start_date, COALESCE(?, start_date))) + 1)), 0) AS d
+           FROM leases
+          WHERE equipment_unit_id = ? AND deleted_at IS NULL AND status IN ('active','completed')",
+        [ff_today(), ff_today(), $acqForDays, $eqUnitId]
+    );
+    $daysOnLease = (int) ($dayRow['d'] ?? 0);
+
+    $opCost = bcadd($totalMaintenance, $totalDamage, 2);
+    $detail = [
+        'fixed' => [
+            'insurance'    => $bcround($ins, 2),
+            'licensing'    => $bcround($lic, 2),
+            'registration' => $bcround($reg, 2),
+            'monthly'      => $bcround($monthlyFixed, 2),
+            'paid'         => $bcround($totalFixedPaid, 2),
+        ],
+        'financing' => (int) ($asset['is_financed'] ?? 0) === 1 ? [
+            'monthly_payment'   => $bcround($finPmt, 2),
+            'interest_rate'     => (string) ($asset['financing_interest_rate'] ?? '0'),
+            'remaining_months'  => $finRem,
+            'remaining_balance' => $bcround(bcmul($finPmt, (string) $finRem, 2), 2),
+            'paid_to_date'      => $bcround($totalFinancingPaid, 2),
+        ] : null,
+        'depreciation' => [
+            'method'              => $asset['depreciation_method'] ?? null,
+            'useful_life_years'   => isset($asset['useful_life_years']) ? (int) $asset['useful_life_years'] : null,
+            'salvage_value'       => $asset['salvage_value'] !== null && $asset['salvage_value'] !== '' ? $bcround((string) $asset['salvage_value'], 2) : null,
+            'depreciable_cost'    => $asset['depreciable_cost'] !== null && $asset['depreciable_cost'] !== '' ? $bcround((string) $asset['depreciable_cost'], 2) : null,
+            'accumulated'         => $asset['accumulated_depreciation'] !== null && $asset['accumulated_depreciation'] !== '' ? $bcround((string) $asset['accumulated_depreciation'], 2) : null,
+            'net_book_value'      => $asset['net_book_value'] !== null && $asset['net_book_value'] !== '' ? $bcround((string) $asset['net_book_value'], 2) : null,
+            'last_run'            => $asset['last_depreciation_date'] ?? null,
+            'fully_depreciated'   => $asset['fully_depreciated_date'] ?? null,
+        ],
+        'revenue_by_lease' => $leasesOut,
+        'pnl'              => $pnl,
+        'insights' => [
+            'days_on_lease'       => $daysOnLease,
+            'revenue_per_day'     => $daysOnLease > 0 ? $bcround(bcdiv($totalRevenue, (string) $daysOnLease, 6), 2) : null,
+            'lease_count'         => count($leasesOut),
+            // Repairs as a share of what the unit earned.
+            'repair_ratio_pct'    => bccomp($totalRevenue, '0', 2) > 0 ? $bcround(bcmul(bcdiv($opCost, $totalRevenue, 6), '100', 6), 1) : null,
+            'avg_monthly_revenue' => $bcround(bcdiv($totalRevenue, (string) $monthsSinceAcq, 6), 2),
+        ],
+    ];
+}
+
 // ── Response ───────────────────────────────────────────────────
 json_success([
     'asset' => [
@@ -521,4 +676,5 @@ json_success([
     ],
     'custom_projection' => $customProjection,
     'monthly_data' => $monthly,
+    'detail'       => $detail,
 ]);

@@ -1,0 +1,206 @@
+/* ============================================================
+   FleetForge — Settings (S-SETTINGS-REDESIGN)
+   ------------------------------------------------------------
+   Loaded by app/admin/settings/index.php only. A two-column shell:
+   a grouped, sticky section navigation on the left (.set-nav) and
+   the active section on the right (.set-main) under a header that
+   follows the active tab (.set-panel-head). Everything inside the
+   panels — the included design / customer emails / system / backup /
+   audit / lockout files and the inline cards — is restyled from
+   here, scoped to .set-main, so no panel's markup or logic changed.
+
+   Rules: tokens only; accents from .ff-acc--* (module-chrome.css).
+   ============================================================ */
+
+.set-shell {
+    display: grid;
+    grid-template-columns: 272px minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+}
+
+/* ── Section navigation ─────────────────────────────────────── */
+.set-nav {
+    position: sticky;
+    top: calc(var(--topbar-height, 60px) + 16px);
+    display: flex; flex-direction: column; gap: 2px;
+    max-height: calc(100vh - var(--topbar-height, 60px) - 32px);
+    overflow-y: auto;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 18px;
+    background:
+        radial-gradient(260px 200px at 0% 0%, color-mix(in srgb, var(--color-primary) 8%, transparent), transparent 70%),
+        var(--bg-surface);
+    box-shadow: var(--shadow-ambient, none);
+    scrollbar-width: thin;
+}
+.set-nav-label {
+    padding: 12px 10px 6px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+.set-nav-label:first-child { padding-top: 4px; }
+
+.set-nav-item {
+    position: relative;
+    display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+    width: 100%; padding: 8px 10px;
+    border: 0; border-radius: 12px; background: transparent;
+    font: inherit; text-align: left; color: var(--text-secondary); text-decoration: none;
+    cursor: pointer;
+    transition: background .15s ease, color .15s ease;
+}
+.set-nav-item:hover { background: var(--bg-surface-2); color: var(--text-primary); text-decoration: none; }
+.set-nav-ic {
+    width: 32px; height: 32px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--acc, var(--color-primary));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 12%, transparent);
+    transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.set-nav-ic svg { width: 17px; height: 17px; }
+.set-nav-text { display: flex; flex-direction: column; min-width: 0; }
+.set-nav-name { font-size: 13.5px; font-weight: 600; color: var(--text-primary); line-height: 1.25; }
+.set-nav-sub {
+    font-size: 11.5px; line-height: 1.35; color: var(--text-tertiary);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.set-nav-badge {
+    min-width: 22px; height: 20px; padding: 0 7px; border-radius: 999px;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--text-secondary); background: var(--bg-surface-2);
+}
+.set-nav-badge.is-danger { color: var(--text-on-danger, var(--text-on-primary)); background: var(--color-danger); }
+.set-nav-go { color: var(--text-tertiary); font-size: 13px; }
+
+.set-nav-item.is-active {
+    color: var(--text-primary);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--acc, var(--color-primary)) 16%, transparent), color-mix(in srgb, var(--acc, var(--color-primary)) 3%, transparent));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc, var(--color-primary)) 26%, transparent);
+}
+.set-nav-item.is-active::before {
+    content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: 0 3px 3px 0;
+    background: var(--acc, var(--color-primary));
+    box-shadow: 0 0 10px var(--acc, var(--color-primary));
+}
+.set-nav-item.is-active .set-nav-ic {
+    color: var(--text-on-primary);
+    background: var(--acc, var(--color-primary));
+    box-shadow: 0 8px 16px -8px var(--acc, var(--color-primary));
+}
+.set-nav-item.is-locked { cursor: not-allowed; opacity: .45; }
+.set-nav-item.is-locked:hover { background: transparent; }
+.set-nav-item .tab-lock-icon { color: var(--text-tertiary); }
+
+/* ── Active section header ──────────────────────────────────── */
+.set-main { min-width: 0; }
+.set-panel-head {
+    display: flex; align-items: center; gap: 14px;
+    margin: 2px 2px 18px;
+}
+.set-panel-ic {
+    width: 46px; height: 46px; border-radius: 14px; flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--acc, var(--color-primary));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 14%, var(--bg-surface));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc, var(--color-primary)) 32%, transparent), 0 10px 24px -14px var(--acc, var(--color-primary));
+}
+.set-panel-ic svg { width: 22px; height: 22px; }
+.set-panel-group { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--text-tertiary); }
+.set-panel-title { margin: 2px 0 0; font-size: 22px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.15; color: var(--text-primary); }
+.set-panel-sub { margin: 3px 0 0; font-size: 13.5px; color: var(--text-secondary); }
+
+/* ── Everything inside a section ────────────────────────────── */
+.set-main .card {
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    background:
+        radial-gradient(360px 160px at 100% 0%, color-mix(in srgb, var(--color-primary) 5%, transparent), transparent 70%),
+        var(--bg-surface);
+    box-shadow: var(--shadow-ambient, none);
+    overflow: hidden;
+    /* Header + body carry the spacing; the Atelier card's own 24px padding
+       would double-indent every settings card (all 61 use header/body). */
+    padding: 0;
+}
+.set-main .card > .card-footer { padding: 14px 22px; }
+.set-main .card > .card-header {
+    background: transparent;
+    padding: 16px 22px 14px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 14.5px; font-weight: 700; letter-spacing: -0.005em;
+    color: var(--text-primary);
+}
+.set-main .card > .card-header .card-title { font-size: 14.5px; font-weight: 700; text-transform: none; letter-spacing: -0.005em; color: var(--text-primary); }
+.set-main .card > .card-body { padding: 20px 22px; }
+
+/* Labels + hints */
+.set-main .form-label { font-size: 12.5px; font-weight: 650; color: var(--text-primary); margin-bottom: 6px; }
+.set-main .form-group > .text-muted,
+.set-main .form-group > p.text-muted { font-size: 12px !important; line-height: 1.45; color: var(--text-tertiary); }
+.set-main .form-control,
+.set-main .form-select { border-radius: 10px; }
+
+/* Save rows: a quiet footer strip across the card. */
+.set-main form > div:last-child > .btn-primary:only-child { box-shadow: 0 8px 18px -12px var(--color-primary); }
+
+/* Yes/no settings become switches. Only single checkboxes inside a
+   .form-check (the settings rows) — multi-select role lists elsewhere
+   keep their normal boxes. Knob drawn with a gradient so it needs no
+   pseudo-element (checkbox pseudo-elements are not cross-browser). */
+.set-main .form-check { display: flex; align-items: center; gap: 10px; }
+.set-main .form-check > input[type="checkbox"] {
+    -webkit-appearance: none; appearance: none;
+    flex: 0 0 auto;
+    width: 40px; height: 22px; margin: 0;
+    border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border-color-strong);
+    background:
+        radial-gradient(circle at 11px 50%, var(--text-tertiary) 0 7px, transparent 7.5px),
+        var(--bg-surface-2);
+    transition: background .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+.set-main .form-check > input[type="checkbox"]:checked {
+    border-color: var(--color-primary);
+    background:
+        radial-gradient(circle at 29px 50%, var(--text-on-primary) 0 7px, transparent 7.5px),
+        var(--color-primary);
+}
+.set-main .form-check > input[type="checkbox"]:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 30%, transparent); }
+.set-main .form-check > input[type="checkbox"]:disabled { opacity: .5; cursor: not-allowed; }
+
+/* Tables inside settings (audit log, backups, logs) sit flush in their card. */
+.set-main .card > .card-body > .table-responsive,
+.set-main .card > .card-body > .table-wrapper { margin: -20px -22px; }
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+    .set-shell { grid-template-columns: 208px minmax(0, 1fr); gap: 18px; }
+    .set-nav-sub { display: none; }
+}
+@media (max-width: 860px) {
+    .set-shell { grid-template-columns: minmax(0, 1fr); }
+    /* The nav becomes a horizontal strip of chips. */
+    .set-nav {
+        position: static; max-height: none;
+        flex-direction: row; flex-wrap: nowrap; gap: 6px;
+        overflow-x: auto; padding: 8px;
+    }
+    .set-nav-label { display: none; }
+    .set-nav-item { grid-template-columns: 26px auto auto; width: auto; flex: 0 0 auto; padding: 6px 10px; }
+    .set-nav-ic { width: 26px; height: 26px; border-radius: 8px; }
+    .set-nav-name { white-space: nowrap; }
+    .set-nav-item.is-active::before { display: none; }
+    .set-panel-title { font-size: 19px; }
+}
+
+/* Phones: the tabs' own inline form grids (minmax(320px, 1fr)) are wider
+   than a phone card — one column, full width. !important beats the inline
+   style attribute on those grids. */
+@media (max-width: 640px) {
+    .set-main .card > .card-body { padding: 16px; }
+    .set-main .card-body [style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
+    .set-main .form-control, .set-main .form-select, .set-main input[type="text"], .set-main input[type="number"] { max-width: 100%; }
+}

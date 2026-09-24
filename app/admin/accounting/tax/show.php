@@ -6,17 +6,35 @@
  * @file        app/admin/accounting/tax/show.php
  * @description Tax filing period drill-down page. Shows the period's
  *              header (tax_type, span, frequency, status, due date,
- *              filed_by/filed_date), the four totals
- *              (sales / collected / ITC / net owing), the remittance
- *              history table, and a per-transaction drill-down of
- *              every contributing invoice and (for GST/HST) bill.
+ *              filed_by/filed_date), the totals (collected / ITC / net
+ *              owing / remitted), the remittance history table, and a
+ *              per-transaction drill-down of every contributing invoice
+ *              and (for GST/HST) bill.
  *              Spec ref §9: "Report shows every transaction making up
  *              each line — full drill-down."
  *
- * @depends     config/app.php, includes/auth.php, includes/header.php,
- *              includes/footer.php, api/v1/accounting/tax/periods/show.php
+ *              Layout (S-RECORD-REDESIGN):
+ *                header — ModuleHero entity: tax type + status badge;
+ *                         period span · frequency · filing due chips
+ *                nav    — the accounting sub-nav, directly under the header
+ *                strip  — tax collected · ITCs (GST/HST) · net owing ·
+ *                         remitted · filing due (days left / overdue)
+ *                main   — Remittance history · Contributing invoices ·
+ *                         Contributing bills (GST/HST) · Documents (the
+ *                         Alpine drill-down fetch is unchanged)
+ *                rail   — Needs attention (overdue / due soon / filed but
+ *                         not remitted / refund due / not calculated) ·
+ *                         Remittance meter · Period facts (total sales,
+ *                         filed by, notes)
+ *              The old tiles used #icon-banknotes, which is not in the
+ *              sprite (blank icon) — the strip uses sprite ids only.
  *
- * @session     S035 — Tax Management module
+ * @depends     config/app.php, includes/auth.php, includes/header.php,
+ *              includes/footer.php, api/v1/accounting/tax/periods/show.php,
+ *              includes/partials/accounting-nav.php,
+ *              includes/partials/acc-documents-section.php, lib/Ui/RecordUi.php
+ *
+ * @session     S035 — Tax Management module; S-RECORD-REDESIGN
  */
 
 // dirname(__DIR__, 4): tax/ -> accounting/ -> admin/ -> app/ -> root
@@ -54,6 +72,34 @@ if (!$period) {
     exit;
 }
 
+// ── Remitted so far (S-RECORD-REDESIGN) ─────────────────────────────────────
+// Payments to the CRA count up; a refund (direction='refund', the CRA paying
+// us on a credit period) counts down — so "balance" is what is still to move
+// in either direction. bcmath: money.
+$remRow = db_row(
+    "SELECT COUNT(*) AS n,
+            COALESCE(SUM(CASE WHEN direction = 'refund' THEN -amount ELSE amount END), 0) AS net,
+            MAX(remittance_date) AS last_date
+       FROM acc_tax_remittances
+      WHERE filing_period_id = ?",
+    [$id]
+);
+$remitted   = bcadd((string) ($remRow['net'] ?? '0'), '0', 2);
+$remCount   = (int) ($remRow['n'] ?? 0);
+$netOwing   = (string) $period['net_tax_owing'];
+$remaining  = bcsub($netOwing, $remitted, 2);
+$isRefund   = bccomp($netOwing, '0', 2) < 0;
+$absNet     = ltrim($netOwing, '-');
+$remPct     = bccomp($absNet, '0', 2) > 0
+    ? (float) bcmul(bcdiv(ltrim($remitted, '-'), $absNet, 6), '100', 2)
+    : 0.0;
+
+$today      = ff_today();
+$dueDate    = (string) ($period['filing_due_date'] ?? '');
+$daysToDue  = $dueDate !== '' ? (int) round((strtotime($dueDate) - strtotime($today)) / 86400) : null;
+$isSettled  = in_array($period['status'], ['filed', 'remitted'], true);
+$isOverdue  = $daysToDue !== null && $daysToDue < 0 && !$isSettled;
+
 $pageTitle = 'Tax Period #' . $id;
 require_once FF_ROOT . '/includes/header.php';
 
@@ -64,6 +110,12 @@ $taxLabels = [
     'pst_sk'  => 'PST — Saskatchewan',
     'pst_mb'  => 'PST — Manitoba',
 ];
+$taxShort = [
+    'gst_hst' => 'GST/HST',
+    'pst_bc'  => 'PST BC',
+    'pst_sk'  => 'PST SK',
+    'pst_mb'  => 'PST MB',
+];
 $statusBadges = [
     'open'       => 'badge-blue',
     'calculated' => 'badge-amber',
@@ -72,96 +124,84 @@ $statusBadges = [
 ];
 $taxLabel  = $taxLabels[$period['tax_type']] ?? $period['tax_type'];
 $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
+
+// ── Header (S-RECORD-REDESIGN) ──────────────────────────────────────────────
+$heroFacts = [
+    \FleetForge\Sop\SopIcons::svg('calendar-days') . e(format_date($period['period_start'])) . ' → ' . e(format_date($period['period_end'])),
+    \FleetForge\Sop\SopIcons::svg('arrow-path') . e(ucfirst((string) $period['frequency'])),
+];
+if ($dueDate !== '') {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . 'Due <b>' . e(format_date($dueDate)) . '</b>';
+}
+if (!empty($period['filed_date'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('check-circle') . 'Filed ' . e(format_date($period['filed_date'])) . (!empty($period['filed_by_name']) ? ' · ' . e($period['filed_by_name']) : '');
+}
 ?>
-
-<!-- ── Breadcrumb ──────────────────────────────────────────────── -->
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/dashboard') ?>">Accounting</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/tax') ?>">Tax Management</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current">Period #<?= e((string) $id) ?></span>
-</nav>
-
-<div class="page-header">
-    <h1 class="page-header-title h4">
-        <?= e($taxLabel) ?>
-        <span class="text-secondary text-sm" style="font-weight:normal;">
-            <?= e($period['period_start']) ?> → <?= e($period['period_end']) ?>
-        </span>
-    </h1>
-    <div class="page-header-actions">
-        <a class="btn btn-secondary btn-sm" href="<?= base_url('accounting/tax') ?>">← Back to list</a>
-    </div>
-</div>
+<?php ob_start(); /* secondary actions → the header's More menu */ ?>
+    <a href="<?= base_url('accounting/tax') ?>">All tax periods</a>
+    <a href="#tax-documents">Documents</a>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+    <a class="btn btn-secondary btn-sm" href="<?= base_url('accounting/tax') ?>"><?= \FleetForge\Sop\SopIcons::svg('calculator') ?> File / remit</a>
+    <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => $isOverdue ? 'danger' : ($isSettled ? 'success' : ($period['status'] === 'calculated' ? 'warning' : 'info')),
+    'icon'       => 'calculator',
+    'mark'       => $taxShort[$period['tax_type']] ?? '',
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Accounting', base_url('accounting/dashboard')], ['Tax Management', base_url('accounting/tax')], ['Period #' . $id, null]],
+    'eyebrow'    => 'Tax filing period',
+    'title_html' => e($taxLabel) . ' <span class="badge badge-no-dot ' . e($statusCls) . '">' . e($period['status']) . '</span>',
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<!-- ── Header card with key facts ─────────────────────────────── -->
-<div class="card" style="padding:20px;margin-bottom:20px;">
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:18px 24px;">
-        <div>
-            <div class="text-secondary text-sm">Status</div>
-            <span class="badge badge-no-dot <?= e($statusCls) ?>"><?= e($period['status']) ?></span>
-        </div>
-        <div>
-            <div class="text-secondary text-sm">Frequency</div>
-            <div><?= e(ucfirst($period['frequency'])) ?></div>
-        </div>
-        <div>
-            <div class="text-secondary text-sm">Filing Due</div>
-            <div class="font-mono"><?= e($period['filing_due_date'] ?? '—') ?></div>
-        </div>
-        <div>
-            <div class="text-secondary text-sm">Filed</div>
-            <div>
-                <?php if ($period['filed_date']): ?>
-                    <?= e($period['filed_date']) ?>
-                    <?php if ($period['filed_by_name']): ?>
-                        <span class="text-secondary text-sm">— <?= e($period['filed_by_name']) ?></span>
-                    <?php endif; ?>
-                <?php else: ?>
-                    <span class="text-secondary">—</span>
-                <?php endif; ?>
-            </div>
-        </div>
-    </div>
-
-    <?php if ($period['notes']): ?>
-        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border-default);">
-            <div class="text-secondary text-sm">Notes</div>
-            <div class="text-sm"><?= nl2br(e($period['notes'])) ?></div>
-        </div>
-    <?php endif; ?>
-</div>
-
-<!-- ── Totals tiles — server-side render ─────────────────────── -->
-<div class="stat-grid" style="margin-bottom:24px;">
-    <div class="stat-card stat-card--blue">
-        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-banknotes"/></svg></span>
-        <div class="stat-label">Total Sales (subtotal)</div>
-        <div class="stat-value font-mono">$<?= number_format((float) $period['total_sales'], 2) ?></div>
-    </div>
+<!-- KEY NUMBERS (S-RECORD-REDESIGN): collected, credits (GST/HST), what the
+     period nets to, what has been remitted, and how long until it is due. -->
+<div class="stat-grid <?= $period['tax_type'] === 'gst_hst' ? 'stat-grid--5' : 'stat-grid--4' ?> ff-stats">
     <div class="stat-card stat-card--amber">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-document-text"/></svg></span>
-        <div class="stat-label">Tax Collected</div>
-        <div class="stat-value font-mono">$<?= number_format((float) $period['total_tax_collected'], 2) ?></div>
+        <div class="stat-label">Tax collected</div>
+        <div class="stat-value font-mono"><?= e(format_currency($period['total_tax_collected'])) ?></div>
     </div>
     <?php if ($period['tax_type'] === 'gst_hst'): ?>
     <div class="stat-card stat-card--green">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
-        <div class="stat-label">Input Tax Credits (1050)</div>
-        <div class="stat-value font-mono">$<?= number_format((float) $period['total_itc'], 2) ?></div>
+        <div class="stat-label">Input tax credits</div>
+        <div class="stat-value font-mono"><?= e(format_currency($period['total_itc'])) ?></div>
+        <div class="stat-delta">1050</div>
     </div>
     <?php endif; ?>
-    <div class="stat-card">
-        <span class="stat-icon"><svg><use href="#icon-clock"/></svg></span>
-        <div class="stat-label">Net Owing</div>
-        <div class="stat-value font-mono">$<?= number_format((float) $period['net_tax_owing'], 2) ?></div>
+    <div class="stat-card <?= $isRefund ? 'stat-card--teal' : 'stat-card--blue' ?>">
+        <span class="stat-icon <?= $isRefund ? 'stat-icon--teal' : 'stat-icon--blue' ?>"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label"><?= $isRefund ? 'Refund due' : 'Net owing' ?></div>
+        <div class="stat-value font-mono"><?= e(format_currency($absNet)) ?></div>
+    </div>
+    <div class="stat-card <?= bccomp($remaining, '0', 2) === 0 ? 'stat-card--green' : 'stat-card--purple' ?>">
+        <span class="stat-icon <?= bccomp($remaining, '0', 2) === 0 ? 'stat-icon--green' : 'stat-icon--purple' ?>"><svg><use href="#icon-credit-card"/></svg></span>
+        <div class="stat-label"><?= $isRefund ? 'Refunded' : 'Remitted' ?></div>
+        <div class="stat-value font-mono"><?= e(format_currency(ltrim($remitted, '-'))) ?></div>
+        <div class="stat-delta"><?= bccomp($remaining, '0', 2) === 0 ? 'settled' : e(format_currency(ltrim($remaining, '-'))) . ' left' ?></div>
+    </div>
+    <div class="stat-card <?= $isOverdue ? 'stat-card--red' : 'stat-card--slate' ?>">
+        <span class="stat-icon <?= $isOverdue ? 'stat-icon--red' : 'stat-icon--slate' ?>"><svg><use href="#icon-<?= $isOverdue ? 'exclamation-triangle' : 'clock' ?>"/></svg></span>
+        <div class="stat-label">Filing due</div>
+        <div class="stat-value stat-value--date font-mono"<?= $isOverdue ? ' style="color:var(--color-danger);"' : '' ?>><?= $dueDate !== '' ? e(format_date($dueDate)) : '—' ?></div>
+        <div class="stat-delta"><?php
+            if ($isSettled) {
+                echo e($period['status']);
+            } elseif ($daysToDue !== null) {
+                echo $daysToDue < 0 ? e((-$daysToDue) . 'd overdue') : ($daysToDue === 0 ? 'today' : e('in ' . $daysToDue . 'd'));
+            }
+        ?></div>
     </div>
 </div>
+
+<div class="rec-layout">
+<div class="rec-main">
 
 <!-- ============================================================
      ALPINE COMPONENT — fetches drill-down + remittances
@@ -169,16 +209,15 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
 <div x-data="FF_TaxPeriodDetail(<?= (int) $id ?>)">
 
     <!-- ── Remittances ───────────────────────────────────────── -->
-    <h2 class="h6" style="margin-bottom:10px;">Remittance History</h2>
-    <template x-if="remittances.length === 0">
-        <div class="card"><div class="empty-state">
-            <p class="empty-state-text text-sm">No remittances recorded yet.</p>
-        </div></div>
-    </template>
-    <template x-if="remittances.length > 0">
-        <div class="card" style="padding:0;margin-bottom:24px;">
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Remittance history <span class="text-secondary" style="font-weight:400;font-size:0.78rem;" x-text="'(' + remittances.length + ')'"></span></h3></div>
+        <template x-if="remittances.length === 0">
+            <div class="card-body"><p class="text-secondary text-sm" style="margin:0;" x-text="loadingDetail ? 'Loading…' : 'No remittances recorded yet.'"></p></div>
+        </template>
+        <template x-if="remittances.length > 0">
+            <div class="card-body" style="padding:0;">
             <div class="table-responsive">
-<table class="data-table">
+            <table class="table">
                 <thead>
                     <tr>
                         <th>Date</th>
@@ -194,34 +233,39 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
                     <template x-for="r in remittances" :key="r.id">
                         <tr>
                             <td class="text-sm" x-text="r.remittance_date"></td>
-                            <td class="text-right font-mono" x-text="formatMoney(r.amount)"></td>
+                            <td class="text-right font-mono" x-text="(r.direction === 'refund' ? '−' : '') + formatMoney(r.amount)"></td>
                             <td class="text-sm" x-text="r.payment_method"></td>
                             <td class="text-sm" x-text="r.bank_account_name || 'Cash 1010'"></td>
                             <td class="text-sm font-mono" x-text="r.reference_number || '—'"></td>
-                            <td class="font-mono text-sm" x-text="r.journal_entry_number ? '#' + r.journal_entry_number : '—'"></td>
+                            <td class="font-mono text-sm">
+                                <template x-if="r.journal_entry_id && <?= can('journal_entries', 'view') ? 'true' : 'false' ?>">
+                                    <a class="link" :href="'<?= base_url('accounting/journal-entries/show') ?>?id=' + r.journal_entry_id" x-text="r.journal_entry_number ? '#' + r.journal_entry_number : 'JE'"></a>
+                                </template>
+                                <template x-if="!r.journal_entry_id || <?= can('journal_entries', 'view') ? 'false' : 'true' ?>"><span x-text="r.journal_entry_number ? '#' + r.journal_entry_number : '—'"></span></template>
+                            </td>
                             <td class="text-sm" x-text="r.created_by_name || '—'"></td>
                         </tr>
                     </template>
                 </tbody>
             </table>
-</div>
-        </div>
-    </template>
+            </div>
+            </div>
+        </template>
+    </div>
 
     <!-- ── Drill-down: contributing invoices ─────────────────── -->
-    <h2 class="h6" style="margin-bottom:10px;">Contributing Invoices <span class="text-secondary text-sm" x-text="'(' + invoices.length + ')'"></span></h2>
-    <template x-if="loadingDetail">
-        <div class="card"><div class="empty-state">Loading drill-down…</div></div>
-    </template>
-    <template x-if="!loadingDetail && invoices.length === 0">
-        <div class="card"><div class="empty-state">
-            <p class="empty-state-text text-sm">No invoices contributed to this period.</p>
-        </div></div>
-    </template>
-    <template x-if="!loadingDetail && invoices.length > 0">
-        <div class="card" style="padding:0;margin-bottom:24px;max-height:480px;overflow-y:auto;">
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Contributing invoices <span class="text-secondary" style="font-weight:400;font-size:0.78rem;" x-text="'(' + invoices.length + ')'"></span></h3></div>
+        <template x-if="loadingDetail">
+            <div class="card-body"><p class="text-secondary text-sm" style="margin:0;">Loading drill-down…</p></div>
+        </template>
+        <template x-if="!loadingDetail && invoices.length === 0">
+            <div class="card-body"><p class="text-secondary text-sm" style="margin:0;">No invoices contributed to this period.</p></div>
+        </template>
+        <template x-if="!loadingDetail && invoices.length > 0">
+            <div class="card-body" style="padding:0;max-height:480px;overflow-y:auto;">
             <div class="table-responsive">
-<table class="data-table">
+            <table class="table">
                 <thead>
                     <tr>
                         <th>Invoice #</th>
@@ -237,7 +281,11 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
                 <tbody>
                     <template x-for="i in invoices" :key="i.id">
                         <tr>
+                            <?php if (can('invoices', 'view')): /* link only when the viewer can open it */ ?>
+                            <td class="font-mono text-sm"><a class="link" :href="'<?= base_url('invoices/show') ?>?id=' + i.id" x-text="i.invoice_number"></a></td>
+                            <?php else: ?>
                             <td class="font-mono text-sm" x-text="i.invoice_number"></td>
+                            <?php endif; ?>
                             <td class="text-sm" x-text="i.invoice_date"></td>
                             <td class="text-sm" x-text="i.company_name || '—'"></td>
                             <td class="text-sm" x-text="i.province || '—'"></td>
@@ -249,49 +297,52 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
                     </template>
                 </tbody>
             </table>
-</div>
-        </div>
-    </template>
+            </div>
+            </div>
+        </template>
+    </div>
 
     <!-- ── Drill-down: contributing bills (gst_hst only) ─────── -->
     <template x-if="taxType === 'gst_hst'">
-        <div>
-            <h2 class="h6" style="margin-bottom:10px;">Contributing Vendor Bills (GST ITC) <span class="text-secondary text-sm" x-text="'(' + bills.length + ')'"></span></h2>
-            <template x-if="bills.length === 0">
-                <div class="card"><div class="empty-state">
-                    <p class="empty-state-text text-sm">No vendor bills with GST input tax credits in this period.</p>
-                </div></div>
+        <div class="card">
+            <div class="card-header"><h3 class="card-title">Contributing vendor bills (GST ITC) <span class="text-secondary" style="font-weight:400;font-size:0.78rem;" x-text="'(' + bills.length + ')'"></span></h3></div>
+            <template x-if="!loadingDetail && bills.length === 0">
+                <div class="card-body"><p class="text-secondary text-sm" style="margin:0;">No vendor bills with GST input tax credits in this period.</p></div>
             </template>
             <template x-if="bills.length > 0">
-                <div class="card" style="padding:0;max-height:400px;overflow-y:auto;">
-                    <div class="table-responsive">
-<table class="data-table">
-                        <thead>
+                <div class="card-body" style="padding:0;max-height:400px;overflow-y:auto;">
+                <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Bill #</th>
+                            <th>Vendor Bill #</th>
+                            <th>Date</th>
+                            <th>Vendor</th>
+                            <th class="text-right">Subtotal</th>
+                            <th class="text-right">GST (ITC)</th>
+                            <th class="text-right">HST</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="b in bills" :key="b.id">
                             <tr>
-                                <th>Bill #</th>
-                                <th>Vendor Bill #</th>
-                                <th>Date</th>
-                                <th>Vendor</th>
-                                <th class="text-right">Subtotal</th>
-                                <th class="text-right">GST (ITC)</th>
-                                <th class="text-right">HST</th>
+                                <?php if (can('accounts_payable', 'view')): ?>
+                                <td class="font-mono text-sm"><a class="link" :href="'<?= base_url('accounting/bills/show') ?>?id=' + b.id" x-text="b.bill_number || ('#' + b.id)"></a></td>
+                                <?php else: ?>
+                                <td class="font-mono text-sm" x-text="b.bill_number || ('#' + b.id)"></td>
+                                <?php endif; ?>
+                                <td class="font-mono text-sm" x-text="b.vendor_bill_number || '—'"></td>
+                                <td class="text-sm" x-text="b.bill_date"></td>
+                                <td class="text-sm" x-text="b.vendor_name || '—'"></td>
+                                <td class="text-right font-mono" x-text="formatMoney(b.subtotal)"></td>
+                                <td class="text-right font-mono" x-text="formatMoney(b.tax_gst_amount)"></td>
+                                <td class="text-right font-mono" x-text="formatMoney(b.tax_hst_amount)"></td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            <template x-for="b in bills" :key="b.id">
-                                <tr>
-                                    <td class="font-mono text-sm" x-text="b.bill_number || ('#' + b.id)"></td>
-                                    <td class="font-mono text-sm" x-text="b.vendor_bill_number || '—'"></td>
-                                    <td class="text-sm" x-text="b.bill_date"></td>
-                                    <td class="text-sm" x-text="b.vendor_name || '—'"></td>
-                                    <td class="text-right font-mono" x-text="formatMoney(b.subtotal)"></td>
-                                    <td class="text-right font-mono" x-text="formatMoney(b.tax_gst_amount)"></td>
-                                    <td class="text-right font-mono" x-text="formatMoney(b.tax_hst_amount)"></td>
-                                </tr>
-                            </template>
-                        </tbody>
-                    </table>
-</div>
+                        </template>
+                    </tbody>
+                </table>
+                </div>
                 </div>
             </template>
         </div>
@@ -300,11 +351,60 @@ $statusCls = $statusBadges[$period['status']] ?? 'badge-neutral';
 </div><!-- /x-data -->
 
 <!-- ── Documents ───────────────────────────────────────────────────────── -->
+<div id="tax-documents">
 <?php
 $entityType = 'tax_filing';
 $entityId   = (int) $period['id'];
 require FF_ROOT . '/includes/partials/acc-documents-section.php';
 ?>
+</div>
+
+</div><!-- /rec-main -->
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the period at a glance ───────────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$rail = [];
+
+$alerts = [];
+if ($isOverdue) {
+    $alerts[] = ['danger', 'Filing was due ' . e(format_date($dueDate)) . ' — <b>' . (-$daysToDue) . ' day' . ($daysToDue === -1 ? '' : 's') . ' overdue</b>. File and remit from <a href="' . e(base_url('accounting/tax')) . '">Tax Management</a>.'];
+} elseif ($daysToDue !== null && !$isSettled && $daysToDue <= 14) {
+    $alerts[] = ['warning', 'Filing due ' . ($daysToDue === 0 ? 'today' : 'in ' . $daysToDue . ' day' . ($daysToDue === 1 ? '' : 's')) . ' (' . e(format_date($dueDate)) . ').'];
+}
+if ($period['status'] === 'open') {
+    $alerts[] = ['info', 'Not calculated yet — the totals fill in when the period is calculated in <a href="' . e(base_url('accounting/tax')) . '">Tax Management</a>.'];
+}
+if ($period['status'] === 'filed' && bccomp($remaining, '0', 2) !== 0) {
+    $alerts[] = ['warning', 'Filed but ' . ($isRefund ? 'the refund is not received' : 'not fully remitted') . ' — <b>' . e(format_currency(ltrim($remaining, '-'))) . '</b> ' . ($isRefund ? 'still to come back.' : 'still to pay.')];
+}
+if ($isRefund && !$isSettled) {
+    $alerts[] = ['info', 'Credits exceed tax collected — this period is a <b>refund</b> of ' . e(format_currency($absNet)) . '.'];
+}
+$rail[] = $R::card('Needs attention', $R::alerts($alerts, $isSettled ? 'Filed — nothing to do.' : 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+$rail[] = $R::card($isRefund ? 'Refund' : 'Remittance',
+    $R::meter($isRefund ? 'Refunded' : 'Remitted', e((string) round($remPct)) . '%', $remPct, $remPct >= 99.99 ? 'ok' : ($isOverdue ? 'danger' : 'info'),
+        e(format_currency(ltrim($remitted, '-'))) . ' of ' . e(format_currency($absNet)))
+    . $R::kv([
+        ['Balance', e(format_currency(ltrim($remaining, '-'))), 'mono'],
+        ['Remittances', (string) $remCount],
+        ['Last', !empty($remRow['last_date']) ? e(format_date($remRow['last_date'])) : null],
+    ]),
+    ['icon' => 'banknotes', 'class' => 'rec-card--accent']);
+
+$rail[] = $R::card('Period', $R::kv([
+    ['Tax', e($taxLabel)],
+    ['Span', e(format_date($period['period_start'])) . ' → ' . e(format_date($period['period_end']))],
+    ['Frequency', e(ucfirst((string) $period['frequency']))],
+    ['Total sales', e(format_currency($period['total_sales'])), 'mono'],
+    ['Filed', !empty($period['filed_date']) ? e(format_date($period['filed_date'])) . (!empty($period['filed_by_name']) ? '<br><span class="text-secondary">' . e($period['filed_by_name']) . '</span>' : '') : 'Not filed'],
+    ['Notes', !empty($period['notes']) ? nl2br(e($period['notes'])) : null],
+]), ['icon' => 'calendar-days']);
+?>
+<aside class="rec-rail" aria-label="Tax period at a glance">
+    <?= implode("\n    ", $rail) ?>
+</aside>
+</div><!-- /rec-layout -->
 
 <script>
 function FF_TaxPeriodDetail(periodId) {

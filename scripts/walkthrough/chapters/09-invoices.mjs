@@ -36,8 +36,8 @@ export default {
     {
       say: 'Outstanding shows everything not yet paid, including drafts. Paid shows settled invoices. All adds a status filter.',
       run: async (d) => {
-        await d.click(tab('Paid')); await settle(d, 1000);
-        await d.click(tab('All')); await settle(d, 1000);
+        await d.tab('Paid'); await settle(d, 1000);
+        await d.tab('All'); await settle(d, 1000);
         await d.hover('select[aria-label="Filter by status"]', 800);
       },
     },

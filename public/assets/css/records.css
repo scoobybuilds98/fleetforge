@@ -1,0 +1,543 @@
+/* ============================================================
+   FleetForge — Record pages (S-RECORD-REDESIGN)
+   ------------------------------------------------------------
+   Loaded after tables.css by includes/header.php and header_embed.php.
+   The shared kit every "profile" page (a customer, a lease, an
+   invoice, a unit …) is built from:
+
+     .ff-hero--entity       compact record header (module-chrome.css
+                            draws it; tightened here)
+     .stat-grid.ff-stats    the key-numbers strip (module-chrome.css)
+     .tab-bar               section tabs — redesigned here for the whole
+                            app: an underline strip in a slim frame;
+                            .tab-bar--sticky = a record page's bar: full
+                            width, every tab shown, pinned under the topbar
+     .rec-layout            main column + right rail
+       .rec-main            the tab panels / sections
+       .rec-rail            "at a glance" cards (lib/Ui/RecordUi.php)
+     .rec-card / .rec-kv / .rec-meter / .rec-alerts / .rec-links
+                            rail building blocks
+     .rec-more              the header's "More" menu for secondary
+                            actions (RecordUi::more)
+     .rec-dl                a label/value grid for section cards
+
+   Rules: tokens only (the brand override and background palettes reach
+   everything); accents come from .ff-acc--* (--acc).
+   ============================================================ */
+
+/* ── Record header ─────────────────────────────────────────────
+   Drawn by module-chrome.css at its full size (operator: the header
+   cards stay "this big"); the record kit only adds the More menu. */
+.ff-hero--entity .ff-hero-actions { align-self: center; }
+
+/* ── "More" menu (RecordUi::more) ───────────────────────────── */
+.rec-more { position: relative; display: inline-flex; }
+.rec-more-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: var(--z-dropdown, 50);
+    min-width: 220px;
+    max-width: 300px;
+    padding: 6px;
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-xl);
+    background: var(--bg-surface-2);
+    box-shadow: var(--card-sheen), var(--shadow-lg);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+/* Every button / link inside the menu becomes a plain menu row, whatever
+   .btn variant the page gave it (the markup is the page's own). */
+.rec-more-menu > *,
+.rec-more-menu > .ff-contents > *,
+.rec-more-menu form > button {
+    display: flex !important;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 34px;
+    padding: 0 10px !important;
+    margin: 0 !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: var(--text-primary) !important;
+    font: inherit;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    text-align: left;
+    text-decoration: none;
+    justify-content: flex-start !important;
+    cursor: pointer;
+}
+.rec-more-menu > *:hover,
+.rec-more-menu > .ff-contents > *:hover { background: color-mix(in srgb, var(--text-primary) 7%, transparent) !important; }
+.rec-more-menu > .btn-danger,
+.rec-more-menu > .btn-outline-danger,
+.rec-more-menu > .ff-contents > .btn-danger,
+.rec-more-menu .rec-danger { color: var(--color-danger) !important; }
+/* The row rule above is !important (a page's .btn variants must not win),
+   which also beat Alpine's inline `display: none` — status-dependent items
+   (x-show) always showed. Hidden stays hidden. */
+.rec-more-menu > [style*="display: none"],
+.rec-more-menu > .ff-contents > [style*="display: none"] { display: none !important; }
+/* The hero clips its overflow (glows, the watermark). While its More menu
+   is open, let the menu hang out of it — the watermark is clipped on its
+   own instead (it sits 22px past the hero's bottom edge). */
+.ff-hero:has(.rec-more > [aria-expanded="true"]) { overflow: visible; z-index: 6; }
+.ff-hero:has(.rec-more > [aria-expanded="true"]) .ff-hero-mark { clip-path: inset(0 0 22px 0); }
+.rec-more-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--border-color); }
+.rec-more-menu svg { width: 15px; height: 15px; flex: 0 0 auto; }
+.rec-more-menu [disabled] { opacity: .45; cursor: not-allowed; }
+
+/* ── Tabs — the whole app's section tabs ────────────────────── */
+.tab-bar {
+    display: flex;
+    flex-wrap: nowrap;
+    width: 100%;
+    gap: 2px;
+    row-gap: 0;
+    padding: 0 8px;
+    margin-bottom: 16px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    background: var(--bg-surface);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
+}
+.tab-bar::-webkit-scrollbar { display: none; }
+.tab-bar .tab-btn {
+    position: relative;
+    flex: 0 0 auto;
+    height: 46px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    transform: none;
+}
+.tab-bar .tab-btn::after {
+    content: "";
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 2px 2px 0 0;
+    background: transparent;
+    transition: background .18s ease, box-shadow .18s ease;
+}
+.tab-bar .tab-btn:hover { background: transparent; border-color: transparent; box-shadow: none; color: var(--text-primary); }
+.tab-bar .tab-btn:hover::after { background: var(--border-color-strong); }
+.tab-bar .tab-btn.is-active,
+.tab-bar .tab-btn[aria-selected="true"],
+.tab-bar .tab-btn.is-active:hover,
+.tab-bar .tab-btn[aria-selected="true"]:hover {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--text-primary);
+}
+.tab-bar .tab-btn.is-active::after,
+.tab-bar .tab-btn[aria-selected="true"]::after {
+    background: var(--acc, var(--color-primary));
+    box-shadow: 0 -2px 12px color-mix(in srgb, var(--acc, var(--color-primary)) 55%, transparent);
+}
+.tab-bar .tab-badge {
+    height: 18px;
+    min-width: 20px;
+    padding: 0 6px;
+    border: 0;
+    background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.tab-bar .tab-btn.is-active .tab-badge,
+.tab-bar .tab-btn[aria-selected="true"] .tab-badge {
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 18%, transparent);
+    border: 0;
+    color: color-mix(in srgb, var(--acc, var(--color-primary)) 80%, var(--text-primary));
+}
+.tab-bar .tab-btn svg { width: 15px; height: 15px; }
+/* Toolbar tabs (tables.css) are a segmented control — no underline. */
+.table-toolbar .tab-bar { overflow: visible; }
+@media (max-width: 767px) { .table-toolbar .tab-bar { overflow-x: auto; } }
+.table-toolbar .tab-bar .tab-btn::after { content: none; }
+.table-toolbar .tab-bar .tab-btn { height: 30px; }
+/* A record page's tab bar spans the full width above the main column and
+   the rail, shows EVERY tab (operator: no "More" button) and wraps onto a
+   second row rather than hiding any when the screen is narrow. It is
+   pinned under the topbar while the page scrolls; an empty .tab-anchor
+   right before it marks its un-stuck spot for FF_TabHash.onSwitchKeep. */
+.tab-bar--sticky {
+    flex-wrap: wrap;
+    overflow: visible;
+    padding: 0 6px;
+    position: sticky;
+    top: calc(var(--topbar-height, 60px) + 8px);
+    z-index: 5;
+    background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+}
+
+/* ── Layout: main + rail ────────────────────────────────────── */
+.rec-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 18px;
+    align-items: start;
+}
+.rec-main { min-width: 0; }
+.rec-rail { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+/* Section cards in the main column: header + body carry the spacing
+   (the Atelier .card's own 24px padding double-indents them). */
+.rec-main .card:has(> .card-header),
+.rec-main .card:has(> .card-body) { padding: 0; }
+.rec-main .card + .card { margin-top: 0; }
+.rec-main .card > .card-header {
+    padding: 13px 18px;
+    background: transparent;
+}
+.rec-main .card > .card-header .card-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13.5px;
+    font-weight: 650;
+    text-transform: none;
+    letter-spacing: -0.005em;
+    color: var(--text-primary);
+}
+.rec-main .card > .card-header .card-title::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 2px;
+    background: var(--acc, var(--color-primary));
+    box-shadow: 0 0 8px color-mix(in srgb, var(--acc, var(--color-primary)) 60%, transparent);
+}
+.rec-main .card > .card-body { padding: 16px 18px; }
+.rec-main .grid-2 { gap: 14px; }
+
+/* Label/value lists inside sections — the pages' own inline-styled
+   <dl>s and the .rec-dl class: hairline rows, labels muted. */
+.rec-main dl[style*="grid-template-columns"],
+.rec-dl {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr) !important;
+    gap: 0 !important;
+    margin: 0;
+}
+.rec-main dl[style*="grid-template-columns"] > dt,
+.rec-main dl[style*="grid-template-columns"] > dd,
+.rec-dl > dt,
+.rec-dl > dd {
+    margin: 0;
+    padding: 7px 0;
+    border-bottom: 1px dashed color-mix(in srgb, var(--border-color) 85%, transparent);
+    font-size: 13px;
+}
+.rec-main dl[style*="grid-template-columns"] > dt,
+.rec-dl > dt { padding-right: 20px; color: var(--text-tertiary); font-size: 12.5px; }
+.rec-main dl[style*="grid-template-columns"] > dd,
+.rec-dl > dd { color: var(--text-primary); min-width: 0; overflow-wrap: anywhere; }
+.rec-main dl[style*="grid-template-columns"] > :nth-last-child(-n+2),
+.rec-dl > :nth-last-child(-n+2) { border-bottom: 0; }
+
+/* ── Rail cards (lib/Ui/RecordUi.php) ───────────────────────── */
+.rec-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    background: var(--bg-surface);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
+    padding: 14px 16px;
+    min-width: 0;
+}
+.rec-card--accent {
+    background:
+        radial-gradient(260px 120px at 100% 0%, color-mix(in srgb, var(--acc, var(--color-primary)) 12%, transparent), transparent 70%),
+        var(--bg-surface);
+}
+.rec-card--danger { border-color: color-mix(in srgb, var(--color-danger) 40%, var(--border-color)); }
+.rec-card--warning { border-color: color-mix(in srgb, var(--color-warning) 40%, var(--border-color)); }
+.rec-card-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+.rec-card-ic {
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    color: var(--acc, var(--color-primary));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 14%, transparent);
+}
+.rec-card-ic svg { width: 14px; height: 14px; }
+.rec-card-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+.rec-card-link { font-size: 12px; font-weight: 600; color: var(--color-primary); text-decoration: none; white-space: nowrap; }
+.rec-card-link:hover { text-decoration: underline; }
+.rec-card-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-color); font-size: 11.5px; color: var(--text-tertiary); }
+
+/* The headline number of a rail card. */
+.rec-big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 2px 0 10px; }
+.rec-big b { font-family: var(--font-mono); font-size: 22px; font-weight: 650; letter-spacing: -0.02em; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.rec-big span { font-size: 12px; color: var(--text-secondary); }
+
+/* Key/value rows */
+.rec-kv { margin: 0; display: flex; flex-direction: column; }
+.rec-kv > div {
+    display: grid;
+    grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
+    gap: 12px;
+    align-items: baseline;
+    padding: 6px 0;
+    border-bottom: 1px dashed color-mix(in srgb, var(--border-color) 85%, transparent);
+}
+.rec-kv > div:last-child { border-bottom: 0; }
+.rec-kv dt { margin: 0; font-size: 12px; color: var(--text-tertiary); }
+.rec-kv dd { margin: 0; font-size: 13px; color: var(--text-primary); text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.rec-kv dd a { color: var(--color-primary); text-decoration: none; font-weight: 600; }
+.rec-kv dd a:hover { text-decoration: underline; }
+.rec-kv .mono, .rec-kv dd.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Meter: a labelled progress bar */
+.rec-meter { margin: 4px 0 10px; }
+.rec-meter:last-child { margin-bottom: 0; }
+.rec-meter-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; font-size: 12px; color: var(--text-secondary); }
+.rec-meter-row b { color: var(--text-primary); font-weight: 650; font-variant-numeric: tabular-nums; }
+.rec-meter-track { height: 7px; border-radius: 999px; background: var(--bg-surface-2); overflow: hidden; }
+.rec-meter-fill { height: 100%; border-radius: inherit; background: var(--color-success); min-width: 2px; }
+.rec-meter--warn .rec-meter-fill { background: var(--color-warning); }
+.rec-meter--danger .rec-meter-fill { background: var(--color-danger); }
+.rec-meter--info .rec-meter-fill { background: var(--acc, var(--color-primary)); }
+.rec-meter-sub { margin-top: 5px; font-size: 11.5px; color: var(--text-tertiary); }
+
+/* Alerts: what needs doing on this record */
+.rec-alerts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rec-alerts li {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 9px 10px;
+    border-radius: 10px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--rec-tone, var(--color-info)) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--rec-tone, var(--color-info)) 26%, transparent);
+}
+.rec-alerts li::before {
+    content: "";
+    flex: 0 0 auto;
+    width: 7px;
+    height: 7px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: var(--rec-tone, var(--color-info));
+    box-shadow: 0 0 8px var(--rec-tone, var(--color-info));
+}
+.rec-alerts li.is-danger  { --rec-tone: var(--color-danger); }
+.rec-alerts li.is-warning { --rec-tone: var(--color-warning); }
+.rec-alerts li.is-success { --rec-tone: var(--color-success); }
+.rec-alerts li a { color: inherit; font-weight: 650; }
+.rec-alerts-ok { font-size: 12.5px; color: var(--text-secondary); display: flex; gap: 8px; align-items: center; }
+.rec-alerts-ok::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); }
+
+/* Link list: related records / quick actions */
+.rec-links { display: flex; flex-direction: column; gap: 4px; }
+.rec-links > a,
+.rec-links > button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 550;
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+}
+.rec-links > a:hover,
+.rec-links > button:hover {
+    border-color: color-mix(in srgb, var(--acc, var(--color-primary)) 50%, var(--border-color));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 7%, transparent);
+}
+.rec-links svg { width: 15px; height: 15px; color: var(--acc, var(--color-primary)); flex: 0 0 auto; }
+.rec-links small { margin-left: auto; font-size: 11.5px; color: var(--text-tertiary); font-weight: 500; }
+.rec-links--grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* A related record (customer / unit / lease) as a mini profile */
+.rec-entity { display: flex; gap: 12px; align-items: center; text-decoration: none; color: inherit; }
+.rec-entity-av {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 11px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--acc, var(--color-primary));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 14%, transparent);
+}
+.rec-entity-av svg { width: 18px; height: 18px; }
+.rec-entity-name { font-size: 14px; font-weight: 650; color: var(--text-primary); line-height: 1.25; }
+.rec-entity-sub { font-size: 12px; color: var(--text-secondary); }
+a.rec-entity:hover .rec-entity-name { color: var(--color-primary); }
+
+/* ── Unit Payoff tab (S-PAYOFF-ONE-PAGE, equipment/show.php) ─── */
+.po-assetbar {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+    margin-bottom: 14px; padding: 10px 14px;
+    border: 1px dashed var(--border-color-strong); border-radius: var(--radius-xl);
+}
+.po-assetbar-id { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.po-asset-no { font-weight: 650; color: var(--text-primary); }
+.po-acq { font-size: 12px; }
+.po-eyebrow { font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--text-tertiary); }
+.po { display: flex; flex-direction: column; gap: 14px; }
+.po-hero {
+    display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 20px; align-items: center;
+    padding: 20px 22px;
+    border: 1px solid var(--border-color); border-radius: var(--radius-xl);
+    background:
+        radial-gradient(420px 200px at 0% 0%, color-mix(in srgb, var(--acc, var(--color-success)) 14%, transparent), transparent 70%),
+        var(--bg-surface);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
+}
+.po-pct { font-family: var(--font-mono); font-size: 44px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; color: var(--text-primary); }
+.po-pct small { font-size: 22px; color: var(--text-secondary); margin-left: 2px; }
+.po-bar { height: 12px; margin: 10px 0 6px; border-radius: 999px; background: var(--bg-surface-2); overflow: hidden; }
+.po-bar-fill { height: 100%; border-radius: inherit; min-width: 3px; transition: width .4s ease; }
+.po-bar-scale { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--text-secondary); }
+.po-bar-scale b { color: var(--text-primary); font-weight: 650; }
+.po-hero-side { padding-left: 20px; border-left: 1px solid var(--border-color); }
+.po-big { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); margin: 2px 0 6px; }
+.po-when { font-size: 13px; line-height: 1.5; color: var(--text-primary); }
+.po-done b { display: block; font-size: 20px; color: var(--color-success); }
+.po-done span { font-size: 13px; color: var(--text-secondary); }
+.po-chips { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.po-chip {
+    display: flex; flex-direction: column; gap: 3px; padding: 10px 12px;
+    border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-surface);
+}
+.po-chip span { font-size: 11px; color: var(--text-tertiary); }
+.po-chip b { font-size: 15px; font-weight: 650; color: var(--text-primary); }
+.po-scen { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.po-scen-card {
+    display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; min-width: 0;
+    border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-surface);
+    font: inherit; color: inherit; text-align: left; cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+}
+button.po-scen-card:hover { border-color: var(--border-color-strong); }
+.po-scen-card.is-active {
+    border-color: var(--acc, var(--color-primary));
+    background: color-mix(in srgb, var(--acc, var(--color-primary)) 8%, var(--bg-surface));
+}
+.po-scen-basis { font-size: 11.5px; color: var(--text-secondary); }
+.po-scen-card b { font-size: 16px; font-weight: 650; color: var(--text-primary); margin-top: 2px; }
+.po-scen-out { font-size: 12px; color: var(--text-secondary); }
+.po-whatif { cursor: default; gap: 6px; }
+.po-field { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.po-field span { font-size: 11px; color: var(--text-tertiary); }
+.po-whatif-actions { display: flex; gap: 6px; margin-top: 2px; }
+.po-charts { gap: 14px; }
+.po-charts .card-header { gap: 10px; }
+.po-money { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; align-items: start; }
+.po-money .card { margin: 0; }
+.po-money .po-total td { font-weight: 700; border-top: 1px solid var(--border-color); }
+.po-empty { margin: 0; padding: 12px 18px; font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+@media (max-width: 1100px) {
+    .po-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .po-scen { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+    .po-hero { grid-template-columns: minmax(0, 1fr); }
+    .po-hero-side { padding-left: 0; border-left: 0; border-top: 1px solid var(--border-color); padding-top: 14px; }
+    .po-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── Live GPS badge (Samsara) ───────────────────────────────
+   Shared by the unit and lease pages. It was defined only in
+   equipment/show.php's own <style>, so the lease page's "Live GPS"
+   badge rendered unstyled. */
+.ff-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: .5rem;
+    padding: 3px 8px 3px 7px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--color-success) 13%, transparent);
+    color: var(--color-success-text, var(--color-success));
+    font-size: .7rem;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    line-height: 1;
+    vertical-align: middle;
+}
+.ff-live-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-success);
+    animation: ff-rec-live 2s infinite;
+}
+@keyframes ff-rec-live {
+    0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-success) 70%, transparent); }
+    70%  { box-shadow: 0 0 0 7px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .ff-live-dot { animation: none; } }
+
+/* ── Responsive ─────────────────────────────────────────────── */
+@media (max-width: 1180px) {
+    .rec-layout { grid-template-columns: minmax(0, 1fr); }
+    .rec-rail {
+        order: -1;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 12px;
+    }
+}
+@media (max-width: 760px) {
+    .rec-rail { grid-template-columns: minmax(0, 1fr); }
+    .tab-bar--sticky { position: static; }
+    .ff-hero--entity .ff-hero-actions { width: 100%; }
+}
+
+/* ── Print: content only ────────────────────────────────────── */
+@media print {
+    .rec-layout { display: block; }
+    .rec-rail, .rec-more, .tab-bar { display: none !important; }
+}

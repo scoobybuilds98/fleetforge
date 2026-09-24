@@ -5,7 +5,12 @@ declare(strict_types=1);
  * FleetForge — Lease Detail Page
  *
  * @file        app/admin/leases/show.php
- * @description Lease detail view. Server-side hero render (contract number, status,
+ * @description Lease detail view (S-RECORD-REDESIGN layout: the header holds
+ *              every status action — Activate / Close / Reopen / Edit /
+ *              Generate Invoice — with Email + AI + Delete in a More menu;
+ *              key-numbers strip: days on rent, billed through, next invoice,
+ *              outstanding, paid; sticky tabs; rail: needs attention, billing,
+ *              customer, unit). Server-side hero render (contract number, status,
  *              customer, unit). Multi-tab Alpine.js component: Overview (all fields),
  *              Amendments (AMEND-1 — full implementation with record-amendment modal,
  *              sourced from the lease_amendments table), Status Log (from lease.status_log),
@@ -42,6 +47,12 @@ $lease = db_row(
             l.daily_rate, l.weekly_rate, l.monthly_rate, l.currency,
             l.outstanding_balance, l.total_invoiced, l.total_paid, l.po_number,
             l.created_at, l.closed_at, l.created_by,
+            -- S-RECORD-REDESIGN: strip + rail (billing, readings, precharge, contact)
+            l.start_time, l.actual_return_date, l.next_billing_date, l.billing_cycle,
+            l.mileage_tracking_mode, l.odometer_start_km, l.precharge_enabled,
+            l.precharge_balance, l.precharge_refund_method, l.precharge_refund_settled_at,
+            c.email AS customer_email, c.phone AS customer_phone, c.contact_name AS customer_contact,
+            c.status AS customer_status,
             creator.name AS created_by_name,
             COALESCE(c.company_name, l.company_name_snapshot) AS customer_display_name,
             COALESCE(u.unit_number, l.unit_number_snapshot)   AS unit_display_number,
@@ -90,6 +101,35 @@ $lease['total_invoiced']      = $_leaseMoney['invoiced'] ?? '0.00';
 $lease['total_paid']          = $_leaseMoney['paid'] ?? '0.00';
 $lease['outstanding_balance'] = $_leaseMoney['outstanding'] ?? '0.00';
 
+// ── S-RECORD-REDESIGN: billing coverage + what needs doing ─────
+// Billed-through = LIVE invoice coverage (same definition as the leases list
+// and api/v1/leases/_focus.php), never leases.last_billed_date.
+$today = ff_today();
+$_cov = db_row(
+    "SELECT MAX(CASE WHEN status <> 'void' THEN billing_period_end END) AS billed_through,
+            SUM(CASE WHEN status IN ('sent','partially_paid','overdue') AND balance_due > 0 AND due_date < ? THEN 1 ELSE 0 END) AS overdue_cnt,
+            SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_cnt,
+            COUNT(*) AS invoice_cnt
+       FROM invoices
+      WHERE lease_id = ? AND deleted_at IS NULL",
+    [$today, $leaseId]
+) ?? [];
+$billedThrough = $_cov['billed_through'] ?? null;
+$leaseOverdue  = (int) ($_cov['overdue_cnt'] ?? 0);
+$leaseDrafts   = (int) ($_cov['draft_cnt'] ?? 0);
+$leaseInvoices = (int) ($_cov['invoice_cnt'] ?? 0);
+// Days on rent: start → actual return (closed) or today (active). Calendar
+// days, inclusive of the start day.
+$_rentEnd   = $lease['status'] === 'completed' ? ($lease['actual_return_date'] ?: $lease['end_date']) : $today;
+$daysOnRent = in_array($lease['status'], ['active', 'completed'], true) && $lease['start_date'] && $_rentEnd
+    ? max(0, (int) ((strtotime($_rentEnd) - strtotime($lease['start_date'])) / 86400) + 1)
+    : null;
+$billingBehind = $lease['status'] === 'active' && (!$billedThrough || $billedThrough < $today);
+$daysUnbilled  = $billingBehind
+    ? max(0, (int) ((strtotime($today) - strtotime($billedThrough ?: date('Y-m-d', strtotime($lease['start_date'] . ' -1 day')))) / 86400))
+    : 0;
+$pastEnd = $lease['status'] === 'active' && $lease['end_date'] && $lease['end_date'] < $today;
+
 /** Returns badge CSS class for a given lease status. */
 function leaseBadgeClass(string $status): string
 {
@@ -127,14 +167,7 @@ require_once FF_ROOT . '/includes/header.php';
             <?php endif; ?>
         </div>
 <?php $heroOwn = ob_get_clean(); ?>
-<?php ob_start(); ?>
-        <?= help_button('leases') ?>
-        <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_lease_<?= (int)$lease['id'] ?>_lease_summary_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:13px;height:13px;color:var(--color-primary);filter:drop-shadow(0 0 3px rgba(249,115,22,0.5));" aria-hidden="true"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
-            AI Analysis
-        </button>
-        <?php endif; ?>
+<?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
         <?php if (can('customers', 'create')): /* EMAIL-1: send lease confirmation email */ ?>
         <button type="button"
                 class="btn btn-secondary btn-sm"
@@ -149,11 +182,67 @@ require_once FF_ROOT . '/includes/header.php';
             Email Customer
         </button>
         <?php endif; ?>
-        <?php /* Edit button moved to the lease action row (next to Close /
-                 Generate Invoice) — see below. */ ?>
+        <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_lease_<?= (int)$lease['id'] ?>_lease_summary_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:13px;height:13px;color:var(--color-primary);filter:drop-shadow(0 0 3px rgba(249,115,22,0.5));" aria-hidden="true"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
+            AI Analysis
+        </button>
+        <?php endif; ?>
         <?php if (can('leases', 'delete') && $lease['status'] === 'pending'): ?>
         <button class="btn btn-danger btn-sm" onclick="FF_Confirm.ask('Delete this pending lease? This cannot be undone.').then(function(ok){if(!ok)return;FF_Api.post('<?= base_url('api/v1/leases/delete') ?>',{id:<?= $leaseId ?>}).then(function(r){if(r.success){window.location.href='<?= base_url('leases') ?>';}else{FF_Toast.error(r.error?.message||'Failed to delete');}});})">Delete</button>
         <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('leases') ?>
+        <?php if (can('leases', 'edit') && $lease['status'] === 'pending'): ?>
+        <button class="btn btn-primary btn-sm" @click="activate()" :disabled="actionInProgress">
+            <span x-show="!activating">Activate Lease</span>
+            <span x-show="activating">Activating…</span>
+        </button>
+        <?php endif; ?>
+
+        <?php if (can('leases', 'edit') && $lease['status'] === 'active'): ?>
+        <button class="btn btn-warning btn-sm" @click="openCloseModal()" :disabled="actionInProgress">
+            Close Lease
+        </button>
+        <?php endif; ?>
+
+        <?php /* S-LEASE-REOPEN-UI: surface the existing reopen endpoint (it had no
+                 button — the only way to correct a completed lease, e.g. a missed
+                 mileage line, was a raw API call). Manager-gated to match
+                 api/v1/leases/reopen.php's role check; the modal collects the
+                 required reopen_reason. Reopen flips completed → active so mileage
+                 mode + a re-close can recompute the final invoice. */
+           $canReopen = can('leases', 'edit')
+               && in_array(current_user()['role_slug'] ?? '', ['super_admin', 'manager'], true);
+        ?>
+        <?php if ($canReopen && $lease['status'] === 'completed'): ?>
+        <button class="btn btn-outline-warning btn-sm" @click="reopenModal.open = true" :disabled="actionInProgress">
+            Reopen Lease
+        </button>
+        <?php endif; ?>
+
+        <?php /* Edit lives here with the other lease actions (next to Close /
+                 Generate Invoice), not up in the header — easier to find when
+                 correcting a lease. Pending: full edit; active: distance/mileage-mode
+                 fields only (the path to flip a reopened lease to Manual). */ ?>
+        <?php if (can('leases', 'edit') && in_array($lease['status'], ['pending', 'active'], true)): ?>
+        <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary btn-sm">Edit Lease</a>
+        <?php endif; ?>
+
+        <?php /* S-INVOICE-CREATION-UX C3 (Issue 3): Generate Invoice
+                 navigates to /invoices/create?lease_id={id}; the form's
+                 init() (C2) reads the URL param and triggers onLeaseChange
+                 so the lease is pre-selected and period dates auto-filled.
+                 Permission gated by 'invoices', 'create' to match the
+                 create page's require_permission. Hidden for pending
+                 (no invoicing yet) and cancelled (won't bill). */ ?>
+        <?php if (can('invoices', 'create') && in_array($lease['status'], ['active', 'completed'], true)): ?>
+        <a href="<?= base_url('invoices/create') ?>?lease_id=<?= (int)$lease['id'] ?>"
+           class="btn btn-primary btn-sm">Generate Invoice</a>
+        <?php endif; ?>
+
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
 <?php $heroActions = ob_get_clean(); ?>
 <?php
 $heroFacts = [];
@@ -168,6 +257,12 @@ if (!empty($lease['po_number'])) {
     $heroFacts[] = \FleetForge\Sop\SopIcons::svg('document-text') . 'PO ' . e($lease['po_number']);
 }
 ?>
+<!-- ============================================================
+     LEASE DETAIL — Alpine component. Opens ABOVE the hero
+     (S-RECORD-REDESIGN): the status actions (Activate / Close / Reopen)
+     live in the header and call the component's methods.
+     ============================================================ -->
+<div x-data="FF_LeaseDetail()">
 <?= \FleetForge\Ui\ModuleHero::render([
     'entity'    => true,
     'accent'    => 'warning',
@@ -190,84 +285,75 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 ?>
 
 <!-- ============================================================
-     STATS ROW — server-rendered so tiles are always visible
-     across all tabs, not just Overview.
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN): how long it
+     has been out, how far it is billed, what's next, and (money roles)
+     what's owed. Replaces the Currency + AI tiles (currency is in the
+     header facts; AI is in the More menu).
      ============================================================ -->
-<!-- TILES-2: lease-level financial tiles now drill to invoices / payments
-     filtered by this specific lease. Currency tile remains display-only. -->
-<div class="stat-grid ff-stats" style="margin-bottom:24px;">
+<div class="stat-grid ff-stats">
 
-    <?php /* L03: AR/payment-outcome tiles are hidden from roles without
-             payments:view (dispatchers). Contract rates stay visible — the same
-             role holds leases:create+edit and sets them. */ ?>
+    <button type="button" class="stat-card stat-card--blue" @click="tab = 'overview'" title="Lease dates">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label"><?= $lease['status'] === 'pending' ? 'Starts' : 'Days on rent' ?></div>
+        <?php if ($lease['status'] === 'pending'): ?>
+        <div class="stat-value"><?= e(format_date($lease['start_date'])) ?></div>
+        <div class="stat-delta"><?= $lease['start_date'] < $today ? '<span class="text-danger">activation is late</span>' : 'awaiting activation' ?></div>
+        <?php else: ?>
+        <div class="stat-value font-mono"><?= $daysOnRent !== null ? number_format($daysOnRent) : '—' ?></div>
+        <div class="stat-delta">since <?= e(format_date($lease['start_date'])) ?></div>
+        <?php endif; ?>
+    </button>
+
+    <button type="button" class="stat-card <?= $billingBehind ? 'stat-card--red' : 'stat-card--green' ?>"
+            @click="tab = 'invoices'; loadInvoices()" title="How far this lease has been invoiced">
+        <span class="stat-icon <?= $billingBehind ? 'stat-icon--red' : 'stat-icon--green' ?>"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Billed through</div>
+        <div class="stat-value"><?= $billedThrough ? e(format_date($billedThrough)) : 'Not billed' ?></div>
+        <div class="stat-delta"><?php
+            if ($billingBehind) {
+                echo '<span class="text-danger">' . $daysUnbilled . ' day' . ($daysUnbilled === 1 ? '' : 's') . ' unbilled</span>';
+            } else {
+                echo $leaseInvoices . ' invoice' . ($leaseInvoices === 1 ? '' : 's') . ($leaseDrafts > 0 ? ' · ' . $leaseDrafts . ' draft' : '');
+            }
+        ?></div>
+    </button>
+
+    <div class="stat-card stat-card--purple" title="When the next invoice is due to be generated">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-arrow-trending-up"/></svg></span>
+        <div class="stat-label">Next invoice</div>
+        <div class="stat-value"><?php
+            if (!in_array($lease['status'], ['active', 'pending'], true)) {
+                echo '—';
+            } elseif (($lease['billing_cycle'] ?? '') === 'on_close_only') {
+                echo 'At close';
+            } else {
+                echo $lease['next_billing_date'] ? e(format_date($lease['next_billing_date'])) : '—';
+            }
+        ?></div>
+        <div class="stat-delta"><?= ($lease['billing_cycle'] ?? '') === 'on_close_only' ? 'billed when it closes' : 'monthly billing' ?></div>
+    </div>
+
     <?php if (can_view_financials()): ?>
-    <a class="stat-card stat-card--blue"
-       href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View all invoices for this lease">
-        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-document-text"/></svg></span>
-        <div class="stat-label">Total Invoiced</div>
-        <div class="stat-value currency"><?= e(format_currency($lease['total_invoiced'] ?? 0)) ?></div>
+    <a class="stat-card <?= $leaseOverdue > 0 ? 'stat-card--red' : 'stat-card--amber' ?>"
+       href="<?= base_url('invoices') ?>?lease_id=<?= (int) $lease['id'] ?>&status=outstanding"
+       title="Unpaid invoices on this lease">
+        <span class="stat-icon <?= $leaseOverdue > 0 ? 'stat-icon--red' : 'stat-icon--amber' ?>"><svg><use href="#icon-exclamation-triangle"/></svg></span>
+        <div class="stat-label">Outstanding</div>
+        <div class="stat-value currency"<?= $leaseOverdue > 0 ? ' style="color:var(--color-danger);"' : '' ?>><?= e(format_currency($lease['outstanding_balance'] ?? 0)) ?></div>
+        <div class="stat-delta"><?= $leaseOverdue > 0 ? $leaseOverdue . ' overdue' : e($lease['currency']) ?></div>
     </a>
 
     <a class="stat-card stat-card--green"
-       href="<?= base_url('payments') ?>?lease_id=<?= (int)$lease['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View all payments against this lease">
+       href="<?= base_url('payments') ?>?lease_id=<?= (int) $lease['id'] ?>"
+       title="Payments against this lease">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
-        <div class="stat-label">Total Paid</div>
+        <div class="stat-label">Paid</div>
         <div class="stat-value currency"><?= e(format_currency($lease['total_paid'] ?? 0)) ?></div>
+        <div class="stat-delta">of <?= e(format_currency($lease['total_invoiced'] ?? 0)) ?> invoiced</div>
     </a>
-
-    <a class="stat-card<?= (float)($lease['outstanding_balance'] ?? 0) > 0 ? ' stat-card--danger' : '' ?>"
-       href="<?= base_url('invoices') ?>?lease_id=<?= (int)$lease['id'] ?>&status=outstanding"
-       style="cursor:pointer;text-decoration:none"
-       title="View outstanding invoices for this lease">
-        <span class="stat-icon stat-icon--<?= bccomp((string) ($lease['outstanding_balance'] ?? '0'), '0', 2) > 0 ? 'red' : 'slate' ?>"><svg><use href="#icon-exclamation-triangle"/></svg></span>
-        <div class="stat-label">Outstanding</div>
-        <div class="stat-value currency"><?= e(format_currency($lease['outstanding_balance'] ?? 0)) ?></div>
-    </a>
-    <?php endif; ?>
-
-    <!-- Currency is metadata, not a drill target — stays display-only -->
-    <div class="stat-card stat-card--slate">
-        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-currency-dollar"/></svg></span>
-        <div class="stat-label">Currency</div>
-        <div class="stat-value"><?= e($lease['currency']) ?></div>
-    </div>
-
-    <?php
-    $_aiCachedLease = db_row(
-        "SELECT generated_at FROM ai_summaries
-         WHERE entity_type = 'lease' AND entity_id = ? AND summary_type = 'lease_summary' AND is_current = 1
-         LIMIT 1",
-        [$lease['id']]
-    );
-    if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
-    <div class="stat-card stat-card--orange"
-         style="cursor:pointer;"
-         onclick="aiPanel_lease_<?= (int)$lease['id'] ?>_lease_summary_open()"
-         title="Open AI Lease Summary">
-        <span class="stat-icon stat-icon--orange">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:18px;height:18px;"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
-        </span>
-        <div class="stat-label">AI Analysis</div>
-        <?php if ($_aiCachedLease): ?>
-        <div class="stat-value" style="font-size:0.9rem;font-weight:600;">Available</div>
-        <div class="stat-delta text-secondary"><?= e(format_datetime($_aiCachedLease['generated_at'], 'M j, Y')) /* UTC DATETIME → local day (S-LOCAL-DAY-TS) */ ?></div>
-        <?php else: ?>
-        <div class="stat-value text-secondary" style="font-size:0.875rem;">Not run yet</div>
-        <div class="stat-delta" style="color:var(--color-primary);font-weight:500;">Click to generate →</div>
-        <?php endif; ?>
-    </div>
     <?php endif; ?>
 
 </div>
-
-<!-- ============================================================
-     LEASE DETAIL — Alpine component
-     ============================================================ -->
-<div x-data="FF_LeaseDetail()">
 
     <!-- ── S-LEASE-MILEAGE: starting-odometer banner ──────────────
          High-visibility prompt shown at the top of every active lease
@@ -294,71 +380,23 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         </div>
     </template>
 
-    <!-- ── Action buttons (status-driven) ─────────────────────── -->
-    <?php if (can('leases', 'edit') || (can('invoices', 'create') && in_array($lease['status'], ['active', 'completed'], true))): ?>
-    <div class="d-flex gap-2" style="margin-bottom:1.5rem;">
+    <!-- Status action errors (the actions themselves live in the header) -->
+    <template x-if="actionError">
+        <div class="alert alert-danger" style="margin-bottom:12px;" x-text="actionError"></div>
+    </template>
 
-        <?php if (can('leases', 'edit') && $lease['status'] === 'pending'): ?>
-        <button class="btn btn-primary" @click="activate()" :disabled="actionInProgress">
-            <span x-show="!activating">Activate Lease</span>
-            <span x-show="activating">Activating…</span>
-        </button>
-        <?php endif; ?>
-
-        <?php if (can('leases', 'edit') && $lease['status'] === 'active'): ?>
-        <button class="btn btn-warning" @click="openCloseModal()" :disabled="actionInProgress">
-            Close Lease
-        </button>
-        <?php endif; ?>
-
-        <?php /* S-LEASE-REOPEN-UI: surface the existing reopen endpoint (it had no
-                 button — the only way to correct a completed lease, e.g. a missed
-                 mileage line, was a raw API call). Manager-gated to match
-                 api/v1/leases/reopen.php's role check; the modal collects the
-                 required reopen_reason. Reopen flips completed → active so mileage
-                 mode + a re-close can recompute the final invoice. */
-           $canReopen = can('leases', 'edit')
-               && in_array(current_user()['role_slug'] ?? '', ['super_admin', 'manager'], true);
-        ?>
-        <?php if ($canReopen && $lease['status'] === 'completed'): ?>
-        <button class="btn btn-outline-warning" @click="reopenModal.open = true" :disabled="actionInProgress">
-            Reopen Lease
-        </button>
-        <?php endif; ?>
-
-        <?php /* Edit lives here with the other lease actions (next to Close /
-                 Generate Invoice), not up in the header — easier to find when
-                 correcting a lease. Pending: full edit; active: distance/mileage-mode
-                 fields only (the path to flip a reopened lease to Manual). */ ?>
-        <?php if (can('leases', 'edit') && in_array($lease['status'], ['pending', 'active'], true)): ?>
-        <a href="<?= base_url('leases/edit') ?>?id=<?= $leaseId ?>" class="btn btn-secondary">Edit Lease</a>
-        <?php endif; ?>
-
-        <?php /* S-INVOICE-CREATION-UX C3 (Issue 3): Generate Invoice
-                 navigates to /invoices/create?lease_id={id}; the form's
-                 init() (C2) reads the URL param and triggers onLeaseChange
-                 so the lease is pre-selected and period dates auto-filled.
-                 Permission gated by 'invoices', 'create' to match the
-                 create page's require_permission. Hidden for pending
-                 (no invoicing yet) and cancelled (won't bill). */ ?>
-        <?php if (can('invoices', 'create') && in_array($lease['status'], ['active', 'completed'], true)): ?>
-        <a href="<?= base_url('invoices/create') ?>?lease_id=<?= (int)$lease['id'] ?>"
-           class="btn btn-primary">Generate Invoice</a>
-        <?php endif; ?>
-
-        <template x-if="actionError">
-            <div class="badge badge-danger badge-no-dot" style="padding:0.5rem 1rem;" x-text="actionError"></div>
-        </template>
-
-    </div>
-    <?php endif; ?>
-
-    <!-- ── TABS ──────────────────────────────────────────────────── -->
-    <div class="tab-bar" role="tablist">
+    <!-- ── TABS (S-RECORD-REDESIGN) — full width above the main column +
+         rail, every tab visible (operator: no "More"), sticky under the
+         topbar. The empty .tab-anchor marks its un-stuck spot for
+         FF_TabHash.onSwitchKeep. -->
+    <div class="tab-anchor" aria-hidden="true"></div>
+    <div class="tab-bar tab-bar--sticky" role="tablist" x-ref="tabBar">
         <button class="tab-btn" :class="{ 'is-active': tab === 'overview' }"
                 @click="tab = 'overview'" :aria-selected="tab === 'overview'" role="tab">Overview</button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'invoices' }"
-                @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices</button>
+                @click="tab = 'invoices'; loadInvoices()" :aria-selected="tab === 'invoices'" role="tab">Invoices
+            <?php if ($leaseInvoices > 0): ?><span class="tab-badge"><?= $leaseInvoices ?></span><?php endif; ?>
+        </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'documents' }"
                 @click="tab = 'documents'; loadDocuments()" :aria-selected="tab === 'documents'" role="tab">Documents
             <span class="tab-badge" x-show="documents.length > 0" x-text="documents.length"></span>
@@ -374,7 +412,7 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <button class="tab-btn" :class="{ 'is-active': tab === 'amendments' }"
                 @click="tab = 'amendments'; loadAmendments()" :aria-selected="tab === 'amendments'" role="tab">
             Amendments
-            <span class="tab-count" x-show="amendments.length > 0" x-text="amendments.length"></span>
+            <span class="tab-badge" x-show="amendments.length > 0" x-text="amendments.length"></span>
         </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'damage_claims' }"
                 @click="tab = 'damage_claims'; loadDamageClaims()" :aria-selected="tab === 'damage_claims'" role="tab">Damage Claims</button>
@@ -383,6 +421,9 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         <button class="tab-btn" :class="{ 'is-active': tab === 'activity' }"
                 @click="tab = 'activity'" :aria-selected="tab === 'activity'" role="tab">Activity</button>
     </div>
+
+    <div class="rec-layout">
+    <div class="rec-main">
 
     <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
     <template x-if="tab === 'overview'">
@@ -2050,6 +2091,98 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         </div>
     </div><!-- /activity tab -->
 
+    </div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the lease at a glance ─────────
+$canMoneyL = can_view_financials();
+$railL     = [];
+
+// 1. Needs attention.
+$alertsL = [];
+if ($lease['status'] === 'pending' && $lease['start_date'] && $lease['start_date'] < $today) {
+    $alertsL[] = ['warning', 'The start date has passed — <b>activate</b> the lease when the unit leaves.'];
+}
+if ($pastEnd) {
+    $alertsL[] = ['danger', 'Past its end date (' . e(format_date($lease['end_date'])) . ') and still active — close it when the unit is back.'];
+}
+if ($billingBehind) {
+    $alertsL[] = ['danger', '<a href="#invoices" @click.prevent="tab = \'invoices\'; loadInvoices()">Billing is behind</a> — ' . $daysUnbilled . ' day' . ($daysUnbilled === 1 ? '' : 's') . ' not invoiced yet.'];
+}
+if ($lease['status'] === 'active' && ($lease['mileage_tracking_mode'] ?? 'off') !== 'off' && $lease['odometer_start_km'] === null) {
+    $alertsL[] = ['warning', 'No starting odometer — mileage can\'t be billed until one is entered (Overview → Odometer &amp; Distance).'];
+}
+if ($leaseOverdue > 0) {
+    $alertsL[] = ['danger', '<a href="#invoices" @click.prevent="tab = \'invoices\'; loadInvoices()">' . $leaseOverdue . ' overdue invoice' . ($leaseOverdue === 1 ? '' : 's') . '</a> on this lease.'];
+}
+if ($leaseDrafts > 0) {
+    $alertsL[] = ['info', '<a href="#invoices" @click.prevent="tab = \'invoices\'; loadInvoices()">' . $leaseDrafts . ' draft invoice' . ($leaseDrafts === 1 ? '' : 's') . '</a> to review and send.'];
+}
+if ($lease['status'] === 'completed' && ($lease['precharge_refund_method'] ?? '') === 'cash' && empty($lease['precharge_refund_settled_at'])) {
+    $alertsL[] = ['warning', 'A precharge <b>cash refund</b> is not marked settled yet.'];
+}
+if (in_array($lease['customer_status'] ?? '', ['credit_hold', 'suspended'], true)) {
+    $alertsL[] = ['warning', 'The customer is on <b>' . e(str_replace('_', ' ', (string) $lease['customer_status'])) . '</b>.'];
+}
+$railL[] = \FleetForge\Ui\RecordUi::card('Needs attention', \FleetForge\Ui\RecordUi::alerts($alertsL, 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Billing.
+$billBody = '';
+if ($canMoneyL && bccomp((string) $lease['total_invoiced'], '0', 2) > 0) {
+    $paidPct = (float) bcmul(bcdiv((string) $lease['total_paid'], (string) $lease['total_invoiced'], 6), '100', 2);
+    $billBody .= \FleetForge\Ui\RecordUi::meter('Paid', e(round($paidPct)) . '%', $paidPct, $paidPct >= 99.99 ? 'ok' : ($leaseOverdue > 0 ? 'danger' : 'info'),
+        e(format_currency($lease['total_paid'])) . ' of ' . e(format_currency($lease['total_invoiced'])) . ' ' . e($lease['currency']));
+}
+$rateLine = null;
+foreach ([['monthly_rate', 'month'], ['weekly_rate', 'week'], ['daily_rate', 'day']] as [$rk, $rl]) {
+    if (bccomp((string) ($lease[$rk] ?? '0'), '0', 2) > 0) { $rateLine = e(format_currency($lease[$rk])) . ' / ' . $rl; break; }
+}
+$billBody .= \FleetForge\Ui\RecordUi::kv([
+    ['Rate', $rateLine, 'mono'],
+    ['Cycle', ($lease['billing_cycle'] ?? '') === 'on_close_only' ? 'On close only' : 'Monthly'],
+    ['Billed through', $billedThrough ? e(format_date($billedThrough)) : 'Not billed yet'],
+    ['Next invoice', in_array($lease['status'], ['active', 'pending'], true) && ($lease['billing_cycle'] ?? '') !== 'on_close_only' && $lease['next_billing_date'] ? e(format_date($lease['next_billing_date'])) : null],
+    ['Precharge', !empty($lease['precharge_enabled']) && $canMoneyL ? e(format_currency($lease['precharge_balance'] ?? '0')) . ' left' : null, 'mono'],
+    ['PO', !empty($lease['po_number']) ? e($lease['po_number']) : null],
+]);
+$billLink = (can('invoices', 'create') && in_array($lease['status'], ['active', 'completed'], true))
+    ? ['Generate invoice', base_url('invoices/create') . '?lease_id=' . (int) $lease['id']] : null;
+$railL[] = \FleetForge\Ui\RecordUi::card('Billing', $billBody, ['icon' => 'banknotes', 'class' => 'rec-card--accent'] + ($billLink ? ['link' => $billLink] : []));
+
+// 3. Customer.
+$custBody = \FleetForge\Ui\RecordUi::entity(
+    (string) $lease['customer_display_name'],
+    base_url('customers/show') . '?id=' . (int) $lease['customer_id'],
+    !empty($lease['customer_contact']) ? e($lease['customer_contact']) : '',
+    \FleetForge\Ui\ModuleHero::initials((string) $lease['customer_display_name'])
+);
+$custKv = \FleetForge\Ui\RecordUi::kv([
+    ['Email', !empty($lease['customer_email']) ? '<a href="mailto:' . e($lease['customer_email']) . '">' . e($lease['customer_email']) . '</a>' : null],
+    ['Phone', !empty($lease['customer_phone']) ? '<a href="tel:' . e(preg_replace('/[^0-9+]/', '', (string) $lease['customer_phone'])) . '">' . e($lease['customer_phone']) . '</a>' : null],
+]);
+$railL[] = \FleetForge\Ui\RecordUi::card('Customer', $custBody . ($custKv !== '' ? '<div style="margin-top:10px;">' . $custKv . '</div>' : ''), ['icon' => 'user-group']);
+
+// 4. Unit.
+if (!empty($lease['equipment_unit_id'])) {
+    $unitStatus = (string) ($lease['unit_current_status'] ?? '');
+    $railL[] = \FleetForge\Ui\RecordUi::card('Unit', \FleetForge\Ui\RecordUi::entity(
+        'Unit ' . (string) $lease['unit_display_number'],
+        base_url('equipment/show') . '?id=' . (int) $lease['equipment_unit_id'],
+        e((string) ($lease['template_name_snapshot'] ?? '')) . ($unitStatus !== '' ? ' · ' . e(str_replace('_', ' ', $unitStatus)) : ''),
+        '',
+        'truck'
+    ), ['icon' => 'truck']);
+}
+?>
+    <aside class="rec-rail" aria-label="Lease at a glance">
+        <?= implode("\n        ", $railL) ?>
+        <p class="text-secondary" style="margin:0 4px;font-size:11.5px;line-height:1.5;">
+            Created <?= e(format_datetime($lease['created_at'])) ?><?= !empty($lease['created_by_name']) ? ' by ' . e($lease['created_by_name']) : '' ?>
+            <?php if (!empty($lease['closed_at'])): ?><br>Closed <?= e(format_datetime($lease['closed_at'])) ?><?php endif; ?>
+        </p>
+    </aside>
+    </div><!-- /rec-layout -->
+
 </div><!-- /x-data -->
 
 <script>
@@ -2229,7 +2362,8 @@ function FF_LeaseDetail() {
             // $watch handles hash write + scroll only; lazy-loading is in @click.
             let _prevTab = _initTab;
             this.$watch('tab', (tab) => {
-                FF_TabHash.onSwitch(_prevTab, tab);
+                // Sticky tab bar: stay put instead of jumping to the top.
+                FF_TabHash.onSwitchKeep(_prevTab, tab, this.$refs.tabBar);
                 _prevTab = tab;
             });
         },

@@ -5,8 +5,11 @@ declare(strict_types=1);
  * FleetForge — Customer Profile Page
  *
  * @file        app/admin/customers/show.php
- * @description Customer profile page. Header shows key summary (name, status,
- *              risk, tags). Body has tabs: Overview, Notes, Leases, Invoices,
+ * @description Customer profile page (S-RECORD-REDESIGN layout: compact
+ *              header with a More menu, key-numbers strip, sticky tabs, and a
+ *              rail — account health, needs attention, contact, quick
+ *              actions). Header shows key summary (name, status,
+ *              risk, tags). Body has tabs: Overview, Notes, Leases, Invoices, Payments,
  *              Damage Claims, Mileage Logs, Rates (customer-specific rate cards),
  *              Documents (uploaded files via polymorphic documents table).
  *              All tabs lazy-load on first activation. Rates tab lists this
@@ -112,6 +115,71 @@ $riskBadgeClass = match($customer['risk_score']) {
 // profile page leaked AR/credit data the API layer already hid.
 $canSeeMoney = can_view_financials();
 
+// ── S-RECORD-REDESIGN: what the page's rail + strip show ───────
+// Account health (overdue, oldest unpaid, last payment) and the
+// "needs attention" list. Business dates compare against the company-local
+// day (ff_today()), never SQL CURDATE() (the UTC day).
+$today = ff_today();
+$acct  = db_row(
+    "SELECT SUM(CASE WHEN status IN ('sent','partially_paid','overdue') AND balance_due > 0 AND due_date < ? THEN 1 ELSE 0 END) AS overdue_cnt,
+            COALESCE(SUM(CASE WHEN status IN ('sent','partially_paid','overdue') AND balance_due > 0 AND due_date < ? THEN balance_due ELSE 0 END), 0) AS overdue_amt,
+            SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_cnt,
+            MIN(CASE WHEN status IN ('sent','partially_paid','overdue') AND balance_due > 0 THEN due_date END) AS oldest_due
+       FROM invoices
+      WHERE customer_id = ? AND deleted_at IS NULL",
+    [$today, $today, $customerId]
+) ?? [];
+$overdueCnt = (int) ($acct['overdue_cnt'] ?? 0);
+$overdueAmt = (string) ($acct['overdue_amt'] ?? '0');
+$draftCnt   = (int) ($acct['draft_cnt'] ?? 0);
+$oldestDue  = $acct['oldest_due'] ?? null;
+$lastPayment = $canSeeMoney ? db_row(
+    "SELECT id, payment_number, payment_date, amount, currency
+       FROM payments
+      WHERE customer_id = ? AND deleted_at IS NULL AND status IN ('pending','cleared')
+      ORDER BY payment_date DESC, id DESC
+      LIMIT 1",
+    [$customerId]
+) : null;
+$leaseWatch = db_row(
+    "SELECT SUM(CASE WHEN status = 'active' AND end_date IS NOT NULL AND end_date <= ? THEN 1 ELSE 0 END) AS ending,
+            SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending
+       FROM leases
+      WHERE customer_id = ? AND deleted_at IS NULL",
+    [date('Y-m-d', strtotime($today . ' +30 days')), $customerId]
+) ?? [];
+$openClaims = db_count(
+    "SELECT COUNT(*) FROM damage_claims WHERE customer_id = ? AND deleted_at IS NULL AND status NOT IN ('resolved','written_off')",
+    [$customerId]
+);
+$appsToReview = db_count(
+    "SELECT COUNT(*) FROM customer_credit_applications WHERE customer_id = ? AND deleted_at IS NULL AND status = 'submitted'",
+    [$customerId]
+);
+$expiringDocs = db_count(
+    "SELECT COUNT(*) FROM documents
+      WHERE entity_type = 'customer' AND entity_id = ? AND deleted_at IS NULL
+        AND expiration_date IS NOT NULL AND expiration_date <= ?",
+    [$customerId, date('Y-m-d', strtotime($today . ' +30 days'))]
+);
+// What the customer has on rent right now (overview's first card).
+$onRent = db_select(
+    "SELECT l.id, l.contract_number, l.start_date, l.end_date, l.daily_rate, l.weekly_rate, l.monthly_rate,
+            l.currency, l.template_name_snapshot,
+            COALESCE(u.unit_number, l.unit_number_snapshot) AS unit_number, u.id AS unit_id
+       FROM leases l
+       LEFT JOIN equipment_units u ON u.id = l.equipment_unit_id AND u.deleted_at IS NULL
+      WHERE l.customer_id = ? AND l.status = 'active' AND l.deleted_at IS NULL
+      ORDER BY l.start_date DESC
+      LIMIT 8",
+    [$customerId]
+);
+$paymentsCount = $canSeeMoney
+    ? db_count("SELECT COUNT(*) FROM payments WHERE customer_id = ? AND deleted_at IS NULL", [$customerId])
+    : 0;
+$creditLimit = (string) ($customer['credit_limit'] ?? '0');
+$outstanding = (string) ($customer['outstanding_balance'] ?? '0');
+
 $pageTitle      = $customer['company_name'];
 $helpModuleSlug = 'customers';
 require_once FF_ROOT . '/includes/header.php';
@@ -168,14 +236,28 @@ require_once FF_ROOT . '/includes/header.php';
             </a>
             <?php endif; ?>
 <?php $heroBadges = ob_get_clean(); ?>
-<?php ob_start(); ?>
-        <?= help_button('customers') ?>
+<?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm" onclick="aiPanel_customer_<?= (int)$customer['id'] ?>_customer_insights_open()" title="Open AI Analysis panel" style="display:inline-flex;align-items:center;gap:6px;">
             <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:13px;height:13px;color:var(--color-primary);filter:drop-shadow(0 0 3px rgba(249,115,22,0.5));" aria-hidden="true"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
             AI Analysis
         </button>
         <?php endif; ?>
+        <?php if (can('customers', 'delete') && (int) $customer['active_lease_count'] === 0): ?>
+        <button class="btn btn-danger btn-sm"
+                onclick="FF_Confirm.show({
+                    title: 'Delete Customer',
+                    message: 'Delete <?= e(addslashes($customer['company_name'])) ?>? This cannot be undone.',
+                    confirmLabel: 'Delete',
+                    dangerMode: true,
+                    onConfirm: () => deleteCustomer(<?= $customerId ?>)
+                })">
+            Delete
+        </button>
+        <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('customers') ?>
         <?php if (can('customers', 'create')): /* EMAIL-1: send-email button */ ?>
         <button type="button"
                 class="btn btn-secondary btn-sm"
@@ -193,18 +275,7 @@ require_once FF_ROOT . '/includes/header.php';
         <a href="<?= base_url('customers/edit') ?>?id=<?= $customerId ?>"
            class="btn btn-secondary btn-sm">Edit</a>
         <?php endif; ?>
-        <?php if (can('customers', 'delete') && (int) $customer['active_lease_count'] === 0): ?>
-        <button class="btn btn-danger btn-sm"
-                onclick="FF_Confirm.show({
-                    title: 'Delete Customer',
-                    message: 'Delete <?= e(addslashes($customer['company_name'])) ?>? This cannot be undone.',
-                    confirmLabel: 'Delete',
-                    dangerMode: true,
-                    onConfirm: () => deleteCustomer(<?= $customerId ?>)
-                })">
-            Delete
-        </button>
-        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
 <?php $heroActions = ob_get_clean(); ?>
 <?php
 $heroFacts = [];
@@ -216,10 +287,7 @@ if ($heroPlace !== '') {
     $heroFacts[] = \FleetForge\Sop\SopIcons::svg('map-pin') . e($heroPlace);
 }
 $heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . e($customer['payment_terms'] ?: 'Net 30 (default)');
-$heroFacts[] = \FleetForge\Sop\SopIcons::svg('truck') . '<b>' . (int) $customer['active_lease_count'] . '</b> active lease' . ((int) $customer['active_lease_count'] === 1 ? '' : 's');
-if ($canSeeMoney) {
-    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('banknotes') . '<b>' . e(format_currency($customer['outstanding_balance'] ?? '0')) . '</b> ' . e($customer['currency'] ?? 'CAD') . ' owing';
-}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('currency-dollar') . e($customer['currency'] ?? 'CAD');
 if (!empty($customer['created_at'])) {
     $heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . 'Customer since ' . e(format_date($customer['created_at']));
 }
@@ -256,82 +324,80 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
 <div x-data="FF_CustomerProfile()">
 
 <!-- ============================================================
-     STATS ROW — 4 clickable quick-stat tiles (TILES-2)
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN). Each segment
+     opens the tab behind it. The AI tile is gone (the header's More
+     menu has AI Analysis); the rail carries contact + account health.
      ============================================================ -->
-<div class="stat-grid ff-stats" style="margin-bottom:24px;">
+<div class="stat-grid ff-stats">
 
-    <div class="stat-card stat-card--blue" style="cursor:pointer"
-         :class="{ 'ring-active': activeTab === 'leases' }"
-         @click="activeTab = 'leases'"
-         title="View active leases for this customer">
+    <button type="button" class="stat-card stat-card--blue"
+            :class="{ 'ring-active': activeTab === 'leases' }"
+            @click="activeTab = 'leases'" title="This customer's leases">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-key"/></svg></span>
-        <div class="stat-label">Active Leases</div>
-        <div class="stat-value font-mono"><?= e($customer['active_lease_count']) ?></div>
-        <div class="stat-delta text-secondary">of <?= e($customer['lease_count']) ?> total</div>
-    </div>
+        <div class="stat-label">On rent</div>
+        <div class="stat-value font-mono"><?= (int) $customer['active_lease_count'] ?></div>
+        <div class="stat-delta"><?= (int) $customer['lease_count'] ?> leases in total<?= (int) ($leaseWatch['pending'] ?? 0) > 0 ? ' · ' . (int) $leaseWatch['pending'] . ' pending' : '' ?></div>
+    </button>
 
     <?php if ($canSeeMoney): ?>
-    <div class="stat-card stat-card--amber" style="cursor:pointer"
-         :class="{ 'ring-active': activeTab === 'invoices' }"
-         @click="activeTab = 'invoices'"
-         title="View outstanding invoices">
+    <button type="button" class="stat-card stat-card--amber"
+            :class="{ 'ring-active': activeTab === 'invoices' }"
+            @click="activeTab = 'invoices'" title="Invoices with a balance">
         <span class="stat-icon stat-icon--amber"><svg><use href="#icon-document-text"/></svg></span>
-        <div class="stat-label">Outstanding Balance</div>
-        <div class="stat-value currency"><?= e(format_currency($customer['outstanding_balance'])) ?></div>
-    </div>
+        <div class="stat-label">Outstanding</div>
+        <div class="stat-value currency"><?= e(format_currency($outstanding)) ?></div>
+        <div class="stat-delta"><?= e($customer['currency'] ?? 'CAD') ?><?= bccomp($creditLimit, '0', 2) > 0 ? ' · limit ' . e(format_currency($creditLimit)) : '' ?></div>
+    </button>
 
-    <!-- Total Revenue drills to the system-wide revenue report scoped to
-         this customer so the user can see the full payment history, not
-         just what's visible on the profile page. -->
+    <button type="button" class="stat-card <?= $overdueCnt > 0 ? 'stat-card--red' : 'stat-card--green' ?>"
+            @click="activeTab = 'invoices'" title="Invoices past their due date">
+        <span class="stat-icon <?= $overdueCnt > 0 ? 'stat-icon--red' : 'stat-icon--green' ?>"><svg><use href="#icon-<?= $overdueCnt > 0 ? 'exclamation-triangle' : 'check-circle' ?>"/></svg></span>
+        <div class="stat-label">Overdue</div>
+        <div class="stat-value currency"<?= $overdueCnt > 0 ? ' style="color:var(--color-danger);"' : '' ?>><?= e(format_currency($overdueAmt)) ?></div>
+        <div class="stat-delta"><?= $overdueCnt > 0 ? $overdueCnt . ' invoice' . ($overdueCnt === 1 ? '' : 's') . ($oldestDue ? ' · since ' . e(format_date($oldestDue)) : '') : 'nothing overdue' ?></div>
+    </button>
+
     <a class="stat-card stat-card--green"
-       href="<?= base_url('reports') ?>?tab=customer&customer_id=<?= (int)$customer['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View this customer's revenue report">
+       href="<?= base_url('reports') ?>?tab=customer&customer_id=<?= (int) $customer['id'] ?>"
+       title="This customer's revenue report">
         <span class="stat-icon stat-icon--green"><svg><use href="#icon-arrow-trending-up"/></svg></span>
-        <div class="stat-label">Total Revenue</div>
+        <div class="stat-label">Lifetime revenue</div>
         <div class="stat-value currency"><?= e(format_currency($customer['total_revenue'])) ?></div>
+        <div class="stat-delta"><?= $lastPayment ? 'last paid ' . e(format_date($lastPayment['payment_date'])) : 'no payments yet' ?></div>
     </a>
 
     <a class="stat-card stat-card--purple"
-       href="<?= base_url('credit_notes') ?>?customer_id=<?= (int)$customer['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View credit notes for this customer">
+       href="<?= base_url('credit_notes') ?>?customer_id=<?= (int) $customer['id'] ?>"
+       title="Credit notes for this customer">
         <span class="stat-icon stat-icon--purple"><svg><use href="#icon-credit-card"/></svg></span>
-        <div class="stat-label">Account Credit</div>
+        <div class="stat-label">Account credit</div>
         <div class="stat-value currency"><?= e(format_currency($customer['account_credit_balance'])) ?></div>
+        <div class="stat-delta">to apply to invoices</div>
     </a>
-    <?php endif; ?>
+    <?php else: ?>
+    <button type="button" class="stat-card <?= $openClaims > 0 ? 'stat-card--red' : 'stat-card--green' ?>"
+            @click="activeTab = 'damage_claims'" title="Open damage claims">
+        <span class="stat-icon <?= $openClaims > 0 ? 'stat-icon--red' : 'stat-icon--green' ?>"><svg><use href="#icon-wrench"/></svg></span>
+        <div class="stat-label">Open damage claims</div>
+        <div class="stat-value font-mono"><?= (int) $openClaims ?></div>
+    </button>
 
-    <?php
-    $_aiCachedCustomer = db_row(
-        "SELECT generated_at FROM ai_summaries
-         WHERE entity_type = 'customer' AND entity_id = ? AND summary_type = 'customer_insights' AND is_current = 1
-         LIMIT 1",
-        [$customer['id']]
-    );
-    if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
-    <div class="stat-card stat-card--orange"
-         style="cursor:pointer;"
-         onclick="aiPanel_customer_<?= (int)$customer['id'] ?>_customer_insights_open()"
-         title="Open AI Customer Insights">
-        <span class="stat-icon stat-icon--orange">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:18px;height:18px;"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/></svg>
-        </span>
-        <div class="stat-label">AI Analysis</div>
-        <?php if ($_aiCachedCustomer): ?>
-        <div class="stat-value" style="font-size:0.9rem;font-weight:600;">Available</div>
-        <div class="stat-delta text-secondary"><?= e(format_datetime($_aiCachedCustomer['generated_at'], 'M j, Y')) /* UTC DATETIME → local day (S-LOCAL-DAY-TS) */ ?></div>
-        <?php else: ?>
-        <div class="stat-value text-secondary" style="font-size:0.875rem;">Not run yet</div>
-        <div class="stat-delta" style="color:var(--color-primary);font-weight:500;">Click to generate →</div>
-        <?php endif; ?>
-    </div>
+    <button type="button" class="stat-card stat-card--amber"
+            @click="activeTab = 'leases'" title="Leases ending within 30 days">
+        <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Ending within 30 days</div>
+        <div class="stat-value font-mono"><?= (int) ($leaseWatch['ending'] ?? 0) ?></div>
+    </button>
     <?php endif; ?>
 
 </div>
 
-    <!-- Tab nav -->
-    <div class="tab-bar" role="tablist">
+    <!-- Tab nav (S-RECORD-REDESIGN) — full width above the main column +
+         rail, every tab visible (operator: no "More"), sticky under the
+         topbar. The empty .tab-anchor marks its un-stuck spot for
+         FF_TabHash.onSwitchKeep. -->
+    <div class="tab-anchor" aria-hidden="true"></div>
+    <div class="tab-bar tab-bar--sticky" role="tablist" x-ref="tabBar">
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'overview' }"
                 @click="activeTab = 'overview'" :aria-selected="activeTab === 'overview'" role="tab">
             Overview
@@ -351,6 +417,13 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             Invoices
             <span class="tab-badge" x-show="tabCounts.invoices > 0" x-text="tabCounts.invoices"></span>
         </button>
+        <?php if ($canSeeMoney): ?>
+        <button class="tab-btn" :class="{ 'is-active': activeTab === 'payments' }"
+                @click="activeTab = 'payments'" :aria-selected="activeTab === 'payments'" role="tab">
+            Payments
+            <span class="tab-badge" x-show="paymentsTotal > 0" x-text="paymentsTotal"></span>
+        </button>
+        <?php endif; ?>
         <button class="tab-btn" :class="{ 'is-active': activeTab === 'documents' }"
                 @click="activeTab = 'documents'" :aria-selected="activeTab === 'documents'" role="tab">
             Documents
@@ -389,89 +462,157 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         </button>
     </div>
 
-    <!-- ── TAB: OVERVIEW ──────────────────────────────────────── -->
+<div class="rec-layout">
+<div class="rec-main">
+
+    <!-- ── TAB: OVERVIEW (S-RECORD-REDESIGN) ─────────────────────
+         What's on rent first, then three cards instead of six: contact +
+         address, billing + terms, tax + regulatory. The "Account" card
+         (created / updated) moved to the rail's footer line. -->
     <div x-show="activeTab === 'overview'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+
+        <div class="card" style="margin-bottom:14px;">
+            <div class="card-header">
+                <span class="card-title">On rent now</span>
+                <button type="button" class="btn btn-ghost btn-xs" @click="activeTab = 'leases'">All leases →</button>
+            </div>
+            <?php if ($onRent === []): ?>
+            <div class="card-body"><p class="text-secondary" style="margin:0;font-size:13px;">Nothing on rent right now.</p></div>
+            <?php else: ?>
+            <div style="overflow-x:auto;">
+                <table class="table" aria-label="Units on rent">
+                    <thead><tr><th>Contract</th><th>Unit</th><th>Started</th><th>Ends</th><th class="text-right">Rate</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($onRent as $r):
+                        $rate = bccomp((string) $r['monthly_rate'], '0', 2) > 0 ? [$r['monthly_rate'], '/mo']
+                              : (bccomp((string) $r['weekly_rate'], '0', 2) > 0 ? [$r['weekly_rate'], '/wk']
+                              : (bccomp((string) $r['daily_rate'], '0', 2) > 0 ? [$r['daily_rate'], '/day'] : null)); ?>
+                        <tr>
+                            <td><a href="<?= base_url('leases/show') ?>?id=<?= (int) $r['id'] ?>" class="font-mono"><?= e($r['contract_number']) ?></a></td>
+                            <td>
+                                <?php if ($r['unit_id']): ?><a href="<?= base_url('equipment/show') ?>?id=<?= (int) $r['unit_id'] ?>" class="font-mono"><?= e($r['unit_number']) ?></a><?php else: ?><span class="font-mono"><?= e($r['unit_number'] ?? '—') ?></span><?php endif; ?>
+                                <?php if (!empty($r['template_name_snapshot'])): ?><div class="text-xs text-secondary"><?= e($r['template_name_snapshot']) ?></div><?php endif; ?>
+                            </td>
+                            <td><?= e(format_date($r['start_date'])) ?></td>
+                            <td><?= $r['end_date'] ? e(format_date($r['end_date'])) : '<span class="text-secondary">Open-ended</span>' ?></td>
+                            <td class="text-right font-mono"><?= $rate ? e(format_currency($rate[0])) . '<span class="text-secondary">' . $rate[1] . '</span>' : '—' ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+            <?php endif; ?>
+        </div>
+
         <div class="grid-2">
 
-            <!-- Contact Info -->
+            <!-- Contact & address -->
             <div class="card">
-                <div class="card-header"><span class="card-title">Contact</span></div>
+                <div class="card-header"><span class="card-title">Contact &amp; address</span></div>
                 <div class="card-body">
-                    <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
-                        <dt class="text-secondary text-sm">Primary Contact</dt>
-                        <dd style="margin:0;"><?= e($customer['contact_name'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Email</dt>
-                        <dd style="margin:0;">
-                            <?php if ($customer['email']): ?>
-                            <a href="mailto:<?= e($customer['email']) ?>"
-                               style="color:var(--color-primary);"><?= e($customer['email']) ?></a>
-                            <?php else: ?>—<?php endif; ?>
-                        </dd>
-                        <dt class="text-secondary text-sm">Phone</dt>
-                        <dd style="margin:0;"><?= e($customer['phone'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Alt Phone</dt>
-                        <dd style="margin:0;"><?= e($customer['alt_phone'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Website</dt>
-                        <dd style="margin:0;">
-                            <?php if ($customer['website']): ?>
-                            <a href="<?= e($customer['website']) ?>" target="_blank" rel="noopener"
-                               style="color:var(--color-primary);"><?= e($customer['website']) ?></a>
-                            <?php else: ?>—<?php endif; ?>
-                        </dd>
+                    <dl class="rec-dl">
+                        <dt>Primary contact</dt>
+                        <dd><?= e($customer['contact_name'] ?? '—') ?></dd>
+                        <dt>Email</dt>
+                        <dd><?php if ($customer['email']): ?><a href="mailto:<?= e($customer['email']) ?>"><?= e($customer['email']) ?></a><?php else: ?>—<?php endif; ?></dd>
+                        <dt>Phone</dt>
+                        <dd><?php if (!empty($customer['phone'])): ?><a href="tel:<?= e(preg_replace('/[^0-9+]/', '', (string) $customer['phone'])) ?>"><?= e($customer['phone']) ?></a><?php else: ?>—<?php endif; ?></dd>
+                        <?php if (!empty($customer['alt_phone'])): ?>
+                        <dt>Alt phone</dt>
+                        <dd><?= e($customer['alt_phone']) ?></dd>
+                        <?php endif; ?>
+                        <?php if (!empty($customer['website'])): ?>
+                        <dt>Website</dt>
+                        <dd><a href="<?= e($customer['website']) ?>" target="_blank" rel="noopener"><?= e($customer['website']) ?></a></dd>
+                        <?php endif; ?>
+                        <dt>Address</dt>
+                        <dd style="white-space:pre-line;"><?php
+                            $_addr = array_filter([
+                                (string) ($customer['address'] ?? ''),
+                                trim(implode(', ', array_filter([(string) ($customer['city'] ?? ''), (string) ($customer['province'] ?? $customer['state'] ?? '')])) . ' ' . (string) ($customer['postal_code'] ?? '')),
+                                (string) ($customer['country'] ?? ''),
+                            ], static fn ($v) => trim($v) !== '');
+                            echo $_addr ? e(implode("\n", $_addr)) : '—';
+                            unset($_addr);
+                        ?></dd>
                     </dl>
                 </div>
             </div>
 
-            <!-- Address -->
-            <div class="card">
-                <div class="card-header"><span class="card-title">Address</span></div>
+            <!-- Billing & terms (the tallest card spans both rows) -->
+            <div class="card" style="grid-row: span 2;">
+                <div class="card-header"><span class="card-title">Billing &amp; terms</span></div>
                 <div class="card-body">
-                    <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
-                        <dt class="text-secondary text-sm">Street</dt>
-                        <dd style="margin:0;"><?= e($customer['address'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">City</dt>
-                        <dd style="margin:0;"><?= e($customer['city'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Province / State</dt>
-                        <dd style="margin:0;"><?= e($customer['province'] ?? $customer['state'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Postal / ZIP</dt>
-                        <dd style="margin:0;"><?= e($customer['postal_code'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Country</dt>
-                        <dd style="margin:0;"><?= e($customer['country'] ?? '—') ?></dd>
+                    <dl class="rec-dl">
+                        <dt>Payment terms</dt>
+                        <dd><?= e($customer['payment_terms'] ?: 'Net 30 (default)') ?></dd>
+                        <dt>Billing cycle</dt>
+                        <dd><?= e(str_replace('_', ' ', (string) $customer['billing_cycle'])) ?></dd>
+                        <dt>Currency · distance</dt>
+                        <dd><span class="font-mono"><?= e($customer['currency']) ?></span> · <?= e($customer['mileage_unit']) ?></dd>
+                        <?php if ($canSeeMoney): ?>
+                        <dt>Credit limit</dt>
+                        <dd class="currency"><?= e(format_currency($customer['credit_limit'])) ?></dd>
+                        <?php endif; ?>
+                        <dt>Discount</dt>
+                        <dd><?php
+                            if ($customer['discount_type'] === 'none') {
+                                echo 'None';
+                            } elseif ($customer['discount_type'] === 'percentage') {
+                                echo e($customer['discount_value']) . '%';
+                            } else {
+                                echo e(format_currency($customer['discount_value']));
+                            }
+                        ?></dd>
+                        <dt>Invoice email</dt>
+                        <dd><?= !empty($customer['invoice_email']) ? e($customer['invoice_email']) : '<span class="text-secondary">— (uses ' . ($customer['billing_email'] ? 'billing' : 'main') . ' email)</span>' ?></dd>
+                        <dt>Delivery · PO</dt>
+                        <dd><?= e($customer['invoice_delivery'] ?? '—') ?> · PO <?= $customer['po_required'] ? 'required' : 'not required' ?></dd>
+                        <dt>Billing contact</dt>
+                        <dd><?= e($customer['billing_contact_name'] ?? '—') ?><?php if (!empty($customer['billing_email'])): ?><br><span class="text-secondary"><?= e($customer['billing_email']) ?></span><?php endif; ?><?php if (!empty($customer['billing_phone'])): ?><br><span class="text-secondary"><?= e($customer['billing_phone']) ?></span><?php endif; ?></dd>
+                        <?php
+                        // I12: the Bill To block on invoice PDFs + the QuickBooks invoice
+                        // BillAddr come from this column. When it's blank, InvoiceGenerator
+                        // composes Bill To from the main address instead — say so here so
+                        // staff know what the invoice will actually print.
+                        $_billAddr = trim((string) ($customer['billing_address'] ?? ''));
+                        ?>
+                        <dt>Bill to</dt>
+                        <dd>
+                            <?php if ($_billAddr !== ''): ?>
+                                <span style="white-space:pre-line;"><?= e($_billAddr) ?></span>
+                            <?php else: ?>
+                                <span class="text-secondary">— (invoices use the main address)</span>
+                            <?php endif; ?>
+                        </dd>
+                        <?php unset($_billAddr); ?>
                     </dl>
                 </div>
             </div>
 
-            <!-- Regulatory -->
+            <!-- Tax & regulatory -->
             <div class="card">
-                <div class="card-header"><span class="card-title">Regulatory</span></div>
+                <div class="card-header"><span class="card-title">Tax &amp; regulatory</span></div>
                 <div class="card-body">
-                    <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
-                        <dt class="text-secondary text-sm">DOT Number</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e($customer['dot_number'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">MC Number</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e($customer['mc_number'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">GST Number</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e($customer['gst_number'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">PST Number</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e($customer['pst_number'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">GST Exempt</dt>
-                        <dd style="margin:0;">
-                            <?= $customer['gst_exempt']
-                                ? '<span class="badge badge-warning">Yes</span>'
-                                : 'No' ?>
-                        </dd>
-                        <dt class="text-secondary text-sm">PST Exempt</dt>
-                        <dd style="margin:0;">
-                            <?= $customer['pst_exempt']
-                                ? '<span class="badge badge-warning">Yes</span>'
-                                : 'No' ?>
-                        </dd>
+                    <dl class="rec-dl">
+                        <dt>DOT · MC</dt>
+                        <dd class="font-mono"><?= e($customer['dot_number'] ?: '—') ?> · <?= e($customer['mc_number'] ?: '—') ?></dd>
+                        <dt>GST number</dt>
+                        <dd class="font-mono"><?= e($customer['gst_number'] ?: '—') ?></dd>
+                        <dt>PST number</dt>
+                        <dd class="font-mono"><?= e($customer['pst_number'] ?: '—') ?></dd>
+                        <dt>Tax exemptions</dt>
+                        <dd><?php
+                            $_ex = array_filter([$customer['gst_exempt'] ? 'GST' : '', $customer['pst_exempt'] ? 'PST' : '']);
+                            echo $_ex ? '<span class="badge badge-warning">' . e(implode(' + ', $_ex)) . ' exempt</span>' : 'None';
+                            unset($_ex);
+                        ?></dd>
                         <!-- S-ACCT-GPS: per-customer presentation policy (ASPE 3400). -->
-                        <dt class="text-secondary text-sm">GPS Revenue Presentation</dt>
+                        <dt>GPS revenue</dt>
                         <?php // json_encode() emits double quotes, which closed the double-quoted x-data
                               // attribute early ("Unexpected token '}'" + editing/current/draft/saving
                               // "is not defined" on every load) — escape it for the attribute context. ?>
-                        <dd style="margin:0;" x-data="gpsPresentationToggle(<?= (int) $customer['id'] ?>, <?= e(json_encode((string) ($customer['gps_revenue_presentation'] ?? 'net'))) ?>)">
+                        <dd x-data="gpsPresentationToggle(<?= (int) $customer['id'] ?>, <?= e(json_encode((string) ($customer['gps_revenue_presentation'] ?? 'net'))) ?>)">
                             <span x-show="!editing" x-cloak>
                                 <span :class="current === 'gross' ? 'badge badge-warning' : 'badge badge-success'"
                                       style="padding:2px 10px;text-transform:uppercase;font-size:0.6875rem;"
@@ -532,93 +673,6 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                 };
             }
             </script>
-
-            <!-- Billing Contact -->
-            <div class="card">
-                <div class="card-header"><span class="card-title">Billing Contact</span></div>
-                <div class="card-body">
-                    <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
-                        <dt class="text-secondary text-sm">Billing Contact</dt>
-                        <dd style="margin:0;"><?= e($customer['billing_contact_name'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Billing Email</dt>
-                        <dd style="margin:0;"><?= e($customer['billing_email'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Billing Phone</dt>
-                        <dd style="margin:0;"><?= e($customer['billing_phone'] ?? '—') ?></dd>
-                        <?php
-                        // I12: the Bill To block on invoice PDFs + the QuickBooks invoice
-                        // BillAddr come from this column. When it's blank, InvoiceGenerator
-                        // composes Bill To from the main address instead — say so here so
-                        // staff know what the invoice will actually print.
-                        $_billAddr = trim((string) ($customer['billing_address'] ?? ''));
-                        ?>
-                        <dt class="text-secondary text-sm">Billing Address</dt>
-                        <dd style="margin:0;">
-                            <?php if ($_billAddr !== ''): ?>
-                                <span style="white-space:pre-line;"><?= e($_billAddr) ?></span>
-                            <?php else: ?>
-                                <span class="text-secondary text-sm">— (invoices use the main address)</span>
-                            <?php endif; ?>
-                        </dd>
-                        <?php unset($_billAddr); ?>
-                        <dt class="text-secondary text-sm">Invoice Email</dt>
-                        <dd style="margin:0;"><?= e($customer['invoice_email'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">Invoice Delivery</dt>
-                        <dd style="margin:0;"><?= e($customer['invoice_delivery'] ?? '—') ?></dd>
-                        <dt class="text-secondary text-sm">PO Required</dt>
-                        <dd style="margin:0;"><?= $customer['po_required'] ? 'Yes' : 'No' ?></dd>
-                    </dl>
-                </div>
-            </div>
-
-            <!-- Commercial Terms -->
-            <div class="card">
-                <div class="card-header"><span class="card-title">Commercial Terms</span></div>
-                <div class="card-body">
-                    <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
-                        <dt class="text-secondary text-sm">Currency</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e($customer['currency']) ?></dd>
-                        <dt class="text-secondary text-sm">Mileage Unit</dt>
-                        <dd style="margin:0;"><?= e($customer['mileage_unit']) ?></dd>
-                        <dt class="text-secondary text-sm">Billing Cycle</dt>
-                        <dd style="margin:0;"><?= e(str_replace('_', ' ', $customer['billing_cycle'])) ?></dd>
-                        <dt class="text-secondary text-sm">Payment Terms</dt>
-                        <dd style="margin:0;"><?= e($customer['payment_terms'] ?? '—') ?></dd>
-                        <?php if ($canSeeMoney): ?>
-                        <dt class="text-secondary text-sm">Credit Limit</dt>
-                        <dd style="margin:0;" class="currency"><?= e(format_currency($customer['credit_limit'])) ?></dd>
-                        <?php endif; ?>
-                        <dt class="text-secondary text-sm">Discount</dt>
-                        <dd style="margin:0;">
-                            <?php
-                            if ($customer['discount_type'] === 'none') {
-                                echo 'None';
-                            } elseif ($customer['discount_type'] === 'percentage') {
-                                echo e($customer['discount_value']) . '%';
-                            } else {
-                                echo e(format_currency($customer['discount_value']));
-                            }
-                            ?>
-                        </dd>
-                    </dl>
-                </div>
-            </div>
-
-            <!-- Account -->
-            <div class="card">
-                <div class="card-header"><span class="card-title">Account</span></div>
-                <div class="card-body">
-                    <dl style="display:grid; grid-template-columns:max-content 1fr; gap:8px 20px; margin:0;">
-                        <dt class="text-secondary text-sm">Created</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e(format_datetime($customer['created_at'])) ?></dd>
-                        <?php if (!empty($customer['created_by_name'])): ?>
-                        <dt class="text-secondary text-sm">Created by</dt>
-                        <dd style="margin:0;"><?= e($customer['created_by_name']) ?></dd>
-                        <?php endif; ?>
-                        <dt class="text-secondary text-sm">Last Updated</dt>
-                        <dd style="margin:0;" class="font-mono"><?= e(format_datetime($customer['updated_at'])) ?></dd>
-                    </dl>
-                </div>
-            </div>
 
         </div>
     </div><!-- /overview tab -->
@@ -895,6 +949,67 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
             </div>
         </div>
     </div>
+
+    <?php if ($canSeeMoney): ?>
+    <!-- ── TAB: PAYMENTS (S-RECORD-REDESIGN) ────────────────────
+         What this customer has paid — the profile had invoices but no
+         payments. api/v1/payments?customer_id= (payments:view). -->
+    <div x-show="activeTab === 'payments'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Payments</span>
+                <a href="<?= base_url('payments') ?>?customer_id=<?= $customerId ?>" class="btn btn-secondary btn-sm">View all</a>
+            </div>
+            <div x-show="paymentsLoading && payments.length === 0" class="card-body" style="text-align:center;padding:32px;">
+                <span class="text-secondary">Loading payments…</span>
+            </div>
+            <div x-show="paymentsLoaded && !paymentsLoading && payments.length === 0" class="card-body">
+                <div class="empty-state">
+                    <p class="empty-state-title">No payments yet</p>
+                    <p class="empty-state-text">Payments recorded for this customer appear here.</p>
+                </div>
+            </div>
+            <div x-show="payments.length > 0">
+                <div class="table-responsive">
+                    <table class="table" aria-label="Payments">
+                        <thead>
+                            <tr>
+                                <th>Payment #</th>
+                                <th>Date</th>
+                                <th>Method</th>
+                                <th>Reference</th>
+                                <th>Status</th>
+                                <th class="text-right">Amount</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="pay in payments" :key="pay.id">
+                                <tr>
+                                    <td><a :href="'<?= base_url('payments/show') ?>?id=' + pay.id" class="font-mono" x-text="pay.payment_number"></a></td>
+                                    <td x-text="formatDate(pay.payment_date)"></td>
+                                    <td x-text="(pay.payment_method || '—').replace(/_/g, ' ')"></td>
+                                    <td class="font-mono" x-text="pay.reference_number || '—'"></td>
+                                    <td><span class="badge" :class="paymentBadgeClass(pay.status)" x-text="pay.status"></span></td>
+                                    <td class="text-right font-mono" x-text="'$' + parseFloat(pay.amount).toFixed(2) + ' ' + (pay.currency || '')"></td>
+                                    <td><a :href="'<?= base_url('payments/show') ?>?id=' + pay.id" class="btn btn-ghost btn-xs">View</a></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="tab-table-footer">
+                    <span x-text="`Showing ${payments.length} of ${paymentsTotal}`"></span>
+                    <button class="btn btn-secondary btn-sm"
+                            x-show="payments.length < paymentsTotal"
+                            :disabled="paymentsLoading"
+                            @click="paymentsPage++; loadPayments(true)"
+                            x-text="paymentsLoading ? 'Loading…' : 'Load more'"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- ── TAB: DAMAGE CLAIMS ─────────────────────────────────────── -->
     <div x-show="activeTab === 'damage_claims'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
@@ -1558,6 +1673,110 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
         </div>
     </div><!-- /activity tab -->
 
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the customer at a glance ──────
+$railCid   = (int) $customer['id'];
+$railCards = [];
+
+// 1. Account health — money roles only.
+if ($canSeeMoney) {
+    $limitPct = bccomp($creditLimit, '0', 2) > 0 ? (float) bcmul(bcdiv($outstanding, $creditLimit, 6), '100', 2) : 0.0;
+    $body = \FleetForge\Ui\RecordUi::big(e(format_currency($outstanding)), e($customer['currency'] ?? 'CAD') . ' outstanding');
+    if (bccomp($creditLimit, '0', 2) > 0) {
+        $body .= \FleetForge\Ui\RecordUi::meter(
+            'Credit limit used',
+            e(round($limitPct)) . '%',
+            $limitPct,
+            $limitPct >= 100 ? 'danger' : ($limitPct >= 80 ? 'warn' : 'ok'),
+            'of ' . e(format_currency($creditLimit))
+        );
+    }
+    $body .= \FleetForge\Ui\RecordUi::kv([
+        ['Overdue', $overdueCnt > 0 ? '<span class="text-danger">' . e(format_currency($overdueAmt)) . '</span>' : 'None', 'mono'],
+        ['Oldest unpaid', $oldestDue ? e(format_date($oldestDue)) : null],
+        ['Last payment', $lastPayment ? '<a href="' . e(base_url('payments/show')) . '?id=' . (int) $lastPayment['id'] . '">' . e(format_currency($lastPayment['amount'])) . '</a> · ' . e(format_date($lastPayment['payment_date'])) : 'None yet'],
+        ['Account credit', bccomp((string) $customer['account_credit_balance'], '0', 2) > 0 ? e(format_currency($customer['account_credit_balance'])) : null, 'mono'],
+    ]);
+    $railCards[] = \FleetForge\Ui\RecordUi::card('Account', $body, ['icon' => 'banknotes', 'class' => 'rec-card--accent']);
+}
+
+// 2. Needs attention.
+$alerts = [];
+if ($overdueCnt > 0) {
+    $alerts[] = ['danger', '<a href="#invoices" @click.prevent="activeTab = \'invoices\'">' . $overdueCnt . ' overdue invoice' . ($overdueCnt === 1 ? '' : 's') . '</a>'
+        . ($canSeeMoney ? ' — ' . e(format_currency($overdueAmt)) : '')];
+}
+if ($customer['status'] === 'credit_hold') {
+    $alerts[] = ['warning', 'On <b>credit hold</b> — batch invoicing still bills them.'];
+} elseif ($customer['status'] === 'suspended') {
+    $alerts[] = ['danger', '<b>Suspended</b> — no portal access.'];
+}
+if ($canSeeMoney && bccomp($creditLimit, '0', 2) > 0 && bccomp($outstanding, $creditLimit, 2) > 0) {
+    $alerts[] = ['danger', 'Over the credit limit by ' . e(format_currency(bcsub($outstanding, $creditLimit, 2))) . '.'];
+}
+if ($draftCnt > 0) {
+    $alerts[] = ['info', '<a href="#invoices" @click.prevent="activeTab = \'invoices\'">' . $draftCnt . ' draft invoice' . ($draftCnt === 1 ? '' : 's') . '</a> not sent yet.'];
+}
+if ((int) ($leaseWatch['ending'] ?? 0) > 0) {
+    $n = (int) $leaseWatch['ending'];
+    $alerts[] = ['warning', '<a href="#leases" @click.prevent="activeTab = \'leases\'">' . $n . ' lease' . ($n === 1 ? '' : 's') . '</a> end within 30 days.'];
+}
+if ((int) ($leaseWatch['pending'] ?? 0) > 0) {
+    $n = (int) $leaseWatch['pending'];
+    $alerts[] = ['info', $n . ' lease' . ($n === 1 ? ' is' : 's are') . ' waiting to be activated.'];
+}
+if ($appsToReview > 0) {
+    $alerts[] = ['info', '<a href="#credit_applications" @click.prevent="activeTab = \'credit_applications\'">A credit application</a> is waiting for review.'];
+}
+if ($expiringDocs > 0) {
+    $alerts[] = ['warning', '<a href="#documents" @click.prevent="activeTab = \'documents\'">' . $expiringDocs . ' document' . ($expiringDocs === 1 ? '' : 's') . '</a> expired or expiring within 30 days.'];
+}
+if ($openClaims > 0) {
+    $alerts[] = ['warning', '<a href="#damage_claims" @click.prevent="activeTab = \'damage_claims\'">' . $openClaims . ' open damage claim' . ($openClaims === 1 ? '' : 's') . '</a>.'];
+}
+if (trim((string) ($customer['invoice_email'] ?? '')) === '' && trim((string) ($customer['billing_email'] ?? '')) === '' && trim((string) ($customer['email'] ?? '')) === '') {
+    $alerts[] = ['warning', 'No email on file — invoices can\'t be emailed.'];
+}
+$railCards[] = \FleetForge\Ui\RecordUi::card('Needs attention', \FleetForge\Ui\RecordUi::alerts($alerts, 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 3. Contact.
+$contactBody = \FleetForge\Ui\RecordUi::kv([
+    ['Contact', !empty($customer['contact_name']) ? e($customer['contact_name']) : null],
+    ['Email', !empty($customer['email']) ? '<a href="mailto:' . e($customer['email']) . '">' . e($customer['email']) . '</a>' : null],
+    ['Phone', !empty($customer['phone']) ? '<a href="tel:' . e(preg_replace('/[^0-9+]/', '', (string) $customer['phone'])) . '">' . e($customer['phone']) . '</a>' : null],
+    ['Invoices to', !empty($customer['invoice_email']) ? e($customer['invoice_email']) : (!empty($customer['billing_email']) ? e($customer['billing_email']) : null)],
+]);
+$railCards[] = \FleetForge\Ui\RecordUi::card('Contact', $contactBody !== '' ? $contactBody : '<p class="text-secondary" style="margin:0;font-size:12.5px;">No contact details yet.</p>', ['icon' => 'users']);
+
+// 4. Quick actions (only ones that open already scoped to this customer).
+$quick = [];
+if (can('customers', 'create')) {
+    $quick[] = ['Add a note', 'x:activeTab = \'notes\'; loadNotes(); $nextTick(() => document.querySelector(\'[x-model=newNote]\')?.focus())', 'pencil-square'];
+}
+if (can('damage_claims', 'create')) {
+    $quick[] = ['Report damage', base_url('damage_claims/create') . '?customer_id=' . $railCid, 'wrench-screwdriver'];
+}
+if (can('rates', 'create')) {
+    $quick[] = ['New rate card', base_url('rates/create') . '?customer_id=' . $railCid, 'receipt-percent'];
+}
+if ($canSeeMoney) {
+    $quick[] = ['Revenue report', base_url('reports') . '?tab=customer&customer_id=' . $railCid, 'chart-bar'];
+}
+if ($quick) {
+    $railCards[] = \FleetForge\Ui\RecordUi::card('Quick actions', \FleetForge\Ui\RecordUi::links($quick), ['icon' => 'sparkles']);
+}
+?>
+<aside class="rec-rail" aria-label="Customer at a glance">
+    <?= implode("\n    ", $railCards) ?>
+    <p class="text-secondary" style="margin:0 4px;font-size:11.5px;line-height:1.5;">
+        Customer since <?= e(format_date($customer['created_at'])) ?><?= !empty($customer['created_by_name']) ? ' · added by ' . e($customer['created_by_name']) : '' ?><br>
+        Last updated <?= e(format_datetime($customer['updated_at'])) ?>
+    </p>
+</aside>
+</div><!-- /rec-layout -->
+
     <!-- ── Document Upload Modal ────────────────────────────────── -->
     <?php if (can('customers', 'edit')): ?>
     <div x-show="docUploadModal.open" x-cloak
@@ -1661,6 +1880,13 @@ function FF_CustomerProfile() {
         leasesLoading:       false,
         leasesFilters:       { status: '', sort: 'created_at', dir: 'DESC' },
 
+        // ── Payments (S-RECORD-REDESIGN) ──────────────────────────
+        payments:            [],
+        paymentsTotal:       <?= (int) $paymentsCount ?>, // server-preloaded
+        paymentsPage:        1,
+        paymentsLoaded:      false,
+        paymentsLoading:     false,
+
         // ── Invoices ──────────────────────────────────────────────
         invoices:            [],
         invoicesTotal:       0,
@@ -1735,8 +1961,12 @@ function FF_CustomerProfile() {
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
                 if (tab === 'credit_applications' && !this.creditAppsLoaded) this.loadCreditApps();
                 if (tab === 'emails'        && !this.emailsLoaded)           this.loadEmails();
+                if (tab === 'payments'      && !this.paymentsLoaded)         this.loadPayments();
+                // #notes deep link / strip + rail links: notes loaded only
+                // from the tab button's click before (S-RECORD-REDESIGN).
+                if (tab === 'notes'         && !this.notesLoaded)            this.loadNotes();
             };
-            const _tabs = ['overview','credit_applications','leases','invoices','documents',
+            const _tabs = ['overview','credit_applications','leases','invoices','payments','documents',
                            'damage_claims','mileage_logs','rates','emails','notes',
                            'activity'];
             const _initTab = FF_TabHash.init(_tabs, 'overview');
@@ -1748,7 +1978,9 @@ function FF_CustomerProfile() {
             let _prevTab = _initTab;
 
             this.$watch('activeTab', (tab) => {
-                FF_TabHash.onSwitch(_prevTab, tab);
+                // The tab bar is sticky: keep it where it is instead of
+                // jumping the page back to the top (S-RECORD-REDESIGN).
+                FF_TabHash.onSwitchKeep(_prevTab, tab, this.$refs.tabBar);
                 _prevTab = tab;
                 _onTabEnter(tab);
             });
@@ -1913,6 +2145,27 @@ function FF_CustomerProfile() {
             this.invoicesLoading = false;
         },
         loadMoreInvoices()     { this.invoicesPage++; this.loadInvoices(true); },
+
+        // ── Payments (S-RECORD-REDESIGN) ───────────────────────────
+        async loadPayments(append = false) {
+            if (this.paymentsLoading) return;
+            this.paymentsLoading = true;
+            try {
+                const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 25, page: this.paymentsPage, sort: 'payment_date', dir: 'DESC' });
+                const r = await FF_Api.get('<?= base_url('api/v1/payments') ?>?' + p);
+                if (r.success) {
+                    const items         = r.data.items || [];
+                    this.payments       = append ? [...this.payments, ...items] : items;
+                    this.paymentsTotal  = r.data.pagination?.total ?? items.length;
+                    this.paymentsLoaded = true;
+                }
+            } catch (e) { /* silent — the empty state explains */ }
+            this.paymentsLoading = false;
+        },
+        paymentBadgeClass(status) {
+            return { cleared: 'badge-success', pending: 'badge-warning', failed: 'badge-danger',
+                     returned: 'badge-danger', refunded: 'badge-neutral', void: 'badge-neutral' }[status] || 'badge-neutral';
+        },
         applyInvoicesFilters() { this.invoices = []; this.invoicesPage = 1; this.invoicesTotal = 0; this.invoicesLoaded = false; this.loadInvoices(); },
 
         // ── Damage Claims ──────────────────────────────────────────

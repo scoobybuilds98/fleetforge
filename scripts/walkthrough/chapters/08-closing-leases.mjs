@@ -173,7 +173,7 @@ export default {
     {
       say: 'Any invoice that had already billed past the return date is corrected automatically, so the customer is never charged for days after the unit came back.',
       run: async (d) => {
-        await d.click(tab('Invoices')); await settle(d, 1500);
+        await d.tab('Invoices'); await settle(d, 1500);
         await d.highlight('.card:has(.card-title:has-text("Invoices")) table', 'Invoices after closing', 2600);
       },
     },
@@ -218,7 +218,7 @@ export default {
       say: 'The lease is Active again. Make any corrections, then close it again with the right readings. The closing charges on the draft invoice are rebuilt, not added twice.',
       run: async (d) => {
         await d.highlight('h1', 'Active again', 1800);
-        await d.click(tab('Status Log')); await settle(d, 1000);
+        await d.tab('Status Log'); await settle(d, 1000);
         await d.highlight('.card:has(.card-title:has-text("Status Log"))', 'Reopen recorded', 2000);
       },
     },

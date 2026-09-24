@@ -5,8 +5,11 @@ declare(strict_types=1);
  * FleetForge — Leases List Page
  *
  * @file        app/admin/leases/index.php
- * @description Paginated, filterable list of leases. Displays 4 KPI tiles (active,
- *              pending, completed, active revenue). Three tabs: Active+Pending,
+ * @description Paginated, filterable list of leases. A summary strip of the
+ *              lists a dispatcher works from (on rent + monthly revenue,
+ *              ending within 30 days, starting this week, billing behind —
+ *              api/v1/leases/kpis.php; each tile filters the table via
+ *              ?focus=, S-LIST-COMPACT). Three tabs in the table toolbar: Active+Pending,
  *              Closed (completed+cancelled), All — every tab paginates
  *              SERVER-SIDE at 20 rows/page (statuses= multi-status API scope;
  *              S-LEASES-PAGINATE-20). Filter toolbar: search, status
@@ -16,7 +19,7 @@ declare(strict_types=1);
  *
  * @depends     config/app.php, includes/auth.php, includes/header.php,
  *              includes/footer.php, api/v1/leases/index.php,
- *              api/v1/dashboard/kpis.php
+ *              api/v1/leases/kpis.php
  * @spec        FLEETFORGE_SPEC_FINAL.md §7.5 Leases
  * @decisions   D30 (asset_url), D32 (CSS classes), D33 (heroicons)
  * @session     S007, S017
@@ -60,102 +63,102 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div x-data="FF_Leases()">
 
-    <!-- ── KPI TILES ─────────────────────────────────────────────── -->
+    <!-- ── SUMMARY STRIP (S-LIST-COMPACT) ─────────────────────────
+         The lists a dispatcher works from — not the status counts, which
+         the status tabs below already carry. Each tile filters the table
+         to exactly its leases (?focus=, same windows as the counts:
+         api/v1/leases/_focus.php). -->
     <div class="stat-grid stat-grid--4 ff-stats">
 
-        <div class="stat-card stat-card--green" style="cursor:pointer"
-             :class="{ 'ring-active': filters.status === 'active' }"
-             @click="filters.status = filters.status === 'active' ? '' : 'active'; activeTab = 'all'; currentPage = 1; load()">
+        <button type="button" class="stat-card stat-card--green" @click="setFocus('')">
             <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
-            <div class="stat-label">Active</div>
+            <div class="stat-label">On rent now</div>
             <template x-if="kpisLoaded">
                 <div>
                     <div class="stat-value font-mono" x-text="kpis.active"></div>
-                    <div class="stat-delta text-secondary" x-show="kpis.pending > 0"
-                         x-text="kpis.pending + ' pending'"></div>
+                    <div class="stat-delta"
+                         x-text="kpis.active_revenue !== null ? '$' + formatMoney(kpis.active_revenue) + ' / month' : (kpis.pending + ' pending')"></div>
                 </div>
             </template>
-            <template x-if="!kpisLoaded">
-                <div class="skeleton skeleton-text-lg" style="width:45%;margin-top:8px;"></div>
-            </template>
-        </div>
+            <template x-if="!kpisLoaded"><div class="skeleton skeleton-text-lg" style="width:45%;"></div></template>
+        </button>
 
-        <div class="stat-card stat-card--amber" style="cursor:pointer"
-             :class="{ 'ring-active': filters.status === 'pending' }"
-             @click="filters.status = filters.status === 'pending' ? '' : 'pending'; activeTab = 'all'; currentPage = 1; load()">
+        <button type="button" class="stat-card stat-card--amber"
+                :class="{ 'ring-active': filters.focus === 'ending' }"
+                @click="setFocus('ending')">
             <span class="stat-icon stat-icon--amber"><svg><use href="#icon-clock"/></svg></span>
-            <div class="stat-label">Pending</div>
-            <template x-if="kpisLoaded">
-                <div class="stat-value font-mono" x-text="kpis.pending"></div>
-            </template>
-            <template x-if="!kpisLoaded">
-                <div class="skeleton skeleton-text-lg" style="width:40%;margin-top:8px;"></div>
-            </template>
-        </div>
-
-        <div class="stat-card stat-card--teal" style="cursor:pointer"
-             :class="{ 'ring-active': filters.status === 'completed' }"
-             @click="filters.status = filters.status === 'completed' ? '' : 'completed'; activeTab = 'all'; currentPage = 1; load()">
-            <span class="stat-icon stat-icon--teal"><svg><use href="#icon-check-circle"/></svg></span>
-            <div class="stat-label">Completed</div>
+            <div class="stat-label">Ending within 30 days</div>
             <template x-if="kpisLoaded">
                 <div>
-                    <div class="stat-value font-mono" x-text="kpis.completed"></div>
-                    <div class="stat-delta text-secondary" x-show="kpis.cancelled > 0"
-                         x-text="kpis.cancelled + ' cancelled'"></div>
+                    <div class="stat-value font-mono" x-text="kpis.ending"></div>
+                    <div class="stat-delta" :class="kpis.overdue > 0 ? 'text-danger' : ''"
+                         x-text="kpis.overdue > 0 ? kpis.overdue + ' already past end date' : 'none past their end date'"></div>
                 </div>
             </template>
-            <template x-if="!kpisLoaded">
-                <div class="skeleton skeleton-text-lg" style="width:40%;margin-top:8px;"></div>
-            </template>
-        </div>
+            <template x-if="!kpisLoaded"><div class="skeleton skeleton-text-lg" style="width:40%;"></div></template>
+        </button>
 
-        <div class="stat-card stat-card--green">
-            <span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span>
-            <div class="stat-label">Active Revenue</div>
+        <button type="button" class="stat-card stat-card--blue"
+                :class="{ 'ring-active': filters.focus === 'starting' }"
+                @click="setFocus('starting')">
+            <span class="stat-icon stat-icon--blue"><svg><use href="#icon-truck"/></svg></span>
+            <div class="stat-label">Starting this week</div>
             <template x-if="kpisLoaded">
                 <div>
-                    <div class="stat-value currency"
-                         x-text="'$' + formatMoney(kpis.active_revenue)"></div>
-                    <div class="stat-delta text-secondary">per month</div>
+                    <div class="stat-value font-mono" x-text="kpis.starting"></div>
+                    <div class="stat-delta" x-text="kpis.pending + ' pending activation in total'"></div>
                 </div>
             </template>
-            <template x-if="!kpisLoaded">
-                <div class="skeleton skeleton-text-lg" style="width:65%;margin-top:8px;"></div>
+            <template x-if="!kpisLoaded"><div class="skeleton skeleton-text-lg" style="width:40%;"></div></template>
+        </button>
+
+        <button type="button" class="stat-card stat-card--red"
+                :class="{ 'ring-active': filters.focus === 'unbilled' }"
+                @click="setFocus('unbilled')">
+            <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
+            <div class="stat-label">Billing behind</div>
+            <template x-if="kpisLoaded">
+                <div>
+                    <div class="stat-value font-mono" x-text="kpis.unbilled"></div>
+                    <div class="stat-delta">active leases with unbilled days</div>
+                </div>
             </template>
-        </div>
+            <template x-if="!kpisLoaded"><div class="skeleton skeleton-text-lg" style="width:40%;"></div></template>
+        </button>
 
     </div>
 
-    <!-- ── TAB BAR ───────────────────────────────────────────────── -->
-    <div class="tab-bar" role="tablist">
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'open' }"
-                @click="setTab('open')" :aria-selected="activeTab === 'open'" role="tab">
-            Active &amp; Pending
-            <span class="tab-badge" x-show="kpisLoaded && (kpis.active + kpis.pending) > 0"
-                  x-text="kpis.active + kpis.pending"></span>
-        </button>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'closed' }"
-                @click="setTab('closed')" :aria-selected="activeTab === 'closed'" role="tab">
-            Closed
-        </button>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'all' }"
-                @click="setTab('all')" :aria-selected="activeTab === 'all'" role="tab">
-            All
-        </button>
-    </div>
-
-    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- ── TABLE TOOLBAR — status tabs, search, sort, pager ─────────
+         The status tabs live in the table's own heading (S-LIST-COMPACT);
+         the page-wide tab bar and the full-width pager row above the
+         rows are gone. -->
     <div class="table-toolbar">
 
         <div class="table-toolbar-left">
+            <div class="tab-bar" role="tablist" aria-label="Lease status">
+                <button class="tab-btn" :class="{ 'is-active': activeTab === 'open' }"
+                        @click="setTab('open')" :aria-selected="activeTab === 'open'" role="tab">
+                    Active &amp; Pending
+                    <span class="tab-badge" x-show="kpisLoaded" x-text="kpis.active + kpis.pending"></span>
+                </button>
+                <button class="tab-btn" :class="{ 'is-active': activeTab === 'closed' }"
+                        @click="setTab('closed')" :aria-selected="activeTab === 'closed'" role="tab">
+                    Closed
+                    <span class="tab-badge" x-show="kpisLoaded" x-text="kpis.closed"></span>
+                </button>
+                <button class="tab-btn" :class="{ 'is-active': activeTab === 'all' }"
+                        @click="setTab('all')" :aria-selected="activeTab === 'all'" role="tab">
+                    All
+                </button>
+            </div>
+
             <input type="search"
                    class="form-control form-control-sm"
                    placeholder="Search contract, company, unit…"
                    x-model="filters.search"
                    @input.debounce.400ms="resetPage()"
                    maxlength="255"
-                   style="min-width:220px;"
+                   style="min-width:200px;"
                    aria-label="Search leases">
 
             <!-- Status filter — only shown on All tab -->
@@ -170,13 +173,20 @@ require_once FF_ROOT . '/includes/header.php';
                 <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
             </select>
+
+            <!-- The summary tile this list is narrowed to (click ✕ to clear) -->
+            <button type="button" class="ff-focus-chip" x-show="filters.focus" x-cloak
+                    @click="setFocus('')" :title="'Showing ' + focusLabel() + ' — click to show every lease'">
+                <span x-text="focusLabel()"></span>
+                <span aria-hidden="true">✕</span>
+            </button>
         </div>
 
         <div class="table-toolbar-right">
             <span class="text-secondary text-sm"
                   x-show="!loading"
-                  x-text="leases.length > 0
-                      ? leases.length + (pagination.total > leases.length ? ' of ' + pagination.total : '') + ' lease' + (pagination.total !== 1 ? 's' : '')
+                  x-text="pagination.total !== undefined
+                      ? pagination.total + ' lease' + (pagination.total !== 1 ? 's' : '')
                       : ''">
             </span>
 
@@ -190,6 +200,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <option value="start_date">Start date</option>
                     <option value="end_date">End date</option>
                     <option value="next_billing_date">Next billing date</option>
+                    <option value="billed_through">Billed through</option>
                 </optgroup>
                 <optgroup label="Identifier">
                     <option value="contract_number">Contract #</option>
@@ -217,19 +228,19 @@ require_once FF_ROOT . '/includes/header.php';
             <select class="form-select form-control-sm"
                     x-model="filters.dir"
                     @change="resetPage()"
-                    aria-label="Direction">
+                    aria-label="Direction"
+                    style="width:auto;">
                 <option value="DESC">↓ Desc</option>
                 <option value="ASC">↑ Asc</option>
             </select>
+
+            <?php $position = 'toolbar'; require FF_ROOT . '/includes/partials/pagination-bar.php'; ?>
         </div>
 
     </div>
 
     <!-- ── TABLE CARD ────────────────────────────────────────────── -->
     <div class="card">
-
-        <!-- Top pagination — reachable without scrolling past a page of rows -->
-        <?php $position = 'top'; require FF_ROOT . '/includes/partials/pagination-bar.php'; ?>
 
         <!-- Loading skeleton -->
         <template x-if="loading">
@@ -411,10 +422,6 @@ require_once FF_ROOT . '/includes/header.php';
 
 </div><!-- /x-data -->
 
-<style>
-.stat-card[style*="cursor:pointer"]:hover { transform: translateY(-1px); transition: transform 0.15s; }
-.stat-card.ring-active { box-shadow: 0 0 0 2px var(--color-primary); }
-</style>
 
 <script>
 function FF_Leases() {
@@ -426,7 +433,7 @@ function FF_Leases() {
         activeTab:   'open',
 
         // KPI tile data — loaded once on init, independent of table filters
-        kpis:        { active: 0, pending: 0, completed: 0, cancelled: 0, active_revenue: '0.00' },
+        kpis:        { active: 0, pending: 0, closed: 0, ending: 0, overdue: 0, starting: 0, unbilled: 0, active_revenue: null },
         kpisLoaded:  false,
 
         filters: {
@@ -435,6 +442,7 @@ function FF_Leases() {
             sort:            'created_at',
             dir:             'DESC',
             customer_filter: '',
+            focus:           '',   // ending | starting | unbilled (summary strip)
         },
         currentPage: 1,
 
@@ -457,29 +465,34 @@ function FF_Leases() {
             this.$watch('currentPage', () => this.clearSelection());
         },
 
-        // Load KPI counts in parallel from lightweight API calls.
-        // WHY Promise.all: 4 requests are independent; fire simultaneously.
+        // Summary strip + tab counts — one call (api/v1/leases/kpis.php).
         async loadKpis() {
             try {
-                const base = '<?= base_url('api/v1/leases') ?>';
-                const [activeRes, pendingRes, completedRes, cancelledRes, dashRes] = await Promise.all([
-                    FF_Api.get(base + '?status=active&per_page=1'),
-                    FF_Api.get(base + '?status=pending&per_page=1'),
-                    FF_Api.get(base + '?status=completed&per_page=1'),
-                    FF_Api.get(base + '?status=cancelled&per_page=1'),
-                    FF_Api.get('<?= base_url('api/v1/dashboard/kpis') ?>'),
-                ]);
-                this.kpis = {
-                    active:         activeRes.data?.pagination?.total     ?? 0,
-                    pending:        pendingRes.data?.pagination?.total    ?? 0,
-                    completed:      completedRes.data?.pagination?.total  ?? 0,
-                    cancelled:      cancelledRes.data?.pagination?.total  ?? 0,
-                    active_revenue: dashRes.data?.active_revenue          ?? '0.00',
-                };
-                this.kpisLoaded = true;
-            } catch(e) {
-                this.kpisLoaded = true; // show zeros rather than skeleton forever
+                const r = await FF_Api.get('<?= base_url('api/v1/leases/kpis') ?>');
+                if (r.success) this.kpis = Object.assign(this.kpis, r.data);
+            } catch (e) { /* show zeros rather than a skeleton forever */ }
+            this.kpisLoaded = true;
+        },
+
+        // A summary tile narrows the table to its leases (server-side
+        // ?focus=, the same window as the tile's count) and sorts by the
+        // date that matters for it. '' = back to the plain Active & Pending list.
+        setFocus(key) {
+            const sortFor = { ending: ['end_date', 'ASC'], starting: ['start_date', 'ASC'], unbilled: ['billed_through', 'ASC'] };
+            this.filters.focus = (key && this.filters.focus !== key) ? key : '';
+            this.activeTab     = 'open';
+            this.filters.status = '';
+            FF_TabHash.write('open');
+            if (this.filters.focus) {
+                [this.filters.sort, this.filters.dir] = sortFor[this.filters.focus];
+            } else {
+                this.filters.sort = 'created_at'; this.filters.dir = 'DESC';
             }
+            this.resetPage();
+        },
+
+        focusLabel() {
+            return { ending: 'Ending within 30 days', starting: 'Starting this week', unbilled: 'Billing behind' }[this.filters.focus] || '';
         },
 
         setTab(tab) {
@@ -487,6 +500,7 @@ function FF_Leases() {
             this.activeTab      = tab;
             FF_TabHash.write(tab);           // keep hash in sync
             this.filters.status = '';
+            this.filters.focus  = '';
             this.currentPage    = 1;
             this.load();
         },
@@ -511,6 +525,7 @@ function FF_Leases() {
                 params.set('status', this.filters.status);
             }
 
+            if (this.filters.focus)   params.set('focus',    this.filters.focus);
             if (this.filters.search)  params.set('search',   this.filters.search);
             params.set('sort',     this.filters.sort);
             params.set('dir',      this.filters.dir);
@@ -567,7 +582,7 @@ function FF_Leases() {
         },
 
         hasActiveFilters() {
-            return this.filters.search || this.filters.status;
+            return this.filters.search || this.filters.status || this.filters.focus;
         },
 
         statusBadgeClass(status) {

@@ -1398,50 +1398,22 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
             <?php endif; ?>
         </div>
 <?php $heroOwn = ob_get_clean(); ?>
-<?php ob_start(); ?>
+<?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
     <?php if (!$isEmbed): ?>
-        <?= help_button('invoices') ?>
-        <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
-        <button type="button" class="btn btn-secondary btn-sm no-print"
-                onclick="aiPanel_invoice_<?= (int)$invoiceId ?>_invoice_analysis_open()"
-                title="Open AI Invoice Analysis">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;" aria-hidden="true">
-                <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
-            </svg>
-            AI Analysis
-        </button>
+        <?php if ($canEdit && !$isDraft): ?>
+            <!-- Send Invoice (S-MILEAGE-2B C5: HARD review gate retired per D-I) -->
+            <button class="btn btn-primary btn-sm"
+                    @click="sendInvoice()"
+                    :disabled="sending">
+                <span x-show="!sending">Re-send Invoice</span>
+                <span x-show="sending">Sending…</span>
+            </button>
         <?php endif; ?>
         <!-- Print -->
         <button class="btn btn-secondary btn-sm no-print" onclick="window.print();" title="Print Invoice">
             <?= heroicon('document-text', 'icon-sm') ?>
             Print
         </button>
-
-        <!-- S-INVOICE-PDF: generate (or re-open) the server-side PDF. Same
-             action either way — the endpoint returns a fresh signed URL
-             whether or not one already existed. -->
-        <button type="button" class="btn btn-secondary btn-sm no-print" @click="generatePdf()" :disabled="pdfWorking">
-            <?= heroicon('document-text', 'icon-sm') ?>
-            <span x-show="!pdfWorking"><?= $invoice['pdf_path'] && $invoice['status'] !== 'draft' ? 'View PDF' : 'Generate PDF' ?></span>
-            <span x-show="pdfWorking">Generating…</span>
-        </button>
-
-        <?php if (can('customers', 'create')): /* EMAIL-1: email this invoice */ ?>
-        <button type="button"
-                class="btn btn-primary btn-sm no-print"
-                onclick="openEmailCompose({
-                    customerId:   <?= (int)$invoice['customer_id'] ?>,
-                    toEmail:      <?= e(json_encode((string)($invoice['customer_email_snapshot'] ?? ''))) ?>,
-                    toName:       <?= e(json_encode((string)($invoice['customer_name_snapshot'] ?? $invoice['company_name_snapshot']))) ?>,
-                    templateSlug: 'invoice_ready',
-                    entityType:   'invoice',
-                    entityId:     <?= (int)$invoice['id'] ?>
-                })"
-                title="Email invoice to customer">
-            <?= heroicon('envelope', 'icon-sm') ?>
-            Email Invoice
-        </button>
-        <?php endif; ?>
 
         <?php
         // S-QBO-INVOICE-PAYNOW: the same Pay-now link the email and PDF carry,
@@ -1463,6 +1435,50 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
                 <?= heroicon('pencil-square', 'icon-sm') ?>
                 Edit
             </button>
+        <?php endif; ?>
+        <?php /* S-INVOICE-DRAFT-EDIT: rebuild a draft from current lease state (regular, lease-linked, non-advance). */ ?>
+        <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance'
+                  && ($invoice['invoice_type'] ?? 'regular') === 'regular' && $invoice['lease_id'] && can('invoices', 'edit')): ?>
+            <button class="btn btn-secondary btn-sm"
+                    @click="regenerateFromLease(<?= $invoiceId ?>, <?= e(json_encode($invoice['updated_at'])) ?>)"
+                    :disabled="regenerating">
+                <span x-show="!regenerating">Regenerate from Lease</span>
+                <span x-show="regenerating">Regenerating…</span>
+            </button>
+        <?php endif; ?>
+
+        <?php if ($invoice['lease_id']): ?>
+            <a href="<?= base_url('leases/show') ?>?id=<?= (int)$invoice['lease_id'] ?>" class="btn btn-secondary btn-sm">
+                View Lease
+            </a>
+        <?php endif; ?>
+
+        <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
+        <button type="button" class="btn btn-secondary btn-sm no-print"
+                onclick="aiPanel_invoice_<?= (int)$invoiceId ?>_invoice_analysis_open()"
+                title="Open AI Invoice Analysis">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;" aria-hidden="true">
+                <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
+            </svg>
+            AI Analysis
+        </button>
+        <?php endif; ?>
+        <?php if (in_array($invoice['status'], ['draft', 'sent']) && can('invoices', 'edit')): ?>
+            <button class="btn btn-danger btn-sm" @click="showVoidModal = true">Void</button>
+        <?php endif; ?>
+        <?php // SOP I13: an uncollectable invoice is written off (bad debt), not credited. Same gate as the endpoint. ?>
+        <?php if (in_array($invoice['status'], ['sent', 'overdue', 'partially_paid'], true) && (float) $invoice['balance_due'] > 0 && can('journal_entries', 'create')): ?>
+            <button class="btn btn-secondary btn-sm" @click="showWriteOffModal = true">Write Off</button>
+        <?php endif; ?>
+        <?php if ($canDelete): ?>
+            <button class="btn btn-danger btn-sm" @click="showDeleteModal = true">Delete</button>
+        <?php endif; ?>
+    <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+    <?php if (!$isEmbed): ?>
+        <?= help_button('invoices') ?>
+        <?php if ($canEdit && $isDraft): ?>
             <!-- Send Invoice (S-MILEAGE-2B C5: HARD review gate retired per D-I) -->
             <button class="btn btn-primary btn-sm"
                     @click="sendInvoice()"
@@ -1480,10 +1496,21 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
             </a>
         <?php endif; ?>
 
-        <?php if ($invoice['lease_id']): ?>
-            <a href="<?= base_url('leases/show') ?>?id=<?= (int)$invoice['lease_id'] ?>" class="btn btn-secondary btn-sm">
-                View Lease
-            </a>
+        <?php if (can('customers', 'create')): /* EMAIL-1: email this invoice */ ?>
+        <button type="button"
+                class="btn <?= ($canEdit || $canRecordPayment) ? 'btn-secondary' : 'btn-primary' ?> btn-sm no-print"
+                onclick="openEmailCompose({
+                    customerId:   <?= (int)$invoice['customer_id'] ?>,
+                    toEmail:      <?= e(json_encode((string)($invoice['customer_email_snapshot'] ?? ''))) ?>,
+                    toName:       <?= e(json_encode((string)($invoice['customer_name_snapshot'] ?? $invoice['company_name_snapshot']))) ?>,
+                    templateSlug: 'invoice_ready',
+                    entityType:   'invoice',
+                    entityId:     <?= (int)$invoice['id'] ?>
+                })"
+                title="Email invoice to customer">
+            <?= heroicon('envelope', 'icon-sm') ?>
+            Email Invoice
+        </button>
         <?php endif; ?>
 
         <?php /* S-INVOICE-DRAFT-EDIT: hand-edit a draft's line items (totals recomputed
@@ -1491,27 +1518,16 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
         <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance' && can('invoices', 'edit')): ?>
             <a href="<?= base_url('invoices/edit') ?>?id=<?= $invoiceId ?>" class="btn btn-secondary btn-sm">Edit Line Items</a>
         <?php endif; ?>
-        <?php /* S-INVOICE-DRAFT-EDIT: rebuild a draft from current lease state (regular, lease-linked, non-advance). */ ?>
-        <?php if ($invoice['status'] === 'draft' && ($invoice['generation_source'] ?? '') !== 'advance'
-                  && ($invoice['invoice_type'] ?? 'regular') === 'regular' && $invoice['lease_id'] && can('invoices', 'edit')): ?>
-            <button class="btn btn-secondary btn-sm"
-                    @click="regenerateFromLease(<?= $invoiceId ?>, <?= e(json_encode($invoice['updated_at'])) ?>)"
-                    :disabled="regenerating">
-                <span x-show="!regenerating">Regenerate from Lease</span>
-                <span x-show="regenerating">Regenerating…</span>
-            </button>
-        <?php endif; ?>
+        <!-- S-INVOICE-PDF: generate (or re-open) the server-side PDF. Same
+             action either way — the endpoint returns a fresh signed URL
+             whether or not one already existed. -->
+        <button type="button" class="btn btn-secondary btn-sm no-print" @click="generatePdf()" :disabled="pdfWorking">
+            <?= heroicon('document-text', 'icon-sm') ?>
+            <span x-show="!pdfWorking"><?= $invoice['pdf_path'] && $invoice['status'] !== 'draft' ? 'View PDF' : 'Generate PDF' ?></span>
+            <span x-show="pdfWorking">Generating…</span>
+        </button>
 
-        <?php if (in_array($invoice['status'], ['draft', 'sent']) && can('invoices', 'edit')): ?>
-            <button class="btn btn-danger btn-sm" @click="showVoidModal = true">Void</button>
-        <?php endif; ?>
-        <?php // SOP I13: an uncollectable invoice is written off (bad debt), not credited. Same gate as the endpoint. ?>
-        <?php if (in_array($invoice['status'], ['sent', 'overdue', 'partially_paid'], true) && (float) $invoice['balance_due'] > 0 && can('journal_entries', 'create')): ?>
-            <button class="btn btn-secondary btn-sm" @click="showWriteOffModal = true">Write Off</button>
-        <?php endif; ?>
-        <?php if ($canDelete): ?>
-            <button class="btn btn-danger btn-sm" @click="showDeleteModal = true">Delete</button>
-        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
     <?php endif; // !$isEmbed ?>
 <?php $heroActions = ob_get_clean(); ?>
 <?php
@@ -1738,310 +1754,75 @@ $currentIdx = $statusOrder[$invoice['status']] ?? 0;
 
 
 <!-- ================================================================
-     KPI STAT CARDS (S-MODULE-CHROME: ff-stats glow + icons, no top bar)
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN). What is still
+     owed leads (with how much is paid); the due date says how far away
+     or how late it is; the total carries its CAD equivalent.
      ================================================================ -->
+<?php
+$_paidPct = bccomp((string) $invoice['total_amount'], '0', 2) > 0
+    ? (float) bcmul(bcdiv(bcadd((string) $invoice['amount_paid'], (string) ($invoice['credits_applied'] ?? '0'), 6), (string) $invoice['total_amount'], 6), '100', 1)
+    : 0.0;
+$_dueRel = '';
+if (!empty($invoice['due_date']) && !$isDraft && !$isPaid && !$isVoid && !$isWrittenOff) {
+    $_dd = (int) round((strtotime($invoice['due_date']) - strtotime(date('Y-m-d'))) / 86400);
+    $_dueRel = $_dd < 0 ? (-$_dd) . ' day' . ($_dd === -1 ? '' : 's') . ' overdue'
+             : ($_dd === 0 ? 'due today' : 'in ' . $_dd . ' day' . ($_dd === 1 ? '' : 's'));
+}
+?>
 <div class="stat-grid stat-grid--5 ff-stats">
-    <div class="stat-card stat-card--slate">
-        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-document-text"/></svg></span>
-        <div class="stat-label">Invoice Date</div>
-        <div class="stat-value stat-value--date font-mono"><?= format_date($invoice['invoice_date']) ?></div>
-    </div>
+    <?php $_owing = bccomp((string) $invoice['balance_due'], '0', 2) > 0; ?>
+    <<?= ($_owing && $canRecordPayment && can('payments', 'create') && !$isEmbed) ? 'a href="' . base_url('payments/create') . '?invoice_id=' . (int) $invoice['id'] . '" title="Record a payment against this invoice"' : 'div' ?>
+       class="stat-card <?= $_owing ? ($isOverdue ? 'stat-card--red' : 'stat-card--amber') : 'stat-card--green' ?>">
+        <span class="stat-icon <?= $_owing ? ($isOverdue ? 'stat-icon--red' : 'stat-icon--amber') : 'stat-icon--green' ?>"><svg><use href="#icon-<?= $_owing ? 'exclamation-triangle' : 'check-circle' ?>"/></svg></span>
+        <div class="stat-label">Balance due</div>
+        <div class="stat-value font-mono"<?= $_owing && $isOverdue ? ' style="color:var(--color-danger);"' : '' ?>><?= format_currency($invoice['balance_due']) ?></div>
+        <div class="stat-delta"><?= $isPaid ? 'paid in full' . ($invoice['paid_date'] ? ' · ' . format_date($invoice['paid_date']) : '') : round($_paidPct) . '% paid' ?></div>
+    </<?= ($_owing && $canRecordPayment && can('payments', 'create') && !$isEmbed) ? 'a' : 'div' ?>>
+
     <div class="stat-card <?= $isOverdue ? 'stat-card--red' : 'stat-card--amber' ?>">
         <span class="stat-icon <?= $isOverdue ? 'stat-icon--red' : 'stat-icon--amber' ?>"><svg><use href="#icon-clock"/></svg></span>
-        <div class="stat-label">Due Date</div>
-        <div class="stat-value stat-value--date font-mono" <?php if ($isOverdue): ?>style="color:var(--color-danger);"<?php endif; ?>>
-            <?= format_date($invoice['due_date']) ?>
-            <?php if ($isOverdue): ?>
-                <?php
-                $daysOverdue = (int)((strtotime('today') - strtotime($invoice['due_date'])) / 86400);
-                ?>
-                <div class="text-sm" style="font-size:11px; color:var(--color-danger); margin-top:2px;">
-                    <?= $daysOverdue ?> day<?= $daysOverdue !== 1 ? 's' : '' ?> overdue
-                </div>
-            <?php endif; ?>
-        </div>
+        <div class="stat-label">Due</div>
+        <div class="stat-value stat-value--date font-mono"<?= $isOverdue ? ' style="color:var(--color-danger);"' : '' ?>><?= format_date($invoice['due_date']) ?></div>
+        <div class="stat-delta"<?= $isOverdue ? ' style="color:var(--color-danger);"' : '' ?>><?= $_dueRel !== '' ? e($_dueRel) : ($isDraft ? 'provisional until sent' : '—') ?></div>
     </div>
+
     <div class="stat-card stat-card--blue">
         <span class="stat-icon stat-icon--blue"><svg><use href="#icon-currency-dollar"/></svg></span>
-        <div class="stat-label">Total Amount</div>
+        <div class="stat-label">Total</div>
         <div class="stat-value font-mono"><?= format_currency($invoice['total_amount']) ?></div>
-        <?php if ($invoice['currency'] !== 'CAD' && !empty($invoice['exchange_rate_to_cad'])): ?>
-            <?php
-                // CURRENCY-MARKUP-1: use effective rate (bank + markup) for CAD display
-                $_tileMarkup = (string)($invoice['currency_markup_pct'] ?? '0.0000');
-                if (bccomp($_tileMarkup, '0', 4) > 0) {
-                    $_tileFactor = bcadd('1', bcdiv($_tileMarkup, '100', 10), 10);
-                    $_tileEffRate = bcmul((string)$invoice['exchange_rate_to_cad'], $_tileFactor, 6);
-                } else {
-                    $_tileEffRate = (string)$invoice['exchange_rate_to_cad'];
-                }
-            ?>
-            <div class="text-sm text-secondary" style="margin-top:2px; font-size:11px;">
-                ≈ <?= format_currency(bcmul($invoice['total_amount'], $_tileEffRate, 2)) ?> CAD
-            </div>
-        <?php endif; ?>
-    </div>
-    <!-- TILES-2: Amount Paid drills to payments scoped to this invoice.
-         Invoice Date / Due Date / Total Amount stay as display-only info. -->
-    <a class="stat-card stat-card--green"
-       href="<?= base_url('payments') ?>?invoice_id=<?= (int)$invoice['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View payments applied to this invoice">
-        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
-        <div class="stat-label">Amount Paid</div>
-        <div class="stat-value font-mono" style="<?= bccomp($invoice['amount_paid'], '0', 2) > 0 ? 'color:var(--color-success);' : '' ?>">
-            <?= format_currency($invoice['amount_paid']) ?>
-        </div>
-    </a>
-
-    <!-- TILES-2: Balance Due jumps to the Record Payment form pre-loaded
-         with this invoice when there's still an outstanding balance.
-         When fully paid the tile stays as display-only (nothing to pay). -->
-    <?php if (bccomp($invoice['balance_due'], '0', 2) > 0 && can('payments', 'create')): ?>
-    <a class="stat-card stat-card--red"
-       href="<?= base_url('payments/create') ?>?invoice_id=<?= (int)$invoice['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="Record a payment against this invoice">
-        <span class="stat-icon stat-icon--red"><svg><use href="#icon-exclamation-triangle"/></svg></span>
-        <div class="stat-label">Balance Due</div>
-        <div class="stat-value font-mono" style="color:var(--color-danger);">
-            <?= format_currency($invoice['balance_due']) ?>
-        </div>
-    </a>
-    <?php else: ?>
-    <div class="stat-card <?= $isPaid ? 'stat-card--green' : 'stat-card--slate' ?>">
-        <span class="stat-icon <?= $isPaid ? 'stat-icon--green' : 'stat-icon--slate' ?>"><svg><use href="#icon-<?= $isPaid ? 'check-circle' : 'credit-card' ?>"/></svg></span>
-        <div class="stat-label">Balance Due</div>
-        <div class="stat-value font-mono">
-            <?= format_currency($invoice['balance_due']) ?>
-        </div>
-        <?php if ($isPaid): ?>
-            <div class="text-sm" style="color:var(--color-success); font-size:11px; margin-top:2px;">
-                ✓ Paid in full<?php if ($invoice['paid_date']): ?> · <?= format_date($invoice['paid_date']) ?><?php endif; ?>
-            </div>
-        <?php endif; ?>
-    </div>
-    <?php endif; ?>
-
-
-</div>
-
-
-<!-- ================================================================
-     QUICKBOOKS SYNC PANEL (S-QBO-INVOICE-SHOW-RICH-PANEL)
-     Maximalist inline replacement for the retired S-QBO-11 header
-     badge. Surfaces 6-state badge + QBO IDs + deep-link + last-pushed
-     timestamp + currency + sync token + last-20 push history +
-     Retry/View-in-QBO actions. Hidden in print (operator-facing only).
-     Conditional on quickbooks.connection_status='connected'; renders
-     nothing when QBO is disconnected.
-     ================================================================ -->
-<?php if ($qboConnected):
-    // ── State classification ──────────────────────────────────────
-    // 6-state vocabulary mapped from the canonical push_status ENUM
-    // (FLEETFORGE_DATABASE_MASTER.sql line 1112). Synced = pushed
-    // (single ENUM value, not the prompt's hypothetical
-    // success_created/success_updated/already_mapped). When no
-    // mapping row exists, the panel still renders in "Not Synced"
-    // state — addressing the operator complaint that the prior
-    // header badge "disappeared" for unmapped invoices.
-    $rp_status = $qboInvoiceMapping['push_status'] ?? null;
-    $rp_qbo_id = $qboInvoiceMapping['qbo_invoice_id'] ?? null;
-
-    if ($qboInvoiceMapping === null) {
-        $rp_state       = 'not_synced';
-        $rp_badge_class = 'badge-neutral';
-        $rp_state_icon  = '○';
-        $rp_state_label = 'Not Synced';
-    } elseif ($rp_status === 'pushed') {
-        $rp_state       = 'synced';
-        $rp_badge_class = 'badge-success';
-        $rp_state_icon  = '✓';
-        $rp_state_label = 'Synced';
-    } elseif ($rp_status === 'pending') {
-        $rp_state       = 'pending';
-        $rp_badge_class = 'badge-neutral';
-        $rp_state_icon  = '⋯';
-        $rp_state_label = 'Pending';
-    } elseif ($rp_status === 'failed') {
-        $rp_state       = 'failed';
-        $rp_badge_class = 'badge-danger';
-        $rp_state_icon  = '✗';
-        $rp_state_label = 'Failed';
-    } elseif (str_starts_with((string)$rp_status, 'failed_preflight')) {
-        $rp_state       = 'failed_preflight';
-        $rp_badge_class = 'badge-warning';
-        $rp_state_icon  = '⚠';
-        $rp_state_label = 'Failed Pre-flight';
-    } elseif (str_starts_with((string)$rp_status, 'skipped_')) {
-        $rp_state       = 'skipped';
-        $rp_badge_class = 'badge-neutral';
-        $rp_state_icon  = '–';
-        $rp_state_label = 'Skipped';
-    } else {
-        $rp_state       = 'unknown';
-        $rp_badge_class = 'badge-neutral';
-        $rp_state_icon  = '○';
-        $rp_state_label = ucfirst(str_replace('_', ' ', (string)$rp_status));
-    }
-
-    // Retryable iff edit perm held AND push_status is in the
-    // retryable set — matches retry.php line 49's whitelist.
-    $rp_retryable_statuses = ['failed', 'failed_preflight', 'failed_preflight_field_too_long', 'failed_preflight_currency_mismatch'];
-    $rp_show_retry         = $qboCanEdit && $qboInvoiceMapping !== null
-                          && in_array($rp_status, $rp_retryable_statuses, true);
-
-    // QBO web app deep-link — host swap on sandbox/production.
-    $rp_qbo_host    = $qboEnvironment === 'production' ? 'app.qbo.intuit.com' : 'app.sandbox.qbo.intuit.com';
-    $rp_qbo_url     = $rp_qbo_id ? "https://{$rp_qbo_host}/app/invoice?txnId=" . urlencode((string)$rp_qbo_id) : null;
-
-    // Inline time-ago helper — no canonical helper exists in lib/.
-    // Returns NULL for NULL/empty input so the caller can skip rendering.
-    // S-UTC-STAMPS: callers pass UTC DATETIMEs (acc_qbo_invoice_map.pushed_at,
-    // acc_qbo_sync_log.created_at) — parse as UTC, not PHP-local.
-    $rp_time_ago = static function (?string $ts): ?string {
-        if (!$ts) return null;
-        $t = strtotime($ts . ' UTC');
-        if ($t === false) return null;
-        $diff = time() - $t;
-        if ($diff < 60)      return $diff <= 1 ? 'just now' : $diff . ' seconds ago';
-        if ($diff < 3600)    return floor($diff / 60) . ' min ago';
-        if ($diff < 86400)   return floor($diff / 3600) . ' hr ago';
-        if ($diff < 2592000) return floor($diff / 86400) . ' days ago';
-        return date('Y-m-d', $t);
-    };
-    $rp_pushed_rel = $rp_time_ago($qboInvoiceMapping['pushed_at'] ?? null);
-?>
-<div class="card ff-print-hide" id="qbo-sync-panel" style="margin-bottom:24px;">
-
-    <!-- Panel header: state badge + identifiers row -->
-    <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-        <div style="display:flex; align-items:center; gap:10px;">
-            <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0;">QuickBooks Sync</h3>
-            <span class="badge badge-no-dot <?= $rp_badge_class ?>"
-                  style="font-size:12px; padding:3px 10px;"
-                  title="<?= e($rp_status ?? 'no mapping row') ?>">
-                <span style="font-family:'DM Mono',monospace;"><?= e($rp_state_icon) ?></span>
-                <?= e($rp_state_label) ?>
-            </span>
-        </div>
-
-        <!-- Identifiers row: QBO ID + last-pushed + currency + sync token -->
-        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-size:13px; margin-left:auto;">
-            <?php if ($rp_qbo_id): ?>
-                <div>
-                    <span class="text-secondary">QBO</span>
-                    <a href="<?= e($rp_qbo_url) ?>" target="_blank" rel="noopener noreferrer"
-                       class="font-mono link" title="Open in QuickBooks">#<?= e($rp_qbo_id) ?> ↗</a>
-                </div>
-            <?php endif; ?>
-            <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['pushed_at'])): ?>
-                <div title="<?= e(format_datetime($qboInvoiceMapping['pushed_at'], 'Y-m-d H:i:s T')) ?>">
-                    <span class="text-secondary">Pushed</span>
-                    <span class="font-mono"><?= e($rp_pushed_rel ?? (string)$qboInvoiceMapping['pushed_at']) ?></span>
-                </div>
-            <?php endif; ?>
-            <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['qbo_currency'])): ?>
-                <div>
-                    <span class="text-secondary">Currency</span>
-                    <span class="font-mono"><?= e($qboInvoiceMapping['qbo_currency']) ?></span>
-                </div>
-            <?php endif; ?>
-            <?php if ($qboInvoiceMapping && $qboInvoiceMapping['qbo_sync_token'] !== null && $qboInvoiceMapping['qbo_sync_token'] !== ''): ?>
-                <div class="text-secondary text-sm" title="QBO optimistic-lock token — used to detect divergent updates.">
-                    Token: <span class="font-mono"><?= e($qboInvoiceMapping['qbo_sync_token']) ?></span>
-                </div>
-            <?php endif; ?>
-        </div>
-    </div>
-
-    <!-- Push history table -->
-    <div style="padding:14px 20px;">
-        <h4 style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 8px 0;">
-            Push History
-        </h4>
-        <?php if (empty($qboSyncLogHistory)): ?>
-            <p class="text-secondary text-sm" style="margin:0;">No push attempts yet.</p>
+        <?php if ($invoice['currency'] !== 'CAD' && !empty($invoice['exchange_rate_to_cad'])):
+            // CURRENCY-MARKUP-1: use effective rate (bank + markup) for CAD display
+            $_tileMarkup = (string) ($invoice['currency_markup_pct'] ?? '0.0000');
+            $_tileEffRate = bccomp($_tileMarkup, '0', 4) > 0
+                ? bcmul((string) $invoice['exchange_rate_to_cad'], bcadd('1', bcdiv($_tileMarkup, '100', 10), 10), 6)
+                : (string) $invoice['exchange_rate_to_cad']; ?>
+        <div class="stat-delta">≈ <?= format_currency(bcmul($invoice['total_amount'], $_tileEffRate, 2)) ?> CAD</div>
         <?php else: ?>
-            <table class="table" style="margin:0; font-size:12px;">
-                <thead>
-                    <tr>
-                        <th style="font-size:10px;">Timestamp</th>
-                        <th style="font-size:10px;">Operation</th>
-                        <th style="font-size:10px;">Status</th>
-                        <th style="font-size:10px;">Error</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($qboSyncLogHistory as $lr): ?>
-                        <?php
-                        // Status row color: HTTP 2xx → success, 4xx/5xx → danger,
-                        // null → neutral (queued but not yet dispatched).
-                        $lr_status = (int)($lr['response_status'] ?? 0);
-                        if ($lr_status >= 200 && $lr_status < 300) {
-                            $lr_badge = 'badge-success';
-                            $lr_icon  = '✓';
-                        } elseif ($lr_status >= 400) {
-                            $lr_badge = 'badge-danger';
-                            $lr_icon  = '✗';
-                        } else {
-                            $lr_badge = 'badge-neutral';
-                            $lr_icon  = '⋯';
-                        }
-                        ?>
-                        <tr>
-                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e(format_datetime($lr['created_at'], 'Y-m-d H:i:s T')) ?>">
-                                <?= e($rp_time_ago($lr['created_at']) ?? (string)$lr['created_at']) ?>
-                            </td>
-                            <td class="text-sm"><?= e(($lr['http_method'] ?? '') . ' ' . ($lr['operation'] ?? '')) ?></td>
-                            <td>
-                                <span class="badge badge-no-dot <?= $lr_badge ?>" style="font-size:10px;">
-                                    <?= e($lr_icon) ?> <?= e($lr_status > 0 ? (string)$lr_status : 'queued') ?>
-                                </span>
-                            </td>
-                            <td class="text-sm text-secondary" style="max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
-                                title="<?= e((string)($lr['error_message'] ?? '')) ?>">
-                                <?php if (!empty($lr['error_code'])): ?>
-                                    <span class="font-mono text-danger"><?= e((string)$lr['error_code']) ?></span>
-                                <?php endif; ?>
-                                <?= e((string)($lr['error_message'] ?? '')) ?>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-            <?php if ($qboSyncLogTotalCount > count($qboSyncLogHistory)): ?>
-                <p class="text-secondary text-sm" style="margin:8px 0 0 0; font-size:11px;">
-                    +<?= (int)($qboSyncLogTotalCount - count($qboSyncLogHistory)) ?> more attempts (showing most recent 20)
-                </p>
-            <?php endif; ?>
+        <div class="stat-delta"><?= e($invoice['currency']) ?> · incl. <?= format_currency($invoice['tax_total'] ?? '0') ?> tax</div>
         <?php endif; ?>
     </div>
 
-    <!-- Actions row -->
-    <?php if ($rp_show_retry || $rp_qbo_url): ?>
-    <div style="padding:12px 20px; border-top:1px solid var(--border-color); display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
-         x-data="qboSyncPanel(<?= (int)($qboInvoiceMapping['id'] ?? 0) ?>)">
-        <?php if ($rp_show_retry): ?>
-            <button type="button" class="btn btn-secondary btn-sm"
-                    @click="retry()" :disabled="retrying">
-                <span x-show="!retrying">Retry Push</span>
-                <span x-show="retrying" x-cloak>Retrying…</span>
-            </button>
-        <?php endif; ?>
-        <?php if ($rp_qbo_url): ?>
-            <a href="<?= e($rp_qbo_url) ?>" target="_blank" rel="noopener noreferrer"
-               class="btn btn-secondary btn-sm">
-                View in QBO ↗
-            </a>
-        <?php endif; ?>
-        <span x-show="flash" x-cloak x-text="flash" class="text-sm" :class="flashType === 'success' ? 'text-success' : 'text-danger'"></span>
-    </div>
-    <?php endif; ?>
+    <a class="stat-card stat-card--green"
+       href="<?= base_url('payments') ?>?invoice_id=<?= (int) $invoice['id'] ?>"
+       title="Payments applied to this invoice">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
+        <div class="stat-label">Paid</div>
+        <div class="stat-value font-mono"><?= format_currency($invoice['amount_paid']) ?></div>
+        <div class="stat-delta"><?= count($invoicePayments) ?> payment<?= count($invoicePayments) === 1 ? '' : 's' ?><?= bccomp((string) ($invoice['credits_applied'] ?? '0'), '0', 2) > 0 ? ' · ' . format_currency($invoice['credits_applied']) . ' credit' : '' ?></div>
+    </a>
 
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Issued</div>
+        <div class="stat-value stat-value--date font-mono"><?= format_date($invoice['invoice_date']) ?></div>
+        <div class="stat-delta"><?= !empty($invoice['sent_date']) ? 'sent ' . format_date($invoice['sent_date']) : ($isDraft ? 'not sent yet' : '—') ?></div>
+    </div>
 </div>
-<?php endif; /* $qboConnected */ ?>
 
+<?php if (!$isEmbed): ?>
+<div class="rec-layout">
+<div class="rec-main">
+<?php endif; ?>
 
 <!-- ================================================================
      FROM / TO ADDRESSES + INVOICE METADATA
@@ -3331,6 +3112,222 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
 
 
 <!-- ================================================================
+     QUICKBOOKS SYNC PANEL (S-QBO-INVOICE-SHOW-RICH-PANEL)
+     Maximalist inline replacement for the retired S-QBO-11 header
+     badge. Surfaces 6-state badge + QBO IDs + deep-link + last-pushed
+     timestamp + currency + sync token + last-20 push history +
+     Retry/View-in-QBO actions. Hidden in print (operator-facing only).
+     Conditional on quickbooks.connection_status='connected'; renders
+     nothing when QBO is disconnected.
+     ================================================================ -->
+<?php if ($qboConnected):
+    // ── State classification ──────────────────────────────────────
+    // 6-state vocabulary mapped from the canonical push_status ENUM
+    // (FLEETFORGE_DATABASE_MASTER.sql line 1112). Synced = pushed
+    // (single ENUM value, not the prompt's hypothetical
+    // success_created/success_updated/already_mapped). When no
+    // mapping row exists, the panel still renders in "Not Synced"
+    // state — addressing the operator complaint that the prior
+    // header badge "disappeared" for unmapped invoices.
+    $rp_status = $qboInvoiceMapping['push_status'] ?? null;
+    $rp_qbo_id = $qboInvoiceMapping['qbo_invoice_id'] ?? null;
+
+    if ($qboInvoiceMapping === null) {
+        $rp_state       = 'not_synced';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '○';
+        $rp_state_label = 'Not Synced';
+    } elseif ($rp_status === 'pushed') {
+        $rp_state       = 'synced';
+        $rp_badge_class = 'badge-success';
+        $rp_state_icon  = '✓';
+        $rp_state_label = 'Synced';
+    } elseif ($rp_status === 'pending') {
+        $rp_state       = 'pending';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '⋯';
+        $rp_state_label = 'Pending';
+    } elseif ($rp_status === 'failed') {
+        $rp_state       = 'failed';
+        $rp_badge_class = 'badge-danger';
+        $rp_state_icon  = '✗';
+        $rp_state_label = 'Failed';
+    } elseif (str_starts_with((string)$rp_status, 'failed_preflight')) {
+        $rp_state       = 'failed_preflight';
+        $rp_badge_class = 'badge-warning';
+        $rp_state_icon  = '⚠';
+        $rp_state_label = 'Failed Pre-flight';
+    } elseif (str_starts_with((string)$rp_status, 'skipped_')) {
+        $rp_state       = 'skipped';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '–';
+        $rp_state_label = 'Skipped';
+    } else {
+        $rp_state       = 'unknown';
+        $rp_badge_class = 'badge-neutral';
+        $rp_state_icon  = '○';
+        $rp_state_label = ucfirst(str_replace('_', ' ', (string)$rp_status));
+    }
+
+    // Retryable iff edit perm held AND push_status is in the
+    // retryable set — matches retry.php line 49's whitelist.
+    $rp_retryable_statuses = ['failed', 'failed_preflight', 'failed_preflight_field_too_long', 'failed_preflight_currency_mismatch'];
+    $rp_show_retry         = $qboCanEdit && $qboInvoiceMapping !== null
+                          && in_array($rp_status, $rp_retryable_statuses, true);
+
+    // QBO web app deep-link — host swap on sandbox/production.
+    $rp_qbo_host    = $qboEnvironment === 'production' ? 'app.qbo.intuit.com' : 'app.sandbox.qbo.intuit.com';
+    $rp_qbo_url     = $rp_qbo_id ? "https://{$rp_qbo_host}/app/invoice?txnId=" . urlencode((string)$rp_qbo_id) : null;
+
+    // Inline time-ago helper — no canonical helper exists in lib/.
+    // Returns NULL for NULL/empty input so the caller can skip rendering.
+    // S-UTC-STAMPS: callers pass UTC DATETIMEs (acc_qbo_invoice_map.pushed_at,
+    // acc_qbo_sync_log.created_at) — parse as UTC, not PHP-local.
+    $rp_time_ago = static function (?string $ts): ?string {
+        if (!$ts) return null;
+        $t = strtotime($ts . ' UTC');
+        if ($t === false) return null;
+        $diff = time() - $t;
+        if ($diff < 60)      return $diff <= 1 ? 'just now' : $diff . ' seconds ago';
+        if ($diff < 3600)    return floor($diff / 60) . ' min ago';
+        if ($diff < 86400)   return floor($diff / 3600) . ' hr ago';
+        if ($diff < 2592000) return floor($diff / 86400) . ' days ago';
+        return date('Y-m-d', $t);
+    };
+    $rp_pushed_rel = $rp_time_ago($qboInvoiceMapping['pushed_at'] ?? null);
+?>
+<div class="card ff-print-hide" id="qbo-sync-panel" style="margin-bottom:24px;">
+
+    <!-- Panel header: state badge + identifiers row -->
+    <div style="padding:16px 20px; border-bottom:1px solid var(--border-color); display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:10px;">
+            <h3 style="font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0;">QuickBooks Sync</h3>
+            <span class="badge badge-no-dot <?= $rp_badge_class ?>"
+                  style="font-size:12px; padding:3px 10px;"
+                  title="<?= e($rp_status ?? 'no mapping row') ?>">
+                <span style="font-family:'DM Mono',monospace;"><?= e($rp_state_icon) ?></span>
+                <?= e($rp_state_label) ?>
+            </span>
+        </div>
+
+        <!-- Identifiers row: QBO ID + last-pushed + currency + sync token -->
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap; font-size:13px; margin-left:auto;">
+            <?php if ($rp_qbo_id): ?>
+                <div>
+                    <span class="text-secondary">QBO</span>
+                    <a href="<?= e($rp_qbo_url) ?>" target="_blank" rel="noopener noreferrer"
+                       class="font-mono link" title="Open in QuickBooks">#<?= e($rp_qbo_id) ?> ↗</a>
+                </div>
+            <?php endif; ?>
+            <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['pushed_at'])): ?>
+                <div title="<?= e(format_datetime($qboInvoiceMapping['pushed_at'], 'Y-m-d H:i:s T')) ?>">
+                    <span class="text-secondary">Pushed</span>
+                    <span class="font-mono"><?= e($rp_pushed_rel ?? (string)$qboInvoiceMapping['pushed_at']) ?></span>
+                </div>
+            <?php endif; ?>
+            <?php if ($qboInvoiceMapping && !empty($qboInvoiceMapping['qbo_currency'])): ?>
+                <div>
+                    <span class="text-secondary">Currency</span>
+                    <span class="font-mono"><?= e($qboInvoiceMapping['qbo_currency']) ?></span>
+                </div>
+            <?php endif; ?>
+            <?php if ($qboInvoiceMapping && $qboInvoiceMapping['qbo_sync_token'] !== null && $qboInvoiceMapping['qbo_sync_token'] !== ''): ?>
+                <div class="text-secondary text-sm" title="QBO optimistic-lock token — used to detect divergent updates.">
+                    Token: <span class="font-mono"><?= e($qboInvoiceMapping['qbo_sync_token']) ?></span>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Push history table -->
+    <div style="padding:14px 20px;">
+        <h4 style="font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-secondary); margin:0 0 8px 0;">
+            Push History
+        </h4>
+        <?php if (empty($qboSyncLogHistory)): ?>
+            <p class="text-secondary text-sm" style="margin:0;">No push attempts yet.</p>
+        <?php else: ?>
+            <table class="table" style="margin:0; font-size:12px;">
+                <thead>
+                    <tr>
+                        <th style="font-size:10px;">Timestamp</th>
+                        <th style="font-size:10px;">Operation</th>
+                        <th style="font-size:10px;">Status</th>
+                        <th style="font-size:10px;">Error</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($qboSyncLogHistory as $lr): ?>
+                        <?php
+                        // Status row color: HTTP 2xx → success, 4xx/5xx → danger,
+                        // null → neutral (queued but not yet dispatched).
+                        $lr_status = (int)($lr['response_status'] ?? 0);
+                        if ($lr_status >= 200 && $lr_status < 300) {
+                            $lr_badge = 'badge-success';
+                            $lr_icon  = '✓';
+                        } elseif ($lr_status >= 400) {
+                            $lr_badge = 'badge-danger';
+                            $lr_icon  = '✗';
+                        } else {
+                            $lr_badge = 'badge-neutral';
+                            $lr_icon  = '⋯';
+                        }
+                        ?>
+                        <tr>
+                            <td class="font-mono text-sm" style="white-space:nowrap;" title="<?= e(format_datetime($lr['created_at'], 'Y-m-d H:i:s T')) ?>">
+                                <?= e($rp_time_ago($lr['created_at']) ?? (string)$lr['created_at']) ?>
+                            </td>
+                            <td class="text-sm"><?= e(($lr['http_method'] ?? '') . ' ' . ($lr['operation'] ?? '')) ?></td>
+                            <td>
+                                <span class="badge badge-no-dot <?= $lr_badge ?>" style="font-size:10px;">
+                                    <?= e($lr_icon) ?> <?= e($lr_status > 0 ? (string)$lr_status : 'queued') ?>
+                                </span>
+                            </td>
+                            <td class="text-sm text-secondary" style="max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                                title="<?= e((string)($lr['error_message'] ?? '')) ?>">
+                                <?php if (!empty($lr['error_code'])): ?>
+                                    <span class="font-mono text-danger"><?= e((string)$lr['error_code']) ?></span>
+                                <?php endif; ?>
+                                <?= e((string)($lr['error_message'] ?? '')) ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php if ($qboSyncLogTotalCount > count($qboSyncLogHistory)): ?>
+                <p class="text-secondary text-sm" style="margin:8px 0 0 0; font-size:11px;">
+                    +<?= (int)($qboSyncLogTotalCount - count($qboSyncLogHistory)) ?> more attempts (showing most recent 20)
+                </p>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+
+    <!-- Actions row -->
+    <?php if ($rp_show_retry || $rp_qbo_url): ?>
+    <div style="padding:12px 20px; border-top:1px solid var(--border-color); display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
+         x-data="qboSyncPanel(<?= (int)($qboInvoiceMapping['id'] ?? 0) ?>)">
+        <?php if ($rp_show_retry): ?>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    @click="retry()" :disabled="retrying">
+                <span x-show="!retrying">Retry Push</span>
+                <span x-show="retrying" x-cloak>Retrying…</span>
+            </button>
+        <?php endif; ?>
+        <?php if ($rp_qbo_url): ?>
+            <a href="<?= e($rp_qbo_url) ?>" target="_blank" rel="noopener noreferrer"
+               class="btn btn-secondary btn-sm">
+                View in QBO ↗
+            </a>
+        <?php endif; ?>
+        <span x-show="flash" x-cloak x-text="flash" class="text-sm" :class="flashType === 'success' ? 'text-success' : 'text-danger'"></span>
+    </div>
+    <?php endif; ?>
+
+</div>
+<?php endif; /* $qboConnected */ ?>
+
+
+<!-- ================================================================
      NOTES — Customer-facing, Internal, Void reason
      With inline editing for draft invoices
      WHY: Whole card is hidden in print when there's nothing
@@ -3479,6 +3476,90 @@ if ($hasDeliveryInfo || $hasLateFee || $hasCreditNotes || $hasVoidInfo || $hasWr
 </div>
 <?php endif; ?>
 
+
+<?php if (!$isEmbed): ?>
+</div><!-- /rec-main -->
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the invoice at a glance. Screen only
+// (records.css hides .rec-rail in print; the printed invoice is the main
+// column). Skipped in the batch-invoicing preview (?embed=1).
+$R = \FleetForge\Ui\RecordUi::class;
+$railI = [];
+
+// 1. Needs attention.
+$alertsI = [];
+if ($isOverdue) {
+    $alertsI[] = ['danger', 'Overdue — ' . e($_dueRel) . '. ' . (can('payments', 'create') ? '<a href="' . e(base_url('payments/create')) . '?invoice_id=' . (int) $invoiceId . '">Record a payment</a> or send a reminder.' : 'Send a reminder.')];
+}
+if ($isDraft) {
+    $alertsI[] = ['info', 'Draft — review the lines, then <b>Send Invoice</b>. Nothing is owed until it is sent.'];
+}
+if (!$isVoid && !$isWrittenOff && trim((string) ($invoice['customer_email_snapshot'] ?? '')) === '' && !$isPaid) {
+    $alertsI[] = ['warning', 'No customer email on this invoice — it can\'t be emailed.'];
+}
+if ($invoice['status'] === 'partially_paid') {
+    $alertsI[] = ['warning', 'Partly paid — ' . e(format_currency($invoice['balance_due'])) . ' still owing.'];
+}
+if ($qboInvoiceMapping !== null && in_array((string) ($qboInvoiceMapping['push_status'] ?? ''), ['failed', 'error'], true)) {
+    $alertsI[] = ['danger', '<a href="#qbo-sync-panel">QuickBooks push failed</a> — retry from the QuickBooks panel.'];
+}
+if ($isVoid && !empty($invoice['void_reason'])) {
+    $alertsI[] = ['info', 'Voided: ' . e($invoice['void_reason'])];
+}
+$railI[] = $R::card('Needs attention', $R::alerts($alertsI, $isPaid ? 'Paid in full — nothing to do.' : 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Payment.
+$payBody  = $R::meter('Paid', e(round($_paidPct)) . '%', $_paidPct, $_paidPct >= 99.99 ? 'ok' : ($isOverdue ? 'danger' : 'info'),
+    e(format_currency(bcadd((string) $invoice['amount_paid'], (string) ($invoice['credits_applied'] ?? '0'), 2))) . ' of ' . e(format_currency($invoice['total_amount'])) . ' ' . e($invoice['currency']));
+$_lastPay = $invoicePayments ? end($invoicePayments) : null;
+$payBody .= $R::kv([
+    ['Balance', e(format_currency($invoice['balance_due'])), 'mono'],
+    ['Credits applied', bccomp((string) ($invoice['credits_applied'] ?? '0'), '0', 2) > 0 ? e(format_currency($invoice['credits_applied'])) : null, 'mono'],
+    ['Last payment', $_lastPay ? '<a href="' . e(base_url('payments/show')) . '?id=' . (int) $_lastPay['payment_id'] . '">' . e(format_currency($_lastPay['applied_amount'])) . '</a> · ' . e(format_date($_lastPay['payment_date'])) : 'None yet'],
+    ['Terms', !empty($invoice['due_date']) && !empty($invoice['invoice_date']) ? e('Net ' . max(0, (int) round((strtotime($invoice['due_date']) - strtotime($invoice['invoice_date'])) / 86400))) : null],
+]);
+$railI[] = $R::card('Payment', $payBody, ['icon' => 'banknotes', 'class' => 'rec-card--accent']
+    + ($canRecordPayment && can('payments', 'create') ? ['link' => ['Record payment', base_url('payments/create') . '?invoice_id=' . (int) $invoiceId]] : []));
+
+// 3. Delivery.
+$sentByName = isset($userNames[(int) ($invoice['sent_by'] ?? 0)]) ? $userNames[(int) $invoice['sent_by']] : null;
+$railI[] = $R::card('Delivery', $R::kv([
+    ['Sent', !empty($invoice['sent_at']) ? e(format_datetime($invoice['sent_at'])) : (!empty($invoice['sent_date']) ? e(format_date($invoice['sent_date'])) : 'Not sent')],
+    ['By', $sentByName !== null ? e($sentByName) : null],
+    ['To', !empty($invoice['sent_to_email']) ? e($invoice['sent_to_email']) : (!empty($invoice['customer_email_snapshot']) ? '<span class="text-secondary">' . e($invoice['customer_email_snapshot']) . '</span>' : null)],
+    ['Method', !empty($invoice['delivery_method']) ? e(str_replace('_', ' ', (string) $invoice['delivery_method'])) : null],
+    ['QuickBooks', $qboInvoiceMapping !== null ? '<a href="#qbo-sync-panel">' . e(str_replace('_', ' ', (string) ($qboInvoiceMapping['push_status'] ?? 'linked'))) . '</a>' : null],
+]), ['icon' => 'paper-airplane']);
+
+// 4. Related records.
+$relBody = '';
+if (!empty($invoice['customer_id'])) {
+    $relBody .= $R::entity((string) ($invoice['company_name_snapshot'] ?: $invoice['customer_name_snapshot']), base_url('customers/show') . '?id=' . (int) $invoice['customer_id'],
+        !empty($invoice['customer_name_snapshot']) && $invoice['customer_name_snapshot'] !== $invoice['company_name_snapshot'] ? e($invoice['customer_name_snapshot']) : 'Customer',
+        \FleetForge\Ui\ModuleHero::initials((string) ($invoice['company_name_snapshot'] ?: $invoice['customer_name_snapshot'])));
+}
+$relLinks = [];
+if (!empty($invoice['lease_id'])) {
+    $relLinks[] = ['Lease ' . ($leaseContractNumber ?? $invoice['contract_number_snapshot'] ?? ''), base_url('leases/show') . '?id=' . (int) $invoice['lease_id'], 'calendar-days', !empty($invoice['unit_number_invoice_snapshot']) ? 'Unit ' . $invoice['unit_number_invoice_snapshot'] : ''];
+}
+if (!empty($invoice['customer_id'])) {
+    $relLinks[] = ['All invoices for this customer', base_url('invoices') . '?customer_id=' . (int) $invoice['customer_id'], 'document-duplicate'];
+}
+if (!empty($lateFeeInvoice)) {
+    $relLinks[] = ['Late fee ' . $lateFeeInvoice['invoice_number'], base_url('invoices/show') . '?id=' . (int) $lateFeeInvoice['id'], 'receipt-percent'];
+}
+if ($relLinks) {
+    $relBody .= '<div style="margin-top:' . ($relBody !== '' ? '12px' : '0') . ';">' . $R::links($relLinks) . '</div>';
+}
+if ($relBody !== '') {
+    $railI[] = $R::card('Related', $relBody, ['icon' => 'user-group']);
+}
+?>
+<aside class="rec-rail" aria-label="Invoice at a glance">
+    <?= implode("\n    ", $railI) ?>
+</aside>
+</div><!-- /rec-layout -->
+<?php endif; ?>
 
 <!-- ================================================================
      PRINT-ONLY FOOTER — Shows on printed invoice

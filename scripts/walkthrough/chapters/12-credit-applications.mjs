@@ -102,7 +102,7 @@ export default {
     {
       say: 'Open the Credit Application tab. It shows the current status and every application ever sent to this customer, with when it expires.',
       run: async (d) => {
-        await d.click('button.tab-btn:has-text("Credit Application")');
+        await d.tab('Credit Application');
         await d.wait(1500);
         await d.highlight('[role="tabpanel"] table, .tab-table-container table', 'Application history', 2200);
       },

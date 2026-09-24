@@ -121,7 +121,7 @@ export default {
       say: 'The Design tab sets your brand. Pick a colour and the whole screen previews it straight away. It is only saved for everyone when you click Save Brand Colour, so we will put it back.',
       caption: 'The Design tab sets your brand. Pick a colour and the whole screen previews it straight away. It is only saved for everyone when you click Save Brand Color, so we will put it back.',
       run: async (d) => {
-        await d.click(tab('Design'));
+        await d.tab('Design');
         await d.wait(600);
         await d.click('button:has-text("Fleet Green")');
         await d.wait(1800);
@@ -140,7 +140,7 @@ export default {
     {
       say: 'The Users tab links to the Users module, and Lockout is the emergency access control. Both are covered in the Users chapter.',
       run: async (d) => {
-        await d.click(tab('Users'));
+        await d.tab('Users');
         await d.wait(700);
         await d.hover(tab('Lockout'), 1200);
       },
@@ -148,7 +148,7 @@ export default {
     {
       say: 'Portal and Requests decides who is notified inside Fleet Forge when a customer submits a service request from the portal. Choose roles or named people for each request type.',
       run: async (d) => {
-        await d.click(tab('Portal & Requests'));
+        await d.tab('Portal & Requests');
         await d.wait(700);
         await d.highlight(card('Service Request Notification Routing'), 'Who hears about portal requests', 3200);
       },
@@ -160,7 +160,7 @@ export default {
     {
       say: 'The Audit Log tab is a filterable history of every change in the system: who did it, when, and from which IP address.',
       run: async (d) => {
-        await d.click(tab('Audit Log'));
+        await d.tab('Audit Log');
         await d.wait(800);
         await d.highlight('table thead', 'Change history', 2400);
       },
@@ -168,7 +168,7 @@ export default {
     {
       say: 'System shows health checks, server and database details, and when each background task last ran. Run Now starts a task immediately, so leave that to your administrator.',
       run: async (d) => {
-        await d.click(tab('System'));
+        await d.tab('System');
         await d.wait(800);
         await d.highlight(card('Health Checks'), 'Health checks', 2200);
         await d.hover('button:has-text("Run Now")', 1400);
@@ -178,7 +178,7 @@ export default {
       say: 'Backup shows the three backup destinations: automatic A W S backups, an optional Dropbox copy, and on-demand full backups, with a history of recent runs.',
       caption: 'Backup shows the three backup destinations: automatic AWS backups, an optional Dropbox copy, and on-demand full backups, with a history of recent runs.',
       run: async (d) => {
-        await d.click(tab('Backup'));
+        await d.tab('Backup');
         await d.wait(800);
         await d.hover('a:has-text("Connect Dropbox")', 1000);
         await d.hover('button:has-text("Generate full backup")', 1200);
@@ -188,7 +188,7 @@ export default {
       say: 'Integrations holds the connections to outside services: G P S tracking, outgoing email, file storage and A W S. Keys are masked; to replace one, paste the new key over it and save.',
       caption: 'Integrations holds the connections to outside services: GPS tracking, outgoing email, file storage and AWS. Keys are masked; to replace one, paste the new key over it and save.',
       run: async (d) => {
-        await d.click(tab('Integrations'));
+        await d.tab('Integrations');
         await d.wait(800);
         await d.highlight(card('GPS Integration'), 'Sensitive credentials', 2600);
       },
@@ -205,7 +205,7 @@ export default {
       say: 'Intelligence controls the A I features. A I features enabled is the master switch, and you can also set the model and a daily usage limit.',
       caption: 'Intelligence controls the AI features. AI Features Enabled is the master switch, and you can also set the model and a daily usage limit.',
       run: async (d) => {
-        await d.click(tab('Intelligence'));
+        await d.tab('Intelligence');
         await d.wait(800);
         await d.highlight(card('AI Core'), 'AI configuration', 2400);
         await d.hover('#ai\\.enabled', 1000);
@@ -233,7 +233,7 @@ export default {
     {
       say: 'Credit Application sets how long a credit application link stays valid, where applicants send references and insurance, and the terms they agree to. Below is a log of every application sent.',
       run: async (d) => {
-        await d.click(tab('Credit Application'));
+        await d.tab('Credit Application');
         await d.wait(800);
         await d.hover('#cca_credit_application\\.token_expiry_days', 1000);
         await d.hover('a:has-text("Preview Form"), button:has-text("Preview Form")', 900);
@@ -243,7 +243,7 @@ export default {
     {
       say: 'Customer Emails controls every automatic reminder sent to customers. Three switches must all be on for one to go out: the master switch, the reminder dispatcher, and that reminder’s own toggle.',
       run: async (d) => {
-        await d.click(tab('Customer Emails'));
+        await d.tab('Customer Emails');
         await d.wait(900);
         await d.highlight(card('Global settings'), 'Master controls', 3200);
       },

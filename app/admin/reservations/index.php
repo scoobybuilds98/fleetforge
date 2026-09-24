@@ -119,7 +119,7 @@ require_once FF_ROOT . '/includes/header.php';
                     <div class="stat-value font-mono"
                          :class="kpis.today > 0 ? 'text-warning' : ''"
                          x-text="kpis.today"></div>
-                    <div class="stat-delta text-secondary">pickup_date = today</div>
+                    <div class="stat-delta text-secondary">picking up today</div>
                 </div>
             </template>
             <template x-if="!kpisLoaded">

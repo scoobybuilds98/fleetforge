@@ -8,9 +8,9 @@
  * Operating leases are managed on the main app/admin/leases/show.php page.
  *
  * Affordances:
- *   - Header card: lease basics + classification badge + implicit rate +
- *     initial NI + term + status.
- *   - Right-rail summary: total finance income, total principal,
+ *   - Lease basics + classification badge + implicit rate + initial NI +
+ *     term + status.
+ *   - Schedule summary: total finance income, total principal,
  *     initial / final NI, posted-vs-scheduled period counts.
  *   - Schedule table:
  *       * If no schedule yet → "Preview Schedule" button (GET preview)
@@ -21,10 +21,25 @@
  *   - "Regenerate Schedule" (super_admin only, blocked when any row is
  *     posted) → confirm modal → POST generate.php?regenerate=1.
  *
+ * Layout (S-RECORD-REDESIGN):
+ *   The Alpine component (capitalLeaseShow) opens ABOVE the header so the
+ *   schedule actions (Preview / Generate & Save / Re-preview / Regenerate)
+ *   live in the header.
+ *   header  — ModuleHero entity: contract # + classification + status
+ *             badges; customer · unit · term · payment chips
+ *   nav     — the accounting sub-nav, directly under the header
+ *   strip   — monthly payment · initial net investment · implicit rate ·
+ *             periods posted · net investment now (from the saved schedule)
+ *   main    — flash banner · Schedule summary · NI current vs long-term ·
+ *             Schedule table / empty state · Lease details · regen modal
+ *   rail    — Needs attention (no schedule / regenerate blocked / behind on
+ *             posting) · Customer + unit · Classification facts · Related
+ *
  * @depends  config/app.php, includes/auth.php, includes/header.php,
- *           includes/partials/accounting-nav.php,
- *           api/v1/accounting/leases/amortization/{generate,preview,show}.php
- * @session  S-ACCT-LESSOR-2
+ *           includes/partials/accounting-nav.php, lib/Ui/RecordUi.php,
+ *           api/v1/accounting/leases/amortization/{generate,preview,show}.php,
+ *           api/v1/accounting/leases/ni-reclass-preview.php
+ * @session  S-ACCT-LESSOR-2, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
@@ -39,8 +54,12 @@ if ($leaseId === null) {
     exit;
 }
 
+// WHY signer.name: users has no `full_name` column — `signer.full_name` threw
+// SQLSTATE 42S22 and 500'd this page for EVERY capital lease (found while
+// verifying S-RECORD-REDESIGN).
 $lease = db_row(
     "SELECT l.id, l.contract_number, l.classification, l.status,
+            l.customer_id, l.equipment_unit_id,
             l.start_date, l.end_date, l.monthly_rate, l.implicit_rate,
             l.initial_fair_value, l.initial_direct_costs,
             l.guaranteed_residual_value, l.unguaranteed_residual_value,
@@ -50,7 +69,7 @@ $lease = db_row(
             u.unit_number,
             eb.label AS brand, t.model,
             alc.criterion_b_lease_term_months AS term_months,
-            signer.full_name AS signoff_name
+            signer.name AS signoff_name
        FROM leases l
        LEFT JOIN customers           c      ON c.id     = l.customer_id          AND c.deleted_at IS NULL
        LEFT JOIN equipment_units     u      ON u.id     = l.equipment_unit_id    AND u.deleted_at IS NULL
@@ -76,7 +95,8 @@ if ($lease['classification'] === 'operating') {
 }
 
 $existing = db_select(
-    "SELECT id, period_number, status FROM acc_lease_amortization_schedules
+    "SELECT id, period_number, period_date, status, closing_net_investment
+       FROM acc_lease_amortization_schedules
       WHERE lease_id = ? ORDER BY period_number ASC",
     [$leaseId]
 );
@@ -85,119 +105,174 @@ $postedCount = 0;
 foreach ($existing as $r) if ($r['status'] === 'posted') $postedCount++;
 $canRegenerate = $hasSchedule && $postedCount === 0 && is_super_admin();
 
+// ── Strip numbers from the saved schedule (S-RECORD-REDESIGN) ──────────────
+// Net investment now = the closing NI of the last posted period (else the
+// initial fair value). "Due to post" = scheduled periods dated on/before
+// today that are not posted yet — the schedule is behind.
+$today     = ff_today();
+$niNow     = (string) ($lease['initial_fair_value'] ?? '0');
+$duePosts  = 0;
+$nextRow   = null;
+foreach ($existing as $r) {
+    if ($r['status'] === 'posted') {
+        $niNow = (string) $r['closing_net_investment'];
+    } elseif ($r['status'] === 'scheduled') {
+        if ($r['period_date'] <= $today) {
+            $duePosts++;
+        }
+        if ($nextRow === null) {
+            $nextRow = $r;
+        }
+    }
+}
+$periodCount = count($existing);
+$postedPct   = $periodCount > 0 ? round($postedCount / $periodCount * 100, 1) : 0.0;
+
 $classBadge = $lease['classification'] === 'sales_type' ? 'badge-warning' : 'badge-info';
 $classLabel = $lease['classification'] === 'sales_type' ? 'Sales-Type' : 'Direct Financing';
 $annualRatePct = $lease['implicit_rate'] !== null
     ? number_format((float) $lease['implicit_rate'] * 100, 4) . '%'
     : '—';
 $fairVal = $lease['initial_fair_value'] !== null
-    ? '$' . number_format((float) $lease['initial_fair_value'], 2)
+    ? format_currency($lease['initial_fair_value'])
     : '—';
 $unitDisp = trim(($lease['unit_number'] ?? '') . ' — ' . trim(($lease['brand'] ?? '') . ' ' . ($lease['model'] ?? '')));
 
 $pageTitle = 'Capital Lease — ' . $lease['contract_number'];
 require_once FF_ROOT . '/includes/header.php';
+
+// ── Header (S-RECORD-REDESIGN) ──────────────────────────────────────────────
+$heroTitle = e($lease['contract_number'])
+    . ' <span class="badge ' . $classBadge . '">' . $classLabel . '</span>'
+    . ' <span class="badge badge-neutral">' . e($lease['status']) . '</span>';
+$heroFacts = [];
+if (!empty($lease['company_name'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('user-group') . e($lease['company_name']);
+}
+if (!empty($lease['unit_number'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('truck') . 'Unit ' . e($lease['unit_number']);
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . e(format_date($lease['start_date'])) . ' → ' . ($lease['end_date'] ? e(format_date($lease['end_date'])) : 'open-ended');
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('currency-dollar') . '<b>' . e(format_currency($lease['monthly_rate'])) . '</b> / month';
 ?>
+<?php ob_start(); /* secondary actions → the header's More menu */ ?>
+    <a href="<?= base_url('accounting/leases') ?>">All capital leases</a>
+    <?php if (can('leases', 'view')): ?>
+    <a href="<?= base_url('leases/show') ?>?id=<?= (int) $lease['id'] ?>">Operational lease record</a>
+    <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+    <template x-if="!hasSchedule && !schedule.preview">
+        <button @click="loadPreview()" :disabled="busy" class="btn btn-primary btn-sm">
+            <span x-show="!busy">Preview Schedule</span>
+            <span x-show="busy">Computing…</span>
+        </button>
+    </template>
+    <template x-if="schedule.preview && !schedule.persisted">
+        <span class="ff-contents">
+            <button @click="generateSchedule(false)" :disabled="busy" class="btn btn-primary btn-sm">
+                <span x-show="!busy">Generate &amp; Save</span>
+                <span x-show="busy">Saving…</span>
+            </button>
+            <button @click="loadPreview()" :disabled="busy" class="btn btn-secondary btn-sm">Re-preview</button>
+        </span>
+    </template>
+    <?php if ($canRegenerate): ?>
+    <template x-if="hasSchedule">
+        <button @click="confirmRegenerate()" :disabled="busy" class="btn btn-warning btn-sm">
+            Regenerate Schedule
+        </button>
+    </template>
+    <?php endif; ?>
+    <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
 
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/dashboard') ?>">Accounting</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/leases') ?>">Capital Leases</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current"><?= e($lease['contract_number']) ?></span>
-</nav>
-
-<div class="page-header">
-    <h1 class="page-header-title h4">Capital Lease — <?= e($lease['contract_number']) ?></h1>
-    <p class="page-header-subtitle">
-        <span class="badge <?= $classBadge ?>"><?= $classLabel ?></span>
-        &nbsp;Effective-interest amortization schedule (ASPE 3065).
-    </p>
-</div>
+<!-- The component opens ABOVE the header so the schedule actions live there. -->
+<div x-data="capitalLeaseShow(<?= (int) $leaseId ?>, <?= $hasSchedule ? 'true' : 'false' ?>)">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'success',
+    'icon'       => 'calendar-days',
+    'mark'       => (string) $lease['contract_number'],
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Accounting', base_url('accounting/dashboard')], ['Capital Leases', base_url('accounting/leases')], [(string) $lease['contract_number'], null]],
+    'eyebrow'    => 'Capital lease · ASPE 3065',
+    'title_html' => $heroTitle,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="capitalLeaseShow(<?= (int) $leaseId ?>, <?= $hasSchedule ? 'true' : 'false' ?>)">
+<!-- KEY NUMBERS (S-RECORD-REDESIGN) — from the saved schedule. -->
+<div class="stat-grid stat-grid--5 ff-stats">
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Monthly payment</div>
+        <div class="stat-value font-mono"><?= e(format_currency($lease['monthly_rate'])) ?></div>
+        <div class="stat-delta"><?= $lease['term_months'] ? (int) $lease['term_months'] . ' mo' : '' ?></div>
+    </div>
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-key"/></svg></span>
+        <div class="stat-label">Initial net investment</div>
+        <div class="stat-value font-mono"><?= e($fairVal) ?></div>
+    </div>
+    <div class="stat-card stat-card--teal">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-arrow-trending-up"/></svg></span>
+        <div class="stat-label">Implicit rate</div>
+        <div class="stat-value font-mono"><?= e($annualRatePct) ?></div>
+        <div class="stat-delta">annual</div>
+    </div>
+    <div class="stat-card <?= $duePosts > 0 ? 'stat-card--red' : 'stat-card--green' ?>">
+        <span class="stat-icon <?= $duePosts > 0 ? 'stat-icon--red' : 'stat-icon--green' ?>"><svg><use href="#icon-<?= $duePosts > 0 ? 'exclamation-triangle' : 'check-circle' ?>"/></svg></span>
+        <div class="stat-label">Periods posted</div>
+        <div class="stat-value font-mono"><?= $hasSchedule ? $postedCount . ' / ' . $periodCount : '—' ?></div>
+        <div class="stat-delta"><?= !$hasSchedule ? 'no schedule' : ($duePosts > 0 ? $duePosts . ' due' : 'on track') ?></div>
+    </div>
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-shield-check"/></svg></span>
+        <div class="stat-label">Net investment now</div>
+        <div class="stat-value font-mono"><?= $hasSchedule ? e(format_currency($niNow)) : '—' ?></div>
+    </div>
+</div>
 
-    <!-- ── Header info row + summary card ──────────────────────── -->
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
-        <!-- Lease detail card -->
-        <div class="card">
-            <div class="card-header"><div class="card-title">Lease Details</div></div>
-            <div class="card-body">
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px 24px;font-size:0.9rem;">
-                    <div><strong>Customer:</strong><br><?= e($lease['company_name'] ?? '—') ?></div>
-                    <div><strong>Unit:</strong><br><?= e($unitDisp) ?></div>
-                    <div><strong>Start Date:</strong><br><?= e($lease['start_date']) ?></div>
-                    <div><strong>End Date:</strong><br><?= e($lease['end_date'] ?? '—') ?></div>
-                    <div><strong>Monthly Payment:</strong><br>$<?= number_format((float) $lease['monthly_rate'], 2) ?></div>
-                    <div><strong>Term (wizard):</strong><br><?= e($lease['term_months'] ?? '—') ?> months</div>
-                    <div><strong>Initial Fair Value:</strong><br><?= $fairVal ?></div>
-                    <div><strong>Implicit Rate (annual):</strong><br><?= $annualRatePct ?></div>
-                    <div><strong>Guaranteed Residual:</strong><br>$<?= number_format((float) $lease['guaranteed_residual_value'], 2) ?></div>
-                    <div><strong>Unguaranteed Residual:</strong><br>$<?= number_format((float) $lease['unguaranteed_residual_value'], 2) ?></div>
-                    <?php if ($lease['bargain_purchase_option_amount']): ?>
-                    <div><strong>BPO Amount:</strong><br>$<?= number_format((float) $lease['bargain_purchase_option_amount'], 2) ?></div>
-                    <div><strong>BPO Date:</strong><br><?= e($lease['bargain_purchase_option_date'] ?? '—') ?></div>
-                    <?php endif; ?>
-                    <div><strong>Status:</strong><br><span class="badge badge-neutral"><?= e($lease['status']) ?></span></div>
-                    <div><strong>Classified By:</strong><br><?= e($lease['signoff_name'] ?? '—') ?>
-                        <br><span style="font-size:0.75rem;color:var(--text-secondary);"><?= e($lease['classification_signed_off_at'] ?? '') ?></span></div>
-                </div>
-            </div>
-        </div>
+<div x-show="banner" x-cloak :class="bannerClass" role="status" style="margin-bottom:14px;" x-text="banner"></div>
 
-        <!-- Summary card -->
-        <div class="card">
-            <div class="card-header"><div class="card-title">Schedule Summary</div></div>
-            <div class="card-body">
-                <template x-if="!schedule.persisted && !schedule.preview">
-                    <div style="color:var(--text-secondary);font-size:0.9rem;">
-                        No schedule yet. Click <strong>Preview Schedule</strong> below to compute the
-                        effective-interest amortization without writing.
-                    </div>
-                </template>
-                <template x-if="schedule.persisted || schedule.preview">
-                    <div style="display:flex;flex-direction:column;gap:6px;font-size:0.875rem;">
-                        <div style="display:flex;justify-content:space-between;">
-                            <span>Initial Net Investment:</span>
-                            <strong x-text="'$' + fmt(schedule.summary.initial_ni)"></strong>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;">
-                            <span>Final Closing NI:</span>
-                            <strong x-text="'$' + fmt(schedule.summary.final_closing_ni)"></strong>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;">
-                            <span>Total Finance Income:</span>
-                            <strong x-text="'$' + fmt(schedule.summary.total_finance_income)"></strong>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;">
-                            <span>Total Principal:</span>
-                            <strong x-text="'$' + fmt(schedule.summary.total_principal)"></strong>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;">
-                            <span>Periods:</span>
-                            <strong>
-                                <span x-text="schedule.summary.period_count"></span>
-                                (<span x-text="schedule.summary.posted_count"></span> posted)
-                            </strong>
-                        </div>
-                        <div style="display:flex;justify-content:space-between;">
-                            <span>Implicit Rate (annual):</span>
-                            <strong x-text="schedule.annual_rate ? (Number(schedule.annual_rate) * 100).toFixed(4) + '%' : '—'"></strong>
-                        </div>
-                    </div>
-                </template>
-            </div>
+<div class="rec-layout">
+<div class="rec-main">
+
+    <!-- ── Schedule summary ────────────────────────────────────── -->
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Schedule summary</h3></div>
+        <div class="card-body">
+            <template x-if="!schedule.persisted && !schedule.preview">
+                <p class="text-secondary" style="margin:0;font-size:0.9rem;">
+                    No schedule yet. Click <strong>Preview Schedule</strong> above to compute the
+                    effective-interest amortization without writing.
+                </p>
+            </template>
+            <template x-if="schedule.persisted || schedule.preview">
+                <dl class="rec-dl">
+                    <dt>Initial net investment</dt>
+                    <dd class="font-mono" x-text="'$' + fmt(schedule.summary.initial_ni)"></dd>
+                    <dt>Final closing NI</dt>
+                    <dd class="font-mono" x-text="'$' + fmt(schedule.summary.final_closing_ni)"></dd>
+                    <dt>Total finance income</dt>
+                    <dd class="font-mono" x-text="'$' + fmt(schedule.summary.total_finance_income)"></dd>
+                    <dt>Total principal</dt>
+                    <dd class="font-mono" x-text="'$' + fmt(schedule.summary.total_principal)"></dd>
+                    <dt>Periods</dt>
+                    <dd><span x-text="schedule.summary.period_count"></span> (<span x-text="schedule.summary.posted_count"></span> posted)<span x-show="schedule.preview && !schedule.persisted" class="badge badge-warning" style="margin-left:6px;">preview — not saved</span></dd>
+                    <dt>Implicit rate (annual)</dt>
+                    <dd class="font-mono" x-text="schedule.annual_rate ? (Number(schedule.annual_rate) * 100).toFixed(4) + '%' : '—'"></dd>
+                </dl>
+            </template>
         </div>
     </div>
 
     <!-- ── NI Current vs Long-Term Breakdown (S-ACCT-LESSOR-5) ── -->
-    <div class="card" style="margin-bottom:16px;" x-show="niBreakdown" x-cloak>
-        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-            <div class="card-title">NI Current vs Long-Term Breakdown (ASPE 3065.54)</div>
+    <div class="card" x-show="niBreakdown" x-cloak>
+        <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <h3 class="card-title">NI current vs long-term (ASPE 3065.54)</h3>
             <button class="btn btn-ghost btn-sm" @click="loadNiBreakdown()" :disabled="niBusy">
                 <span x-show="!niBusy">Refresh Preview</span>
                 <span x-show="niBusy">Loading…</span>
@@ -205,27 +280,27 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
         <div class="card-body">
             <template x-if="niBreakdown">
-                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;font-size:0.9rem;">
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;font-size:0.9rem;">
                     <div>
-                        <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">On-Books Now (GL trail)</div>
+                        <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">On-books now (GL trail)</div>
                         <div style="display:flex;justify-content:space-between;">
                             <span>NI Current (1090):</span>
-                            <strong>$<span x-text="fmt(niBreakdown.currentBalance1090)"></span></strong>
+                            <strong class="font-mono">$<span x-text="fmt(niBreakdown.currentBalance1090)"></span></strong>
                         </div>
                         <div style="display:flex;justify-content:space-between;">
                             <span>NI Long-Term (1600):</span>
-                            <strong>$<span x-text="fmt(niBreakdown.currentBalance1600)"></span></strong>
+                            <strong class="font-mono">$<span x-text="fmt(niBreakdown.currentBalance1600)"></span></strong>
                         </div>
                     </div>
                     <div>
-                        <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Target After Next Reclass (next 12mo split)</div>
+                        <div style="font-weight:600;margin-bottom:4px;color:var(--text-secondary);">Target after next reclass (next 12 mo split)</div>
                         <div style="display:flex;justify-content:space-between;">
                             <span>Target 1090:</span>
-                            <strong>$<span x-text="fmt(niBreakdown.target1090)"></span></strong>
+                            <strong class="font-mono">$<span x-text="fmt(niBreakdown.target1090)"></span></strong>
                         </div>
                         <div style="display:flex;justify-content:space-between;">
                             <span>Target 1600:</span>
-                            <strong>$<span x-text="fmt(niBreakdown.target1600)"></span></strong>
+                            <strong class="font-mono">$<span x-text="fmt(niBreakdown.target1600)"></span></strong>
                         </div>
                     </div>
                 </div>
@@ -252,41 +327,11 @@ require_once FF_ROOT . '/includes/header.php';
         </div>
     </div>
 
-    <!-- ── Action bar ─────────────────────────────────────────── -->
-    <div class="card" style="padding:14px 18px;margin-bottom:16px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
-        <template x-if="!hasSchedule && !schedule.preview">
-            <button @click="loadPreview()" :disabled="busy" class="btn btn-secondary">
-                <span x-show="!busy">Preview Schedule</span>
-                <span x-show="busy">Computing…</span>
-            </button>
-        </template>
-        <template x-if="schedule.preview && !schedule.persisted">
-            <div style="display:flex;gap:10px;">
-                <button @click="generateSchedule(false)" :disabled="busy" class="btn btn-primary">
-                    <span x-show="!busy">Generate &amp; Save</span>
-                    <span x-show="busy">Saving…</span>
-                </button>
-                <button @click="loadPreview()" :disabled="busy" class="btn btn-ghost">Re-preview</button>
-            </div>
-        </template>
-        <?php if ($canRegenerate): ?>
-        <template x-if="hasSchedule">
-            <button @click="confirmRegenerate()" :disabled="busy" class="btn btn-warning">
-                Regenerate Schedule
-            </button>
-        </template>
-        <?php endif; ?>
-        <?php if ($hasSchedule && $postedCount > 0): ?>
-        <div class="alert alert-info" style="margin:0;padding:6px 12px;font-size:0.875rem;">
-            <?= (int) $postedCount ?> period(s) posted — regenerate is blocked.
-        </div>
-        <?php endif; ?>
-        <div x-show="banner" :class="bannerClass" style="padding:6px 12px;border-radius:6px;font-size:0.875rem;"
-             x-text="banner"></div>
-    </div>
-
     <!-- ── Schedule table ─────────────────────────────────────── -->
     <div class="card" x-show="schedule.preview || schedule.persisted">
+        <div class="card-header"><h3 class="card-title">Amortization schedule <span x-show="schedule.preview && !schedule.persisted" class="badge badge-warning">preview</span></h3></div>
+        <div class="card-body" style="padding:0;">
+        <div style="overflow-x:auto;">
         <table class="table" style="width:100%;font-size:0.85rem;">
             <thead>
                 <tr>
@@ -306,11 +351,11 @@ require_once FF_ROOT . '/includes/header.php';
                     <tr>
                         <td x-text="row.period_number"></td>
                         <td x-text="row.period_date"></td>
-                        <td style="text-align:right;" x-text="'$' + fmt(row.opening_net_investment)"></td>
-                        <td style="text-align:right;" x-text="'$' + fmt(row.cash_receipt)"></td>
-                        <td style="text-align:right;" x-text="'$' + fmt(row.finance_income)"></td>
-                        <td style="text-align:right;" x-text="'$' + fmt(row.principal_reduction)"></td>
-                        <td style="text-align:right;" x-text="'$' + fmt(row.closing_net_investment)"></td>
+                        <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(row.opening_net_investment)"></td>
+                        <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(row.cash_receipt)"></td>
+                        <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(row.finance_income)"></td>
+                        <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(row.principal_reduction)"></td>
+                        <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(row.closing_net_investment)"></td>
                         <td>
                             <span class="badge"
                                   :class="(row.status||'scheduled') === 'posted' ? 'badge-success'
@@ -319,7 +364,7 @@ require_once FF_ROOT . '/includes/header.php';
                         </td>
                         <td>
                             <template x-if="row.posted_je_id">
-                                <a :href="'<?= base_url('accounting/journal-entries/show') ?>?id=' + row.posted_je_id"
+                                <a class="link" :href="'<?= base_url('accounting/journal-entries/show') ?>?id=' + row.posted_je_id"
                                    x-text="'JE #' + row.posted_je_id"></a>
                             </template>
                             <template x-if="!row.posted_je_id">
@@ -330,22 +375,69 @@ require_once FF_ROOT . '/includes/header.php';
                 </template>
             </tbody>
             <tfoot x-show="schedule.summary">
-                <tr style="background:var(--bg-input);font-weight:600;">
+                <tr style="font-weight:600;">
                     <td colspan="4" style="text-align:right;">Totals:</td>
-                    <td style="text-align:right;" x-text="'$' + fmt(schedule.summary.total_finance_income)"></td>
-                    <td style="text-align:right;" x-text="'$' + fmt(schedule.summary.total_principal)"></td>
+                    <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(schedule.summary && schedule.summary.total_finance_income)"></td>
+                    <td class="font-mono" style="text-align:right;" x-text="'$' + fmt(schedule.summary && schedule.summary.total_principal)"></td>
                     <td colspan="3"></td>
                 </tr>
             </tfoot>
         </table>
+        </div>
+        </div>
     </div>
 
     <!-- ── Empty state when no schedule yet AND no preview loaded ─ -->
-    <div class="card" x-show="!schedule.preview && !schedule.persisted" style="padding:1.5rem;text-align:center;">
-        <div style="color:var(--text-secondary);">
-            This lease has been classified as <strong><?= $classLabel ?></strong> but no amortization
-            schedule has been built yet. The schedule auto-generates on activation; you can also
-            preview it now to validate the inputs before activating.
+    <div class="card" x-show="!schedule.preview && !schedule.persisted">
+        <div class="card-body" style="padding:1.5rem;text-align:center;">
+            <p class="text-secondary" style="margin:0;">
+                This lease has been classified as <strong><?= $classLabel ?></strong> but no amortization
+                schedule has been built yet. The schedule auto-generates on activation; you can also
+                preview it now to validate the inputs before activating.
+            </p>
+        </div>
+    </div>
+
+    <!-- ── Lease details ───────────────────────────────────────── -->
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Lease details</h3></div>
+        <div class="card-body">
+            <dl class="rec-dl">
+                <dt>Customer</dt>
+                <dd><?= e($lease['company_name'] ?? '—') ?></dd>
+                <dt>Unit</dt>
+                <dd><?= e($unitDisp) ?></dd>
+                <dt>Start date</dt>
+                <dd class="font-mono"><?= e(format_date($lease['start_date'])) ?></dd>
+                <dt>End date</dt>
+                <dd class="font-mono"><?= e(format_date($lease['end_date'] ?? null)) ?></dd>
+                <dt>Monthly payment</dt>
+                <dd class="font-mono"><?= e(format_currency($lease['monthly_rate'])) ?></dd>
+                <dt>Term (wizard)</dt>
+                <dd><?= e($lease['term_months'] ?? '—') ?> months</dd>
+                <dt>Initial fair value</dt>
+                <dd class="font-mono"><?= e($fairVal) ?></dd>
+                <?php if ($lease['initial_direct_costs'] !== null && bccomp((string) $lease['initial_direct_costs'], '0', 2) > 0): ?>
+                <dt>Initial direct costs</dt>
+                <dd class="font-mono"><?= e(format_currency($lease['initial_direct_costs'])) ?></dd>
+                <?php endif; ?>
+                <dt>Implicit rate (annual)</dt>
+                <dd class="font-mono"><?= e($annualRatePct) ?></dd>
+                <dt>Guaranteed residual</dt>
+                <dd class="font-mono"><?= e(format_currency($lease['guaranteed_residual_value'] ?? '0')) ?></dd>
+                <dt>Unguaranteed residual</dt>
+                <dd class="font-mono"><?= e(format_currency($lease['unguaranteed_residual_value'] ?? '0')) ?></dd>
+                <?php if ($lease['bargain_purchase_option_amount']): ?>
+                <dt>BPO amount</dt>
+                <dd class="font-mono"><?= e(format_currency($lease['bargain_purchase_option_amount'])) ?></dd>
+                <dt>BPO date</dt>
+                <dd class="font-mono"><?= e(format_date($lease['bargain_purchase_option_date'] ?? null)) ?></dd>
+                <?php endif; ?>
+                <dt>Status</dt>
+                <dd><span class="badge badge-neutral"><?= e($lease['status']) ?></span></dd>
+                <dt>Classified by</dt>
+                <dd><?= e($lease['signoff_name'] ?? '—') ?><?php if (!empty($lease['classification_signed_off_at'])): ?> <span class="text-secondary">· <?= e(format_datetime($lease['classification_signed_off_at'])) ?></span><?php endif; ?></dd>
+            </dl>
         </div>
     </div>
 
@@ -370,7 +462,71 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
         </div>
     </div>
-</div>
+
+</div><!-- /rec-main -->
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the capital lease at a glance ────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$rail = [];
+
+$alerts = [];
+if (!$hasSchedule) {
+    $alerts[] = ['warning', 'No amortization schedule saved — preview it, then <b>Generate &amp; Save</b>.'];
+}
+if ($duePosts > 0) {
+    $alerts[] = ['danger', $duePosts . ' scheduled period' . ($duePosts === 1 ? ' is' : 's are') . ' dated on or before today but not posted.'];
+}
+if ($hasSchedule && $postedCount > 0) {
+    $alerts[] = ['info', $postedCount . ' period' . ($postedCount === 1 ? '' : 's') . ' posted — regenerate is blocked.'];
+}
+if ($lease['implicit_rate'] === null) {
+    $alerts[] = ['warning', 'No implicit rate on the lease — the schedule cannot be computed.'];
+}
+$rail[] = $R::card('Needs attention', $R::alerts($alerts, 'All clear — the schedule is on track.'), ['icon' => 'exclamation-triangle']);
+
+// Progress through the schedule.
+if ($hasSchedule) {
+    $rail[] = $R::card('Schedule progress',
+        $R::meter('Posted', $postedCount . ' of ' . $periodCount, (float) $postedPct, $duePosts > 0 ? 'danger' : 'info',
+            $nextRow ? 'Next: period ' . (int) $nextRow['period_number'] . ' · ' . e(format_date($nextRow['period_date'])) : 'All periods posted')
+        . $R::kv([['Net investment now', e(format_currency($niNow)), 'mono']]),
+        ['icon' => 'chart-bar', 'class' => 'rec-card--accent']);
+}
+
+// Parties.
+$partyBody = '';
+if (!empty($lease['company_name'])) {
+    $partyBody .= $R::entity((string) $lease['company_name'], can('customers', 'view') && !empty($lease['customer_id']) ? base_url('customers/show') . '?id=' . (int) $lease['customer_id'] : '',
+        !empty($lease['contact_name']) ? e($lease['contact_name']) : 'Lessee', \FleetForge\Ui\ModuleHero::initials((string) $lease['company_name']));
+}
+if (!empty($lease['unit_number'])) {
+    $partyBody .= ($partyBody !== '' ? '<div style="height:10px;"></div>' : '')
+        . $R::entity('Unit ' . $lease['unit_number'], can('equipment', 'view') && !empty($lease['equipment_unit_id']) ? base_url('equipment/show') . '?id=' . (int) $lease['equipment_unit_id'] : '',
+            e(trim(($lease['brand'] ?? '') . ' ' . ($lease['model'] ?? ''))) ?: 'Leased unit', '', 'truck');
+}
+if ($partyBody !== '') {
+    $rail[] = $R::card('Lessee & unit', $partyBody, ['icon' => 'user-group']);
+}
+
+$rail[] = $R::card('Classification', $R::kv([
+    ['Type', '<span class="badge ' . $classBadge . '">' . $classLabel . '</span>'],
+    ['Term', $lease['term_months'] ? e((string) $lease['term_months']) . ' months' : null],
+    ['Guaranteed residual', e(format_currency($lease['guaranteed_residual_value'] ?? '0')), 'mono'],
+    ['Unguaranteed residual', e(format_currency($lease['unguaranteed_residual_value'] ?? '0')), 'mono'],
+    ['Classified by', !empty($lease['signoff_name']) ? e($lease['signoff_name']) : null],
+]), ['icon' => 'scale']);
+
+$rel = [['All capital leases', base_url('accounting/leases'), 'list-bullet']];
+if (can('leases', 'view')) {
+    $rel[] = ['Operational lease record', base_url('leases/show') . '?id=' . (int) $lease['id'], 'calendar-days', (string) $lease['contract_number']];
+}
+$rail[] = $R::card('Related', $R::links($rel), ['icon' => 'document-duplicate']);
+?>
+<aside class="rec-rail" aria-label="Capital lease at a glance">
+    <?= implode("\n    ", $rail) ?>
+</aside>
+</div><!-- /rec-layout -->
+</div><!-- /x-data capitalLeaseShow -->
 
 <script>
 function capitalLeaseShow(leaseId, hasSchedule) {

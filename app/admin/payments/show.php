@@ -4,14 +4,35 @@ declare(strict_types=1);
 /**
  * app/admin/payments/show.php
  *
- * Payment detail page. Displays full payment info (method, reference, dates),
- * allocation table (which invoices the payment was applied to), and links to
- * the associated customer and each invoice.
+ * Payment detail page (S-RECORD-REDESIGN layout):
+ *   - Entity hero: payment number + status (+ "From QuickBooks" when the
+ *     payment is QuickBooks' record), fact chips (customer, received date,
+ *     method, who recorded it). Send Receipt is the one visible action; Edit
+ *     notes / AI Analysis / Void-Remove live in the More menu. The page's
+ *     Alpine component (FF_PaymentActions) opens ABOVE the hero so those
+ *     header buttons drive the edit card + remove modal.
+ *   - Key-numbers strip: amount received, applied to invoices, unapplied
+ *     (warn/danger when money is sitting on no invoice), invoices touched,
+ *     received date.
+ *   - Main column: inline edit card (toggled from the header), Invoice
+ *     Allocations (with Move — SOP I17 — and a Total applied footer), Notes,
+ *     the QuickBooks Sync panel, Activity.
+ *   - Rail: needs attention (unapplied money, unresolved overpayment,
+ *     pending / failed / returned / void / refunded, QuickBooks push failure),
+ *     where the money went (applied meter + account-credit note + refund),
+ *     customer, payment facts (method, reference, cheque, bank, deposit /
+ *     cleared dates, verification), QuickBooks status summary.
  *
- * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
+ * The page is reachable only with payments:view, which IS the financial
+ * predicate (can_view_financials() === can('payments','view')), so every figure
+ * here is already money-gated; the internal-notes (payments:edit) and
+ * credit-note (invoices:view) gates are kept.
+ *
+ * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php,
+ *           lib/Ui/ModuleHero.php, lib/Ui/RecordUi.php
  * @spec     FLEETFORGE_SPEC_FINAL.md §7.8 Payments
  * @decisions D30 (asset_url), D32 (CSS classes verified), D5/D13 (soft-delete filter)
- * @session  S009
+ * @session  S009 → S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -98,49 +119,111 @@ $statusBadge = match($payment['status']) {
     default    => 'badge-neutral',
 };
 
+// ── S-RECORD-REDESIGN: strip + rail data ─────────────────────────
+$today      = ff_today();
+$methodName = $methodLabels[$payment['payment_method']] ?? (string) $payment['payment_method'];
+$isQboOwned = in_array($payment['origin'] ?? 'ff_native', ['qbo_payments_webhook', 'qbo_other'], true);
+// Money that should be sitting on invoices: a void / refunded / failed /
+// returned payment has no "unapplied" balance to chase.
+$isLive     = in_array($payment['status'], ['pending', 'cleared'], true);
+
+$allocTotal   = '0.00';
+$allocPaidCnt = 0;
+foreach ($allocations as $_a) {
+    $allocTotal = bcadd($allocTotal, (string) $_a['amount'], 2);
+    if ($_a['invoice_status'] === 'paid') {
+        $allocPaidCnt++;
+    }
+}
+unset($_a);
+
+// Overpayment excess that payments/create.php converted into an account-credit
+// note (credit_notes.source_payment_id). Same hold rule as
+// api/v1/payments/allocate.php: every non-void note counts, spent or not — the
+// money lives on the note, so it is NOT unapplied.
+$cnHold = (string) (db_row(
+    "SELECT COALESCE(SUM(amount), 0) AS s FROM credit_notes
+      WHERE source_payment_id = ? AND status <> 'void' AND voided_at IS NULL AND deleted_at IS NULL",
+    [$id]
+)['s'] ?? '0');
+$refunded  = (string) ($payment['refund_amount'] ?? '0');
+// Unapplied = received − on invoices − held as account credit − paid back.
+$unapplied = bcsub(bcsub(bcsub((string) $payment['amount'], $allocTotal, 2), $cnHold, 2), $refunded, 2);
+$hasUnapplied = $isLive && bccomp($unapplied, '0', 2) > 0;
+
+$daysSince = null;
+if (!empty($payment['payment_date'])) {
+    try {
+        $daysSince = (int) (new DateTimeImmutable((string) $payment['payment_date']))->diff(new DateTimeImmutable($today))->format('%r%a');
+    } catch (Throwable) {
+        $daysSince = null;
+    }
+}
+$daysSinceLabel = $daysSince === null ? ''
+    : ($daysSince === 0 ? 'today' : ($daysSince > 0 ? $daysSince . ' day' . ($daysSince === 1 ? '' : 's') . ' ago' : 'in ' . (-$daysSince) . ' days'));
+// Money on no invoice for over a month is stale — the strip turns red.
+$unappliedStale = $hasUnapplied && $daysSince !== null && $daysSince > 30;
+
+// Where unapplied money could go: this customer's open invoices in the
+// payment's currency (count + total owing). Only asked when there IS money.
+$openInv = ['cnt' => 0, 'owing' => '0'];
+if ($hasUnapplied && !empty($payment['customer_id'])) {
+    $openInv = db_row(
+        "SELECT COUNT(*) AS cnt, COALESCE(SUM(balance_due), 0) AS owing FROM invoices
+          WHERE customer_id = ? AND currency = ? AND deleted_at IS NULL
+            AND status IN ('sent', 'partially_paid', 'overdue') AND balance_due > 0",
+        [(int) $payment['customer_id'], (string) $payment['currency']]
+    ) ?: $openInv;
+}
+
+// Account-credit notes minted from this payment's overpayment (linked in the
+// rail). Gated on the credit-notes module's own permission (invoices:view).
+$overpaymentCns = can('invoices', 'view')
+    ? db_select(
+        "SELECT id, credit_note_number, amount_remaining, currency, status
+         FROM credit_notes
+         WHERE source_payment_id = ? AND deleted_at IS NULL
+         ORDER BY id ASC",
+        [$id]
+    )
+    : [];
+
+// QuickBooks status for the rail summary — the full panel stays in the main
+// column. Same 6-state labels as includes/partials/qbo-sync-panel.php.
+$qboConnected = (string) settings_get('quickbooks.connection_status', 'disconnected') === 'connected';
+$qboMap = $qboConnected
+    ? db_row("SELECT push_status, qbo_payment_id, pushed_at FROM acc_qbo_payment_map WHERE ff_payment_id = ? LIMIT 1", [$id])
+    : null;
+
 $pageTitle      = 'Payment ' . $payment['payment_number'];
 $helpModuleSlug = 'payments';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<!-- ============================================================
-     Breadcrumb
-     ============================================================ -->
-<div class="breadcrumb" style="margin-bottom:20px;">
-    <a href="<?= base_url('/payments') ?>" class="breadcrumb-item">Payments</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-item breadcrumb-current"><?= e($payment['payment_number']) ?></span>
-</div>
-
 <?php
-// F8 (S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN): shared QuickBooks Sync rich panel.
-$qboPanel = [
-    'entity_type' => 'payment',
-    'map_table'   => 'acc_qbo_payment_map',
-    'qbo_id_col'  => 'qbo_payment_id',
-    'ff_fk'       => 'ff_payment_id',
-    'ff_id'       => (int) $payment['id'],
-    'deep_link'   => 'recvpayment',
-    'retry_url'   => base_url('api/v1/quickbooks/payments/retry'),
-];
-require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
-?>
-
-<!-- ============================================================
-     Page header
-     ============================================================ -->
-<div class="page-header" style="margin-bottom:24px;">
-    <div>
-        <h1 class="page-header-title h4"><?= e($payment['payment_number']) ?></h1>
-        <p style="margin:4px 0 0; color:var(--text-secondary); font-size:0.9rem;">
-            Recorded <?= format_datetime($payment['created_at']) ?>
-            <?php if ($payment['recorded_by_name']): ?>
-                by <?= e($payment['recorded_by_name']) ?>
-            <?php endif; ?>
-        </p>
-    </div>
-    <div class="page-header-actions">
-        <?= help_button('payments') ?>
+// ============================================================
+// Page header — entity hero (S-RECORD-REDESIGN). Send Receipt is the
+// visible action; Edit / AI / Void-Remove sit in the More menu. The
+// buttons are the page's own markup, captured unchanged.
+// ============================================================
+ob_start(); ?>
+        <span class="badge badge-no-dot <?= $statusBadge ?>"><?= e(ucfirst((string) $payment['status'])) ?></span>
+        <?php if ($isQboOwned): ?>
+        <span class="badge badge-no-dot badge-info" title="Mirrored from QuickBooks — apply or change it in QuickBooks; FleetForge follows.">From QuickBooks</span>
+        <?php endif; ?>
+        <?php if ($payment['currency'] !== 'CAD'): ?>
+        <span class="badge badge-no-dot badge-warning"><?= e($payment['currency']) ?></span>
+        <?php endif; ?>
+<?php $heroBadges = ob_get_clean(); ?>
+<?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <?php if (can('payments', 'edit')): ?>
+        <!-- Edit metadata — opens the inline edit card at the top of the page -->
+        <button type="button" class="btn btn-secondary btn-sm"
+                @click="showEdit = true; $nextTick(() => { const el = document.getElementById('pay-edit'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); })">
+            <?= heroicon('pencil', 'icon-sm') ?>
+            Edit Notes / Reference
+        </button>
+        <?php endif; ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm no-print"
                 onclick="aiPanel_payment_<?= (int)$id ?>_payment_summary_open()"
@@ -151,12 +234,19 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
             AI Analysis
         </button>
         <?php endif; ?>
-        <span class="badge <?= $statusBadge ?>" style="font-size:1rem; padding:6px 14px;">
-            <?= e(strtoupper($payment['status'])) ?>
-        </span>
+        <?php if (can('payments', 'edit') && can('payments', 'delete')): ?>
+        <hr>
+        <button type="button" class="btn btn-danger btn-sm" @click="showDelete = true">
+            <?= heroicon('trash', 'icon-sm') ?>
+            Void / Remove Payment
+        </button>
+        <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('payments') ?>
         <?php if ($payment['customer_id'] && can('customers', 'create')): /* EMAIL-1: send receipt */ ?>
         <button type="button"
-                class="btn btn-secondary btn-sm"
+                class="btn btn-primary btn-sm"
                 onclick="openEmailCompose({
                     customerId:   <?= (int)$payment['customer_id'] ?>,
                     templateSlug: 'payment_received',
@@ -168,220 +258,167 @@ require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
             Send Receipt
         </button>
         <?php endif; ?>
-    </div>
-</div>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
+<?php
+$heroFacts = [];
+if ($payment['customer_id']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('user-group')
+        . '<a href="' . e(base_url('customers/show')) . '?id=' . (int) $payment['customer_id'] . '" style="color:inherit;">' . e($payment['company_name'] ?? 'Customer') . '</a>';
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . 'Received ' . e(format_date($payment['payment_date']));
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('credit-card') . e($methodName)
+    . (!empty($payment['check_number']) ? ' #' . e($payment['check_number']) : '')
+    . (!empty($payment['card_last_four']) ? ' •••• ' . e($payment['card_last_four']) : '');
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . 'Recorded ' . e(format_datetime($payment['created_at']))
+    . ($payment['recorded_by_name'] ? ' by ' . e($payment['recorded_by_name']) : '');
+$heroMark = (string) $payment['payment_number'];
+if (preg_match('/(\d{3,})$/', $heroMark, $hm)) { $heroMark = $hm[1]; }
+?>
+<!-- ============================================================
+     PAYMENT DETAIL — Alpine component. Opens ABOVE the hero
+     (S-RECORD-REDESIGN) so the header's Edit / Void-Remove buttons
+     drive the edit card and the remove modal below.
+     ============================================================ -->
+<div x-data="FF_PaymentActions()">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'success',
+    'icon'       => 'banknotes',
+    'mark'       => $heroMark,
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Payments', base_url('payments')], [(string) $payment['payment_number'], null]],
+    'eyebrow'    => 'Payment',
+    'title_html' => e($payment['payment_number']) . ' ' . $heroBadges,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
 
 <!-- ============================================================
-     Summary tiles
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN). What came in,
+     how much of it is on invoices, and what is still sitting on no
+     invoice lead. Method / Customer tiles are gone (identity, not
+     numbers — they are in the header facts and the rail).
      ============================================================ -->
-<!-- S-TILE-FIT: inline 4-column override removed — it beat the responsive
-     .stat-grid rules and kept these tiles 4-across (and cropping) on phones.
-     .stat-grid--4 keeps the desktop look and collapses at tablet/mobile. -->
-<div class="stat-grid stat-grid--4" style="margin-bottom:24px;">
+<div class="stat-grid ff-stats">
+    <?php
+    $_amtTag = $payment['customer_id'] && can('customers', 'view')
+        ? 'a href="' . e(base_url('customers/show')) . '?id=' . (int) $payment['customer_id'] . '#payments" title="All payments from this customer"'
+        : 'div';
+    ?>
+    <<?= $_amtTag ?> class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Amount received</div>
+        <div class="stat-value font-mono"><?= format_currency($payment['amount']) ?></div>
+        <div class="stat-delta"><?php
+            if (bccomp($refunded, '0', 2) > 0) {
+                echo e(format_currency($refunded)) . ' refunded';
+            } elseif ($payment['amount_in_cad'] && $payment['currency'] !== 'CAD') {
+                echo '≈ ' . e(format_currency($payment['amount_in_cad'])) . ' CAD';
+            } else {
+                echo e($payment['currency']);
+            }
+        ?></div>
+    </<?= $_amtTag === 'div' ? 'div' : 'a' ?>>
 
-    <!-- TILES-2: Amount Received drills to all payments for this customer;
-         Payment Method + Payment Date stay as display-only metadata;
-         Customer becomes a full clickable <a> tile that drills to the
-         customer profile (was a nested link inside a div before). -->
-    <?php if ($payment['customer_id']): ?>
-    <a class="stat-card"
-       href="<?= base_url('payments') ?>?customer_id=<?= (int)$payment['customer_id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View all payments from this customer">
-        <div class="stat-label">Amount Received</div>
-        <div class="stat-value font-mono">
-            <?= format_currency($payment['amount']) ?>
-            <span style="font-size:0.8rem; color:var(--text-muted);"><?= e($payment['currency']) ?></span>
-        </div>
+    <a class="stat-card stat-card--green" href="#pay-allocations" title="Share of this payment applied to invoices">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
+        <div class="stat-label">Applied to invoices</div>
+        <div class="stat-value font-mono"><?= format_currency($allocTotal) ?></div>
+        <div class="stat-delta"><?php
+            $_pct = bccomp((string) $payment['amount'], '0', 2) > 0
+                ? (int) round((float) bcmul(bcdiv($allocTotal, (string) $payment['amount'], 6), '100', 2))
+                : 0;
+            echo $allocations ? $_pct . '%' : 'none';
+        ?></div>
     </a>
-    <?php else: ?>
-    <div class="stat-card">
-        <div class="stat-label">Amount Received</div>
-        <div class="stat-value font-mono">
-            <?= format_currency($payment['amount']) ?>
-            <span style="font-size:0.8rem; color:var(--text-muted);"><?= e($payment['currency']) ?></span>
-        </div>
-    </div>
-    <?php endif; ?>
 
-    <div class="stat-card">
-        <div class="stat-label">Payment Method</div>
-        <div class="stat-value"><?= e($methodLabels[$payment['payment_method']] ?? $payment['payment_method']) ?></div>
-    </div>
-
-    <div class="stat-card">
-        <div class="stat-label">Payment Date</div>
-        <div class="stat-value font-mono"><?= format_date($payment['payment_date']) ?></div>
-    </div>
-
-    <?php if ($payment['customer_id']): ?>
-    <a class="stat-card"
-       href="<?= base_url('customers/show') ?>?id=<?= (int)$payment['customer_id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="Open customer profile">
-        <div class="stat-label">Customer</div>
-        <div class="stat-value"><?= e($payment['company_name'] ?? '—') ?></div>
-    </a>
-    <?php else: ?>
-    <div class="stat-card">
-        <div class="stat-label">Customer</div>
+    <?php
+    $_unTone = !$isLive ? 'slate' : ($hasUnapplied ? ($unappliedStale ? 'red' : 'amber') : 'green');
+    ?>
+    <div class="stat-card stat-card--<?= $_unTone ?>" title="Money received that is on no invoice, not held as account credit and not refunded<?= bccomp($cnHold, '0', 2) > 0 ? e(' — ' . format_currency($cnHold) . ' of it is account credit') : '' ?>">
+        <span class="stat-icon stat-icon--<?= $_unTone ?>"><svg><use href="#icon-<?= $hasUnapplied ? 'exclamation-triangle' : 'check-circle' ?>"/></svg></span>
+        <div class="stat-label">Unapplied</div>
+        <?php if ($isLive): ?>
+        <div class="stat-value font-mono"<?= $unappliedStale ? ' style="color:var(--color-danger);"' : '' ?>><?= format_currency(bccomp($unapplied, '0', 2) > 0 ? $unapplied : '0.00') ?></div>
+        <div class="stat-delta"><?php
+            if ($hasUnapplied) {
+                echo $isQboOwned ? 'apply in QuickBooks' : 'on no invoice';
+            } elseif (bccomp($cnHold, '0', 2) > 0) {
+                echo 'rest is credit';
+            } else {
+                echo 'all applied';
+            }
+        ?></div>
+        <?php else: ?>
         <div class="stat-value">—</div>
+        <div class="stat-delta">payment <?= e((string) $payment['status']) ?></div>
+        <?php endif; ?>
     </div>
-    <?php endif; ?>
 
+    <a class="stat-card stat-card--purple" href="#pay-allocations" title="Invoices this payment touches">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Invoices</div>
+        <div class="stat-value font-mono"><?= count($allocations) ?></div>
+        <div class="stat-delta"><?php
+            if (!$allocations) {
+                echo 'none yet';
+            } else {
+                $_owing = count($allocations) - $allocPaidCnt;
+                echo $allocPaidCnt . ' paid in full' . ($_owing > 0 ? ' · ' . $_owing . ' still owing' : '');
+            }
+        ?></div>
+    </a>
+
+    <div class="stat-card stat-card--slate" title="Received <?= e(format_date($payment['payment_date'])) ?><?= $daysSinceLabel !== '' ? ' (' . e($daysSinceLabel) . ')' : '' ?><?= $payment['cleared_date'] ? ' · cleared ' . e(format_date($payment['cleared_date'])) : '' ?>">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Received</div>
+        <div class="stat-value stat-value--date font-mono"><?= format_date($payment['payment_date']) ?></div>
+        <div class="stat-delta"><?= e($daysSinceLabel) ?></div>
+    </div>
 </div>
 
+<div class="rec-layout">
+<div class="rec-main">
+
+<?php if (can('payments', 'edit')): ?>
 <!-- ============================================================
-     Two-column detail layout
+     Edit payment notes — opened from the header's More menu
+     (was the "Actions" card's inline form)
      ============================================================ -->
-<div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:24px;">
-
-    <!-- Payment details -->
-    <div class="card">
-        <div class="card-header"><h3 class="card-title">Payment Details</h3></div>
-        <div class="card-body">
-            <dl class="detail-grid">
-                <dt>Payment Number</dt>
-                <dd class="font-mono"><?= e($payment['payment_number']) ?></dd>
-
-                <dt>Amount</dt>
-                <dd class="font-mono">
-                    <?= format_currency($payment['amount']) ?> <?= e($payment['currency']) ?>
-                    <?php if ($payment['amount_in_cad'] && $payment['currency'] !== 'CAD'): ?>
-                        <span style="color:var(--text-muted); font-size:0.85rem;">
-                            (<?= format_currency($payment['amount_in_cad']) ?> CAD)
-                        </span>
-                    <?php endif; ?>
-                </dd>
-
-                <dt>Method</dt>
-                <dd><?= e($methodLabels[$payment['payment_method']] ?? $payment['payment_method']) ?></dd>
-
-                <?php if ($payment['reference_number']): ?>
-                    <dt>Reference #</dt>
-                    <dd class="font-mono"><?= e($payment['reference_number']) ?></dd>
-                <?php endif; ?>
-
-                <?php if ($payment['check_number']): ?>
-                    <dt>Cheque #</dt>
-                    <dd class="font-mono"><?= e($payment['check_number']) ?></dd>
-                <?php endif; ?>
-
-                <?php if ($payment['bank_name']): ?>
-                    <dt>Customer's Bank</dt>
-                    <dd><?= e($payment['bank_name']) ?></dd>
-                <?php endif; ?>
-
-                <?php // SOP I10: the FleetForge bank account the ledger entry debited. ?>
-                <dt>Deposited to</dt>
-                <dd><?= $payment['deposit_bank_name'] ? e($payment['deposit_bank_name']) : '<span class="text-secondary">Default cash account (Accounting settings)</span>' ?></dd>
-
-                <?php if ($payment['card_last_four']): ?>
-                    <dt>Card Last 4</dt>
-                    <dd class="font-mono">•••• <?= e($payment['card_last_four']) ?></dd>
-                <?php endif; ?>
-
-                <dt>Payment Date</dt>
-                <dd class="font-mono"><?= format_date($payment['payment_date']) ?></dd>
-
-                <?php if ($payment['deposited_date']): ?>
-                    <dt>Deposited</dt>
-                    <dd class="font-mono"><?= format_date($payment['deposited_date']) ?></dd>
-                <?php endif; ?>
-
-                <?php if ($payment['cleared_date']): ?>
-                    <dt>Cleared</dt>
-                    <dd class="font-mono"><?= format_date($payment['cleared_date']) ?></dd>
-                <?php endif; ?>
-
-                <dt>Status</dt>
-                <dd><span class="badge <?= $statusBadge ?>"><?= e($payment['status']) ?></span></dd>
-
-                <?php if ($payment['failure_reason']): ?>
-                    <dt>Failure Reason</dt>
-                    <dd style="color:var(--color-danger);"><?= e($payment['failure_reason']) ?></dd>
-                <?php endif; ?>
-            </dl>
-        </div>
+<div class="card" id="pay-edit" x-show="showEdit" x-cloak style="margin-bottom:14px; scroll-margin-top:80px;">
+    <div class="card-header">
+        <h3 class="card-title">Edit payment notes</h3>
+        <button type="button" class="btn btn-ghost btn-xs" @click="showEdit = false" aria-label="Close">&times;</button>
     </div>
-
-    <!-- Overpayment / Refund / Verified -->
-    <div class="card">
-        <div class="card-header"><h3 class="card-title">Financial Notes</h3></div>
-        <div class="card-body">
-            <dl class="detail-grid">
-                <?php if (bccomp((string)$payment['overpayment_amount'], '0', 2) > 0): ?>
-                    <dt>Overpayment</dt>
-                    <dd class="font-mono" style="color:var(--color-warning);">
-                        <?= format_currency($payment['overpayment_amount']) ?>
-                        <span style="font-size:0.8rem;">(<?= e($payment['overpayment_action'] ?? 'unresolved') ?>)</span>
-                    </dd>
-                    <dt>Overpayment Resolved</dt>
-                    <dd><?= $payment['overpayment_resolved'] ? '✓ Yes' : '✗ No' ?></dd>
-                    <?php
-                    // payments/create.php routes the excess to a credit note stamped with
-                    // source_payment_id — link it so staff can see/apply the account
-                    // credit without hunting through the credit-notes list. Gated on the
-                    // credit-notes module's own permission (invoices:view).
-                    $overpaymentCns = can('invoices', 'view')
-                        ? db_select(
-                            "SELECT id, credit_note_number, amount_remaining, currency, status
-                             FROM credit_notes
-                             WHERE source_payment_id = ? AND deleted_at IS NULL
-                             ORDER BY id ASC",
-                            [$id]
-                        )
-                        : [];
-                    ?>
-                    <?php if ($overpaymentCns): ?>
-                        <dt>Credit Note</dt>
-                        <dd>
-                            <?php foreach ($overpaymentCns as $_ocn): ?>
-                                <div>
-                                    <a href="<?= base_url('credit_notes/show') ?>?id=<?= (int) $_ocn['id'] ?>" class="link font-mono"><?= e($_ocn['credit_note_number']) ?></a>
-                                    <span style="font-size:0.8rem; color:var(--text-secondary);">
-                                        <?= format_currency($_ocn['amount_remaining']) ?> <?= e($_ocn['currency']) ?> remaining · <?= e(str_replace('_', ' ', $_ocn['status'])) ?>
-                                    </span>
-                                </div>
-                            <?php endforeach; ?>
-                        </dd>
-                    <?php endif; ?>
-                <?php endif; ?>
-
-                <?php if (bccomp((string)$payment['refund_amount'], '0', 2) > 0): ?>
-                    <dt>Refund Amount</dt>
-                    <dd class="font-mono"><?= format_currency($payment['refund_amount']) ?></dd>
-                    <?php if ($payment['refund_date']): ?>
-                        <dt>Refund Date</dt>
-                        <dd class="font-mono"><?= format_date($payment['refund_date']) ?></dd>
-                    <?php endif; ?>
-                    <?php if ($payment['refund_reference']): ?>
-                        <dt>Refund Ref #</dt>
-                        <dd class="font-mono"><?= e($payment['refund_reference']) ?></dd>
-                    <?php endif; ?>
-                <?php endif; ?>
-
-                <?php if ($payment['verified_by']): ?>
-                    <dt>Verified By</dt>
-                    <dd><?= e($payment['verified_by_name'] ?? 'Unknown') ?></dd>
-                    <dt>Verified At</dt>
-                    <dd class="font-mono"><?= format_datetime($payment['verified_at']) ?></dd>
-                <?php endif; ?>
-
-                <?php if ($payment['notes']): ?>
-                    <dt>Notes</dt>
-                    <dd style="white-space:pre-wrap;"><?= e($payment['notes']) ?></dd>
-                <?php endif; ?>
-
-                <?php if ($payment['internal_notes'] && can('payments', 'edit')): ?>
-                    <dt>Internal Notes</dt>
-                    <dd style="white-space:pre-wrap; color:var(--text-secondary);"><?= e($payment['internal_notes']) ?></dd>
-                <?php endif; ?>
-            </dl>
+    <div class="card-body">
+        <div class="grid-2" style="margin-bottom:16px;">
+            <div>
+                <label class="form-label">Reference Number</label>
+                <input type="text" class="form-input" x-model="editForm.reference_number" maxlength="100">
+            </div>
+            <div>
+                <label class="form-label">Bank Name</label>
+                <input type="text" class="form-input" x-model="editForm.bank_name" maxlength="100">
+            </div>
+            <div>
+                <label class="form-label">Public Notes</label>
+                <textarea class="form-input" rows="3" x-model="editForm.notes" maxlength="2000"></textarea>
+            </div>
+            <div>
+                <label class="form-label">Internal Notes</label>
+                <textarea class="form-input" rows="3" x-model="editForm.internal_notes" maxlength="2000"></textarea>
+            </div>
         </div>
+        <div style="display:flex; gap:8px;">
+            <button class="btn btn-primary btn-sm" @click="saveEdit()" :disabled="saving">
+                <span x-text="saving ? 'Saving…' : 'Save Changes'"></span>
+            </button>
+            <button class="btn btn-secondary btn-sm" @click="showEdit = false">Cancel</button>
+        </div>
+        <p x-show="editError" x-text="editError" style="color:var(--color-danger); margin-top:8px;"></p>
     </div>
-
 </div>
+<?php endif; ?>
 
 <!-- ============================================================
      Allocation table
@@ -394,7 +431,7 @@ $canMoveAlloc = can('payments', 'edit')
     && !in_array($payment['origin'] ?? 'ff_native', ['qbo_payments_webhook', 'qbo_other'], true)
     && !in_array($payment['status'] ?? '', ['void', 'refunded', 'failed', 'returned'], true);
 ?>
-<div class="card" style="margin-bottom:24px;" x-data="FF_PaymentMove()">
+<div class="card" id="pay-allocations" style="margin-bottom:14px; scroll-margin-top:80px;" x-data="FF_PaymentMove()">
     <div class="card-header">
         <h3 class="card-title">Invoice Allocations</h3>
         <span class="badge badge-neutral"><?= count($allocations) ?> allocation<?= count($allocations) !== 1 ? 's' : '' ?></span>
@@ -403,19 +440,19 @@ $canMoveAlloc = can('payments', 'edit')
         <?php if (empty($allocations)): ?>
             <div class="empty-state" style="padding:32px;">
                 <p class="empty-state-title">No allocations</p>
-                <p class="empty-state-text">This payment has not been applied to any invoice yet.</p>
+                <p class="empty-state-text">This payment has not been applied to any invoice yet.<?= $hasUnapplied && $isQboOwned ? ' It came from QuickBooks — apply it to the invoice there and FleetForge will follow.' : '' ?></p>
             </div>
         <?php else: ?>
             <table class="table" style="width:100%;">
                 <thead>
+                    <?php /* S-RECORD-REDESIGN: short headers + the invoice status under the
+                             number, so the table fits the main column beside the rail. */ ?>
                     <tr>
-                        <th>Invoice #</th>
+                        <th>Invoice</th>
                         <th>Billing Period</th>
-                        <th style="text-align:right;">Invoice Total</th>
-                        <th style="text-align:right;">Applied Amount</th>
-                        <th style="text-align:right;">Remaining Balance</th>
-                        <th>Invoice Status</th>
-                        <th>Type</th>
+                        <th style="text-align:right;">Total</th>
+                        <th style="text-align:right;">Applied</th>
+                        <th style="text-align:right;">Balance Left</th>
                         <th>Allocated</th>
                         <?php if ($canMoveAlloc): ?><th></th><?php endif; ?>
                     </tr>
@@ -438,8 +475,9 @@ $canMoveAlloc = can('payments', 'edit')
                                    class="link font-mono">
                                     <?= e($alloc['invoice_number']) ?>
                                 </a>
+                                <div style="margin-top:3px;"><span class="badge <?= $invBadge ?>"><?= e(str_replace('_', ' ', (string) $alloc['invoice_status'])) ?></span></div>
                             </td>
-                            <td class="font-mono" style="font-size:0.85rem;">
+                            <td style="font-size:0.85rem; white-space:normal;">
                                 <?= format_date($alloc['billing_period_start']) ?>
                                 – <?= format_date(ff_invoice_display_period_end($alloc)) ?>
                             </td>
@@ -452,10 +490,12 @@ $canMoveAlloc = can('payments', 'edit')
                             <td class="font-mono" style="text-align:right;">
                                 <?= format_currency($alloc['invoice_balance_due']) ?>
                             </td>
-                            <td><span class="badge <?= $invBadge ?>"><?= e($alloc['invoice_status']) ?></span></td>
-                            <td><span class="badge badge-neutral" style="font-size:0.75rem;"><?= e($alloc['allocation_type']) ?></span></td>
-                            <td class="font-mono" style="font-size:0.8rem; color:var(--text-muted);">
-                                <?= format_datetime($alloc['created_at']) ?>
+                            <?php /* S-RECORD-REDESIGN: the Type column (auto / manual) folded into
+                                     Allocated so the table fits beside the rail; full time on hover. */ ?>
+                            <td style="font-size:0.8rem; color:var(--text-muted); white-space:nowrap;"
+                                title="<?= e(format_datetime($alloc['created_at'])) ?>">
+                                <?= format_date(format_datetime($alloc['created_at'], 'Y-m-d')) ?>
+                                <div style="font-size:0.72rem;"><?= e($alloc['allocation_type']) ?></div>
                             </td>
                             <?php if ($canMoveAlloc): ?>
                             <td>
@@ -468,6 +508,14 @@ $canMoveAlloc = can('payments', 'edit')
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
+                <?php /* S-RECORD-REDESIGN: the applied total, so it reconciles to the strip at a glance. */ ?>
+                <tfoot>
+                    <tr>
+                        <th colspan="3">Total applied</th>
+                        <th class="font-mono" style="text-align:right;"><?= format_currency($allocTotal) ?></th>
+                        <th colspan="<?= $canMoveAlloc ? 3 : 2 ?>"></th>
+                    </tr>
+                </tfoot>
             </table>
         <?php endif; ?>
     </div>
@@ -518,6 +566,221 @@ $canMoveAlloc = can('payments', 'edit')
     <?php endif; ?>
 </div>
 
+<?php
+// ── Notes (was part of the "Financial Notes" card; the overpayment, refund
+// and verification rows moved to the rail). Internal notes stay payments:edit.
+$_showInternal = $payment['internal_notes'] && can('payments', 'edit');
+if ($payment['notes'] || $_showInternal): ?>
+<div class="card" style="margin-bottom:14px;">
+    <div class="card-header"><h3 class="card-title">Notes</h3></div>
+    <div class="card-body">
+        <dl class="rec-dl">
+            <?php if ($payment['notes']): ?>
+                <dt>Notes</dt>
+                <dd style="white-space:pre-wrap;"><?= e($payment['notes']) ?></dd>
+            <?php endif; ?>
+            <?php if ($_showInternal): ?>
+                <dt>Internal Notes</dt>
+                <dd style="white-space:pre-wrap; color:var(--text-secondary);"><?= e($payment['internal_notes']) ?></dd>
+            <?php endif; ?>
+        </dl>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php
+// F8 (S-QBO-ENTITY-SHOW-RICH-PANEL-PAYDOWN): shared QuickBooks Sync rich panel.
+// S-RECORD-REDESIGN: moved below the payment's own content; the rail carries
+// its status summary.
+$qboPanel = [
+    'entity_type' => 'payment',
+    'map_table'   => 'acc_qbo_payment_map',
+    'qbo_id_col'  => 'qbo_payment_id',
+    'ff_fk'       => 'ff_payment_id',
+    'ff_id'       => (int) $payment['id'],
+    'deep_link'   => 'recvpayment',
+    'retry_url'   => base_url('api/v1/quickbooks/payments/retry'),
+];
+require FF_ROOT . '/includes/partials/qbo-sync-panel.php';
+?>
+
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card" style="margin-bottom:14px;">
+    <div class="card-header"><h3 class="card-title">Activity</h3></div>
+    <div class="card-body">
+        <?php $activityEntityType = 'payment'; $activityEntityId = $id; ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the payment at a glance ─────────
+$R      = \FleetForge\Ui\RecordUi::class;
+$railP  = [];
+$_cur   = (string) $payment['currency'];
+
+// 1. Needs attention.
+$alertsP = [];
+if ($hasUnapplied) {
+    $_msg = e(format_currency($unapplied)) . ' ' . e($_cur) . ' is on no invoice';
+    if ($isQboOwned) {
+        $_msg .= ' — it came from QuickBooks: apply it to the invoice there and FleetForge follows.';
+    } elseif ((int) $openInv['cnt'] > 0) {
+        $_msg .= ' — this customer has <a href="' . e(base_url('invoices')) . '?customer_id=' . (int) $payment['customer_id'] . '&status=outstanding">'
+            . (int) $openInv['cnt'] . ' open invoice' . ((int) $openInv['cnt'] === 1 ? '' : 's') . '</a> (' . e(format_currency($openInv['owing'])) . ' owing).';
+    } else {
+        $_msg .= '.';
+    }
+    $alertsP[] = [$unappliedStale ? 'danger' : 'warning', $_msg];
+}
+if (bccomp((string) $payment['overpayment_amount'], '0', 2) > 0 && !(int) $payment['overpayment_resolved']) {
+    $alertsP[] = ['warning', 'Overpayment of ' . e(format_currency($payment['overpayment_amount'])) . ' not resolved'
+        . ($payment['overpayment_action'] ? ' (' . e(str_replace('_', ' ', (string) $payment['overpayment_action'])) . ')' : '') . '.'];
+}
+if ($payment['status'] === 'pending') {
+    $alertsP[] = ['info', 'Pending — not cleared by the bank yet' . ($daysSince !== null && $daysSince > 0 ? ' (' . e($daysSinceLabel) . ')' : '') . '.'];
+} elseif ($payment['status'] === 'failed') {
+    $alertsP[] = ['danger', '<b>Failed</b>' . ($payment['failure_reason'] ? ' — ' . e($payment['failure_reason']) : '') . '.'];
+} elseif ($payment['status'] === 'returned') {
+    $alertsP[] = ['danger', '<b>Returned</b>' . ($payment['returned_date'] ? ' ' . e(format_date($payment['returned_date'])) : '')
+        . ($payment['returned_reason'] ? ' — ' . e($payment['returned_reason']) : '') . '. Check the invoices it paid are owing again.'];
+} elseif ($payment['status'] === 'void') {
+    $alertsP[] = ['info', 'Voided — this payment no longer counts toward any invoice.'];
+} elseif ($payment['status'] === 'refunded') {
+    $alertsP[] = ['info', 'Refunded' . (bccomp($refunded, '0', 2) > 0 ? ' ' . e(format_currency($refunded)) : '')
+        . ($payment['refund_date'] ? ' on ' . e(format_date($payment['refund_date'])) : '') . '.'];
+}
+// failure_reason can be set on a non-failed status (a retried payment) — keep it visible.
+if ($payment['failure_reason'] && $payment['status'] !== 'failed') {
+    $alertsP[] = ['warning', 'Failure note: ' . e($payment['failure_reason'])];
+}
+if (!$payment['customer_id']) {
+    $alertsP[] = ['warning', 'Not linked to a customer.'];
+}
+if ($qboMap !== null && ((string) ($qboMap['push_status'] ?? '') === 'failed' || str_starts_with((string) ($qboMap['push_status'] ?? ''), 'failed_preflight'))) {
+    $alertsP[] = ['danger', '<a href="#qbo-sync-panel">QuickBooks push failed</a> — retry from the QuickBooks panel.'];
+}
+$railP[] = $R::card('Needs attention', $R::alerts($alertsP, 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Where the money went — applied vs the rest.
+$_appliedPct = bccomp((string) $payment['amount'], '0', 2) > 0
+    ? (float) bcmul(bcdiv($allocTotal, (string) $payment['amount'], 6), '100', 2)
+    : 0.0;
+$moneyBody = $R::meter('On invoices', e((string) round($_appliedPct)) . '%', $_appliedPct,
+    $_appliedPct >= 99.99 ? 'ok' : ($hasUnapplied ? ($unappliedStale ? 'danger' : 'warn') : 'info'),
+    e(format_currency($allocTotal)) . ' of ' . e(format_currency($payment['amount'])) . ' ' . e($_cur));
+$_cnHtml = '';
+foreach ($overpaymentCns as $_ocn) {
+    $_cnHtml .= ($_cnHtml !== '' ? '<br>' : '')
+        . '<a href="' . e(base_url('credit_notes/show')) . '?id=' . (int) $_ocn['id'] . '">' . e($_ocn['credit_note_number']) . '</a> · '
+        . e(format_currency($_ocn['amount_remaining'])) . ' left';
+}
+$moneyBody .= $R::kv([
+    ['Account credit', bccomp($cnHold, '0', 2) > 0 ? e(format_currency($cnHold)) : null, 'mono'],
+    ['Credit note', $_cnHtml !== '' ? $_cnHtml : null],
+    ['Overpayment', bccomp((string) $payment['overpayment_amount'], '0', 2) > 0
+        ? e(format_currency($payment['overpayment_amount'])) . ' · ' . e(str_replace('_', ' ', (string) ($payment['overpayment_action'] ?? 'unresolved'))) . ((int) $payment['overpayment_resolved'] ? ' ✓' : '')
+        : null],
+    ['Refunded', bccomp($refunded, '0', 2) > 0 ? e(format_currency($refunded)) . ($payment['refund_date'] ? ' · ' . e(format_date($payment['refund_date'])) : '') : null],
+    ['Refund method', !empty($payment['refund_method']) ? e(str_replace('_', ' ', (string) $payment['refund_method'])) : null],
+    ['Refund ref #', !empty($payment['refund_reference']) ? e($payment['refund_reference']) : null, 'mono'],
+    ['Unapplied', $isLive && bccomp($unapplied, '0', 2) !== 0 ? e(format_currency($unapplied)) : null, 'mono'],
+]);
+$railP[] = $R::card('Where the money went', $moneyBody, ['icon' => 'banknotes', 'class' => 'rec-card--accent']);
+
+// 3. Customer.
+if ($payment['customer_id']) {
+    $_cid   = (int) $payment['customer_id'];
+    $_cname = (string) ($payment['company_name'] ?? 'Customer');
+    $custBody = $R::entity($_cname, can('customers', 'view') ? base_url('customers/show') . '?id=' . $_cid : '', 'Customer', \FleetForge\Ui\ModuleHero::initials($_cname));
+    $custLinks = [];
+    if (can('customers', 'view')) {
+        $custLinks[] = ['Payments from this customer', base_url('customers/show') . '?id=' . $_cid . '#payments', 'banknotes'];
+    }
+    if (can('invoices', 'view')) {
+        $custLinks[] = ['Open invoices', base_url('invoices') . '?customer_id=' . $_cid . '&status=outstanding', 'document-text'];
+        $custLinks[] = ['Credit notes', base_url('credit_notes') . '?customer_id=' . $_cid, 'receipt-percent'];
+    }
+    if ($custLinks) {
+        $custBody .= '<div style="margin-top:12px;">' . $R::links($custLinks) . '</div>';
+    }
+    $railP[] = $R::card('Customer', $custBody, ['icon' => 'user-group']);
+}
+
+// 4. Payment facts (was the "Payment Details" card).
+$railP[] = $R::card('Payment details', $R::kv([
+    ['Method', e($methodName)],
+    ['Reference #', !empty($payment['reference_number']) ? e($payment['reference_number']) : null, 'mono'],
+    ['Cheque #', !empty($payment['check_number']) ? e($payment['check_number']) : null, 'mono'],
+    ['Card', !empty($payment['card_last_four']) ? '•••• ' . e($payment['card_last_four']) : null, 'mono'],
+    ["Customer's bank", !empty($payment['bank_name']) ? e($payment['bank_name']) : null],
+    // SOP I10: the FleetForge bank account the ledger entry debited.
+    ['Deposited to', $payment['deposit_bank_name'] ? e($payment['deposit_bank_name']) : '<span class="text-secondary">Default cash account</span>'],
+    ['Amount in CAD', $payment['amount_in_cad'] && $payment['currency'] !== 'CAD' ? e(format_currency($payment['amount_in_cad'])) : null, 'mono'],
+    ['Received at', !empty($payment['received_at']) ? e(format_datetime($payment['received_at'])) : null],
+    ['Deposited', $payment['deposited_date'] ? e(format_date($payment['deposited_date'])) : null],
+    ['Cleared', $payment['cleared_date'] ? e(format_date($payment['cleared_date'])) : null],
+    ['Verified', $payment['verified_by'] ? e($payment['verified_by_name'] ?? 'Unknown') . ' · ' . e(format_datetime($payment['verified_at'])) : null],
+    ['Source', $isQboOwned ? 'QuickBooks' . ($payment['origin'] === 'qbo_payments_webhook' ? ' Payments' : '') : 'FleetForge'],
+]), ['icon' => 'credit-card']);
+
+// 5. QuickBooks summary (full panel in the main column).
+if ($qboConnected) {
+    $_qs = $qboMap['push_status'] ?? null;
+    [$_qBadge, $_qLabel] = match (true) {
+        $qboMap === null                                  => ['badge-neutral', 'Not synced'],
+        $_qs === 'pushed'                                 => ['badge-success', 'Synced'],
+        $_qs === 'voided'                                 => ['badge-neutral', 'Voided'],
+        $_qs === 'pending'                                => ['badge-neutral', 'Pending'],
+        $_qs === 'failed'                                 => ['badge-danger', 'Failed'],
+        str_starts_with((string) $_qs, 'failed_preflight') => ['badge-warning', 'Failed pre-flight'],
+        str_starts_with((string) $_qs, 'skipped_')        => ['badge-neutral', 'Skipped'],
+        default                                           => ['badge-neutral', ucfirst(str_replace('_', ' ', (string) $_qs))],
+    };
+    $railP[] = $R::card('QuickBooks', $R::kv([
+        ['Status', '<span class="badge badge-no-dot ' . $_qBadge . '">' . e($_qLabel) . '</span>'],
+        ['QuickBooks #', !empty($qboMap['qbo_payment_id']) ? e('#' . $qboMap['qbo_payment_id']) : null, 'mono'],
+        ['Last push', !empty($qboMap['pushed_at']) ? e(format_datetime($qboMap['pushed_at'])) : null],
+    ]), ['icon' => 'arrow-path', 'link' => ['Details', '#qbo-sync-panel']]);
+}
+?>
+<aside class="rec-rail" aria-label="Payment at a glance">
+    <?= implode("\n    ", $railP) ?>
+</aside>
+</div><!-- /rec-layout -->
+
+<?php if (can('payments', 'edit') && can('payments', 'delete')): ?>
+<!-- Void / Remove confirmation modal (opened from the header's More menu) -->
+<div class="modal-backdrop" x-show="showDelete" x-cloak @click.self="showDelete = false">
+    <div class="modal modal-sm">
+        <div class="modal-header">
+            <h3 class="modal-title">Void / Remove Payment?</h3>
+            <button class="modal-close-btn" aria-label="Close" @click="showDelete = false">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p style="color:var(--text-secondary); margin-bottom:16px;">
+                This will soft-delete payment <strong><?= e($payment['payment_number']) ?></strong>
+                and reverse all invoice allocations. Invoice statuses will revert.
+            </p>
+            <label class="form-label">Reason <span style="color:var(--color-danger);">*</span></label>
+            <textarea class="form-input" rows="3" x-model="deleteReason"
+                      placeholder="Enter reason for removal…" maxlength="500"></textarea>
+            <p x-show="deleteError" x-text="deleteError" style="color:var(--color-danger); margin-top:8px;"></p>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary btn-sm" @click="showDelete = false">Cancel</button>
+            <button class="btn btn-danger btn-sm" @click="confirmDelete()" :disabled="deleting">
+                <span x-text="deleting ? 'Removing…' : 'Confirm Remove'"></span>
+            </button>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+</div><!-- end x-data="FF_PaymentActions()" -->
+
 <script>
 // SOP I17: move an allocation to another invoice (api/v1/payments/reallocate.php).
 function FF_PaymentMove() {
@@ -555,91 +818,9 @@ function FF_PaymentMove() {
         },
     };
 }
-</script>
 
-<!-- ============================================================
-     Action buttons
-     ============================================================ -->
-<?php if (can('payments', 'edit')): ?>
-<div class="card" style="margin-bottom:24px;" x-data="FF_PaymentActions()">
-    <div class="card-header"><h3 class="card-title">Actions</h3></div>
-    <div class="card-body" style="display:flex; gap:12px; flex-wrap:wrap;">
-
-        <!-- Edit metadata button — opens inline form -->
-        <button class="btn btn-secondary btn-md" @click="showEdit = !showEdit">
-            <?= heroicon('pencil', 'icon-sm') ?>
-            Edit Notes / Reference
-        </button>
-
-        <?php if (can('payments', 'delete')): ?>
-        <button class="btn btn-danger btn-md" @click="showDelete = true">
-            <?= heroicon('trash', 'icon-sm') ?>
-            Void / Remove Payment
-        </button>
-        <?php endif; ?>
-
-    </div>
-
-    <!-- Inline edit form -->
-    <div x-show="showEdit" x-cloak style="border-top:1px solid var(--border-color); padding:20px;">
-        <h4 style="margin:0 0 16px; font-size:0.95rem;">Edit Payment Notes</h4>
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
-            <div>
-                <label class="form-label">Reference Number</label>
-                <input type="text" class="form-input" x-model="editForm.reference_number" maxlength="100">
-            </div>
-            <div>
-                <label class="form-label">Bank Name</label>
-                <input type="text" class="form-input" x-model="editForm.bank_name" maxlength="100">
-            </div>
-            <div>
-                <label class="form-label">Public Notes</label>
-                <textarea class="form-input" rows="3" x-model="editForm.notes" maxlength="2000"></textarea>
-            </div>
-            <div>
-                <label class="form-label">Internal Notes</label>
-                <textarea class="form-input" rows="3" x-model="editForm.internal_notes" maxlength="2000"></textarea>
-            </div>
-        </div>
-        <div style="display:flex; gap:8px;">
-            <button class="btn btn-primary btn-sm" @click="saveEdit()" :disabled="saving">
-                <span x-text="saving ? 'Saving…' : 'Save Changes'"></span>
-            </button>
-            <button class="btn btn-secondary btn-sm" @click="showEdit = false">Cancel</button>
-        </div>
-        <p x-show="editError" x-text="editError" style="color:var(--color-danger); margin-top:8px;"></p>
-    </div>
-
-    <!-- Delete confirmation modal -->
-    <div class="modal-backdrop" x-show="showDelete" x-cloak @click.self="showDelete = false">
-        <div class="modal modal-sm">
-            <div class="modal-header">
-                <h3 class="modal-title">Void / Remove Payment?</h3>
-                <button class="modal-close-btn" aria-label="Close" @click="showDelete = false">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p style="color:var(--text-secondary); margin-bottom:16px;">
-                    This will soft-delete payment <strong><?= e($payment['payment_number']) ?></strong>
-                    and reverse all invoice allocations. Invoice statuses will revert.
-                </p>
-                <label class="form-label">Reason <span style="color:var(--color-danger);">*</span></label>
-                <textarea class="form-input" rows="3" x-model="deleteReason"
-                          placeholder="Enter reason for removal…" maxlength="500"></textarea>
-                <p x-show="deleteError" x-text="deleteError" style="color:var(--color-danger); margin-top:8px;"></p>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary btn-sm" @click="showDelete = false">Cancel</button>
-                <button class="btn btn-danger btn-sm" @click="confirmDelete()" :disabled="deleting">
-                    <span x-text="deleting ? 'Removing…' : 'Confirm Remove'"></span>
-                </button>
-            </div>
-        </div>
-    </div>
-
-</div>
-<?php endif; ?>
-
-<script>
+// Page component (opens above the hero): the edit card + remove modal state
+// the header's More menu drives.
 function FF_PaymentActions() {
     return {
         showEdit:  false,
@@ -693,15 +874,6 @@ function FF_PaymentActions() {
     };
 }
 </script>
-
-<!-- ── Activity Log ───────────────────────────────────────────── -->
-<div class="card" style="margin-top:24px;">
-    <div class="card-header"><h3 class="card-title">Activity</h3></div>
-    <div class="card-body">
-        <?php $activityEntityType = 'payment'; $activityEntityId = $id; ?>
-        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
-    </div>
-</div>
 
 <?php
 // ── AI Payment Summary panel (S-AI-SUMMARY-PANELS) ──

@@ -187,7 +187,7 @@ $_roleLabels = [
 $_roleLabel = $_roleLabels[$invite['role_slug'] ?? ''] ?? ucfirst($invite['role_slug'] ?? '');
 ?>
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="dark" data-bg="<?= e(ff_background()) ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -196,6 +196,8 @@ $_roleLabel = $_roleLabels[$invite['role_slug'] ?? ''] ?? ucfirst($invite['role_
     <?= ff_favicon_tags() ?>
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <script>
         try { var t=localStorage.getItem('ff-theme'); if(t==='light'||t==='dark') document.documentElement.setAttribute('data-theme',t); } catch(e){}
     </script>

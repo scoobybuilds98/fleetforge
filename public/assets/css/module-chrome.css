@@ -242,6 +242,113 @@
 .ff-stats > .stat-card:hover { border-color: color-mix(in srgb, var(--stat-glow) 45%, var(--border-color)); }
 .ff-stats .stat-icon { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--stat-glow) 28%, transparent); }
 
+/* ============================================================
+   KEY-NUMBER TILES — compact, separate (S-LIST-COMPACT)
+   Every .stat-grid.ff-stats that follows a module hero (list and record
+   pages). The dashboard's KPI groups have no hero and keep their tiles.
+   Operator: "reduce the height of the tiles … keep it simple" and "there
+   should be a clear distinction between tiles" — so each number is its
+   own card (gap between, own frame + corner glow) but only ~68px tall:
+   icon on the left, label over value, the sub-line beside the value.
+   Colour through the icon + glow (no top bar — operator rule; no
+   pseudo-elements on .ff-stats). A clickable tile lifts on hover and
+   rings when it is the active filter.
+   ============================================================ */
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-template-columns: none;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card {
+    display: grid;
+    grid-template-columns: 34px auto minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 1px;
+    align-content: center;
+    align-items: center;
+    width: 100%;
+    min-height: 0;
+    padding: 12px 16px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    background:
+        radial-gradient(180px 110px at 100% 0%, color-mix(in srgb, var(--stat-glow) 14%, transparent), transparent 70%),
+        var(--bg-surface);
+    box-shadow: var(--card-sheen), var(--shadow-ambient);
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    text-decoration: none;
+}
+/* Everything right of the icon spans both text columns; a bare value +
+   delta pair (no wrapper div) shares one row: value, then delta. */
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > * { grid-column: 2 / -1; min-width: 0; }
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > .stat-value:has(+ .stat-delta) { grid-column: 2; }
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > .stat-value + .stat-delta { grid-column: 3; align-self: center; margin-left: -4px; }
+/* Some pages put the value before its label in the markup (mileage logs):
+   the label always reads first. */
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > .stat-label { order: -1; }
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > .stat-icon {
+    order: -2;
+    position: static;
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > .stat-icon svg { width: 17px; height: 17px; }
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) .stat-label {
+    display: block;
+    margin: 0;
+    padding-right: 0;
+    font-size: 10.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) .stat-value {
+    margin: 0;
+    font-size: 19px;
+    line-height: 1.25;
+    white-space: nowrap;
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > div:has(> .stat-value) {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 8px;
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) .stat-delta {
+    margin: 0;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) .skeleton { margin: 4px 0 0; }
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > :is(button, a, [style*="cursor:pointer"], [\@click]).stat-card { cursor: pointer; }
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > :is(button, a, [style*="cursor:pointer"], [\@click]).stat-card:hover {
+    border-color: color-mix(in srgb, var(--stat-glow) 50%, var(--border-color));
+    box-shadow: var(--card-sheen), var(--shadow-ambient), var(--shadow-md);
+    transform: translateY(-1px);
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card.ring-active {
+    border-color: var(--stat-glow);
+    box-shadow: var(--card-sheen), 0 0 0 3px color-mix(in srgb, var(--stat-glow) 22%, transparent);
+    background:
+        radial-gradient(180px 110px at 100% 0%, color-mix(in srgb, var(--stat-glow) 22%, transparent), transparent 70%),
+        color-mix(in srgb, var(--stat-glow) 6%, var(--bg-surface));
+}
+:is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--stat-glow) 60%, transparent);
+    outline-offset: 2px;
+}
+
 /* ── Motion ─────────────────────────────────────────────────── */
 @keyframes dg-dash { to { stroke-dashoffset: -13; } }
 @keyframes dg-dash-slow { to { stroke-dashoffset: -24; } }
@@ -258,6 +365,10 @@
 /* ── Responsive (after the base rules) ──────────────────────── */
 @media (max-width: 1000px) {
     .ff-hero { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+    :is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    /* Half-width segments: the sub-line gets its own row instead of "…". */
+    :is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) > .stat-card > .stat-value + .stat-delta { grid-column: 2 / -1; margin-left: 0; }
+    :is(.ff-hero ~ .stat-grid.ff-stats, .ff-hero ~ * > .stat-grid.ff-stats) .stat-delta { white-space: normal; }
     .ff-hero-art { display: none; }
     .ff-hero--entity { padding: 20px; }
     .ff-hero--entity .ff-hero-actions { justify-content: flex-start; }

@@ -6,7 +6,7 @@ declare(strict_types=1);
 // Included by includes/header.php — do not include directly.
 //
 // S-SHELL-REDESIGN: brand block (logo, or icon + company name when there
-// is no logo / it fails to load), a "Find a page" filter, grouped sections
+// is no logo / it fails to load), grouped sections
 // from config/navigation.php, per-item accent (ff-acc--*, the module's hero
 // colour) on hover/active, and a user card with initials. Visuals live in
 // public/assets/css/shell.css; responsive/collapse behaviour is unchanged
@@ -205,21 +205,6 @@ $_sidebarUser = current_user();
                 title="Toggle sidebar">
             <?= heroicon('chevron-left', 'collapse-icon') ?>
         </button>
-    </div>
-
-    <!-- ── Find a page (S-SHELL-REDESIGN) ─────────────────── -->
-    <!-- Filters the menu as you type (labels of items and sub-items);
-         Enter opens the first match, Escape clears. Hidden in the
-         collapsed icon rail. -->
-    <div class="sidebar-find">
-        <?php /* WHY a wrapper span: heroicon() caches by icon NAME, so a custom
-                 class on the svg would leak into every later magnifying-glass
-                 (the topbar's phone search button took this position). */ ?>
-        <span class="sidebar-find-icon" aria-hidden="true"><?= heroicon('magnifying-glass', 'nav-icon') ?></span>
-        <input type="search" class="sidebar-find-input" placeholder="Find a page…"
-               autocomplete="off" spellcheck="false" aria-label="Find a page in the menu"
-               oninput="FF_SidebarFind(this.value)"
-               onkeydown="if (event.key === 'Escape') { this.value = ''; FF_SidebarFind(''); } else if (event.key === 'Enter') { event.preventDefault(); FF_SidebarFind(this.value, true); }">
     </div>
 
     <!-- ── Navigation ────────────────────────────────────── -->
@@ -497,77 +482,6 @@ $_sidebarUser = current_user();
         scrollActiveIntoView();
     }
 })();
-
-// ============================================================
-// S-SHELL-REDESIGN — "Find a page" filter.
-//
-// Matches the typed text against every item's label (children
-// too). A group stays visible when its own label or any child
-// matches and opens to show the matching children; section labels
-// hide when nothing under them matches. Enter (go=true) opens the
-// first visible match. Clearing restores each group's own
-// open/closed state (remembered in data-was-open).
-// ============================================================
-window.FF_SidebarFind = function (query, go) {
-    var nav = document.querySelector('#ff-sidebar .sidebar-nav');
-    if (!nav) return;
-    var q = String(query || '').trim().toLowerCase();
-    var text = function (el) {
-        var l = el && el.querySelector('.nav-item-label');
-        return l ? l.textContent.trim().toLowerCase() : '';
-    };
-    var kids = Array.prototype.slice.call(nav.children);
-
-    kids.forEach(function (el) {
-        if (el.classList.contains('nav-section-label') || el.classList.contains('sidebar-find-empty')) return;
-        var isGroup = el.classList.contains('nav-group');
-        if (!q) {
-            el.hidden = false;
-            if (isGroup) {
-                if (el.dataset.wasOpen !== undefined) {
-                    el.classList.toggle('is-open', el.dataset.wasOpen === '1');
-                    delete el.dataset.wasOpen;
-                }
-                el.querySelectorAll('.nav-children > .nav-item').forEach(function (c) { c.hidden = false; });
-            }
-            return;
-        }
-        if (isGroup) {
-            if (el.dataset.wasOpen === undefined) el.dataset.wasOpen = el.classList.contains('is-open') ? '1' : '0';
-            var parentHit = text(el.querySelector(':scope > .nav-item')).indexOf(q) !== -1;
-            var childHit = false;
-            el.querySelectorAll('.nav-children > .nav-item').forEach(function (c) {
-                var hit = parentHit || text(c).indexOf(q) !== -1;
-                c.hidden = !hit;
-                if (hit && !parentHit) childHit = true;
-            });
-            el.hidden = !(parentHit || childHit);
-            el.classList.toggle('is-open', childHit);
-        } else {
-            el.hidden = text(el).indexOf(q) === -1;
-        }
-    });
-
-    // Section labels: hidden while filtering when nothing below them shows.
-    var label = null, seen = false;
-    var settle = function () { if (label) label.hidden = !!q && !seen; };
-    kids.forEach(function (el) {
-        if (el.classList.contains('nav-section-label')) { settle(); label = el; seen = false; }
-        else if (!el.hidden && !el.classList.contains('sidebar-find-empty')) { seen = true; }
-    });
-    settle();
-
-    var empty = nav.querySelector('.sidebar-find-empty');
-    if (!empty) {
-        empty = document.createElement('div');
-        empty.className = 'sidebar-find-empty';
-        empty.textContent = 'No page matches that.';
-        nav.appendChild(empty);
-    }
-    var first = Array.prototype.slice.call(nav.querySelectorAll('a.nav-item')).filter(function (a) { return a.offsetParent !== null; })[0];
-    empty.hidden = !q || !!first;
-    if (go && first) window.location.href = first.href;
-};
 
 // ============================================================
 // S-SIDEBAR-COLLAPSED-TOOLTIP — show module name on hover when

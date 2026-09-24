@@ -187,7 +187,7 @@ export default {
       await d.hover('a:has-text("+ New Work Order")', 1200);
     }),
     S('Completed work order costs also count against the unit in Payoff Analysis, so repairs are weighed against the revenue the unit earns.', async (d) => {
-      await d.click('button.tab-btn:has-text("Payoff Analysis")');
+      await d.tab('Payoff');
       await d.wait(2500);
     }),
     S('One last rule: a work order can only be deleted while it is still open or once cancelled. Completed jobs stay on record for good.', async (d) => {

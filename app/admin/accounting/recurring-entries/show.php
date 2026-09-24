@@ -3,16 +3,30 @@
 /**
  * app/admin/accounting/recurring-entries/show.php
  *
- * Recurring template detail: header card + line items table + posting
+ * Recurring template detail: header + line items table + posting
  * history. Pause/Unpause action via inline Alpine. Post-Now action
  * available to super_admin/manager only (matches the API gate).
  *
- * Overdue banner: when next_post_date has passed, the page says how many
+ * Overdue state: when next_post_date has passed, the page says how many
  * occurrences are unposted, whether the nightly scheduler is switched off
  * (Settings → Scheduled Jobs), and offers "Catch up now" — which posts each
  * missed occurrence once, dated on its scheduled date.
  *
- * @session S037-REC
+ * Layout (S-RECORD-REDESIGN):
+ *   The Alpine component (recurringShow) opens ABOVE the header so the
+ *   actions live there: Catch up / Post Now (primary), Pause / Unpause;
+ *   Delete in the More menu.
+ *   header  — ModuleHero entity: template name + Active/Paused/Overdue
+ *             badges; schedule · window · auto-post chips
+ *   nav     — the accounting sub-nav, directly under the header
+ *   strip   — amount per posting · next post · last posted · postings
+ *   main    — Schedule details · Template lines (balance check) · Posting
+ *             history
+ *   rail    — Needs attention (the overdue explanation that used to be a
+ *             banner, scheduler off, unbalanced/empty template, paused,
+ *             ended) · Schedule facts · Related links
+ *
+ * @session S037-REC, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 4) . '/config/app.php');
@@ -63,6 +77,11 @@ $history = db_select(
       LIMIT 24",
     [$id]
 );
+// The table shows the latest 24; the strip counts them all.
+$historyTotal = (int) (db_row(
+    "SELECT COUNT(*) AS c FROM acc_journal_entries WHERE source_type = 'recurring' AND source_id = ?",
+    [$id]
+)['c'] ?? 0);
 
 $canEdit       = can('journal_entries', 'edit');
 $canDelete     = can('journal_entries', 'delete');
@@ -83,196 +102,277 @@ foreach ($lines as $l) {
     $sumDr = bcadd($sumDr, (string) $l['debit'], 2);
     $sumCr = bcadd($sumCr, (string) $l['credit'], 2);
 }
+$isBalanced = bccomp($sumDr, $sumCr, 2) === 0;
+// NOT $isActive: includes/partials/accounting-nav.php (included below the
+// header) sets its own $isActive in its loop and would clobber it.
+$tplActive  = (int) $template['is_active'] === 1;
+$hasEnded   = !empty($template['end_date']) && $template['end_date'] < $today;
+
+// "in N days" / "N days ago" for the strip.
+$relDays = static function (?string $date) use ($today): string {
+    if (empty($date)) return '';
+    $n = (int) round((strtotime($date) - strtotime($today)) / 86400);
+    return $n === 0 ? 'today' : ($n > 0 ? 'in ' . $n . ' day' . ($n === 1 ? '' : 's') : (-$n) . ' day' . ($n === -1 ? '' : 's') . ' ago');
+};
+$ordinal = static function (int $n): string {
+    $s = ['th', 'st', 'nd', 'rd'];
+    $v = $n % 100;
+    return $n . ($s[($v - 20) % 10] ?? $s[$v] ?? $s[0]);
+};
 
 $pageTitle = $template['name'];
 require_once FF_ROOT . '/includes/header.php';
+
+// ── Header (S-RECORD-REDESIGN) ──────────────────────────────────────────────
+$heroTitle = e($template['name'])
+    . ($tplActive ? ' <span class="badge badge-green">Active</span>' : ' <span class="badge badge-red">Paused</span>')
+    . ($missedDates ? ' <span class="badge badge-warning">Overdue</span>' : '');
+$heroFacts = [
+    \FleetForge\Sop\SopIcons::svg('arrow-path') . e(ucfirst((string) $template['frequency'])) . ' on the ' . e($ordinal((int) $template['day_of_month'])),
+    \FleetForge\Sop\SopIcons::svg('calendar-days') . e(format_date($template['start_date'])) . ' → ' . ($template['end_date'] ? e(format_date($template['end_date'])) : 'open-ended'),
+    \FleetForge\Sop\SopIcons::svg('check-circle') . ((int) $template['auto_post'] === 1 ? 'Auto-posts' : 'Drafts for review'),
+];
 ?>
+<?php ob_start(); /* secondary actions → the header's More menu */ ?>
+    <a href="<?= base_url('accounting/recurring-entries') ?>">All recurring entries</a>
+    <?php if ($canDelete && $canBeDeleted): ?>
+        <button class="btn btn-danger btn-sm" @click="del()">Delete</button>
+    <?php elseif ($canDelete): ?>
+        <button class="btn btn-danger btn-sm" disabled title="Cannot delete — template has posting history. Pause instead.">Delete</button>
+    <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+    <?php if ($canPostNow): ?>
+        <button class="btn btn-primary btn-sm" @click="postNow(<?= count($missedDates) ?>)" :disabled="posting"
+                x-text="posting ? 'Posting…' : '<?= $missedDates ? 'Catch up now (' . count($missedDates) . ')' : 'Post Now' ?>'"><?= $missedDates ? 'Catch up now' : 'Post Now' ?></button>
+    <?php endif; ?>
+    <?php if ($canEdit): ?>
+        <button class="btn btn-secondary btn-sm" @click="togglePause()" x-text="'<?= $tplActive ? 'Pause' : 'Unpause' ?>'"></button>
+    <?php endif; ?>
+    <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
 
-<nav class="breadcrumb">
-    <a href="<?= base_url('dashboard') ?>">Dashboard</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/dashboard') ?>">Accounting</a>
-    <span class="breadcrumb-sep">/</span>
-    <a href="<?= base_url('accounting/recurring-entries') ?>">Recurring Entries</a>
-    <span class="breadcrumb-sep">/</span>
-    <span class="breadcrumb-current"><?= e($template['name']) ?></span>
-</nav>
-
-<div class="page-header">
-    <h1 class="page-header-title h4">
-        <?= e($template['name']) ?>
-        <?= ((int) $template['is_active']) === 1
-            ? '<span class="badge badge-green" style="margin-left:8px;font-size:0.7rem;vertical-align:middle;">Active</span>'
-            : '<span class="badge badge-red" style="margin-left:8px;font-size:0.7rem;vertical-align:middle;">Paused</span>' ?>
-    </h1>
-    <div class="page-header-actions">
-        <a class="btn btn-secondary btn-sm" href="<?= base_url('accounting/recurring-entries') ?>">← Back</a>
-    </div>
-</div>
+<!-- The component opens ABOVE the header so its actions can live there. -->
+<div x-data="recurringShow(<?= (int) $id ?>)">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => $missedDates ? 'warning' : ($tplActive ? 'success' : 'info'),
+    'icon'       => 'arrow-path',
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Accounting', base_url('accounting/dashboard')], ['Recurring Entries', base_url('accounting/recurring-entries')], [(string) $template['name'], null]],
+    'eyebrow'    => 'Recurring journal entry',
+    'title_html' => $heroTitle,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
 
 <?php require_once FF_ROOT . '/includes/partials/accounting-nav.php'; ?>
 
-<div x-data="recurringShow(<?= (int) $id ?>)">
-    <?php if ($missedDates): ?>
-    <!-- Overdue banner -->
-    <div class="alert alert-warning" role="status" style="margin-bottom:14px;">
-        <div style="font-weight:600;margin-bottom:4px;">
-            Overdue — <?= count($missedDates) ?> occurrence<?= count($missedDates) === 1 ? '' : 's' ?> not posted
-            (<?= e($missedDates[0]) ?><?= count($missedDates) > 1 ? ' → ' . e(end($missedDates)) : '' ?>)
-        </div>
-        <div style="font-size:0.8125rem;">
-            <?php if (!$cronOn): ?>
-                The nightly <strong>Recurring journal entries</strong> job is switched <strong>off</strong>
-                in Settings → Scheduled Jobs, so nothing posts automatically.
-            <?php else: ?>
-                The nightly job posts every missed occurrence on its next run (up to 24 per run).
-            <?php endif; ?>
-            <?php if ($canPostNow): ?>
-                “Catch up now” posts each one once, dated on its scheduled date<?= ((int) $template['auto_post']) === 1 ? '' : ' (as drafts for review — this template is not auto-post)' ?>.
-            <?php endif; ?>
-        </div>
+<!-- KEY NUMBERS (S-RECORD-REDESIGN): what each posting books, when the next
+     one is due (late ones in red), when it last ran, and how often it has. -->
+<div class="stat-grid stat-grid--4 ff-stats">
+    <div class="stat-card stat-card--blue">
+        <span class="stat-icon stat-icon--blue"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Per posting</div>
+        <div class="stat-value font-mono"><?= e(format_currency($sumDr)) ?></div>
+        <div class="stat-delta"><?= count($lines) ?> line<?= count($lines) === 1 ? '' : 's' ?></div>
     </div>
-    <?php endif; ?>
+    <div class="stat-card <?= $missedDates ? 'stat-card--red' : 'stat-card--amber' ?>">
+        <span class="stat-icon <?= $missedDates ? 'stat-icon--red' : 'stat-icon--amber' ?>"><svg><use href="#icon-<?= $missedDates ? 'exclamation-triangle' : 'clock' ?>"/></svg></span>
+        <div class="stat-label">Next post</div>
+        <div class="stat-value stat-value--date font-mono"<?= $missedDates ? ' style="color:var(--color-danger);"' : '' ?>><?= !empty($template['next_post_date']) && $tplActive && !$hasEnded ? e(format_date($template['next_post_date'])) : '—' ?></div>
+        <div class="stat-delta"><?= $missedDates ? count($missedDates) . ' missed' : ($tplActive ? ($hasEnded ? 'ended' : e($relDays($template['next_post_date']))) : 'paused') ?></div>
+    </div>
+    <div class="stat-card stat-card--green">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
+        <div class="stat-label">Last posted</div>
+        <div class="stat-value stat-value--date font-mono"><?= $template['last_posted_date'] ? e(format_date($template['last_posted_date'])) : 'Never' ?></div>
+        <div class="stat-delta"><?= $template['last_posted_date'] ? e($relDays($template['last_posted_date'])) : '' ?></div>
+    </div>
+    <div class="stat-card stat-card--purple">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Postings</div>
+        <div class="stat-value font-mono"><?= $historyTotal ?></div>
+        <div class="stat-delta">journal entries</div>
+    </div>
+</div>
 
-    <!-- Header card -->
-    <div class="card" style="padding:18px;margin-bottom:14px;">
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Frequency</div>
-                <div style="text-transform:capitalize;"><?= e($template['frequency']) ?></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Day of Month</div>
-                <div class="font-mono"><?= (int) $template['day_of_month'] ?></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Auto-Post</div>
-                <div><?= ((int) $template['auto_post']) === 1 ? '<span class="badge badge-green" style="font-size:0.65rem;">Auto</span>' : '<span class="badge badge-neutral" style="font-size:0.65rem;">Draft for review</span>' ?></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Start Date</div>
-                <div class="font-mono"><?= e($template['start_date']) ?></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">End Date</div>
-                <div class="font-mono"><?= $template['end_date'] ? e($template['end_date']) : '<span style="color:var(--text-secondary);">open-ended</span>' ?></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Next Post</div>
-                <div class="font-mono"><?= e($template['next_post_date'] ?? '—') ?>
-                    <?php if ($missedDates): ?><span class="badge badge-warning" style="margin-left:6px;font-size:0.65rem;">Overdue</span><?php endif; ?>
-                </div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Last Posted</div>
-                <div class="font-mono"><?= $template['last_posted_date'] ? e($template['last_posted_date']) : '<span style="color:var(--text-secondary);">never</span>' ?></div>
-            </div>
-            <div>
-                <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:2px;">Created</div>
-                <div><?= e($template['created_by_name'] ?? 'system') ?> <span style="font-size:0.7rem;color:var(--text-secondary);"><?= e(substr((string) $template['created_at'], 0, 10)) ?></span></div>
-            </div>
-        </div>
-        <?php if ($template['description']): ?>
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-default);">
-            <div style="font-size:0.7rem;text-transform:uppercase;color:var(--text-secondary);font-weight:600;margin-bottom:4px;">Description</div>
-            <div style="white-space:pre-wrap;font-size:0.875rem;"><?= e($template['description']) ?></div>
-        </div>
-        <?php endif; ?>
+<div x-show="postMsg" x-cloak class="alert" :class="postIsError ? 'alert-danger' : 'alert-success'" role="status" style="margin-bottom:14px;" x-text="postMsg"></div>
 
-        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border-default);display:flex;gap:8px;flex-wrap:wrap;">
-            <?php if ($canEdit): ?>
-                <button class="btn btn-secondary btn-sm" @click="togglePause()" x-text="'<?= ((int) $template['is_active']) === 1 ? 'Pause' : 'Unpause' ?>'"></button>
-            <?php endif; ?>
-            <?php if ($canPostNow): ?>
-                <button class="btn btn-primary btn-sm" @click="postNow(<?= count($missedDates) ?>)" :disabled="posting"
-                        x-text="posting ? 'Posting…' : '<?= $missedDates ? 'Catch up now (' . count($missedDates) . ')' : 'Post Now' ?>'"><?= $missedDates ? 'Catch up now' : 'Post Now' ?></button>
-            <?php endif; ?>
-            <?php if ($canDelete && $canBeDeleted): ?>
-                <button class="btn btn-danger btn-sm" @click="del()">Delete</button>
-            <?php elseif ($canDelete): ?>
-                <button class="btn btn-danger btn-sm" disabled title="Cannot delete — template has posting history. Pause instead.">Delete</button>
-            <?php endif; ?>
+<div class="rec-layout">
+<div class="rec-main">
+
+    <!-- Schedule details -->
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Schedule</h3></div>
+        <div class="card-body">
+            <dl class="rec-dl">
+                <dt>Frequency</dt>
+                <dd><?= e(ucfirst((string) $template['frequency'])) ?></dd>
+                <dt>Day of month</dt>
+                <dd class="font-mono"><?= (int) $template['day_of_month'] ?></dd>
+                <dt>Auto-post</dt>
+                <dd><?= ((int) $template['auto_post']) === 1 ? '<span class="badge badge-green">Auto</span>' : '<span class="badge badge-neutral">Draft for review</span>' ?></dd>
+                <dt>Start date</dt>
+                <dd class="font-mono"><?= e(format_date($template['start_date'])) ?></dd>
+                <dt>End date</dt>
+                <dd class="font-mono"><?= $template['end_date'] ? e(format_date($template['end_date'])) : '<span class="text-secondary">open-ended</span>' ?></dd>
+                <dt>Next post</dt>
+                <dd class="font-mono"><?= e(format_date($template['next_post_date'] ?? null)) ?>
+                    <?php if ($missedDates): ?><span class="badge badge-warning">Overdue</span><?php endif; ?>
+                </dd>
+                <dt>Last posted</dt>
+                <dd class="font-mono"><?= $template['last_posted_date'] ? e(format_date($template['last_posted_date'])) : '<span class="text-secondary">never</span>' ?></dd>
+                <?php if ($template['description']): ?>
+                <dt>Description</dt>
+                <dd style="white-space:pre-wrap;"><?= e($template['description']) ?></dd>
+                <?php endif; ?>
+            </dl>
         </div>
-        <div x-show="postMsg" x-cloak style="margin-top:10px;font-size:0.8125rem;" :style="postIsError ? 'color:var(--color-danger);' : 'color:var(--color-success);'" x-text="postMsg"></div>
     </div>
 
     <!-- Lines -->
-    <div class="card" style="padding:18px;margin-bottom:14px;">
-        <div style="font-weight:600;font-size:0.95rem;margin-bottom:12px;">Template Lines</div>
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Template lines</h3></div>
+        <div class="card-body">
         <?php if (empty($lines)): ?>
-            <div style="font-size:0.8125rem;color:var(--text-secondary);">No lines configured.</div>
+            <p class="text-secondary" style="margin:0;font-size:0.8125rem;">No lines configured.</p>
         <?php else: ?>
             <div style="overflow-x:auto;">
-                <table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
+                <table class="table">
                     <thead>
-                        <tr style="border-bottom:2px solid var(--border-default);">
-                            <th style="padding:9px 12px;text-align:center;width:60px;">#</th>
-                            <th style="padding:9px 12px;text-align:left;">Account</th>
-                            <th style="padding:9px 12px;text-align:left;">Description</th>
-                            <th style="padding:9px 12px;text-align:right;">Debit</th>
-                            <th style="padding:9px 12px;text-align:right;">Credit</th>
+                        <tr>
+                            <th style="text-align:center;width:60px;">#</th>
+                            <th>Account</th>
+                            <th>Description</th>
+                            <th class="text-right">Debit</th>
+                            <th class="text-right">Credit</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($lines as $l): ?>
-                        <tr style="border-bottom:1px solid var(--border-default);">
-                            <td class="font-mono" style="padding:7px 12px;text-align:center;"><?= (int) $l['line_number'] ?></td>
-                            <td class="font-mono" style="padding:7px 12px;font-size:0.78rem;"><?= e($l['account_code'] . ' — ' . $l['account_name']) ?></td>
-                            <td style="padding:7px 12px;"><?= e($l['description'] ?? '') ?></td>
-                            <td class="font-mono" style="padding:7px 12px;text-align:right;<?= ((float) $l['debit'] > 0) ? 'font-weight:600;' : 'color:var(--text-secondary);' ?>"><?= ((float) $l['debit'] > 0) ? '$' . number_format((float) $l['debit'], 2) : '—' ?></td>
-                            <td class="font-mono" style="padding:7px 12px;text-align:right;<?= ((float) $l['credit'] > 0) ? 'font-weight:600;' : 'color:var(--text-secondary);' ?>"><?= ((float) $l['credit'] > 0) ? '$' . number_format((float) $l['credit'], 2) : '—' ?></td>
+                        <?php $dr = bccomp((string) $l['debit'], '0', 2) > 0; $cr = bccomp((string) $l['credit'], '0', 2) > 0; ?>
+                        <tr>
+                            <td class="font-mono" style="text-align:center;"><?= (int) $l['line_number'] ?></td>
+                            <td class="font-mono" style="font-size:0.78rem;"><?= e($l['account_code'] . ' — ' . $l['account_name']) ?></td>
+                            <td><?= e($l['description'] ?? '') ?></td>
+                            <td class="font-mono text-right"<?= $dr ? ' style="font-weight:600;"' : ' style="color:var(--text-secondary);"' ?>><?= $dr ? e(format_currency($l['debit'])) : '—' ?></td>
+                            <td class="font-mono text-right"<?= $cr ? ' style="font-weight:600;"' : ' style="color:var(--text-secondary);"' ?>><?= $cr ? e(format_currency($l['credit'])) : '—' ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                     <tfoot>
-                        <tr style="background:var(--bg-elev);border-top:2px solid var(--border-default);">
-                            <td colspan="3" style="padding:9px 12px;font-weight:700;text-align:right;">Totals</td>
-                            <td class="font-mono" style="padding:9px 12px;text-align:right;font-weight:700;">$<?= number_format((float) $sumDr, 2) ?></td>
-                            <td class="font-mono" style="padding:9px 12px;text-align:right;font-weight:700;">$<?= number_format((float) $sumCr, 2) ?></td>
+                        <tr>
+                            <td colspan="3" class="text-right" style="font-weight:700;">Totals<?= $isBalanced ? '' : ' <span class="badge badge-red">unbalanced</span>' ?></td>
+                            <td class="font-mono text-right" style="font-weight:700;"><?= e(format_currency($sumDr)) ?></td>
+                            <td class="font-mono text-right" style="font-weight:700;"><?= e(format_currency($sumCr)) ?></td>
                         </tr>
                     </tfoot>
                 </table>
             </div>
         <?php endif; ?>
+        </div>
     </div>
 
     <!-- Posting history -->
-    <div class="card" style="padding:18px;">
-        <div style="font-weight:600;font-size:0.95rem;margin-bottom:12px;">Posting History <span style="font-weight:400;color:var(--text-secondary);font-size:0.78rem;margin-left:6px;"><?= count($history) ?> JE(s), last 24 shown</span></div>
+    <div class="card">
+        <div class="card-header"><h3 class="card-title">Posting history <span class="text-secondary" style="font-weight:400;font-size:0.78rem;margin-left:6px;"><?= $historyTotal ?> JE(s)<?= $historyTotal > 24 ? ', latest 24 shown' : '' ?></span></h3></div>
+        <div class="card-body">
         <?php if (empty($history)): ?>
-            <div style="font-size:0.8125rem;color:var(--text-secondary);">No JEs posted yet for this template.</div>
+            <p class="text-secondary" style="margin:0;font-size:0.8125rem;">No JEs posted yet for this template.</p>
         <?php else: ?>
             <div style="overflow-x:auto;">
-                <table class="data-table" style="width:100%;border-collapse:collapse;font-size:0.8125rem;">
+                <table class="table">
                     <thead>
-                        <tr style="border-bottom:2px solid var(--border-default);">
-                            <th style="padding:9px 12px;text-align:left;">Entry #</th>
-                            <th style="padding:9px 12px;text-align:left;">Entry Date</th>
-                            <th style="padding:9px 12px;text-align:center;">Status</th>
-                            <th style="padding:9px 12px;text-align:left;">Reference</th>
-                            <th style="padding:9px 12px;text-align:left;">Description</th>
+                        <tr>
+                            <th>Entry #</th>
+                            <th>Entry date</th>
+                            <th style="text-align:center;">Status</th>
+                            <th>Reference</th>
+                            <th>Description</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($history as $h): ?>
-                        <tr style="border-bottom:1px solid var(--border-default);">
-                            <td class="font-mono" style="padding:7px 12px;">
-                                <a href="<?= base_url('accounting/journal-entries/show?id=' . (int) $h['id']) ?>" style="color:var(--color-accent);text-decoration:none;"><?= e($h['entry_number']) ?></a>
+                        <tr>
+                            <td class="font-mono">
+                                <a class="link" href="<?= base_url('accounting/journal-entries/show?id=' . (int) $h['id']) ?>"><?= e($h['entry_number']) ?></a>
                             </td>
-                            <td class="font-mono" style="padding:7px 12px;"><?= e($h['entry_date']) ?></td>
-                            <td style="padding:7px 12px;text-align:center;">
+                            <td class="font-mono"><?= e(format_date($h['entry_date'])) ?></td>
+                            <td style="text-align:center;">
                                 <span class="badge <?= $h['status'] === 'posted' ? 'badge-green' : ($h['status'] === 'reversed' ? 'badge-red' : 'badge-neutral') ?>"><?= e($h['status']) ?></span>
                             </td>
-                            <td class="font-mono" style="padding:7px 12px;font-size:0.78rem;"><?= e($h['reference']) ?></td>
-                            <td style="padding:7px 12px;"><?= e($h['description']) ?></td>
+                            <td class="font-mono" style="font-size:0.78rem;"><?= e($h['reference']) ?></td>
+                            <td><?= e($h['description']) ?></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
         <?php endif; ?>
+        </div>
     </div>
-</div>
+
+</div><!-- /rec-main -->
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the template at a glance ─────────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$rail = [];
+
+$alerts = [];
+if ($missedDates) {
+    // The old overdue banner, now the first attention item.
+    $alerts[] = ['danger', '<b>Overdue</b> — ' . count($missedDates) . ' occurrence' . (count($missedDates) === 1 ? '' : 's') . ' not posted ('
+        . e($missedDates[0]) . (count($missedDates) > 1 ? ' → ' . e(end($missedDates)) : '') . ').'
+        . ($canPostNow ? ' “Catch up now” posts each one once, dated on its scheduled date' . (((int) $template['auto_post']) === 1 ? '' : ' (as drafts for review — this template is not auto-post)') . '.' : '')];
+    $alerts[] = $cronOn
+        ? ['info', 'The nightly job posts every missed occurrence on its next run (up to 24 per run).']
+        : ['warning', 'The nightly <b>Recurring journal entries</b> job is switched <b>off</b> in Settings → Scheduled Jobs, so nothing posts automatically.'];
+} elseif ($tplActive && !$cronOn && !$hasEnded) {
+    $alerts[] = ['warning', 'The nightly <b>Recurring journal entries</b> job is off — this template only posts when someone presses Post Now.'];
+}
+if (empty($lines)) {
+    $alerts[] = ['warning', 'No lines — a posting would fail.'];
+} elseif (!$isBalanced) {
+    $alerts[] = ['danger', 'Lines do not balance (debits ' . e(format_currency($sumDr)) . ' vs credits ' . e(format_currency($sumCr)) . ').'];
+}
+if (!$tplActive) {
+    $alerts[] = ['info', 'Paused — nothing posts until it is unpaused.'];
+}
+if ($hasEnded) {
+    $alerts[] = ['info', 'Ended ' . e(format_date($template['end_date'])) . ' — no further postings.'];
+}
+if ((int) $template['auto_post'] !== 1 && $tplActive) {
+    $alerts[] = ['info', 'Posts as drafts — review and post them from <a href="' . e(base_url('accounting/journal-entries')) . '">Journal Entries</a>.'];
+}
+$rail[] = $R::card('Needs attention', $R::alerts($alerts, 'All clear — on schedule.'), ['icon' => 'exclamation-triangle']);
+
+$perLabel = match ((string) $template['frequency']) { 'annually' => 'year', 'quarterly' => 'quarter', default => 'month' };
+$rail[] = $R::card('Schedule', $R::big(e(format_currency($sumDr)), 'per ' . $perLabel)
+    . $R::kv([
+        ['Scheduler', $cronOn ? 'On' : '<span style="color:var(--color-warning);">Off</span>'],
+        ['Posts', (int) $template['auto_post'] === 1 ? 'Automatically' : 'As drafts'],
+        ['Created', e($template['created_by_name'] ?? 'system') . '<br><span class="text-secondary">' . e(format_datetime($template['created_at'])) . '</span>'],
+        ['Updated', !empty($template['updated_at']) ? e(format_datetime($template['updated_at'])) : null],
+    ]),
+    ['icon' => 'arrow-path', 'class' => 'rec-card--accent']);
+
+$rel = [
+    ['All recurring entries', base_url('accounting/recurring-entries'), 'list-bullet'],
+    ['Journal entries', base_url('accounting/journal-entries'), 'book-open'],
+];
+if (!empty($history)) {
+    $rel[] = ['Latest: ' . $history[0]['entry_number'], base_url('accounting/journal-entries/show?id=' . (int) $history[0]['id']), 'document-text', format_date($history[0]['entry_date'])];
+}
+if (can('settings', 'view')) {
+    $rel[] = ['Scheduled jobs', base_url('settings') . '#intelligence', 'cog-6-tooth', 'Settings'];
+}
+$rail[] = $R::card('Related', $R::links($rel), ['icon' => 'document-duplicate']);
+?>
+<aside class="rec-rail" aria-label="Recurring entry at a glance">
+    <?= implode("\n    ", $rail) ?>
+</aside>
+</div><!-- /rec-layout -->
+</div><!-- /x-data recurringShow -->
 
 <script>
 function recurringShow(id) {

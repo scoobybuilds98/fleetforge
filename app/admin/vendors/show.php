@@ -4,8 +4,24 @@ declare(strict_types=1);
 /**
  * app/admin/vendors/show.php
  *
- * Vendor detail page.
- * Displays vendor profile (view + inline edit) and recent work orders.
+ * Vendor profile page (S-RECORD-REDESIGN layout).
+ *
+ *   Header  — entity hero (lib/Ui/ModuleHero.php): name + type / preferred /
+ *             QuickBooks badges, contact facts, New Work Order + Edit visible,
+ *             AI Analysis + Delete in the More menu (RecordUi::more).
+ *   Strip   — key numbers: spend (last 12 months, lifetime underneath),
+ *             open work orders, average job cost, last job, and — for AP
+ *             roles — unpaid bills. Money segments only for
+ *             can_view_financials(); other roles get completed jobs + units
+ *             on rent instead.
+ *   Main    — Work Orders (Alpine, paginated + filtered — the page's primary
+ *             content), Vendor Details (view + inline edit), Units Serviced,
+ *             Serviced Units On Rent, Activity.
+ *   Rail    — Spend (money roles), Needs attention (waiting parts, late /
+ *             urgent jobs, unpaid / overdue / draft bills, unbilled work,
+ *             missing contact info), Contact, Unpaid bills (AP roles; each bill
+ *             links to its page — the bills list has no vendor deep-link),
+ *             Shortcuts.
  *
  * Edit mode: plain onclick toggle + raw fetch() to api/v1/vendors/update.php.
  * D19 optimistic lock: updated_at submitted with every save.
@@ -13,17 +29,24 @@ declare(strict_types=1);
  *
  * Total Spent = vendors.total_spent, maintained by FleetForge\Accounting\VendorSpend
  * (approved AP bills + completed work orders no approved bill covers — bug #7).
- * Tiles deep-link to the work-order list with vendor_id / status params that the
- * list honours (bug #25); 'active' is the open+in_progress+waiting_parts roll-up.
- * The work-type filter offers exactly the maintenance_work_orders.work_type ENUM.
+ * The 12-month figure applies the SAME rule with a date window (bill_date /
+ * completed_date), so the two numbers are comparable.
+ * Strip segments deep-link to the work-order list with vendor_id / status params
+ * that the list honours (bug #25); 'active' is the open+in_progress+waiting_parts
+ * roll-up. The work-type filter offers exactly the maintenance_work_orders.work_type ENUM.
+ *
+ * Money: dispatchers hold maintenance:view, so this page is reachable without
+ * payments:view — every dollar figure on it (spend, average job, bills) is
+ * behind can_view_financials(); bills additionally need accounts_payable:view.
  *
  * D30: asset_url() / base_url().
- * D32: Only CSS classes confirmed in app.css.
+ * D32: Only CSS classes confirmed in app.css / records.css.
  *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
- *           api/v1/vendors/show.php, api/v1/vendors/update.php, api/v1/vendors/delete.php
+ *           api/v1/vendors/show.php, api/v1/vendors/update.php, api/v1/vendors/delete.php,
+ *           lib/Ui/ModuleHero.php, lib/Ui/RecordUi.php, lib/Accounting/VendorSpend.php
  * @decisions D5/D7/D19/D30/D32
- * @session  S014
+ * @session  S014, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -54,7 +77,7 @@ if (!$vendor) {
 
 // Decode JSON specializations
 $specializations = $vendor['specializations']
-    ? json_decode($vendor['specializations'], true)
+    ? (json_decode($vendor['specializations'], true) ?: [])
     : [];
 
 // ── QBO mapping (S-QBO-7) ─────────────────────────────────────
@@ -71,10 +94,158 @@ if ((string) settings_get('quickbooks.connection_status', 'disconnected') === 'c
     );
 }
 
-// Work order counts for KPI tiles
-$woOpen      = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE vendor_id = ? AND status IN ('open','in_progress','waiting_parts') AND deleted_at IS NULL", [$vendorId]);
-$woCompleted = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE vendor_id = ? AND status = 'completed' AND deleted_at IS NULL", [$vendorId]);
-$woTotal     = db_count("SELECT COUNT(*) FROM maintenance_work_orders WHERE vendor_id = ? AND deleted_at IS NULL", [$vendorId]);
+// ── S-RECORD-REDESIGN: strip + rail data ─────────────────────────────────────
+// Money visibility: the page gate is maintenance:view (dispatchers have it),
+// so dollar figures ride on the app-wide predicate. Bills also need AP view.
+$canSeeMoney = can_view_financials();
+$canSeeBills = $canSeeMoney && can('accounts_payable', 'view');
+// Business dates (scheduled / completed / due) compare against the
+// company-local day, never SQL CURDATE() (the UTC day).
+$today   = ff_today();
+$yearAgo = date('Y-m-d', strtotime($today . ' -12 months'));
+
+// One pass over the vendor's work orders for every count the page shows.
+$woStats = db_row(
+    "SELECT COUNT(*) AS total_cnt,
+            SUM(CASE WHEN status IN ('open','in_progress','waiting_parts') THEN 1 ELSE 0 END) AS open_cnt,
+            SUM(CASE WHEN status = 'waiting_parts' THEN 1 ELSE 0 END) AS parts_cnt,
+            SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) AS progress_cnt,
+            SUM(CASE WHEN status IN ('open','in_progress','waiting_parts')
+                      AND scheduled_date IS NOT NULL AND scheduled_date < ? THEN 1 ELSE 0 END) AS late_cnt,
+            SUM(CASE WHEN status IN ('open','in_progress','waiting_parts')
+                      AND priority IN ('high','emergency') THEN 1 ELSE 0 END) AS urgent_cnt,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) AS done_cnt,
+            SUM(CASE WHEN status = 'completed' AND total_cost > 0 THEN 1 ELSE 0 END) AS costed_cnt,
+            COALESCE(SUM(CASE WHEN status = 'completed' AND total_cost > 0 THEN total_cost ELSE 0 END), 0) AS costed_sum,
+            COUNT(DISTINCT equipment_unit_id) AS unit_cnt
+       FROM maintenance_work_orders
+      WHERE vendor_id = ? AND deleted_at IS NULL",
+    [$today, $vendorId]
+) ?? [];
+$woTotal     = (int) ($woStats['total_cnt'] ?? 0);
+$woOpen      = (int) ($woStats['open_cnt'] ?? 0);
+$woCompleted = (int) ($woStats['done_cnt'] ?? 0);
+$woParts     = (int) ($woStats['parts_cnt'] ?? 0);
+$woProgress  = (int) ($woStats['progress_cnt'] ?? 0);
+$woLate      = (int) ($woStats['late_cnt'] ?? 0);
+$woUrgent    = (int) ($woStats['urgent_cnt'] ?? 0);
+$woCosted    = (int) ($woStats['costed_cnt'] ?? 0);
+// Average of completed jobs that carry a cost ($0 warranty / no-charge jobs
+// would drag it toward zero and hide what a real job costs).
+$avgJob = $woCosted > 0 ? bcdiv((string) ($woStats['costed_sum'] ?? '0'), (string) $woCosted, 2) : null;
+
+// The most recent finished job (strip + rail), else the latest requested one.
+$lastJob = db_row(
+    "SELECT w.id, w.work_order_number, w.status, w.completed_date, w.requested_date,
+            COALESCE(eu.unit_number, '') AS unit_number
+       FROM maintenance_work_orders w
+       LEFT JOIN equipment_units eu ON eu.id = w.equipment_unit_id
+      WHERE w.vendor_id = ? AND w.deleted_at IS NULL
+      ORDER BY (w.status = 'completed') DESC, w.completed_date DESC, w.requested_date DESC, w.id DESC
+      LIMIT 1",
+    [$vendorId]
+);
+$lastJobDone = $lastJob !== null && $lastJob['status'] === 'completed';
+$lastJobDate = $lastJob ? (string) (($lastJobDone ? $lastJob['completed_date'] : null) ?: $lastJob['requested_date']) : '';
+$lastJobDays = $lastJobDone && $lastJobDate !== ''
+    ? (int) round((strtotime($today) - strtotime($lastJobDate)) / 86400)
+    : null;
+
+// Spend in the last 12 months — VendorSpend's rule with a date window:
+// counted bills by bill_date + completed work orders (by completed_date) that
+// no counted bill from this vendor covers. SUMs are exact DECIMALs; combined
+// with bcmath.
+$spend12 = null;
+if ($canSeeMoney) {
+    $counted = \FleetForge\Accounting\VendorSpend::COUNTED_BILL_STATUSES;
+    $ph      = implode(', ', array_fill(0, count($counted), '?'));
+    $s12b = db_row(
+        "SELECT COALESCE(SUM(CASE WHEN b.currency <> 'CAD' AND b.exchange_rate_to_cad IS NOT NULL
+                                       AND b.exchange_rate_to_cad > 0
+                                  THEN ROUND(b.total_amount * b.exchange_rate_to_cad, 2)
+                                  ELSE b.total_amount END), 0.00) AS t
+           FROM acc_bills b
+          WHERE b.vendor_id = ? AND b.status IN ({$ph}) AND b.bill_date >= ?",
+        array_merge([$vendorId], $counted, [$yearAgo])
+    );
+    $s12w = db_row(
+        "SELECT COALESCE(SUM(w.total_cost), 0.00) AS t
+           FROM maintenance_work_orders w
+          WHERE w.vendor_id = ? AND w.status = 'completed' AND w.deleted_at IS NULL
+            AND w.completed_date >= ?
+            AND NOT EXISTS (SELECT 1 FROM acc_bills b
+                             WHERE b.work_order_id = w.id AND b.vendor_id = w.vendor_id
+                               AND b.status IN ({$ph}))",
+        array_merge([$vendorId, $yearAgo], $counted)
+    );
+    $spend12 = bcadd(bcadd((string) ($s12b['t'] ?? '0'), '0', 2), bcadd((string) ($s12w['t'] ?? '0'), '0', 2), 2);
+}
+
+// AP picture — unpaid / overdue / draft bills, per currency (a vendor can be
+// billed in CAD and USD; balances are never summed across currencies).
+$billsByCur   = [];
+$billOpenCnt  = 0;
+$billOverCnt  = 0;
+$billDraftCnt = 0;
+$billTotal    = '0';
+$billPaid     = '0';
+$openBills    = [];
+$unbilledWos  = 0;
+if ($canSeeBills) {
+    foreach (db_select(
+        "SELECT currency,
+                SUM(CASE WHEN status IN ('approved','scheduled','partially_paid') AND balance_due > 0 THEN 1 ELSE 0 END) AS open_cnt,
+                COALESCE(SUM(CASE WHEN status IN ('approved','scheduled','partially_paid') AND balance_due > 0 THEN balance_due ELSE 0 END), 0) AS open_amt,
+                SUM(CASE WHEN status IN ('approved','scheduled','partially_paid') AND balance_due > 0 AND due_date < ? THEN 1 ELSE 0 END) AS over_cnt,
+                COALESCE(SUM(CASE WHEN status IN ('approved','scheduled','partially_paid') AND balance_due > 0 AND due_date < ? THEN balance_due ELSE 0 END), 0) AS over_amt,
+                SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft_cnt,
+                COALESCE(SUM(CASE WHEN status IN ('approved','scheduled','partially_paid','paid') THEN total_amount ELSE 0 END), 0) AS billed,
+                COALESCE(SUM(CASE WHEN status IN ('approved','scheduled','partially_paid','paid') THEN amount_paid ELSE 0 END), 0) AS paid
+           FROM acc_bills
+          WHERE vendor_id = ?
+          GROUP BY currency",
+        [$today, $today, $vendorId]
+    ) as $b) {
+        $billsByCur[(string) $b['currency']] = $b;
+        $billOpenCnt  += (int) $b['open_cnt'];
+        $billOverCnt  += (int) $b['over_cnt'];
+        $billDraftCnt += (int) $b['draft_cnt'];
+        // The paid meter is a ratio, so mixing currencies only skews it
+        // slightly; the amounts shown beside it stay per-currency.
+        $billTotal = bcadd($billTotal, (string) $b['billed'], 2);
+        $billPaid  = bcadd($billPaid, (string) $b['paid'], 2);
+    }
+    $openBills = db_select(
+        "SELECT id, bill_number, vendor_bill_number, due_date, balance_due, currency, status
+           FROM acc_bills
+          WHERE vendor_id = ? AND status IN ('approved','scheduled','partially_paid') AND balance_due > 0
+          ORDER BY due_date ASC, id ASC
+          LIMIT 5",
+        [$vendorId]
+    );
+    // Finished, chargeable work with no bill entered (draft counts as
+    // entered; $0 warranty jobs expect no bill) — AP's "did we get invoiced
+    // for this?" list.
+    $unbilledWos = db_count(
+        "SELECT COUNT(*) FROM maintenance_work_orders w
+          WHERE w.vendor_id = ? AND w.status = 'completed' AND w.deleted_at IS NULL
+            AND w.total_cost > 0
+            AND NOT EXISTS (SELECT 1 FROM acc_bills b
+                             WHERE b.work_order_id = w.id AND b.vendor_id = w.vendor_id AND b.status <> 'void')",
+        [$vendorId]
+    );
+}
+
+/** "CAD $1,200.00 · USD $300.00" — one amount per currency, never summed across. */
+$fmtByCur = static function (array $byCur, string $key): string {
+    $parts = [];
+    foreach ($byCur as $cur => $row) {
+        if (bccomp((string) $row[$key], '0', 2) > 0) {
+            $parts[] = e(format_currency($row[$key])) . (count($byCur) > 1 ? ' ' . e($cur) : '');
+        }
+    }
+    return $parts ? implode(' · ', $parts) : e(format_currency('0'));
+};
 
 // Equipment units this vendor has worked on (distinct, from work orders)
 $unitHistory = db_select(
@@ -112,7 +283,7 @@ $leaseExposure = db_select(
 );
 
 // WHY: Work orders section converted to Alpine.js (paginated + filtered) in S018-UX.
-//      $woTotal already loaded above for KPI tiles. No PHP pre-load needed.
+//      $woTotal already loaded above for the strip. No PHP pre-load needed.
 
 // Vendor type label/badge maps — used in view mode
 $typeLabels = [
@@ -132,14 +303,25 @@ $typeBadges = [
     'other'       => 'badge-neutral',
 ];
 
+$woListUrl = base_url('maintenance_work_orders') . '?vendor_id=' . (int) $vendorId;
+
 $pageTitle = e($vendor['name']);
 $helpModuleSlug = 'vendors';
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <a href="<?= base_url('vendors') ?>" class="btn btn-secondary btn-sm">← Vendors</a>
-    <h1 class="page-header-title" style="margin:0 12px 0 8px;"><?= e($vendor['name']) ?></h1>
+<!-- ============================================================
+     Page header — entity hero (S-MODULE-CHROME / S-RECORD-REDESIGN).
+     The badges and buttons are the page's own markup, captured with
+     ob_start() and placed inside the hero unchanged.
+     ============================================================ -->
+<?php ob_start(); ?>
+    <span class="badge <?= e($typeBadges[$vendor['vendor_type']] ?? 'badge-neutral') ?>">
+        <?= e($typeLabels[$vendor['vendor_type']] ?? $vendor['vendor_type']) ?>
+    </span>
+    <?php if ($vendor['is_preferred']): ?>
+    <span class="badge badge-success">Preferred</span>
+    <?php endif; ?>
     <?php /* QBO mapping badge — S-QBO-7. Only shown when the
              connection is established AND a mapping row exists.
              Status drives the color: mapped=success (linked both
@@ -175,93 +357,293 @@ require_once FF_ROOT . '/includes/header.php';
         <?= e($qm_label) ?>
     </a>
     <?php endif; ?>
-    <div style="display:flex;gap:8px;margin-left:auto;">
-        <?php if (can('maintenance', 'edit')): ?>
-        <button id="btn-edit" class="btn btn-secondary btn-sm"
-                onclick="showEdit()">Edit</button>
-        <?php endif; ?>
-        <?php if (can('maintenance', 'delete')): ?>
-        <button class="btn btn-danger btn-sm"
-                onclick="document.getElementById('vendor-delete-modal').style.display='flex'">Delete</button>
-        <?php endif; ?>
-    </div>
-    <div class="page-header-actions">
-        <?= help_button('vendors') ?>
+<?php $heroBadges = ob_get_clean(); ?>
+<?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
         <?php if (function_exists('can') && can('ai', 'view') && (bool)settings_get('ai.enabled', false) && (settings_get('ai.anthropic_api_key') ?: env('AI_ANTHROPIC_API_KEY', ''))): ?>
         <button type="button" class="btn btn-secondary btn-sm no-print"
                 onclick="aiPanel_vendor_<?= (int)$vendorId ?>_vendor_summary_open()"
                 title="Open AI Vendor Summary">
-            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:14px;margin-right:4px;vertical-align:-2px;" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="width:14px;height:14px;color:var(--color-primary);" aria-hidden="true">
                 <path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z" fill="currentColor"/>
             </svg>
             AI Analysis
         </button>
         <?php endif; ?>
+        <?php if (can('maintenance', 'delete')): ?>
+        <button class="btn btn-danger btn-sm"
+                onclick="document.getElementById('vendor-delete-modal').style.display='flex'">Delete</button>
+        <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?= help_button('vendors') ?>
+        <?php if (can('maintenance', 'edit')): ?>
+        <button id="btn-edit" class="btn btn-secondary btn-sm"
+                onclick="showEdit()">Edit</button>
+        <?php endif; ?>
+        <?php if (can('maintenance', 'create')): ?>
+        <a href="<?= base_url('maintenance_work_orders/create') ?>?vendor_id=<?= $vendorId ?>"
+           class="btn btn-primary btn-sm">+ New Work Order</a>
+        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
+<?php
+$heroFacts = [];
+if (!empty($vendor['contact_name'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('users') . e($vendor['contact_name']);
+}
+if (!empty($vendor['phone'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('phone') . e($vendor['phone']);
+}
+$heroPlace = trim(implode(', ', array_filter([(string) ($vendor['city'] ?? ''), (string) ($vendor['state'] ?? '')])));
+if ($heroPlace !== '') {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('map-pin') . e($heroPlace);
+}
+if ($vendor['rating']) {
+    $heroFacts[] = '<span style="color:var(--color-warning);">' . str_repeat('★', (int) $vendor['rating']) . '</span>' . e((string) $vendor['rating']) . '/5';
+}
+if (!empty($specializations)) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('wrench-screwdriver') . e(implode(', ', array_slice($specializations, 0, 3)) . (count($specializations) > 3 ? ' +' . (count($specializations) - 3) : ''));
+}
+?>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'info',
+    'icon'       => 'wrench-screwdriver',
+    'avatar'     => \FleetForge\Ui\ModuleHero::initials((string) $vendor['name']),
+    'mark'       => \FleetForge\Ui\ModuleHero::initials((string) $vendor['name']),
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Vendors', base_url('vendors')], [(string) $vendor['name'], null]],
+    'eyebrow'    => 'Vendor',
+    'title_html' => e($vendor['name']) . $heroBadges,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
+
+<!-- ============================================================
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN). Segments
+     deep-link to the work-order list filtered to this vendor (TILES-2).
+     "Total work orders" / "Completed" counters became spend, average
+     job cost and last job — the numbers a buyer acts on.
+     ============================================================ -->
+<div class="stat-grid ff-stats">
+
+    <?php if ($canSeeMoney): ?>
+    <a class="stat-card stat-card--green"
+       href="<?= e($woListUrl) ?>&status=completed"
+       title="Approved bills + completed work orders no bill covers, last 12 months">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-currency-dollar"/></svg></span>
+        <div class="stat-label">Spent · 12 months</div>
+        <div class="stat-value currency"><?= e(format_currency($spend12)) ?></div>
+        <div class="stat-delta">lifetime <?= e(format_currency($vendor['total_spent'])) ?></div>
+    </a>
+    <?php endif; ?>
+
+    <a class="stat-card <?= $woOpen > 0 ? 'stat-card--amber' : 'stat-card--blue' ?>"
+       href="<?= e($woListUrl) ?>&status=active"
+       title="Open / in-progress / waiting-parts work orders">
+        <span class="stat-icon <?= $woOpen > 0 ? 'stat-icon--amber' : 'stat-icon--blue' ?>"><svg><use href="#icon-wrench"/></svg></span>
+        <div class="stat-label">Open work orders</div>
+        <div class="stat-value font-mono"><?= $woOpen ?></div>
+        <div class="stat-delta"><?= $woParts > 0 ? $woParts . ' waiting on parts' : ($woProgress > 0 ? $woProgress . ' in progress' : ($woOpen > 0 ? 'not started' : 'nothing open')) ?></div>
+    </a>
+
+    <?php if ($canSeeMoney): ?>
+    <a class="stat-card stat-card--purple"
+       href="<?= e($woListUrl) ?>&status=completed"
+       title="Average cost of a completed, costed work order">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-chart-bar"/></svg></span>
+        <div class="stat-label">Avg job cost</div>
+        <div class="stat-value currency"><?= $avgJob !== null ? e(format_currency($avgJob)) : '—' ?></div>
+        <div class="stat-delta"><?= $woCosted > 0 ? 'over ' . $woCosted . ' job' . ($woCosted === 1 ? '' : 's') : 'no costed jobs yet' ?></div>
+    </a>
+    <?php else: ?>
+    <a class="stat-card stat-card--green"
+       href="<?= e($woListUrl) ?>&status=completed"
+       title="Completed work orders for this vendor">
+        <span class="stat-icon stat-icon--green"><svg><use href="#icon-check-circle"/></svg></span>
+        <div class="stat-label">Completed jobs</div>
+        <div class="stat-value font-mono"><?= $woCompleted ?></div>
+        <div class="stat-delta"><?= (int) ($woStats['unit_cnt'] ?? 0) ?> unit<?= (int) ($woStats['unit_cnt'] ?? 0) === 1 ? '' : 's' ?> serviced</div>
+    </a>
+    <?php endif; ?>
+
+    <?php if ($lastJob): ?>
+    <a class="stat-card stat-card--teal"
+       href="<?= base_url('maintenance_work_orders/show') ?>?id=<?= (int) $lastJob['id'] ?>"
+       title="<?= e('Work order ' . $lastJob['work_order_number']) ?>">
+        <span class="stat-icon stat-icon--teal"><svg><use href="#icon-clock"/></svg></span>
+        <?php if ($lastJobDays !== null): ?>
+        <div class="stat-label">Last job</div>
+        <div class="stat-value"><?= e(format_date($lastJobDate)) ?></div>
+        <div class="stat-delta"><?= $lastJobDays <= 0 ? 'today' : $lastJobDays . ' day' . ($lastJobDays === 1 ? '' : 's') . ' ago' ?><?= $lastJob['unit_number'] !== '' ? ' · unit ' . e($lastJob['unit_number']) : '' ?></div>
+        <?php else: ?>
+        <div class="stat-label">Last job requested</div>
+        <div class="stat-value"><?= e(format_date($lastJobDate)) ?></div>
+        <div class="stat-delta">none finished yet</div>
+        <?php endif; ?>
+    </a>
+    <?php else: ?>
+    <div class="stat-card stat-card--slate">
+        <span class="stat-icon stat-icon--slate"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Last job</div>
+        <div class="stat-value">—</div>
+        <div class="stat-delta">no work orders yet</div>
     </div>
+    <?php endif; ?>
+
+    <?php if ($canSeeBills): ?>
+    <a class="stat-card <?= $billOverCnt > 0 ? 'stat-card--red' : ($billOpenCnt > 0 ? 'stat-card--amber' : 'stat-card--green') ?>"
+       href="#vendor-bills" title="Approved bills with a balance">
+        <span class="stat-icon <?= $billOverCnt > 0 ? 'stat-icon--red' : ($billOpenCnt > 0 ? 'stat-icon--amber' : 'stat-icon--green') ?>"><svg><use href="#icon-document-text"/></svg></span>
+        <div class="stat-label">Unpaid bills</div>
+        <div class="stat-value currency"<?= $billOverCnt > 0 ? ' style="color:var(--color-danger);"' : '' ?>><?= $fmtByCur($billsByCur, 'open_amt') ?></div>
+        <div class="stat-delta"><?= $billOpenCnt > 0 ? $billOpenCnt . ' bill' . ($billOpenCnt === 1 ? '' : 's') . ($billOverCnt > 0 ? ' · ' . $billOverCnt . ' overdue' : '') : 'nothing owing' ?></div>
+    </a>
+    <?php elseif (!$canSeeMoney): ?>
+    <a class="stat-card <?= $leaseExposure ? 'stat-card--amber' : 'stat-card--slate' ?>"
+       href="#lease-exposure" title="Units this vendor serviced that are on rent now">
+        <span class="stat-icon <?= $leaseExposure ? 'stat-icon--amber' : 'stat-icon--slate' ?>"><svg><use href="#icon-key"/></svg></span>
+        <div class="stat-label">Serviced units on rent</div>
+        <div class="stat-value font-mono"><?= count($leaseExposure) ?></div>
+    </a>
+    <?php endif; ?>
+
 </div>
 
-<!-- TILES-2: vendor-level tiles drill to the maintenance work orders list
-     filtered by this vendor. Each tile applies a different status filter
-     so the user lands on exactly the subset represented by the counter. -->
-<div class="stat-grid" style="margin-bottom:24px;">
+<div class="rec-layout">
+<div class="rec-main">
 
-    <a class="stat-card"
-       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View all work orders for this vendor">
-        <div class="stat-label">Total Spent</div>
-        <div class="stat-value font-mono"><?= format_currency($vendor['total_spent']) ?></div>
-        <div class="stat-delta">approved bills + unbilled work orders</div>
-    </a>
+<!-- ── Work Orders (Alpine — paginated + filtered) ────────────────────────── -->
+<div class="card" x-data="FF_VendorWorkOrders()">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+        <h3 class="card-title">
+            Work Orders
+            <span class="badge badge-neutral"><?= e($woTotal) ?></span>
+        </h3>
+        <a href="<?= e($woListUrl) ?>" class="btn btn-ghost btn-sm">Open in Work Orders →</a>
+    </div>
 
-    <a class="stat-card"
-       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>&status=active"
-       style="cursor:pointer;text-decoration:none"
-       title="View open / in-progress / waiting-parts work orders">
-        <div class="stat-label">Active Work Orders</div>
-        <div class="stat-value font-mono"><?= e($woOpen) ?></div>
-        <div class="stat-delta">open / in progress / waiting parts</div>
-    </a>
+    <!-- Filter bar -->
+    <div class="tab-filter-bar">
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.status" @change="applyFilters()">
+            <option value="">All Statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="waiting_parts">Waiting Parts</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+        </select>
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.work_type" @change="applyFilters()">
+            <option value="">All Types</option>
+            <?php /* Bug #25: must mirror the maintenance_work_orders.work_type ENUM —
+                     'preventive'/'emergency' never existed (emergency is a PRIORITY),
+                     so picking them silently returned every work order. */ ?>
+            <option value="scheduled_service">Scheduled Service</option>
+            <option value="repair">Repair</option>
+            <option value="inspection">Inspection</option>
+            <option value="tire">Tire</option>
+            <option value="electrical">Electrical</option>
+            <option value="body_damage">Body Damage</option>
+            <option value="breakdown">Breakdown</option>
+            <option value="other">Other</option>
+        </select>
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.sort" @change="applyFilters()">
+            <option value="created_at">Sort: Date Added</option>
+            <option value="requested_date">Sort: Requested Date</option>
+            <option value="total_cost">Sort: Total Cost</option>
+        </select>
+        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
+                x-model="filters.dir" @change="applyFilters()">
+            <option value="DESC">Newest First</option>
+            <option value="ASC">Oldest First</option>
+        </select>
+    </div>
 
-    <a class="stat-card"
-       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>&status=completed"
-       style="cursor:pointer;text-decoration:none"
-       title="View completed work orders for this vendor">
-        <div class="stat-label">Completed</div>
-        <div class="stat-value font-mono"><?= e($woCompleted) ?></div>
-        <div class="stat-delta">finished work orders</div>
-    </a>
+    <!-- Loading -->
+    <div x-show="loading && items.length === 0" class="card-body" style="text-align:center;padding:32px;">
+        <span class="text-secondary">Loading work orders…</span>
+    </div>
 
-    <a class="stat-card"
-       href="<?= base_url('maintenance_work_orders') ?>?vendor_id=<?= (int)$vendor['id'] ?>"
-       style="cursor:pointer;text-decoration:none"
-       title="View every work order for this vendor">
-        <div class="stat-label">Total Work Orders</div>
-        <div class="stat-value font-mono"><?= e($woTotal) ?></div>
-        <div class="stat-delta">all time</div>
-    </a>
+    <!-- Empty state -->
+    <div x-show="loaded && !loading && items.length === 0" class="card-body">
+        <div class="empty-state">
+            <p class="empty-state-title">No work orders found</p>
+            <p class="empty-state-text"><?= $woTotal > 0 ? 'No work orders match the current filters.' : 'This vendor has no work orders yet.' ?></p>
+        </div>
+    </div>
 
+    <!-- Table + footer -->
+    <div x-show="items.length > 0">
+        <div class="tab-table-container">
+            <div class="table-responsive">
+<table class="table">
+                <thead>
+                    <tr>
+                        <th>Work Order #</th>
+                        <th>Unit</th>
+                        <th>Type</th>
+                        <th>Title</th>
+                        <th>Status</th>
+                        <th style="text-align:right;">Total Cost</th>
+                        <th>Requested</th>
+                        <th>Completed</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="wo in items" :key="wo.id">
+                        <tr>
+                            <td class="font-mono" x-text="wo.work_order_number"></td>
+                            <td class="font-mono" x-text="wo.unit_number || '—'"></td>
+                            <td x-text="wo.work_type ? wo.work_type.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) : '—'"></td>
+                            <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="wo.title"></td>
+                            <td>
+                                <span class="badge" :class="woBadge(wo.status)" x-text="woLabel(wo.status)"></span>
+                            </td>
+                            <td class="font-mono" style="text-align:right;"
+                                x-text="wo.total_cost > 0 ? '$' + parseFloat(wo.total_cost).toLocaleString('en-CA',{minimumFractionDigits:2}) : '—'"></td>
+                            <td x-text="wo.requested_date || '—'"></td>
+                            <td x-text="wo.completed_date || '—'"></td>
+                            <td>
+                                <a :href="'<?= base_url('maintenance_work_orders/show') ?>?id=' + wo.id"
+                                   class="btn btn-secondary btn-sm">View</a>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
 </div>
+        </div>
+        <div class="tab-table-footer">
+            <span x-text="`Showing ${items.length} of ${total}`"></span>
+            <button class="btn btn-secondary btn-sm"
+                    x-show="items.length < total"
+                    :disabled="loading"
+                    @click="loadMore()"
+                    x-text="loading ? 'Loading…' : 'Load more'">
+            </button>
+        </div>
+    </div>
+</div><!-- /work orders card -->
 
 <!-- ── Vendor Details card ───────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:24px;">
-    <div class="card-header" style="font-weight:600;">Vendor Details</div>
+<div class="card" id="vendor-details">
+    <div class="card-header"><h3 class="card-title">Vendor Details</h3></div>
 
-    <!-- VIEW MODE — always server-rendered -->
+    <!-- VIEW MODE — always server-rendered. Name / created moved to the
+         hero and the rail footer (S-RECORD-REDESIGN). -->
     <div id="vendor-view-section" class="card-body">
-        <dl class="detail-grid">
-            <dt>Name</dt>
-            <dd><?= e($vendor['name']) ?>
-                <?php if ($vendor['is_preferred']): ?>
-                <span class="badge badge-success" style="margin-left:8px;font-size:0.7rem;">Preferred</span>
-                <?php endif; ?>
-            </dd>
-
+        <dl class="rec-dl">
             <dt>Type</dt>
             <dd>
                 <span class="badge <?= e($typeBadges[$vendor['vendor_type']] ?? 'badge-neutral') ?>">
                     <?= e($typeLabels[$vendor['vendor_type']] ?? $vendor['vendor_type']) ?>
                 </span>
+                <?php if ($vendor['is_preferred']): ?>
+                <span class="badge badge-success" style="margin-left:6px;">Preferred</span>
+                <?php endif; ?>
             </dd>
 
             <dt>Contact</dt>
@@ -275,7 +657,11 @@ require_once FF_ROOT . '/includes/header.php';
             </dd>
 
             <dt>Phone</dt>
-            <dd><?= $vendor['phone'] ? e($vendor['phone']) : '—' ?></dd>
+            <dd>
+                <?php if ($vendor['phone']): ?>
+                <a href="tel:<?= e(preg_replace('/[^0-9+]/', '', (string) $vendor['phone'])) ?>"><?= e($vendor['phone']) ?></a>
+                <?php else: ?>—<?php endif; ?>
+            </dd>
 
             <dt>Address</dt>
             <dd>
@@ -310,13 +696,6 @@ require_once FF_ROOT . '/includes/header.php';
 
             <dt>Notes</dt>
             <dd style="white-space:pre-wrap;"><?= $vendor['notes'] ? e($vendor['notes']) : '—' ?></dd>
-
-            <dt>Created</dt>
-            <dd><?= format_datetime($vendor['created_at']) ?>
-                <?php if ($vendor['created_by_name']): ?>
-                by <?= e($vendor['created_by_name']) ?>
-                <?php endif; ?>
-            </dd>
         </dl>
     </div>
 
@@ -458,130 +837,13 @@ require_once FF_ROOT . '/includes/header.php';
 
 </div><!-- /card -->
 
-<!-- ── Work Orders (Alpine — paginated + filtered) ────────────────────────── -->
-<div class="card" x-data="FF_VendorWorkOrders()">
-    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
-        <span style="font-weight:600;">
-            Work Orders
-            <span class="badge badge-neutral" style="margin-left:8px;"><?= e($woTotal) ?></span>
-        </span>
-        <?php if (can('maintenance', 'create')): ?>
-        <a href="<?= base_url('maintenance_work_orders/create') ?>?vendor_id=<?= $vendorId ?>"
-           class="btn btn-primary btn-sm">+ New Work Order</a>
-        <?php endif; ?>
-    </div>
-
-    <!-- Filter bar -->
-    <div class="tab-filter-bar">
-        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
-                x-model="filters.status" @change="applyFilters()">
-            <option value="">All Statuses</option>
-            <option value="open">Open</option>
-            <option value="in_progress">In Progress</option>
-            <option value="waiting_parts">Waiting Parts</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-        </select>
-        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
-                x-model="filters.work_type" @change="applyFilters()">
-            <option value="">All Types</option>
-            <?php /* Bug #25: must mirror the maintenance_work_orders.work_type ENUM —
-                     'preventive'/'emergency' never existed (emergency is a PRIORITY),
-                     so picking them silently returned every work order. */ ?>
-            <option value="scheduled_service">Scheduled Service</option>
-            <option value="repair">Repair</option>
-            <option value="inspection">Inspection</option>
-            <option value="tire">Tire</option>
-            <option value="electrical">Electrical</option>
-            <option value="body_damage">Body Damage</option>
-            <option value="breakdown">Breakdown</option>
-            <option value="other">Other</option>
-        </select>
-        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
-                x-model="filters.sort" @change="applyFilters()">
-            <option value="created_at">Sort: Date Added</option>
-            <option value="requested_date">Sort: Requested Date</option>
-            <option value="total_cost">Sort: Total Cost</option>
-        </select>
-        <select class="form-control" style="width:auto;font-size:0.8125rem;padding:5px 10px;"
-                x-model="filters.dir" @change="applyFilters()">
-            <option value="DESC">Newest First</option>
-            <option value="ASC">Oldest First</option>
-        </select>
-    </div>
-
-    <!-- Loading -->
-    <div x-show="loading && items.length === 0" class="card-body" style="text-align:center;padding:32px;">
-        <span class="text-secondary">Loading work orders…</span>
-    </div>
-
-    <!-- Empty state -->
-    <div x-show="loaded && !loading && items.length === 0" class="card-body">
-        <div class="empty-state">
-            <p class="empty-state-title">No work orders found</p>
-            <p class="empty-state-text">No work orders match the current filters.</p>
-        </div>
-    </div>
-
-    <!-- Table + footer -->
-    <div x-show="items.length > 0">
-        <div class="tab-table-container">
-            <div class="table-responsive">
-<table class="table">
-                <thead>
-                    <tr>
-                        <th>Work Order #</th>
-                        <th>Unit</th>
-                        <th>Type</th>
-                        <th>Title</th>
-                        <th>Status</th>
-                        <th style="text-align:right;">Total Cost</th>
-                        <th>Requested</th>
-                        <th>Completed</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <template x-for="wo in items" :key="wo.id">
-                        <tr>
-                            <td class="font-mono" x-text="wo.work_order_number"></td>
-                            <td class="font-mono" x-text="wo.unit_number || '—'"></td>
-                            <td x-text="wo.work_type ? wo.work_type.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()) : '—'"></td>
-                            <td style="max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" x-text="wo.title"></td>
-                            <td>
-                                <span class="badge" :class="woBadge(wo.status)" x-text="woLabel(wo.status)"></span>
-                            </td>
-                            <td class="font-mono" style="text-align:right;"
-                                x-text="wo.total_cost > 0 ? '$' + parseFloat(wo.total_cost).toLocaleString('en-CA',{minimumFractionDigits:2}) : '—'"></td>
-                            <td x-text="wo.requested_date || '—'"></td>
-                            <td x-text="wo.completed_date || '—'"></td>
-                            <td>
-                                <a :href="'<?= base_url('maintenance_work_orders/show') ?>?id=' + wo.id"
-                                   class="btn btn-secondary btn-sm">View</a>
-                            </td>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-</div>
-        </div>
-        <div class="tab-table-footer">
-            <span x-text="`Showing ${items.length} of ${total}`"></span>
-            <button class="btn btn-secondary btn-sm"
-                    x-show="items.length < total"
-                    :disabled="loading"
-                    @click="loadMore()"
-                    x-text="loading ? 'Loading…' : 'Load more'">
-            </button>
-        </div>
-    </div>
-</div><!-- /work orders card -->
-
-<!-- ── Equipment Worked On ───────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:24px;margin-top:24px;">
-    <div class="card-header" style="font-weight:600;">
-        Equipment Worked On
-        <span class="badge badge-neutral" style="margin-left:8px;"><?= e(count($unitHistory)) ?></span>
+<!-- ── Units Serviced ────────────────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header">
+        <h3 class="card-title">
+            Units Serviced
+            <span class="badge badge-neutral"><?= e(count($unitHistory)) ?></span>
+        </h3>
     </div>
 
     <?php if (empty($unitHistory)): ?>
@@ -627,14 +889,13 @@ require_once FF_ROOT . '/includes/header.php';
     <?php endif; ?>
 </div>
 
-<!-- ── Active Lease Exposure ─────────────────────────────────────────────── -->
-<div class="card" style="margin-bottom:24px;">
-    <div class="card-header" style="font-weight:600;display:flex;align-items:center;gap:8px;">
-        Active Lease Exposure
-        <span class="badge badge-neutral"><?= e(count($leaseExposure)) ?></span>
-        <?php if (!empty($leaseExposure)): ?>
-        <span class="badge badge-warning" style="font-size:0.7rem;">Units currently on lease</span>
-        <?php endif; ?>
+<!-- ── Serviced Units On Rent (was "Active Lease Exposure") ───────────────── -->
+<div class="card" id="lease-exposure">
+    <div class="card-header">
+        <h3 class="card-title">
+            Serviced Units On Rent
+            <span class="badge badge-neutral"><?= e(count($leaseExposure)) ?></span>
+        </h3>
     </div>
 
     <?php if (empty($leaseExposure)): ?>
@@ -687,6 +948,128 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
     <?php endif; ?>
 </div>
+
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header"><h3 class="card-title">Activity</h3></div>
+    <div class="card-body">
+        <?php $activityEntityType = 'vendor'; $activityEntityId = $vendorId; ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the vendor at a glance ────────────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$railV = [];
+
+// 1. Spend — money roles only.
+if ($canSeeMoney) {
+    $body = $R::big(e(format_currency($vendor['total_spent'])), 'spent all time');
+    if ($canSeeBills && bccomp($billTotal, '0', 2) > 0) {
+        $paidPct = (float) bcmul(bcdiv($billPaid, $billTotal, 6), '100', 2);
+        $body .= $R::meter('Bills paid', e(round($paidPct)) . '%', $paidPct,
+            $billOverCnt > 0 ? 'danger' : ($paidPct >= 99.99 ? 'ok' : 'info'),
+            e(format_currency($billPaid)) . ' of ' . e(format_currency($billTotal)) . ' billed');
+    }
+    $body .= $R::kv([
+        ['Last 12 months', e(format_currency($spend12)), 'mono'],
+        ['Avg job', $avgJob !== null ? e(format_currency($avgJob)) : null, 'mono'],
+        ['Hourly rate', $vendor['hourly_rate'] ? e(format_currency($vendor['hourly_rate'])) . '/hr' : null, 'mono'],
+        ['Currency', e($vendor['currency'] ?? 'CAD')],
+    ]);
+    $railV[] = $R::card('Spend', $body, ['icon' => 'banknotes', 'class' => 'rec-card--accent']);
+}
+
+// 2. Needs attention.
+$alertsV = [];
+if ($woLate > 0) {
+    $alertsV[] = ['danger', '<a href="' . e($woListUrl) . '&amp;status=active">' . $woLate . ' open work order' . ($woLate === 1 ? '' : 's') . '</a> past the scheduled date.'];
+}
+if ($woParts > 0) {
+    $alertsV[] = ['warning', '<a href="' . e($woListUrl) . '&amp;status=waiting_parts">' . $woParts . ' work order' . ($woParts === 1 ? '' : 's') . '</a> waiting on parts.'];
+}
+if ($woUrgent > 0) {
+    $alertsV[] = ['warning', $woUrgent . ' high-priority / emergency job' . ($woUrgent === 1 ? '' : 's') . ' still open.'];
+}
+if ($canSeeBills && $billOverCnt > 0) {
+    $alertsV[] = ['danger', '<a href="#vendor-bills">' . $billOverCnt . ' bill' . ($billOverCnt === 1 ? '' : 's') . ' overdue</a> — ' . $fmtByCur($billsByCur, 'over_amt') . '.'];
+} elseif ($canSeeBills && $billOpenCnt > 0) {
+    $alertsV[] = ['info', '<a href="#vendor-bills">' . $billOpenCnt . ' unpaid bill' . ($billOpenCnt === 1 ? '' : 's') . '</a> — ' . $fmtByCur($billsByCur, 'open_amt') . ' owing.'];
+}
+if ($canSeeBills && $billDraftCnt > 0) {
+    $alertsV[] = ['info', $billDraftCnt . ' draft bill' . ($billDraftCnt === 1 ? '' : 's') . ' waiting for approval.'];
+}
+if ($canSeeBills && $unbilledWos > 0) {
+    $alertsV[] = ['info', '<a href="' . e($woListUrl) . '&amp;status=completed">' . $unbilledWos . ' completed job' . ($unbilledWos === 1 ? '' : 's') . '</a> with no bill entered yet.'];
+}
+if (trim((string) ($vendor['email'] ?? '')) === '' && trim((string) ($vendor['phone'] ?? '')) === '') {
+    $alertsV[] = ['warning', 'No phone or email on file.'];
+}
+if ($qboMapping !== null && ($qboMapping['mapping_status'] ?? '') === 'ff_only') {
+    $alertsV[] = ['info', 'Not in QuickBooks yet — <a href="' . e(base_url('quickbooks/vendors')) . '?q=' . e(rawurlencode((string) $vendor['name'])) . '">sync it</a>.'];
+}
+$railV[] = $R::card('Needs attention', $R::alerts($alertsV, 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 3. Contact.
+$vAddr = trim(implode(', ', array_filter([(string) ($vendor['address'] ?? ''), (string) ($vendor['city'] ?? ''), (string) ($vendor['state'] ?? '')])));
+$contactBody = $R::kv([
+    ['Contact', !empty($vendor['contact_name']) ? e($vendor['contact_name']) : null],
+    ['Phone', !empty($vendor['phone']) ? '<a href="tel:' . e(preg_replace('/[^0-9+]/', '', (string) $vendor['phone'])) . '">' . e($vendor['phone']) . '</a>' : null],
+    ['Email', !empty($vendor['email']) ? '<a href="mailto:' . e($vendor['email']) . '">' . e($vendor['email']) . '</a>' : null],
+    ['Address', $vAddr !== '' ? e($vAddr) : null],
+]);
+$railV[] = $R::card('Contact', $contactBody !== '' ? $contactBody : '<p class="text-secondary" style="margin:0;font-size:12.5px;">No contact details yet.</p>', ['icon' => 'phone']);
+
+// 4. Unpaid bills — AP roles. Each row opens the bill (the bills list has
+//    no vendor deep-link, so a filtered "all bills" link isn't possible).
+if ($canSeeBills) {
+    if ($openBills) {
+        $billLinks = [];
+        foreach ($openBills as $b) {
+            $overdue = (string) $b['due_date'] < $today;
+            $billLinks[] = [
+                (string) $b['bill_number'] . (!empty($b['vendor_bill_number']) ? ' · ' . $b['vendor_bill_number'] : ''),
+                base_url('accounting/bills/show') . '?id=' . (int) $b['id'],
+                'document-text',
+                format_currency($b['balance_due']) . ' ' . $b['currency'] . ' · ' . ($overdue ? 'overdue ' : 'due ') . date('M j', strtotime((string) $b['due_date'])),
+            ];
+        }
+        $billBody = $R::links($billLinks);
+        $more = $billOpenCnt - count($openBills);
+        $railV[] = $R::card('Unpaid bills', $billBody, [
+            'icon' => 'receipt-percent',
+            'id'   => 'vendor-bills',
+            'foot' => $more > 0 ? '+' . $more . ' more — see <a href="' . e(base_url('accounting/ap-aging')) . '">AP aging</a>.' : '',
+        ]);
+    } else {
+        $railV[] = $R::card('Unpaid bills', '<p class="rec-alerts-ok">Nothing owing to this vendor.</p>', ['icon' => 'receipt-percent', 'id' => 'vendor-bills']);
+    }
+}
+
+// 5. Shortcuts — only links that open already scoped to this vendor.
+$quickV = [['All work orders', $woListUrl, 'clipboard-document-list', (string) $woTotal]];
+if ($woParts > 0) {
+    $quickV[] = ['Waiting on parts', $woListUrl . '&status=waiting_parts', 'clock', (string) $woParts];
+}
+if (can('maintenance', 'create')) {
+    $quickV[] = ['New work order', base_url('maintenance_work_orders/create') . '?vendor_id=' . (int) $vendorId, 'plus'];
+}
+if (!empty($vendor['email'])) {
+    $quickV[] = ['Email ' . ($vendor['contact_name'] ?: 'vendor'), 'mailto:' . $vendor['email'], 'envelope'];
+}
+$railV[] = $R::card('Shortcuts', $R::links($quickV), ['icon' => 'sparkles']);
+?>
+<aside class="rec-rail" aria-label="Vendor at a glance">
+    <?= implode("\n    ", $railV) ?>
+    <p class="text-secondary" style="margin:0 4px;font-size:11.5px;line-height:1.5;">
+        Added <?= e(format_datetime($vendor['created_at'])) ?><?= !empty($vendor['created_by_name']) ? ' by ' . e($vendor['created_by_name']) : '' ?><br>
+        Last updated <?= e(format_datetime($vendor['updated_at'])) ?>
+    </p>
+</aside>
+</div><!-- /rec-layout -->
 
 <!-- ── Delete modal ─────────────────────────────────────────────────────── -->
 <div id="vendor-delete-modal" class="modal-backdrop" style="display:none;"
@@ -762,11 +1145,15 @@ function FF_VendorWorkOrders() {
 }
 
 // ── Edit / Cancel ────────────────────────────────────────────────────────────
+// The Edit button lives in the header (S-RECORD-REDESIGN) while the form is
+// in the Vendor Details card further down — bring the form into view.
 function showEdit() {
     document.getElementById('vendor-view-section').style.display = 'none';
     document.getElementById('vendor-edit-section').style.display = 'block';
     document.getElementById('btn-edit').style.display = 'none';
     document.getElementById('vendor-edit-error').style.display = 'none';
+    document.getElementById('vendor-details').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('edit-name').focus({ preventScroll: true });
 }
 
 function cancelEdit() {
@@ -877,15 +1264,6 @@ async function confirmDelete() {
     }
 }
 </script>
-
-<!-- ── Activity Log ───────────────────────────────────────────── -->
-<div class="card" style="margin-top:24px;">
-    <div class="card-header"><h3 class="card-title">Activity</h3></div>
-    <div class="card-body">
-        <?php $activityEntityType = 'vendor'; $activityEntityId = $vendorId; ?>
-        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
-    </div>
-</div>
 
 <?php
 // ── AI Vendor Summary panel (S-AI-SUMMARY-PANELS) ──

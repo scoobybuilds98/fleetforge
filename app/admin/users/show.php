@@ -4,29 +4,55 @@ declare(strict_types=1);
 /**
  * app/admin/users/show.php
  *
- * User detail page.
- * Server-renders user header, detail card (view + inline edit), and actions panel.
+ * User profile page (S-RECORD-REDESIGN layout).
+ *
+ *   Header  — entity hero (lib/Ui/ModuleHero.php): name + status / role /
+ *             "You" badges, email / phone / timezone facts. Actions: Edit and
+ *             the one status action that fits (Resend Invitation for an
+ *             invite, Activate / Unlock for an inactive / suspended / locked
+ *             user) plus Permissions stay visible; everything else — password
+ *             reset email, Set password…, Deactivate, Suspend, Lock Out,
+ *             Disable 2FA, Delete — sits in the More menu (RecordUi::more).
+ *             This replaces the old right-hand stack of seven single-button
+ *             cards; every handler, confirm and modal is the same.
+ *   Strip   — last login (relative), logins in the last 30 days (failed
+ *             ones called out), 2FA, status, custom permission overrides.
+ *   Main    — action feedback line, User Details (view + inline edit),
+ *             Login History, Activity.
+ *   Rail    — Needs attention (invite pending / expired, locked, suspended,
+ *             2FA required but not set up, 2FA off on an admin role, failed
+ *             logins, temp lockout, dormant account, outstanding reset link),
+ *             Access (role + the user's permission overrides), Security,
+ *             Account.
  *
  * View/Edit mode: Alpine.js toggle with D19 optimistic lock via updated_at.
- * Actions: Resend Invite, Activate, Deactivate, Suspend, Lock Out (S-USER-LOCKOUT).
+ * The page's x-data (userShow) opens ABOVE the hero so the header's Edit
+ * button can drive it (same pattern as app/admin/leases/show.php).
  *
  * D5: SOFT_DELETE — deleted_at IS NULL guard.
  * D19: updated_at submitted with every save.
  * D30: asset_url() / base_url().
- * D32: Only CSS classes confirmed in app.css.
+ * D32: Only CSS classes confirmed in app.css / records.css.
  *
  * S-USER-LOCKOUT: "Lock Out" (super_admin only, any non-self, non-already-
  * locked status) posts to api/v1/users/lock.php with a mandatory reason.
  * The primary control surface for this feature is the dedicated Settings →
- * Lockout tab (app/admin/settings/lockout.php); this page's button is a
+ * Lockout tab (app/admin/settings/lockout.php); this page's menu item is a
  * convenience for acting on a user while already viewing their profile.
  * "Unlock" reuses the existing Activate button/update_status.php path.
  *
+ * Time stamps (last_login_at, invite / reset / lock expiries, audit_log
+ * created_at) are UTC DATETIMEs (S-UTC-STAMPS): format_datetime() shows them
+ * in company time; "N days ago" and expiry checks run on the UTC clock.
+ *
  * @depends  config/app.php, includes/auth.php, includes/header.php, includes/footer.php
  *           api/v1/users/update.php, api/v1/users/update_status.php,
- *           api/v1/users/invite.php, api/v1/users/lock.php
+ *           api/v1/users/invite.php, api/v1/users/lock.php,
+ *           api/v1/users/send_password_reset.php, api/v1/users/set_password.php,
+ *           api/v1/users/disable_mfa.php, api/v1/users/delete.php,
+ *           lib/Ui/ModuleHero.php, lib/Ui/RecordUi.php
  * @decisions D5/D7/D19/D30/D32
- * @session  S017, S-USER-LOCKOUT
+ * @session  S017, S-USER-LOCKOUT, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -77,8 +103,9 @@ $user = db_row(
     "SELECT
          u.id, u.name, u.email, u.status, u.phone, u.timezone,
          u.theme_preference, u.last_login_at, u.last_login_ip,
-         u.invite_sent_at, u.created_at, u.updated_at,
+         u.invite_sent_at, u.invite_token_expiry, u.created_at, u.updated_at,
          u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
+         u.login_attempts, u.locked_until, u.password_reset_expiry,
          u.created_by,
          u.locked_at, u.lock_reason,
          creator.name AS created_by_name,
@@ -133,20 +160,265 @@ $statusLabels = [
     'locked'    => 'Locked',
 ];
 
+// ── S-RECORD-REDESIGN: strip + rail data ─────────────────────────────────────
+$nowUtc = ff_now_utc();
+$nowTs  = time();
+/** "3 days ago" for a UTC DATETIME; null when empty. */
+$ago = static function (?string $utc) use ($nowTs): ?string {
+    if ($utc === null || $utc === '') {
+        return null;
+    }
+    $s = max(0, $nowTs - (int) strtotime($utc . ' UTC'));
+    if ($s < 90) return 'just now';
+    if ($s < 3600) return (int) round($s / 60) . ' min ago';
+    if ($s < 86400) return (int) round($s / 3600) . ' h ago';
+    $d = intdiv($s, 86400);
+    if ($d < 60) return $d . ' day' . ($d === 1 ? '' : 's') . ' ago';
+    if ($d < 730) return intdiv($d, 30) . ' months ago';
+    return intdiv($d, 365) . ' years ago';
+};
+$daysSinceLogin = $user['last_login_at'] ? intdiv(max(0, $nowTs - (int) strtotime($user['last_login_at'] . ' UTC')), 86400) : null;
+
+// Logins in the last 30 days. Failures are logged under action='login' with a
+// "Failed login attempt N/5" note — the same keyword test the history table
+// uses decides success vs failure.
+$failSql = "(LOWER(COALESCE(notes,'')) LIKE '%fail%' OR LOWER(COALESCE(notes,'')) LIKE '%lock%' OR LOWER(COALESCE(notes,'')) LIKE '%invalid%')";
+$login30 = db_row(
+    "SELECT SUM(CASE WHEN {$failSql} THEN 0 ELSE 1 END) AS ok_cnt,
+            SUM(CASE WHEN {$failSql} THEN 1 ELSE 0 END) AS fail_cnt
+       FROM audit_log
+      WHERE action = 'login' AND user_id = ? AND created_at >= ?",
+    [$userId, ff_now_utc('-30 days')]
+) ?? [];
+$ok30   = (int) ($login30['ok_cnt'] ?? 0);
+$fail30 = (int) ($login30['fail_cnt'] ?? 0);
+
+// Per-user permission overrides (PERM-1) — the exceptions to the role.
+$overrides = $user['role_slug'] !== 'super_admin'
+    ? db_select("SELECT module, action, granted FROM user_permission_overrides WHERE user_id = ? ORDER BY module, action", [$userId])
+    : [];
+$ovGranted = count(array_filter($overrides, static fn ($o) => (int) $o['granted'] === 1));
+$ovRevoked = count($overrides) - $ovGranted;
+
+$mfaOn        = (int) ($user['mfa_enabled'] ?? 0) === 1;
+$mfaRequired  = (int) ($user['mfa_required'] ?? 0) === 1;
+$isAdminRole  = in_array($user['role_slug'], ['super_admin', 'manager'], true);
+$tempLocked   = !empty($user['locked_until']) && (string) $user['locked_until'] > $nowUtc;
+$inviteExpired = $user['status'] === 'invited' && !empty($user['invite_token_expiry']) && (string) $user['invite_token_expiry'] < $nowUtc;
+$resetPending = !empty($user['password_reset_expiry']) && (string) $user['password_reset_expiry'] > $nowUtc;
+$permUrl      = base_url('users/permissions') . '?user_id=' . (int) $userId;
+
 $pageTitle = e($user['name']);
 require_once FF_ROOT . '/includes/header.php';
 ?>
 
-<div class="page-header">
-    <a href="<?= base_url('users') ?>" class="btn btn-secondary btn-sm">← Users</a>
-    <h1 class="page-header-title"><?= e($user['name']) ?></h1>
-    <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
-        <span class="badge <?= e($statusBadges[$user['status']] ?? 'badge-neutral') ?>">
-            <?= e($statusLabels[$user['status']] ?? ucfirst($user['status'])) ?>
-        </span>
-        <span class="badge badge-neutral badge-pill"><?= e($user['role_name']) ?></span>
+<style>
+/* User profile (S-RECORD-REDESIGN) — action feedback lines. The header /
+   More-menu actions report back here; each script sets the colour. Tokens only. */
+.user-msg {
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    background: var(--bg-surface);
+    font-size: 13px;
+}
+.user-ov { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.user-ov li { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+.user-ov code { font-size: 12px; }
+</style>
+
+<?php ob_start(); ?>
+    <span class="badge <?= e($statusBadges[$user['status']] ?? 'badge-neutral') ?>">
+        <?= e($statusLabels[$user['status']] ?? ucfirst($user['status'])) ?>
+    </span>
+    <span class="badge badge-neutral badge-pill"><?= e($user['role_name']) ?></span>
+    <?php if ($isSelf): ?>
+    <span class="badge badge-info">You</span>
+    <?php endif; ?>
+<?php $heroBadges = ob_get_clean(); ?>
+<?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
+        <?php if (is_super_admin() && $user['status'] === 'active' && !$isSelf): ?>
+        <!-- Send Password Reset Email — super_admin only, active non-self users
+             (link expires in 2 hours) -->
+        <button id="btn-send-reset" type="button" class="btn btn-secondary btn-sm"
+                onclick="sendPasswordReset()">
+            Send Password Reset Email
+        </button>
+        <?php endif; ?>
+        <?php if (is_super_admin() && !$isSelf): ?>
+        <!-- Set Password — super_admin only, non-self users (opens a modal) -->
+        <button type="button" class="btn btn-secondary btn-sm" onclick="openSetPassword()">
+            Set Password…
+        </button>
+        <?php endif; ?>
+        <?php if ($canEdit && !$isSelf): ?>
+            <?php if ($user['status'] === 'active'): ?>
+            <hr>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    onclick="confirmStatus('inactive', 'Deactivate')">
+                Deactivate
+            </button>
+            <button type="button" class="btn btn-danger btn-sm"
+                    onclick="confirmStatus('suspended', 'Suspend')">
+                Suspend
+            </button>
+            <?php endif; ?>
+            <?php if ($user['status'] === 'suspended'): ?>
+            <hr>
+            <button type="button" class="btn btn-secondary btn-sm"
+                    onclick="changeStatus('inactive')">
+                Set Inactive
+            </button>
+            <?php endif; ?>
+            <?php if (is_super_admin() && $user['status'] !== 'locked'): ?>
+            <!-- Immediately blocks login and password reset, and ends any
+                 session they have open. Requires a reason. -->
+            <button type="button" class="btn btn-danger btn-sm"
+                    onclick="lockUser()">
+                Lock Out
+            </button>
+            <?php endif; ?>
+        <?php endif; ?>
+        <?php if (is_super_admin() && !$isSelf && $mfaOn): ?>
+        <!-- Two-Factor Authentication — emergency recovery only: the user lost
+             both their authenticator app and backup codes. They re-enroll on
+             next login if their role requires it. -->
+        <button type="button" class="btn btn-danger btn-sm" id="btn-disable-mfa"
+                onclick="disableUserMfa()">
+            Disable 2FA
+        </button>
+        <?php endif; ?>
+        <?php if (is_super_admin() && !$isSelf): ?>
+        <!-- Delete User — super_admin only, non-self users -->
+        <button type="button" class="btn btn-danger btn-sm"
+                onclick="confirmDeleteUser()">
+            Delete User
+        </button>
+        <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+        <?php if ($canEdit): ?>
+        <button id="btn-edit" type="button" class="btn btn-secondary btn-sm"
+                x-show="!editMode"
+                @click="showEdit()">Edit</button>
+        <?php endif; ?>
+        <?php if (is_super_admin() && $user['role_slug'] !== 'super_admin'): ?>
+        <!-- Manage Permissions — PERM-1 — super_admin only, never on super_admin targets -->
+        <a href="<?= e($permUrl) ?>" class="btn btn-secondary btn-sm">Permissions</a>
+        <?php endif; ?>
+        <?php if ($canCreate && $user['status'] === 'invited'): ?>
+        <!-- Resend Invite -->
+        <button id="btn-resend-invite" type="button"
+                class="btn btn-primary btn-sm"
+                onclick="resendInvite()">
+            Resend Invitation
+        </button>
+        <?php endif; ?>
+        <?php /* S-USER-LOCKOUT: 'locked' included so the existing Activate
+                 button also reactivates a locked-out user — reusing
+                 update_status.php, which S-USER-LOCKOUT taught to clear
+                 locked_at/locked_by/lock_reason (and the unrelated
+                 login_attempts/locked_until brute-force pair) whenever the
+                 prior status was 'locked'. */ ?>
+        <?php if ($canEdit && !$isSelf && in_array($user['status'], ['inactive', 'suspended', 'locked'], true)): ?>
+        <button type="button" class="btn btn-primary btn-sm"
+                onclick="changeStatus('active')">
+            <?= $user['status'] === 'locked' ? 'Unlock' : 'Activate' ?>
+        </button>
+        <?php endif; ?>
+        <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
+<?php
+$heroFacts = [\FleetForge\Sop\SopIcons::svg('envelope') . '<a href="mailto:' . e($user['email']) . '" style="color:inherit;text-decoration:none;">' . e($user['email']) . '</a>'];
+if (!empty($user['phone'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('phone') . e($user['phone']);
+}
+if (!empty($user['timezone'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('clock') . e($user['timezone']);
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . 'Member since ' . e(format_datetime($user['created_at'], 'M j, Y'));
+?>
+<!-- ============================================================
+     USER PROFILE — Alpine component. Opens ABOVE the hero
+     (S-RECORD-REDESIGN) so the header's Edit button drives the
+     User Details card's edit mode.
+     ============================================================ -->
+<div x-data="userShow()">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => 'info',
+    'icon'       => 'users',
+    'avatar'     => \FleetForge\Ui\ModuleHero::initials((string) $user['name']),
+    'mark'       => \FleetForge\Ui\ModuleHero::initials((string) $user['name']),
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Users', base_url('users')], [(string) $user['name'], null]],
+    'eyebrow'    => 'Team member',
+    'title_html' => e($user['name']) . $heroBadges,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
+
+<!-- ============================================================
+     KEY NUMBERS — the summary strip (S-RECORD-REDESIGN): is this
+     account in use, is it protected, what can it do.
+     ============================================================ -->
+<div class="stat-grid ff-stats">
+
+    <a class="stat-card <?= $user['last_login_at'] ? (($daysSinceLogin ?? 0) > 90 ? 'stat-card--amber' : 'stat-card--blue') : 'stat-card--slate' ?>"
+       href="#login-history" title="Login history">
+        <span class="stat-icon <?= $user['last_login_at'] ? (($daysSinceLogin ?? 0) > 90 ? 'stat-icon--amber' : 'stat-icon--blue') : 'stat-icon--slate' ?>"><svg><use href="#icon-clock"/></svg></span>
+        <div class="stat-label">Last login</div>
+        <div class="stat-value"><?= $user['last_login_at'] ? e($ago($user['last_login_at'])) : 'Never' ?></div>
+        <div class="stat-delta"><?= $user['last_login_at'] ? e(format_datetime($user['last_login_at'], 'M j, g:i A')) : ($user['status'] === 'invited' ? 'invite not accepted' : 'no login recorded') ?></div>
+    </a>
+
+    <a class="stat-card <?= $fail30 >= 3 ? 'stat-card--red' : 'stat-card--green' ?>"
+       href="#login-history" title="Logins recorded in the last 30 days">
+        <span class="stat-icon <?= $fail30 >= 3 ? 'stat-icon--red' : 'stat-icon--green' ?>"><svg><use href="#icon-<?= $fail30 >= 3 ? 'exclamation-triangle' : 'arrow-trending-up' ?>"/></svg></span>
+        <div class="stat-label">Logins · 30 days</div>
+        <div class="stat-value font-mono"><?= $ok30 ?></div>
+        <div class="stat-delta"><?= $fail30 > 0 ? '<span' . ($fail30 >= 3 ? ' class="text-danger"' : '') . '>' . $fail30 . ' failed</span>' : 'no failed attempts' ?></div>
+    </a>
+
+    <?php $mfaTone = $mfaOn ? 'green' : ($mfaRequired ? 'red' : ($isAdminRole ? 'amber' : 'slate')); ?>
+    <div class="stat-card stat-card--<?= $mfaTone ?>">
+        <span class="stat-icon stat-icon--<?= $mfaTone ?>"><svg><use href="#icon-shield-check"/></svg></span>
+        <div class="stat-label">Two-factor</div>
+        <div class="stat-value"><?= $mfaOn ? 'On' : 'Off' ?></div>
+        <div class="stat-delta"><?= $mfaOn ? ($user['mfa_enabled_at'] ? 'since ' . e(format_datetime($user['mfa_enabled_at'], 'M j, Y')) : 'enrolled') : ($mfaRequired ? 'required — not set up' : 'not required') ?></div>
     </div>
+
+    <?php $stTone = match ($user['status']) { 'active' => 'green', 'invited' => 'blue', 'inactive' => 'slate', default => 'red' }; ?>
+    <div class="stat-card stat-card--<?= $stTone ?>">
+        <span class="stat-icon stat-icon--<?= $stTone ?>"><svg><use href="#icon-<?= in_array($user['status'], ['locked', 'suspended'], true) ? 'lock-open' : 'check-circle' ?>"/></svg></span>
+        <div class="stat-label">Status</div>
+        <div class="stat-value"><?= e($statusLabels[$user['status']] ?? ucfirst($user['status'])) ?></div>
+        <div class="stat-delta"><?php
+            if ($user['status'] === 'locked' && $user['locked_at']) {
+                echo 'since ' . e(format_datetime($user['locked_at'], 'M j, Y'));
+            } elseif ($user['status'] === 'invited' && $user['invite_sent_at']) {
+                echo 'invited ' . e($ago($user['invite_sent_at']));
+            } elseif ($tempLocked) {
+                echo '<span class="text-danger">temporarily locked</span>';
+            } else {
+                echo $user['status'] === 'active' ? 'can log in' : 'cannot log in';
+            }
+        ?></div>
+    </div>
+
+    <?php if ($user['role_slug'] !== 'super_admin'): ?>
+    <a class="stat-card stat-card--purple" href="<?= e($permUrl) ?>" title="Manage this user's permissions">
+        <span class="stat-icon stat-icon--purple"><svg><use href="#icon-key"/></svg></span>
+        <div class="stat-label">Custom permissions</div>
+        <div class="stat-value font-mono"><?= count($overrides) ?></div>
+        <div class="stat-delta"><?= $overrides ? $ovGranted . ' granted · ' . $ovRevoked . ' revoked' : 'role defaults only' ?></div>
+    </a>
+    <?php endif; ?>
+
 </div>
+
+<div class="rec-layout">
+<div class="rec-main">
 
 <?php if ($flashMsg): ?>
 <div class="toast toast-success" style="position:relative;margin-bottom:16px;animation:none;">
@@ -159,19 +431,19 @@ require_once FF_ROOT . '/includes/header.php';
 </div>
 <?php endif; ?>
 
-<div style="display:grid;grid-template-columns:1fr 280px;gap:20px;align-items:start;" class="user-show-layout">
+<!-- Action feedback — the header / More-menu actions write their result
+     into these (ids unchanged from the old action cards). -->
+<div id="invite-msg" class="user-msg" role="status" style="display:none;"></div>
+<div id="reset-msg" class="user-msg" role="status" style="display:none;"></div>
+<div id="status-msg" class="user-msg" role="status" style="display:none;"></div>
+<div id="mfa-msg" class="user-msg" role="status" style="display:none;"></div>
+<div id="delete-user-msg" class="user-msg" role="status" style="display:none;"></div>
 
-<!-- ── Left: Detail card ─────────────────────────────────────────────────── -->
-<div class="card"
-     x-data="userShow()">
+<!-- ── Detail card ───────────────────────────────────────────────────────── -->
+<div class="card" id="user-details">
 
-    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-weight:600;">User Details</span>
-        <?php if ($canEdit): ?>
-        <button id="btn-edit" class="btn btn-secondary btn-sm"
-                x-show="!editMode"
-                @click="showEdit()">Edit</button>
-        <?php endif; ?>
+    <div class="card-header">
+        <h3 class="card-title" x-text="editMode ? 'Edit User' : 'User Details'">User Details</h3>
     </div>
 
     <!-- Error banner (edit mode) -->
@@ -189,7 +461,7 @@ require_once FF_ROOT . '/includes/header.php';
 
     <!-- VIEW MODE -->
     <div x-show="!editMode" class="card-body">
-        <dl class="detail-grid">
+        <dl class="rec-dl">
             <dt>Name</dt>
             <dd><?= e($user['name']) ?></dd>
 
@@ -225,7 +497,7 @@ require_once FF_ROOT . '/includes/header.php';
             <?php endif; ?>
 
             <dt>Created</dt>
-            <dd><?= format_datetime($user['created_at']) ?></dd>
+            <dd><?= format_datetime($user['created_at']) ?><?= !empty($user['created_by_name']) ? ' by ' . e($user['created_by_name']) : '' ?></dd>
         </dl>
     </div>
 
@@ -238,7 +510,7 @@ require_once FF_ROOT . '/includes/header.php';
 
             <div class="form-group">
                 <label class="form-label">Full Name <span class="required">*</span></label>
-                <input type="text" class="form-control" x-model="form.name"
+                <input type="text" class="form-control" x-model="form.name" x-ref="nameInput"
                        maxlength="255" placeholder="Jane Smith">
             </div>
 
@@ -283,226 +555,12 @@ require_once FF_ROOT . '/includes/header.php';
 
 </div><!-- /detail card -->
 
-<!-- ── Right: Actions panel ──────────────────────────────────────────────── -->
-<div style="display:flex;flex-direction:column;gap:12px;">
-
-    <?php if ($canCreate && $user['status'] === 'invited'): ?>
-    <!-- Resend Invite -->
-    <div class="card">
-        <div class="card-body" style="padding:16px;">
-            <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 12px;">
-                This user has not yet activated their account.
-            </p>
-            <button id="btn-resend-invite"
-                    class="btn btn-secondary w-full"
-                    onclick="resendInvite()">
-                Resend Invitation
-            </button>
-            <div id="invite-msg" style="font-size:0.8125rem;margin-top:8px;display:none;"></div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if (is_super_admin() && $user['status'] === 'active' && !$isSelf): ?>
-    <!-- Send Password Reset Email — super_admin only, active non-self users -->
-    <div class="card">
-        <div class="card-body" style="padding:16px;">
-            <p style="font-size:0.875rem;color:var(--text-secondary);margin:0 0 12px;">
-                Send a password reset link to this user's email address. The link expires in 2 hours.
-            </p>
-            <button id="btn-send-reset"
-                    class="btn btn-secondary w-full"
-                    onclick="sendPasswordReset()">
-                Send Password Reset Email
-            </button>
-            <div id="reset-msg" style="font-size:0.8125rem;margin-top:8px;display:none;"></div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if (is_super_admin() && $user['role_slug'] !== 'super_admin'): ?>
-    <!-- Manage Permissions — PERM-1 — super_admin only, never on super_admin targets -->
-    <div class="card">
-        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Permissions</div>
-        <div class="card-body" style="padding:16px;">
-            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 12px;">
-                Grant or revoke individual permissions on top of this user's
-                <strong><?= e($user['role_name']) ?></strong> role.
-            </p>
-            <a href="<?= base_url('users/permissions') ?>?user_id=<?= $userId ?>"
-               class="btn btn-secondary w-full">
-                Manage Permissions
-            </a>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if ($canEdit && !$isSelf): ?>
-    <!-- Status actions -->
-    <div class="card">
-        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Change Status</div>
-        <div class="card-body" style="padding:16px;display:flex;flex-direction:column;gap:8px;">
-
-            <?php /* S-USER-LOCKOUT: 'locked' added here so the existing Activate
-                     button also reactivates a locked-out user — reusing
-                     update_status.php, which S-USER-LOCKOUT taught to clear
-                     locked_at/locked_by/lock_reason (and the unrelated
-                     login_attempts/locked_until brute-force pair) whenever the
-                     prior status was 'locked'. */ ?>
-            <?php if (in_array($user['status'], ['inactive', 'suspended', 'locked'], true)): ?>
-            <button class="btn btn-secondary w-full"
-                    onclick="changeStatus('active')">
-                <?= $user['status'] === 'locked' ? 'Unlock' : 'Activate' ?>
-            </button>
-            <?php endif; ?>
-
-            <?php if ($user['status'] === 'active'): ?>
-            <button class="btn btn-secondary w-full"
-                    onclick="changeStatus('inactive')">
-                Deactivate
-            </button>
-            <button class="btn btn-danger w-full"
-                    onclick="changeStatus('suspended')">
-                Suspend
-            </button>
-            <?php endif; ?>
-
-            <?php if ($user['status'] === 'suspended'): ?>
-            <button class="btn btn-secondary w-full"
-                    onclick="changeStatus('inactive')">
-                Set Inactive
-            </button>
-            <?php endif; ?>
-
-            <?php if (is_super_admin() && $user['status'] === 'locked'): ?>
-            <div style="font-size:0.75rem;color:var(--text-tertiary);border-top:1px solid var(--border-color,#333);padding-top:8px;margin-top:2px;">
-                Locked <?= $user['locked_at'] ? e(format_datetime($user['locked_at'])) : '' ?>
-                by <?= e($user['locked_by_name'] ?? 'unknown') ?><?php if ($user['lock_reason']): ?><br>&ldquo;<?= e($user['lock_reason']) ?>&rdquo;<?php endif; ?>
-            </div>
-            <?php endif; ?>
-
-            <?php if (is_super_admin() && $user['status'] !== 'locked'): ?>
-            <button class="btn btn-danger w-full" style="margin-top:4px;"
-                    onclick="lockUser()">
-                Lock Out
-            </button>
-            <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0;">
-                Immediately blocks login and password reset, and ends any session they have open. Requires a reason.
-            </p>
-            <?php endif; ?>
-
-            <div id="status-msg" style="font-size:0.8125rem;margin-top:4px;display:none;"></div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if (is_super_admin() && !$isSelf): ?>
-    <!-- Set Password — super_admin only, non-self users -->
-    <div class="card">
-        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Set Password</div>
-        <div class="card-body" style="padding:16px;"
-             x-data="setPasswordForm()">
-            <div class="form-group">
-                <label class="form-label">New Password</label>
-                <input type="password" class="form-control" x-model="pwd"
-                       placeholder="Min. 10 characters" autocomplete="new-password">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Confirm Password</label>
-                <input type="password" class="form-control" x-model="confirmPwd"
-                       placeholder="Repeat password" autocomplete="new-password">
-            </div>
-            <div x-show="msg" x-text="msg"
-                 :style="isError ? 'color:var(--color-danger)' : 'color:var(--color-success)'"
-                 style="font-size:0.8125rem;margin-bottom:8px;display:none;"></div>
-            <button class="btn btn-secondary w-full"
-                    @click="submit()"
-                    :disabled="saving">
-                <span x-show="!saving">Set Password</span>
-                <span x-show="saving">Saving…</span>
-            </button>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <!-- ── Two-Factor Authentication (super_admin, non-self) ─────── -->
-    <?php if (is_super_admin() && !$isSelf && (int)($user['mfa_enabled'] ?? 0)): ?>
-    <div class="card"
-         x-data="{ disabling: false, mfaMsg: '', mfaOk: true }">
-        <div class="card-header" style="font-weight:600;font-size:0.875rem;">Two-Factor Authentication</div>
-        <div class="card-body" style="padding:16px;">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="var(--color-success,#10b981)" style="width:16px;height:16px;flex-shrink:0;">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z"/>
-                </svg>
-                <span style="font-size:0.8125rem;color:var(--color-success,#10b981);font-weight:600;">MFA Enabled</span>
-            </div>
-            <?php if ($user['mfa_enabled_at']): ?>
-            <div style="font-size:0.75rem;color:var(--text-tertiary);margin-bottom:10px;">
-                Since <?= e(format_datetime($user['mfa_enabled_at'])) ?>
-            </div>
-            <?php endif; ?>
-            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 10px;">
-                Emergency recovery only — use this if the user has lost access to both their
-                authenticator app and backup codes. They will be required to set up MFA again
-                on their next login if their role requires it.
-            </p>
-            <div x-show="mfaMsg" x-text="mfaMsg"
-                 :style="mfaOk ? 'color:var(--color-success)' : 'color:var(--color-danger)'"
-                 style="font-size:0.8125rem;margin-bottom:8px;display:none;"></div>
-            <button class="btn btn-danger w-full"
-                    :disabled="disabling"
-                    @click="async function() {
-                        if (!confirm('Disable MFA for this user? They will need to re-enroll if their role requires it.')) return;
-                        this.disabling = true;
-                        this.mfaMsg   = '';
-                        const r = await fetch(window.FF_BASE_PATH + '/api/v1/users/disable_mfa.php', {
-                            method:  'POST',
-                            headers: {
-                                'Content-Type':     'application/json',
-                                'X-Requested-With': 'XMLHttpRequest',
-                                'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content ?? '',
-                            },
-                            body: JSON.stringify({ user_id: <?= $userId ?> }),
-                        });
-                        const d = await r.json();
-                        this.disabling = false;
-                        if (d.success) { this.mfaOk = true; this.mfaMsg = 'MFA disabled. Page will refresh…'; setTimeout(() => location.reload(), 1500); }
-                        else { this.mfaOk = false; this.mfaMsg = d.error?.message ?? 'Failed to disable MFA.'; }
-                    }.call($data)">
-                <span x-show="!disabling">Disable MFA for this User</span>
-                <span x-show="disabling">Disabling…</span>
-            </button>
-        </div>
-    </div>
-    <?php endif; ?>
-
-    <?php if (is_super_admin() && !$isSelf): ?>
-    <!-- Delete User — super_admin only, non-self users -->
-    <div class="card">
-        <div class="card-body" style="padding:16px;">
-            <p style="font-size:0.8125rem;color:var(--text-secondary);margin:0 0 10px;">
-                Permanently removes this user from the system. This action cannot be undone.
-            </p>
-            <button class="btn btn-danger w-full"
-                    onclick="confirmDeleteUser()">
-                Delete User
-            </button>
-            <div id="delete-user-msg" style="font-size:0.8125rem;margin-top:8px;display:none;"></div>
-        </div>
-    </div>
-    <?php endif; ?>
-
-</div><!-- /actions panel -->
-
-</div><!-- /grid -->
-
 <!-- ══════════════════════════════════════════════════════════════
      Login History — last 10 login attempts for this user
      ══════════════════════════════════════════════════════════════ -->
-<div class="card" style="margin-top:20px;">
+<div class="card" id="login-history">
     <div class="card-header">
-        <span style="font-weight:600;">Login History</span>
+        <h3 class="card-title">Login History</h3>
         <span class="text-muted" style="font-size:0.8125rem;margin-left:8px;">Last 10 attempts</span>
     </div>
     <div class="card-body" style="padding:0;">
@@ -535,12 +593,13 @@ require_once FF_ROOT . '/includes/header.php';
                     <td class="font-mono" style="font-size:0.8125rem;">
                         <?= $entry['ip_address'] ? e($entry['ip_address']) : '—' ?>
                     </td>
-                    <td style="font-size:0.8125rem;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    <td style="font-size:0.8125rem;color:var(--text-secondary);max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"
+                        title="<?= e((string) ($entry['user_agent'] ?? '')) ?>">
                         <?= $entry['user_agent'] ? e(substr($entry['user_agent'], 0, 60)) : '—' ?>
                     </td>
                     <td>
                         <?php if ($failed): ?>
-                            <span class="badge badge-danger">Failed</span>
+                            <span class="badge badge-danger" title="<?= e((string) ($entry['notes'] ?? '')) ?>">Failed</span>
                         <?php else: ?>
                             <span class="badge badge-success">Success</span>
                         <?php endif; ?>
@@ -554,11 +613,118 @@ require_once FF_ROOT . '/includes/header.php';
     </div>
 </div>
 
-<style>
-@media (max-width: 768px) {
-    .user-show-layout { grid-template-columns: 1fr !important; }
+<!-- ── Activity Log ───────────────────────────────────────────── -->
+<div class="card">
+    <div class="card-header"><h3 class="card-title">Activity</h3></div>
+    <div class="card-body">
+        <?php
+        $activityEntityType = 'user';
+        $activityEntityId   = $userId;
+        $activityOriginAt   = $user['created_at'];
+        $activityOriginBy   = $user['created_by_name'] ?? null;
+        ?>
+        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
+    </div>
+</div>
+
+</div><!-- /rec-main -->
+
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the account at a glance ──────────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$railU = [];
+
+// 1. Needs attention.
+$alertsU = [];
+if ($user['status'] === 'locked') {
+    $alertsU[] = ['danger', '<b>Locked out</b>' . ($user['locked_at'] ? ' ' . e(format_datetime($user['locked_at'], 'M j, Y')) : '')
+        . ' by ' . e($user['locked_by_name'] ?? 'unknown') . ($user['lock_reason'] ? ' — &ldquo;' . e($user['lock_reason']) . '&rdquo;' : '') . '.'];
+} elseif ($user['status'] === 'suspended') {
+    $alertsU[] = ['danger', '<b>Suspended</b> — cannot log in.'];
+} elseif ($user['status'] === 'inactive') {
+    $alertsU[] = ['info', '<b>Inactive</b> — cannot log in.'];
 }
-</style>
+if ($user['status'] === 'invited') {
+    $alertsU[] = $inviteExpired
+        ? ['warning', 'The invite link expired ' . e(format_datetime($user['invite_token_expiry'], 'M j, Y')) . ($canCreate ? ' — <b>Resend Invitation</b>.' : '.')]
+        : ['info', 'Invite not accepted yet' . ($user['invite_sent_at'] ? ' (sent ' . e($ago($user['invite_sent_at'])) . ')' : '') . '.'];
+}
+if ($tempLocked) {
+    $alertsU[] = ['warning', 'Temporarily locked after ' . (int) $user['login_attempts'] . ' failed logins, until ' . e(format_datetime($user['locked_until'], 'M j, g:i A')) . '.'];
+}
+if (!$mfaOn && $mfaRequired) {
+    $alertsU[] = ['warning', '2FA is required but not set up — they will be made to enrol at next login.'];
+} elseif (!$mfaOn && $isAdminRole && $user['status'] === 'active') {
+    $alertsU[] = ['info', '2FA is off on a ' . e($user['role_name']) . ' account.'];
+}
+if ($fail30 >= 3) {
+    $alertsU[] = ['warning', '<a href="#login-history">' . $fail30 . ' failed login attempts</a> in the last 30 days.'];
+}
+if ($user['status'] === 'active' && !$user['last_login_at']) {
+    $alertsU[] = ['info', 'Has never logged in.'];
+} elseif ($user['status'] === 'active' && $daysSinceLogin !== null && $daysSinceLogin > 90) {
+    $alertsU[] = ['info', 'No login in ' . $daysSinceLogin . ' days — consider deactivating.'];
+}
+if ($resetPending) {
+    $alertsU[] = ['info', 'A password reset link is outstanding (expires ' . e(format_datetime($user['password_reset_expiry'], 'M j, g:i A')) . ').'];
+}
+if ($isSelf) {
+    $alertsU[] = ['info', 'This is your own account — status, password and delete actions are hidden.'];
+}
+$railU[] = $R::card('Needs attention', $R::alerts($alertsU, 'All clear — nothing needs attention.'), ['icon' => 'exclamation-triangle']);
+
+// 2. Access — the role, and the per-user exceptions to it.
+if ($user['role_slug'] === 'super_admin') {
+    $accessBody = $R::kv([['Role', '<span class="badge badge-neutral badge-pill">' . e($user['role_name']) . '</span>']])
+        . '<p class="text-secondary" style="margin:8px 0 0;font-size:12.5px;">Full access to every module — permissions can\'t be narrowed for a super admin.</p>';
+    $railU[] = $R::card('Access', $accessBody, ['icon' => 'shield-check', 'class' => 'rec-card--accent']);
+} else {
+    $accessBody = $R::kv([
+        ['Role', '<span class="badge badge-neutral badge-pill">' . e($user['role_name']) . '</span>'],
+        ['Overrides', $overrides ? $ovGranted . ' granted · ' . $ovRevoked . ' revoked' : 'None — role defaults'],
+    ]);
+    if ($overrides) {
+        $accessBody .= '<ul class="user-ov" style="margin-top:8px;">';
+        foreach (array_slice($overrides, 0, 8) as $o) {
+            $accessBody .= '<li><code>' . e($o['module'] . ':' . $o['action']) . '</code>'
+                . ((int) $o['granted'] === 1 ? '<span class="badge badge-success">granted</span>' : '<span class="badge badge-danger">revoked</span>') . '</li>';
+        }
+        $accessBody .= '</ul>';
+    }
+    $railU[] = $R::card('Access', $accessBody, [
+        'icon'  => 'shield-check',
+        'class' => 'rec-card--accent',
+        'link'  => ['Manage', $permUrl],
+        'foot'  => count($overrides) > 8 ? '+' . (count($overrides) - 8) . ' more on the permissions page.' : '',
+    ]);
+}
+
+// 3. Security.
+$railU[] = $R::card('Security', $R::kv([
+    ['Two-factor', $mfaOn ? '<span class="text-success">On</span>' . ($user['mfa_enabled_at'] ? ' · since ' . e(format_datetime($user['mfa_enabled_at'], 'M j, Y')) : '') : 'Off'],
+    ['2FA required', $mfaRequired ? 'Yes' : 'No'],
+    ['Last login', $user['last_login_at'] ? e(format_datetime($user['last_login_at'], 'M j, Y g:i A')) : 'Never'],
+    ['Last IP', !empty($user['last_login_ip']) ? '<span class="mono">' . e($user['last_login_ip']) . '</span>' : null],
+    ['Failed attempts', (int) $user['login_attempts'] > 0 ? (int) $user['login_attempts'] . ' in a row' : null],
+    ['Locked until', $tempLocked ? '<span class="text-danger">' . e(format_datetime($user['locked_until'], 'M j, g:i A')) . '</span>' : null],
+    ['Reset link', $resetPending ? 'expires ' . e(format_datetime($user['password_reset_expiry'], 'M j, g:i A')) : null],
+]), ['icon' => 'shield-check']);
+
+// 4. Account.
+$railU[] = $R::card('Account', $R::kv([
+    ['Created', e(format_datetime($user['created_at'], 'M j, Y')) . (!empty($user['created_by_name']) ? ' · ' . e($user['created_by_name']) : '')],
+    ['Invite sent', $user['invite_sent_at'] ? e(format_datetime($user['invite_sent_at'], 'M j, Y')) : null],
+    ['Invite expires', $user['status'] === 'invited' && $user['invite_token_expiry'] ? ($inviteExpired ? '<span class="text-danger">' : '') . e(format_datetime($user['invite_token_expiry'], 'M j, Y')) . ($inviteExpired ? ' (expired)</span>' : '') : null],
+    ['Last updated', e(format_datetime($user['updated_at'], 'M j, Y g:i A'))],
+    ['User ID', '<span class="mono">' . (int) $user['id'] . '</span>'],
+]), ['icon' => 'users']);
+?>
+<aside class="rec-rail" aria-label="User at a glance">
+    <?= implode("\n    ", $railU) ?>
+</aside>
+</div><!-- /rec-layout -->
+
+</div><!-- /x-data userShow -->
 
 <script>
 function userShow() {
@@ -585,9 +751,15 @@ function userShow() {
             };
         },
 
+        // The Edit button lives in the header (S-RECORD-REDESIGN); the form
+        // is in the User Details card below — bring it into view.
         showEdit() {
             this.editMode  = true;
             this.editError = null;
+            this.$nextTick(() => {
+                document.getElementById('user-details')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                this.$refs.nameInput?.focus({ preventScroll: true });
+            });
         },
 
         cancelEdit() {
@@ -675,7 +847,7 @@ async function sendPasswordReset() {
     }
 }
 
-// ── Set password (Alpine component) ──────────────────────────────────────────
+// ── Set password (Alpine component, in the Set Password modal) ───────────────
 function setPasswordForm() {
     return {
         pwd: '',
@@ -715,6 +887,49 @@ function setPasswordForm() {
             }
         },
     };
+}
+function openSetPassword() {
+    document.getElementById('set-password-modal').style.display = 'flex';
+    setTimeout(() => document.getElementById('set-password-new')?.focus(), 50);
+}
+function closeSetPassword() {
+    document.getElementById('set-password-modal').style.display = 'none';
+}
+
+// ── Disable 2FA (emergency recovery) ─────────────────────────────────────────
+// Was an inline Alpine handler on its own card; now a menu item, so it is a
+// plain function reporting into #mfa-msg. Same confirm, endpoint and reload.
+async function disableUserMfa() {
+    if (!confirm('Disable MFA for this user? They will need to re-enroll if their role requires it.')) return;
+    const msg = document.getElementById('mfa-msg');
+    const btn = document.getElementById('btn-disable-mfa');
+    msg.style.display = 'none';
+    if (btn) btn.disabled = true;
+    try {
+        const r = await fetch(window.FF_BASE_PATH + '/api/v1/users/disable_mfa.php', {
+            method:  'POST',
+            headers: {
+                'Content-Type':     'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': document.querySelector('meta[name=csrf-token]')?.content ?? '',
+            },
+            body: JSON.stringify({ user_id: <?= $userId ?> }),
+        });
+        const d = await r.json();
+        if (d.success) {
+            msg.textContent = 'MFA disabled. Page will refresh…';
+            msg.style.color = 'var(--color-success)';
+            msg.style.display = 'block';
+            setTimeout(() => location.reload(), 1500);
+            return;
+        }
+        msg.textContent = d.error?.message ?? 'Failed to disable MFA.';
+    } catch (e) {
+        msg.textContent = 'Network error. Please try again.';
+    }
+    msg.style.color = 'var(--color-danger)';
+    msg.style.display = 'block';
+    if (btn) btn.disabled = false;
 }
 
 // ── Delete user ───────────────────────────────────────────────────────────────
@@ -758,6 +973,20 @@ async function changeStatus(newStatus) {
         msg.style.display = 'block';
     }
 }
+// Deactivate / Suspend moved from always-visible buttons into the More menu
+// (S-RECORD-REDESIGN) — a confirm step guards the one-click lockout of a
+// working account from a stray menu click.
+async function confirmStatus(newStatus, verb) {
+    const ok = await FF_Confirm.ask({
+        title: verb + ' ' + <?= json_encode($user['name']) ?>,
+        message: newStatus === 'suspended'
+            ? 'They will not be able to log in until reactivated.'
+            : 'They will not be able to log in until activated again.',
+        confirmLabel: verb,
+        dangerMode: newStatus === 'suspended',
+    });
+    if (ok) changeStatus(newStatus);
+}
 
 // ── Lock out (S-USER-LOCKOUT) ───────────────────────────────────────────────
 // WHY: FF_Api.post resolves (never rejects) on a 4xx/5xx JSON error response
@@ -792,12 +1021,50 @@ async function lockUser() {
 }
 </script>
 
+<?php if (is_super_admin() && !$isSelf): ?>
+<!-- Set Password Modal (was an inline rail card) — super_admin only, non-self.
+     .modal (not the undefined .modal-dialog) gives it the standard panel. -->
+<div id="set-password-modal"
+     class="modal-backdrop"
+     style="display:none;"
+     role="dialog" aria-modal="true" aria-labelledby="setpw-modal-title"
+     onclick="if (event.target === this) closeSetPassword()">
+    <div class="modal modal-sm" x-data="setPasswordForm()" @keydown.escape="closeSetPassword()">
+        <div class="modal-header">
+            <span class="modal-title" id="setpw-modal-title">Set Password — <?= e($user['name']) ?></span>
+        </div>
+        <form class="modal-body" @submit.prevent="submit()">
+            <div class="form-group">
+                <label class="form-label" for="set-password-new">New Password</label>
+                <input type="password" class="form-control" id="set-password-new" x-model="pwd"
+                       placeholder="Min. 10 characters" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="set-password-confirm">Confirm Password</label>
+                <input type="password" class="form-control" id="set-password-confirm" x-model="confirmPwd"
+                       placeholder="Repeat password" autocomplete="new-password">
+            </div>
+            <div x-show="msg" x-text="msg"
+                 :style="{ color: isError ? 'var(--color-danger)' : 'var(--color-success)' }"
+                 style="font-size:0.8125rem;margin-bottom:8px;display:none;"></div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-md" onclick="closeSetPassword()">Close</button>
+                <button type="submit" class="btn btn-primary btn-md" :disabled="saving">
+                    <span x-show="!saving">Set Password</span>
+                    <span x-show="saving">Saving…</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Delete User Confirmation Modal -->
 <div id="delete-user-modal"
      class="modal-backdrop"
      style="display:none;"
      role="dialog" aria-modal="true" aria-labelledby="del-modal-title">
-    <div class="modal-dialog modal-md">
+    <div class="modal modal-md">
         <div class="modal-header">
             <span class="modal-title" id="del-modal-title">Delete User</span>
         </div>
@@ -812,20 +1079,6 @@ async function lockUser() {
             <button class="btn btn-secondary btn-md" onclick="closeDeleteModal()">Cancel</button>
             <button class="btn btn-danger btn-md" id="btn-confirm-delete" onclick="executeDelete()">Delete</button>
         </div>
-    </div>
-</div>
-
-<!-- ── Activity Log ───────────────────────────────────────────── -->
-<div class="card" style="margin-top:24px;">
-    <div class="card-header"><h3 class="card-title">Activity</h3></div>
-    <div class="card-body">
-        <?php
-        $activityEntityType = 'user';
-        $activityEntityId   = $userId;
-        $activityOriginAt   = $user['created_at'];
-        $activityOriginBy   = $user['created_by_name'] ?? null;
-        ?>
-        <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
     </div>
 </div>
 

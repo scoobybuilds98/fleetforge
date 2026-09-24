@@ -65,9 +65,15 @@ $cases = [
         // becomes $_GET['id'] and the linked asset id feeds the regex below.
         'unit'    => 'linked',
         'markers' => [
-            'class="tab-bar"',
+            // S-RECORD-REDESIGN: sticky underline tabs.
+            'class="tab-bar tab-bar--sticky"',
             'Payoff Analysis',
             'FF_UnitDetail',
+            // S-PAYOFF-ONE-PAGE: the Payoff tab is the one payoff page — the
+            // retired equipment/payoff.php deep-dive's sections live here.
+            'id="unit-payoff-bars"',
+            'Revenue by lease',
+            'Month by month',
         ],
         // The PHP injects linkedAssetId via PHP_EOL-aligned formatting, so
         // we match it via regex (any amount of whitespace, then the id).
@@ -80,7 +86,7 @@ $cases = [
         'path'    => 'app/admin/equipment/show.php',
         'unit'    => 'unlinked',
         'markers' => [
-            'class="tab-bar"',
+            'class="tab-bar tab-bar--sticky"',
             'Payoff Analysis',
             'FF_UnitDetail',
         ],

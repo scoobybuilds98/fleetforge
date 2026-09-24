@@ -151,32 +151,32 @@ export default {
     {
       say: 'The Invoices tab lists every invoice for this lease with its period, status, total and balance. Filter by status, or click View to open one.',
       run: async (d) => {
-        await d.click(tab('Invoices')); await d.wait(1200);
+        await d.tab('Invoices'); await d.wait(1200);
         await d.highlight('.card:has(.card-title:has-text("Invoices")) table', 'Invoices for this lease', 2600);
       },
     },
     {
       say: 'Documents holds the signed contract and anything else you upload. Inspections holds the pre-lease and post-lease inspections for this unit.',
       run: async (d) => {
-        await d.click(tab('Documents')); await d.wait(1000);
+        await d.tab('Documents'); await d.wait(1000);
         await d.hover('button:has-text("Upload Document")', 600);
-        await d.click(tab('Inspections')); await d.wait(1200);
+        await d.tab('Inspections'); await d.wait(1200);
       },
     },
     {
       say: 'Status Log records every status change and who made it. Amendments lists rate changes, date extensions and other recorded changes to the contract.',
       run: async (d) => {
-        await d.click(tab('Status Log')); await d.wait(1200);
-        await d.click(tab('Amendments')); await d.wait(1200);
+        await d.tab('Status Log'); await d.wait(1200);
+        await d.tab('Amendments'); await d.wait(1200);
       },
     },
     {
       say: 'Damage Claims shows claims raised against this rental. Mileage Log holds odometer readings recorded for the lease, and Activity is the full audit trail.',
       run: async (d) => {
-        await d.click(tab('Damage Claims')); await d.wait(1300);
-        await d.click(tab('Mileage Log')); await d.wait(1000);
-        await d.click(tab('Activity')); await d.wait(1000);
-        await d.click(tab('Overview'));
+        await d.tab('Damage Claims'); await d.wait(1300);
+        await d.tab('Mileage Log'); await d.wait(1000);
+        await d.tab('Activity'); await d.wait(1000);
+        await d.tab('Overview');
       },
     },
 
@@ -370,7 +370,7 @@ export default {
       say: 'The lease is now Active and the unit is On Lease. Activation also generates the first invoice as a draft, including the cartage charge.',
       run: async (d) => {
         await d.highlight('h1', 'Now active', 1800);
-        await d.click(tab('Invoices')); await d.wait(1500);
+        await d.tab('Invoices'); await d.wait(1500);
         await d.highlight('.card:has(.card-title:has-text("Invoices"))', 'First invoice', 2200);
       },
     },

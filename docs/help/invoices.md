@@ -15,7 +15,7 @@ The Invoices list shows four AR aging tiles at the top:
 - **31–60 Days Overdue** — 31–60 days past due
 - **60+ Days Overdue** — more than 60 days past due
 
-Click any tile to filter the list to that aging bucket. Use the **Outstanding**, **Paid**, and **All** tabs to switch views.
+Click any tile to filter the list to that aging bucket. Use the **Outstanding**, **Paid**, and **All** tabs in the table's toolbar to switch views; the page arrows sit at the end of the same toolbar.
 
 ---
 
@@ -74,6 +74,9 @@ A draft invoice must be sent before it counts toward the customer's outstanding 
 
 Opening an invoice shows:
 
+- **Header actions** — the main action for the invoice's status (**Send Invoice** on a draft, **Record Payment** when money is owed), **Email Invoice** and the PDF; everything else (Print, Copy pay link, View Lease, AI Analysis, Void, Write Off, Delete) is under **More**.
+- **Tiles** — **Balance due** (with how much is paid), **Due** (how many days until or past due), **Total**, **Paid** and **Issued**.
+- **Right-hand panel** — what needs attention, the payment progress, delivery (sent when, by whom, to which address, QuickBooks status) and the related customer and lease.
 - **Status timeline** — visual flow from Draft → Sent → Paid (or Voided/Written Off).
 - **Five KPI cards** — Invoice Date, Due Date, Total Amount, Amount Paid, and Balance Due. Balance Due and Amount Paid are clickable links.
 - **Invoice details** — billing period, rates, line items, taxes, and notes.

@@ -16,6 +16,9 @@ declare(strict_types=1);
  * updates rows that arrive in the request.
  *
  * Cards:
+ *   0. Background       — palette tiles (config/backgrounds.php); click previews
+ *                         on this page by swapping <html data-bg>, Save writes
+ *                         brand.background (S-BACKGROUNDS)
  *   1. Brand Identity   — color picker + 6 swatches + live preview + logo + favicon
  *
  * Bug #23 — REMOVED cards: "New User Defaults" (defaults.theme/density/
@@ -47,6 +50,9 @@ if (!is_super_admin()) {
 $brand_primary_color = (string) (settings_get('brand.primary_color') ?? '#2596be');
 $brand_logo_path     = (string) (settings_get('brand.logo_path')     ?? '');
 $brand_favicon_path  = (string) (settings_get('brand.favicon_path')  ?? '');
+// S-BACKGROUNDS: the palette registry + the palette in use (validated).
+$backgrounds         = ff_backgrounds();
+$brand_background    = ff_background();
 
 // Logo / favicon preview URLs — empty string if nothing uploaded yet.
 // StorageClient::url() returns a signed local URL OR an S3 presigned
@@ -239,6 +245,81 @@ $brandApi = base_url('api/v1/settings/brand');
     #ff-design-tab .ff-card-actions .ff-save-msg {
         font-size:0.8125rem;
     }
+
+    /* S-BACKGROUNDS — palette tiles. Each tile draws its palette from the
+       registry (inline colours are the palette's own data): the dark theme
+       on the left half, the light theme on the right, the always-dark
+       sidebar as the strip in both, the brand colour as the button. */
+    #ff-design-tab .ff-bg-grid {
+        display:grid;
+        grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+        gap:14px;
+    }
+    #ff-design-tab .ff-bg-tile {
+        display:flex;
+        flex-direction:column;
+        gap:10px;
+        padding:10px 10px 12px;
+        border-radius:14px;
+        border:1px solid var(--border-color);
+        background:var(--bg-surface);
+        font:inherit;
+        color:inherit;
+        text-align:left;
+        cursor:pointer;
+        transition:transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    #ff-design-tab .ff-bg-tile:hover { transform:translateY(-2px); border-color:var(--border-color-strong); }
+    #ff-design-tab .ff-bg-tile.is-active {
+        border-color:var(--color-primary);
+        box-shadow:0 0 0 3px color-mix(in srgb, var(--color-primary) 24%, transparent);
+    }
+    #ff-design-tab .ff-bg-mini {
+        display:grid;
+        grid-template-columns:1fr 1fr;
+        height:88px;
+        border-radius:10px;
+        overflow:hidden;
+        border:1px solid var(--border-color);
+    }
+    #ff-design-tab .ff-bg-half { display:flex; gap:6px; padding:8px; min-width:0; }
+    #ff-design-tab .ff-bg-side { flex:0 0 10px; border-radius:4px; }
+    #ff-design-tab .ff-bg-cardm {
+        flex:1;
+        min-width:0;
+        display:flex;
+        flex-direction:column;
+        gap:5px;
+        padding:8px 7px;
+        border-radius:7px;
+        border:1px solid transparent;
+    }
+    #ff-design-tab .ff-bg-cardm i { display:block; height:5px; border-radius:3px; }
+    #ff-design-tab .ff-bg-cardm i:first-child { width:72%; }
+    #ff-design-tab .ff-bg-cardm i:nth-child(2) { width:92%; }
+    #ff-design-tab .ff-bg-cardm b { display:block; width:42%; height:10px; margin-top:auto; border-radius:4px; background:var(--color-primary); }
+    #ff-design-tab .ff-bg-meta { display:flex; flex-direction:column; gap:3px; padding:0 2px; }
+    #ff-design-tab .ff-bg-name {
+        display:flex;
+        align-items:center;
+        gap:6px;
+        flex-wrap:wrap;
+        font-size:0.875rem;
+        font-weight:650;
+        color:var(--text-primary);
+    }
+    #ff-design-tab .ff-bg-chip {
+        padding:2px 7px;
+        border-radius:999px;
+        font-size:0.625rem;
+        font-weight:700;
+        letter-spacing:0.08em;
+        text-transform:uppercase;
+        color:var(--color-primary);
+        background:color-mix(in srgb, var(--color-primary) 14%, transparent);
+    }
+    #ff-design-tab .ff-bg-chip--used { color:var(--text-secondary); background:var(--bg-surface-2); }
+    #ff-design-tab .ff-bg-blurb { font-size:0.75rem; line-height:1.4; color:var(--text-secondary); }
 </style>
 
 <div id="ff-design-tab" x-data="FF_DesignTab(<?= e(json_encode([
@@ -249,7 +330,70 @@ $brandApi = base_url('api/v1/settings/brand');
     'currentFavicon'   => $faviconUrl,
     'hasLogo'          => $brand_logo_path !== '',
     'hasFavicon'       => $brand_favicon_path !== '',
+    'background'       => $brand_background,
 ], JSON_UNESCAPED_SLASHES)) ?>)">
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!-- CARD 0 — Background (S-BACKGROUNDS)                         -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="card" style="margin-bottom:20px;">
+    <div class="card-header" style="font-weight:600;">Background</div>
+    <div class="card-body">
+        <form @submit.prevent="saveBackground()" data-card="brand-background">
+            <p class="ff-helper" style="margin:0 0 14px;font-size:0.8125rem;">
+                The colour of every page, card and the sidebar, for everyone, in both dark and light mode.
+                Click a palette to try it on this page. Nothing changes for anyone else until you save.
+            </p>
+            <div class="ff-bg-grid" role="radiogroup" aria-label="Background palette">
+                <?php foreach ($backgrounds as $_bk => $_bg):
+                    [$_dp, $_dc, $_dc2, $_dt] = $_bg['dark'];
+                    [$_lp, $_lc, $_lc2, $_lt] = $_bg['light']; ?>
+                <button type="button" class="ff-bg-tile" role="radio"
+                        data-bg-key="<?= e($_bk) ?>"
+                        aria-label="<?= e($_bg['label'] . ' — ' . $_bg['blurb']) ?>"
+                        :class="{ 'is-active': bg === '<?= e($_bk) ?>' }"
+                        :aria-checked="bg === '<?= e($_bk) ?>' ? 'true' : 'false'"
+                        @click="previewBackground('<?= e($_bk) ?>')">
+                    <span class="ff-bg-mini" aria-hidden="true">
+                        <span class="ff-bg-half" style="background:<?= e($_dp) ?>;">
+                            <span class="ff-bg-side" style="background:<?= e($_dc) ?>;"></span>
+                            <span class="ff-bg-cardm" style="background:<?= e($_dc) ?>;border-color:<?= e($_dc2) ?>;">
+                                <i style="background:<?= e($_dt) ?>;opacity:.85;"></i><i style="background:<?= e($_dc2) ?>;"></i><b></b>
+                            </span>
+                        </span>
+                        <span class="ff-bg-half" style="background:<?= e($_lp) ?>;">
+                            <span class="ff-bg-side" style="background:<?= e($_dp) ?>;"></span>
+                            <span class="ff-bg-cardm" style="background:<?= e($_lc) ?>;border-color:<?= e($_lc2) ?>;">
+                                <i style="background:<?= e($_lt) ?>;opacity:.85;"></i><i style="background:<?= e($_lc2) ?>;"></i><b></b>
+                            </span>
+                        </span>
+                    </span>
+                    <span class="ff-bg-meta">
+                        <span class="ff-bg-name">
+                            <?= e($_bg['label']) ?>
+                            <?php if ($_bk === FF_BACKGROUND_DEFAULT): ?><span class="ff-bg-chip">Recommended</span><?php endif; ?>
+                            <span class="ff-bg-chip ff-bg-chip--used" x-show="savedBg === '<?= e($_bk) ?>'" x-cloak>In use</span>
+                        </span>
+                        <span class="ff-bg-blurb"><?= e($_bg['blurb']) ?></span>
+                    </span>
+                </button>
+                <?php endforeach; ?>
+            </div>
+
+            <div class="ff-card-actions">
+                <button type="submit" class="btn btn-primary btn-sm" :disabled="saving['brand-background'] || bg === savedBg">
+                    <span x-show="!saving['brand-background']">Save Background</span>
+                    <span x-show="saving['brand-background']" x-cloak>Saving&hellip;</span>
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" x-show="bg !== savedBg" x-cloak @click="previewBackground(savedBg)">Undo preview</button>
+                <span class="ff-save-msg"
+                      :style="msgStyle('brand-background')"
+                      x-text="msg['brand-background'] || ''"
+                      x-show="msg['brand-background']"></span>
+            </div>
+        </form>
+    </div>
+</div>
 
 <!-- ════════════════════════════════════════════════════════════ -->
 <!-- CARD 1 — Brand Identity                                    -->
@@ -419,6 +563,8 @@ function FF_DesignTab(init) {
         faviconPreview: init.currentFavicon || '',
         faviconMeta:    '',
         hasFavicon:     !!init.hasFavicon,
+        bg:             init.background || 'midnight',
+        savedBg:        init.background || 'midnight',
         saving:         {},
         msg:            {},
         msgOk:          {},
@@ -474,6 +620,19 @@ function FF_DesignTab(init) {
         },
         resetDefault() {
             this.applyPreview('#2596be');
+        },
+
+        // ── Background palette (S-BACKGROUNDS) ────────────────
+        // Preview = swap <html data-bg>; backgrounds.css re-colours the
+        // whole page instantly. Saving writes brand.background, which
+        // every page shell reads through ff_background().
+        previewBackground(key) {
+            this.bg = key;
+            document.documentElement.setAttribute('data-bg', key);
+        },
+        async saveBackground() {
+            await this.postFields({ brand_background: this.bg }, 'brand-background');
+            if (this.msgOk['brand-background']) this.savedBg = this.bg;
         },
 
         // ── File previews ─────────────────────────────────────

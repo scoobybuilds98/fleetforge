@@ -13,7 +13,9 @@ declare(strict_types=1);
  *              Both leases.deleted_at and customers.deleted_at checked per D5.
  *
  * @method      GET
- * @query       search, status, customer_id, unit_id, page, per_page, sort, dir
+ * @query       search, status, statuses, customer_id, unit_id, focus
+ *              (ending|overdue|starting|unbilled — see _focus.php), page,
+ *              per_page, sort, dir
  * @auth        Session required; require_permission('leases','view')
  * @returns     200 paginated { items, pagination }
  *
@@ -87,6 +89,17 @@ if ($search = clean_string($_GET['search'] ?? null)) {
     $like    = '%' . $search . '%';
     $where[] = '(l.contract_number LIKE ? OR l.company_name_snapshot LIKE ? OR l.unit_number_snapshot LIKE ?)';
     array_push($params, $like, $like, $like);
+}
+
+// focus — one of the dispatcher work lists behind the summary strip
+// (ending / overdue / starting / unbilled). Defined once in _focus.php so the
+// strip's counts (kpis.php) and this list always agree. Unknown keys are ignored.
+if ($focus = clean_string($_GET['focus'] ?? null)) {
+    require_once __DIR__ . '/_focus.php';
+    if ($frag = ff_lease_focus_sql($focus, ff_today())) {
+        $where[] = '(' . $frag[0] . ')';
+        array_push($params, ...$frag[1]);
+    }
 }
 
 // customer_filter — contextual sub-filter shown when sorting by customer name.

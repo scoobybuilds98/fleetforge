@@ -646,6 +646,8 @@ $ccaCount = count($ccaApplications);
 $pageTitle = 'Settings';
 $helpModuleSlug = 'settings';
 require_once FF_ROOT . '/includes/header.php';
+// S-SETTINGS-REDESIGN: settings shell + panel styling (this page only).
+echo '<link rel="stylesheet" href="' . e(asset_url('assets/css/settings.css')) . '?v=' . e(FF_ASSET_VERSION) . '">';
 
 if (empty($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
@@ -698,43 +700,88 @@ $permittedTabs = [];
 foreach ($tabPermMap as $tab => $perm) {
     if (can($perm, 'view')) { $permittedTabs[] = $tab; }
 }
+
+// ── S-SETTINGS-REDESIGN: the grouped settings navigation ──────────────────────
+// Each tab: [label, icon, one-line purpose, group, badge count|null, accent].
+// Order here is the order in the nav. Permission + lock behaviour is unchanged
+// ($tabPermMap); Lockout stays invisible to everyone but super_admin.
+$setTabs = [
+    'general'                => ['General', 'cog-6-tooth', 'Company details, billing defaults, security and regional basics', 'Company', null, 'primary'],
+    'design'                 => ['Design', 'pencil', 'Brand colour, logo, PDF look and display defaults', 'Company', null, 'primary'],
+    'credit_application'     => ['Credit Application', 'clipboard-document-check', 'The credit form customers fill in, and every application sent', 'Company', (int) $ccaCount, 'primary'],
+    'users'                  => ['Users', 'users', 'Staff accounts — managed in the Users module', 'People & access', (int) $userCount, 'purple'],
+    'lockout'                => ['Lockout', 'x-circle', 'Lock a staff account out immediately', 'People & access', $lockedUserCount > 0 ? (int) $lockedUserCount : null, 'danger'],
+    'portal_users'           => ['Portal & Requests', 'building-storefront', 'Customer portal logins and where service requests go', 'People & access', (int) $portalUserCount, 'purple'],
+    'customer_notifications' => ['Customer Emails', 'envelope', 'Reminders and notices FleetForge sends to customers', 'Communication', null, 'info'],
+    'integrations'           => ['Integrations', 'arrow-path', 'QuickBooks, Samsara, email, file storage and AI keys', 'Connections & automation', null, 'success'],
+    'intelligence'           => ['Intelligence', 'sparkles', 'AI briefings, alerts and scheduled jobs', 'Connections & automation', null, 'success'],
+    'system'                 => ['System', 'wrench-screwdriver', 'Versions, environment and health checks', 'System', null, 'warning'],
+    'backup'                 => ['Backup', 'inbox-arrow-down', 'Database and file backups, and where they are kept', 'System', null, 'warning'],
+    'audit'                  => ['Audit Log', 'list-bullet', 'Who changed what, and when', 'System', (int) $recentAuditCount, 'warning'],
+];
+if (!$isSuperAdmin) {
+    unset($setTabs['lockout']);
+}
+// Panel header data for Alpine (icons pre-rendered here; trusted markup).
+$setTabsJs = [];
+foreach ($setTabs as $_k => [$_l, $_i, $_d, $_g, $_b, $_a]) {
+    $setTabsJs[$_k] = ['label' => $_l, 'icon' => \FleetForge\Sop\SopIcons::svg($_i), 'desc' => $_d, 'group' => $_g, 'accent' => $_a];
+}
 ?>
 
-<div x-data="{ activeTab: '<?= e($defaultTab) ?>' }"
+<div x-data="{ activeTab: '<?= e($defaultTab) ?>', setTabs: <?= e(json_encode($setTabsJs, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP)) ?> }"
      x-init="
         const _t = FF_TabHash.initWithQuery(<?= htmlspecialchars(json_encode($permittedTabs), ENT_QUOTES) ?>, activeTab);
         activeTab = _t;
         FF_TabHash.watchUnload(() => activeTab);
         let _p = _t;
-        $watch('activeTab', (v) => { FF_TabHash.onSwitch(_p, v); _p = v; });
+        /* S-SETTINGS-REDESIGN: the section nav stays put when a section is
+           picked. FF_TabHash's onSwitch helper scrolls the page to the top —
+           right for a tab bar, but here it threw the (sticky) nav back down
+           under the hero on every click. Instead: remember + write the hash
+           as before, and only if the reader had scrolled past the top of
+           the settings area, scroll back to exactly where the nav sticks —
+           so the nav doesn't move and the new section starts at its header. */
+        $watch('activeTab', (v) => {
+            FF_TabHash.save(_p); FF_TabHash.write(v); _p = v;
+            requestAnimationFrame(() => {
+                const shell = document.querySelector('.set-shell'), nav = shell && shell.querySelector('.set-nav');
+                if (!shell || !nav) return;
+                const stick = parseFloat(getComputedStyle(nav).top);
+                const off = isNaN(stick) ? (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--topbar-height')) || 60) + 12 : stick;
+                const y = shell.getBoundingClientRect().top + window.scrollY - off;
+                if (window.scrollY > y) window.scrollTo({ top: y, behavior: 'instant' });
+            });
+        });
+        /* A deep link (?tab=audit) may open a section below the fold of the
+           nav's own scroll: bring it into view once, on load. Clicks never
+           scroll the nav — the item clicked is already in view. */
+        $nextTick(() => {
+            const n = document.querySelector('.set-nav'), a = n && n.querySelector('.set-nav-item.is-active');
+            if (!n || !a || n.scrollHeight <= n.clientHeight) return;
+            const top = a.getBoundingClientRect().top - n.getBoundingClientRect().top + n.scrollTop, bottom = top + a.offsetHeight;
+            if (top < n.scrollTop || bottom > n.scrollTop + n.clientHeight) n.scrollTop = top - n.clientHeight / 2 + a.offsetHeight / 2;
+        });
      ">
 
-<div class="page-header" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-    <div>
-        <h1 class="page-header-title">Settings</h1>
-        <p style="margin:4px 0 0;font-size:0.8125rem;color:var(--text-muted);">System configuration, user management, and administration</p>
-    </div>
-    <div class="page-header-actions">
+<?php /* S-SETTINGS-REDESIGN: module hero replaces the plain header; the
+         Email Templates / Bulk Email / Late Fees links moved into the
+         settings navigation ("More tools"). */ ?>
+<?php ob_start(); ?>
         <?= help_button('settings') ?>
-        <?php /* EMAIL-1: link to standalone email templates manager */ ?>
-        <a href="<?= base_url('settings/email_templates') ?>" class="btn btn-secondary btn-sm">
-            <?= heroicon('envelope', 'btn-icon') ?>
-            Email Templates
-        </a>
-        <a href="<?= base_url('email/bulk') ?>" class="btn btn-secondary btn-sm">
-            <?= heroicon('paper-airplane', 'btn-icon') ?>
-            Bulk Email
-        </a>
-        <?php /* I19: standalone late-fee rules screen (app/admin/settings/late_fees.php) */ ?>
-        <a href="<?= base_url('settings/late_fees') ?>" class="btn btn-secondary btn-sm">
-            <?= heroicon('receipt-percent', 'btn-icon') ?>
-            Late Fees
-        </a>
         <?php if (!$canEdit): ?>
         <span class="badge badge-neutral">View Only</span>
         <?php endif; ?>
-    </div>
-</div>
+<?= \FleetForge\Ui\ModuleHero::render([
+    'crumbs'   => [['Dashboard', base_url('dashboard')], ['Settings', null]],
+    'eyebrow'  => 'Administration',
+    'icon'     => 'cog-6-tooth',
+    'accent'   => 'primary',
+    'title'    => 'Settings',
+    'subtitle' => 'How FleetForge works for your company — details, look, people, customer emails, connections and backups.',
+    'art'      => 'settings',
+    'actions'  => ob_get_clean(),
+]) ?>
 
 <?php if ($saveFlash): ?>
 <div class="toast toast-success" style="position:relative;margin-bottom:16px;animation:none;">
@@ -758,98 +805,64 @@ $_lockSvg = '<span class="tab-lock-icon" aria-hidden="true">'
     . '<path d="M7 11V7a5 5 0 0 1 10 0v4"/>'
     . '</svg></span>';
 ?>
-<!-- ── Tab Navigation ─────────────────────────────────────────────────────── -->
-<div class="tab-bar" role="tablist" style="margin-bottom:24px;">
+<!-- ── Settings navigation (S-SETTINGS-REDESIGN) ─────────────────────────────
+     Grouped, vertical, with a one-line purpose per section. Same activeTab
+     state + FF_TabHash deep links as the old tab bar; a section the viewer
+     cannot open still shows, locked (Lockout is omitted for non-super-admins). -->
+<div class="set-shell">
+<aside class="set-nav" role="tablist" aria-label="Settings sections">
+    <?php $_setGroup = null; ?>
+    <?php foreach ($setTabs as $_k => [$_l, $_i, $_d, $_g, $_b, $_a]): ?>
+        <?php if ($_g !== $_setGroup): $_setGroup = $_g; ?>
+        <div class="set-nav-label"><?= e($_g) ?></div>
+        <?php endif; ?>
+        <?php if (can($tabPermMap[$_k], 'view')): ?>
+        <button type="button" class="set-nav-item ff-acc--<?= e($_a) ?>" role="tab"
+                :class="{ 'is-active': activeTab === '<?= e($_k) ?>' }"
+                :aria-selected="activeTab === '<?= e($_k) ?>' ? 'true' : 'false'"
+                @click="activeTab = '<?= e($_k) ?>'">
+            <span class="set-nav-ic" aria-hidden="true"><?= \FleetForge\Sop\SopIcons::svg($_i) ?></span>
+            <span class="set-nav-text"><span class="set-nav-name"><?= e($_l) ?></span><span class="set-nav-sub"><?= e($_d) ?></span></span>
+            <?php if ($_b !== null && $_b > 0): ?><span class="set-nav-badge<?= $_k === 'lockout' ? ' is-danger' : '' ?>"><?= e((string) $_b) ?></span><?php endif; ?>
+        </button>
+        <?php else: ?>
+        <span class="set-nav-item is-locked ff-acc--<?= e($_a) ?>" title="You don't have access to <?= e($_l) ?> settings">
+            <span class="set-nav-ic" aria-hidden="true"><?= \FleetForge\Sop\SopIcons::svg($_i) ?></span>
+            <span class="set-nav-text"><span class="set-nav-name"><?= e($_l) ?></span><span class="set-nav-sub"><?= e($_d) ?></span></span>
+            <?= $_lockSvg ?>
+        </span>
+        <?php endif; ?>
+    <?php endforeach; ?>
 
-    <?php $_can = can('settings_general', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'general\' }" @click="activeTab = \'general\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to General settings"' ?>>
-        General<?= $_can ? '' : $_lockSvg ?>
-    </button>
+    <div class="set-nav-label">More tools</div>
+    <a href="<?= base_url('settings/email_templates') ?>" class="set-nav-item set-nav-link ff-acc--info">
+        <span class="set-nav-ic" aria-hidden="true"><?= \FleetForge\Sop\SopIcons::svg('envelope-open') ?></span>
+        <span class="set-nav-text"><span class="set-nav-name">Email Templates</span><span class="set-nav-sub">The wording of every email FleetForge sends</span></span>
+        <span class="set-nav-go" aria-hidden="true">→</span>
+    </a>
+    <a href="<?= base_url('email/bulk') ?>" class="set-nav-item set-nav-link ff-acc--info">
+        <span class="set-nav-ic" aria-hidden="true"><?= \FleetForge\Sop\SopIcons::svg('paper-airplane') ?></span>
+        <span class="set-nav-text"><span class="set-nav-name">Bulk Email</span><span class="set-nav-sub">Send one message to many customers</span></span>
+        <span class="set-nav-go" aria-hidden="true">→</span>
+    </a>
+    <?php /* I19: standalone late-fee rules screen (app/admin/settings/late_fees.php) */ ?>
+    <a href="<?= base_url('settings/late_fees') ?>" class="set-nav-item set-nav-link ff-acc--info">
+        <span class="set-nav-ic" aria-hidden="true"><?= \FleetForge\Sop\SopIcons::svg('receipt-percent') ?></span>
+        <span class="set-nav-text"><span class="set-nav-name">Late Fees</span><span class="set-nav-sub">When and how overdue invoices are charged</span></span>
+        <span class="set-nav-go" aria-hidden="true">→</span>
+    </a>
+</aside>
 
-    <?php $_can = can('settings_design', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'design\' }" @click="activeTab = \'design\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Design settings"' ?>>
-        Design<?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_users', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'users\' }" @click="activeTab = \'users\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Users settings"' ?>>
-        Users<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$userCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php /* S-USER-LOCKOUT: deliberately NOT the standard grey-lock treatment
-             every other tab gets when the viewer lacks permission — this
-             button is omitted from the DOM entirely for anyone who isn't
-             is_super_admin(), so the feature's existence isn't advertised
-             to accounts it might one day be used against. */ ?>
-    <?php if ($isSuperAdmin): ?>
-    <button class="tab-btn" :class="{ 'is-active': activeTab === 'lockout' }" @click="activeTab = 'lockout'" role="tab">
-        Lockout<?= $lockedUserCount > 0 ? ' <span class="tab-badge" style="font-size:0.7rem;background:var(--color-danger);color:#fff;">' . e((string)$lockedUserCount) . '</span>' : '' ?>
-    </button>
-    <?php endif; ?>
-
-    <?php $_can = can('settings_portal', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'portal_users\' }" @click="activeTab = \'portal_users\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Portal &amp; Requests settings"' ?>>
-        Portal &amp; Requests<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$portalUserCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_audit', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'audit\' }" @click="activeTab = \'audit\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Audit Log settings"' ?>>
-        Audit Log<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$recentAuditCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_system', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'system\' }" @click="activeTab = \'system\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to System settings"' ?>>
-        System<?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_system', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'backup\' }" @click="activeTab = \'backup\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Backup settings"' ?>>
-        Backup<?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_integrations', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'integrations\' }" @click="activeTab = \'integrations\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Integrations settings"' ?>>
-        Integrations<?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_intelligence', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'intelligence\' }" @click="activeTab = \'intelligence\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Intelligence settings"' ?>>
-        Intelligence<?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_general', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'credit_application\' }" @click="activeTab = \'credit_application\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Credit Application settings"' ?>>
-        Credit Application<?= $_can ? ' <span class="tab-badge" style="font-size:0.7rem;">' . e((string)$ccaCount) . '</span>' : '' ?><?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-    <?php $_can = can('settings_customer_notifications', 'view'); ?>
-    <button class="tab-btn<?= $_can ? '' : ' tab-btn--locked' ?>"
-            <?= $_can ? ':class="{ \'is-active\': activeTab === \'customer_notifications\' }" @click="activeTab = \'customer_notifications\'"' : '' ?>
-            role="tab" <?= $_can ? '' : 'title="You don\'t have access to Customer Emails settings"' ?>>
-        Customer Emails<?= $_can ? '' : $_lockSvg ?>
-    </button>
-
-</div>
+<div class="set-main">
+    <!-- Panel header: follows the active section -->
+    <header class="set-panel-head" x-show="setTabs[activeTab]">
+        <span class="set-panel-ic" :class="'ff-acc--' + ((setTabs[activeTab] || {}).accent || 'primary')" x-html="(setTabs[activeTab] || {}).icon" aria-hidden="true"></span>
+        <div class="set-panel-text">
+            <div class="set-panel-group" x-text="(setTabs[activeTab] || {}).group"></div>
+            <h2 class="set-panel-title" x-text="(setTabs[activeTab] || {}).label"></h2>
+            <p class="set-panel-sub" x-text="(setTabs[activeTab] || {}).desc"></p>
+        </div>
+    </header>
 
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TAB 1: GENERAL SETTINGS                                                 -->
@@ -3274,6 +3287,9 @@ function FF_AuditFeed() {
 </script>
 
 </div><!-- /intelligence tab -->
+
+</div><!-- /set-main -->
+</div><!-- /set-shell -->
 
 </div><!-- /x-data root -->
 

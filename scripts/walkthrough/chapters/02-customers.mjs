@@ -58,35 +58,35 @@ export default {
     },
     {
       say: "The Leases tab lists every contract for this customer, current and past. Filter by status, or click View to open one.",
-      run: async (d) => { await d.click(tab('Leases')); await d.wait(700); await d.highlight('table', 'Leases for this customer', 2200); },
+      run: async (d) => { await d.tab('Leases'); await d.wait(700); await d.highlight('table', 'Leases for this customer', 2200); },
     },
     {
       say: 'The Invoices tab shows every invoice with its billing period, status, due date, and remaining balance.',
-      run: async (d) => { await d.click(tab('Invoices')); await d.wait(700); await d.scroll(400); await d.scroll(-400); },
+      run: async (d) => { await d.tab('Invoices'); await d.wait(700); await d.scroll(400); await d.scroll(-400); },
     },
     {
       say: 'Credit Application tracks the credit form sent to this customer: when it went out, whether it came back, and the decision.',
-      run: async (d) => { await d.click(tab('Credit Application')); await d.wait(1200); },
+      run: async (d) => { await d.tab('Credit Application'); await d.wait(1200); },
     },
     {
       say: 'Rates holds any customer-specific rate card. When one exists, new leases for this customer use those prices instead of the standard rates.',
-      run: async (d) => { await d.click(tab('Rates')); await d.wait(1500); },
+      run: async (d) => { await d.tab('Rates'); await d.wait(1500); },
     },
     {
       say: 'Documents, Damage Claims, Mileage Logs and Email History each gather that customer’s records in one place, so you never have to search other modules.',
       caption: 'Documents, Damage Claims, Mileage Logs and Email History each gather that customer’s records in one place.',
       run: async (d) => {
-        await d.click(tab('Damage Claims')); await d.wait(900);
-        await d.click(tab('Email History')); await d.wait(900);
+        await d.tab('Damage Claims'); await d.wait(900);
+        await d.tab('Email History'); await d.wait(900);
       },
     },
     {
       say: 'Use Notes for anything the team should know about the account. Activity is an automatic log of every change and who made it.',
       run: async (d) => {
-        await d.click(tab('Notes')); await d.wait(600);
+        await d.tab('Notes'); await d.wait(600);
         await d.type('[x-model="newNote"]', 'Prefers invoices on the 1st. Call Kyle before any unit swap.', { delay: 28 });
         await d.wait(600);
-        await d.click(tab('Activity')); await d.wait(1200);
+        await d.tab('Activity'); await d.wait(1200);
       },
     },
     {

@@ -1,0 +1,46 @@
+<svg class="dg dg--art-settings" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>A control panel of switches and sliders</title>
+  <!-- control panel -->
+  <rect class="dg-surface" x="40" y="18" width="236" height="166" rx="16"/>
+  <rect class="dg-acc-faint" x="40" y="18" width="236" height="34" rx="16"/>
+  <circle class="dg-dot--danger" cx="60" cy="35" r="4"/>
+  <circle class="dg-dot--warn" cx="74" cy="35" r="4"/>
+  <circle class="dg-dot--ok" cx="88" cy="35" r="4"/>
+  <text class="dg-t-xs dg-t-start" x="108" y="39">SETTINGS</text>
+
+  <!-- switches -->
+  <text class="dg-t-sm dg-t-start" x="60" y="80">Customer emails</text>
+  <rect class="dg-acc" x="214" y="68" width="40" height="20" rx="10"/>
+  <circle class="dg-surface" cx="244" cy="78" r="7"/>
+  <text class="dg-t-sm dg-t-start" x="60" y="112">QuickBooks sync</text>
+  <rect class="dg-ok-soft" x="214" y="100" width="40" height="20" rx="10"/>
+  <circle class="dg-dot--ok" cx="244" cy="110" r="7"/>
+  <text class="dg-t-sm dg-t-start" x="60" y="144">Monthly invoices</text>
+  <rect class="dg-surface-2" x="214" y="132" width="40" height="20" rx="10"/>
+  <circle class="dg-ink" cx="224" cy="142" r="7" opacity=".55"/>
+  <line class="dg-line-soft" x1="60" y1="94" x2="254" y2="94"/>
+  <line class="dg-line-soft" x1="60" y1="126" x2="254" y2="126"/>
+  <line class="dg-line-soft" x1="60" y1="158" x2="254" y2="158"/>
+  <text class="dg-t-xs dg-t-start" x="60" y="174">3 OF 4 ON</text>
+
+  <!-- sliders -->
+  <g>
+    <rect class="dg-surface" x="300" y="30" width="112" height="120" rx="14"/>
+    <line class="dg-line" x1="326" y1="48" x2="326" y2="128"/>
+    <line class="dg-line" x1="356" y1="48" x2="356" y2="128"/>
+    <line class="dg-line" x1="386" y1="48" x2="386" y2="128"/>
+    <line class="dg-acc-line" x1="326" y1="128" x2="326" y2="74"/>
+    <line class="dg-acc-line" x1="356" y1="128" x2="356" y2="98"/>
+    <line class="dg-acc-line" x1="386" y1="128" x2="386" y2="62"/>
+    <g class="dg-float"><rect class="dg-acc" x="318" y="68" width="16" height="12" rx="4"/></g>
+    <g class="dg-float--2"><rect class="dg-acc" x="348" y="92" width="16" height="12" rx="4"/></g>
+    <g class="dg-float"><rect class="dg-acc" x="378" y="56" width="16" height="12" rx="4"/></g>
+    <text class="dg-t-xs" x="356" y="144">DEFAULTS</text>
+  </g>
+
+  <!-- saved -->
+  <circle class="dg-pulse dg-pulse--ok" cx="356" cy="176" r="12"/>
+  <circle class="dg-ok-soft" cx="356" cy="176" r="13"/>
+  <path class="dg-check" d="M350,176 l4,4 l8,-9" style="stroke-width:2.5"/>
+  <path class="dg-acc-flow" d="M276,150 C300,168 318,176 340,176"/>
+</svg>

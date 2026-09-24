@@ -1060,6 +1060,34 @@ function ff_company_short_name(): string
 }
 }
 
+// ff_backgrounds() — the background palette registry (config/backgrounds.php,
+// S-BACKGROUNDS). Loaded once per request; loading it also defines
+// FF_BACKGROUND_DEFAULT.
+if (!function_exists('ff_backgrounds')) {
+function ff_backgrounds(): array
+{
+    static $registry = null;
+    if ($registry === null) {
+        $registry = require dirname(__DIR__) . '/config/backgrounds.php';
+    }
+    return $registry;
+}
+}
+
+// ff_background() — the palette key every page shell writes to
+// <html data-bg="…"> (public/assets/css/backgrounds.css holds the tokens).
+// Chosen by a super admin in Settings → Design (`brand.background`). A stored
+// key the registry no longer knows falls back to the default instead of
+// leaving the page with no palette.
+if (!function_exists('ff_background')) {
+function ff_background(): string
+{
+    $registry = ff_backgrounds();
+    $key      = (string) (settings_get('brand.background') ?? '');
+    return isset($registry[$key]) ? $key : FF_BACKGROUND_DEFAULT;
+}
+}
+
 // ff_switch_identity_hint() — "is this the same person?" marker for the
 // deployment switcher. NOT a credential.
 //

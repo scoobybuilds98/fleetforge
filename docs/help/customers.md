@@ -88,17 +88,18 @@ To lift the hold, change the status back to **Active** and save.
 
 Open a customer to see their profile. Use the tabs to navigate:
 
-- **Overview** — all contact info, address, regulatory numbers (DOT, MC, GST/PST), billing contact, and commercial terms.
+- **Overview** — what the customer has on rent now, then contact & address, billing & terms, and tax & regulatory details.
 - **Notes** — internal team notes. Pinned notes appear at the top. Anyone with edit access can add notes.
 - **Leases** — every lease, active and historical. Filter by status, sort by date or rate.
 - **Invoices** — all invoices with status, due date, and balance due. Filter and sort to find what you need.
+- **Payments** — every payment received from this customer (roles that see money).
 - **Damage Claims** — claims filed against equipment this customer had on lease.
 - **Mileage Logs** — GPS sync and manual odometer records for their leased units.
 - **Rates** — the customer-specific rate cards that hold this customer's negotiated pricing.
 - **Documents** — uploaded files like tax exemption certificates or credit agreements.
 - **Email History** — every email sent to this customer from FleetForge, with the body and status.
 
-The four stat tiles at the top of the profile are clickable — they jump directly to the Leases, Invoices, or Documents tab.
+The tiles at the top show what is on rent, **Outstanding**, **Overdue**, **Lifetime revenue** and **Account credit** (the money tiles need a role that sees money) — click one to jump to that tab or report. The panel on the right shows the account (balance, credit-limit use, last payment), what needs attention (overdue or draft invoices, leases ending soon, expiring documents, a credit application to review), contact details and quick actions. **Send Email** and **Edit** are in the header; **AI Analysis** and **Delete** are under **More**.
 
 ---
 

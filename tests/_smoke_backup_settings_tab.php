@@ -44,7 +44,9 @@ if (str_contains($idx, "'backup'") && preg_match("/'backup'\s*=>\s*'settings_sys
     ko("'backup' tab not in \$tabPermMap");
 }
 $hasContentBlock = str_contains($idx, "x-show=\"activeTab === 'backup'\"");
-$hasTabButton    = str_contains($idx, 'Backup<?=');           // tab button label line
+// S-SETTINGS-REDESIGN: the tab bar became a grouped nav built from $setTabs,
+// so the "button" is the Backup entry in that list.
+$hasTabButton    = (bool) preg_match("/'backup'\s*=>\s*\['Backup'/", $idx);
 if ($hasContentBlock && $hasTabButton) {
     ok('Backup tab button + content block present');
 } else {

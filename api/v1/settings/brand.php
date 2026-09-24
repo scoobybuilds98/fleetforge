@@ -12,6 +12,7 @@ declare(strict_types=1);
  *
  * Fields accepted (all optional — only saved when present):
  *   brand_primary_color           hex /^#[0-9a-fA-F]{6}$/
+ *   brand_background              a key of config/backgrounds.php (S-BACKGROUNDS)
  *   logo_file                     PNG/SVG/JPG up to 2 MB
  *   logo_remove=1                 deletes the current logo
  *   favicon_file                  PNG/ICO up to 512 KB
@@ -179,6 +180,19 @@ if (isset($_POST['brand_primary_color']) && $_POST['brand_primary_color'] !== ''
         $writes['brand.primary_color']    = $hex;
         $writes['brand.primary_hover']    = ff_darken($hex, 0.12);
         $writes['brand.primary_light']    = ff_mix_with_white($hex, 0.90);
+    }
+}
+
+// ── Background palette (S-BACKGROUNDS) ─────────────────────
+// Allowlisted against config/backgrounds.php — the same registry the page
+// shells (ff_background()) and backgrounds.css are built from, so a saved
+// key always has a palette behind it.
+if (isset($_POST['brand_background']) && $_POST['brand_background'] !== '') {
+    $bg = (string) $_POST['brand_background'];
+    if (!array_key_exists($bg, ff_backgrounds())) {
+        $errors[] = 'Background must be one of: ' . implode(', ', array_keys(ff_backgrounds())) . '.';
+    } else {
+        $writes['brand.background'] = $bg;
     }
 }
 

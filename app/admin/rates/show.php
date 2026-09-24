@@ -10,6 +10,25 @@ declare(strict_types=1);
  * S-LEASE-MIN-DAYS: each rate item shows/edits minimum_days — the per-equipment
  * short-lease daily floor (em-dash when null); persisted via update.php.
  *
+ * Layout (S-RECORD-REDESIGN):
+ *   The Alpine component (FF_RateCardShow) opens ABOVE the header so the
+ *   actions live there: + Add Rate (primary), Edit details; the rest (new
+ *   card for this customer, all cards, Delete) in the More menu — the old
+ *   bottom-of-page "Delete This Rate Card" button moved there.
+ *   header — ModuleHero entity: card name + Active/Expired/Upcoming +
+ *            Default badges; customer (or "All customers") · effective
+ *            window chips
+ *   strip  — rates (live count) · applies to (customer / general) ·
+ *            effective (days left / expired / starts) · last updated
+ *   main   — Card Details (in-place edit, customer record-picker) · Rate
+ *            Items (the cream cards + editor, unchanged)
+ *   rail   — Needs attention (no rates, expired / not yet effective, rates
+ *            with no prices, archived customer, overlapping customer cards)
+ *            · Customer (with active-lease count) · How this card is used
+ *            (the lookup order) · Record (created / updated)
+ *   "Leases using this card" is not shown: leases copy their rates and keep
+ *   no rate_card_id, so it is not queryable (see the rail note instead).
+ *
  * D30: asset_url() / base_url().
  * D32: Only confirmed CSS classes.
  * D19: updated_at passed on every update.
@@ -19,7 +38,7 @@ declare(strict_types=1);
  *           api/v1/rate_cards/show.php, api/v1/rate_cards/update.php
  *           includes/partials/record-picker.php
  * @decisions D5/D7/D16/D19/D30/D32
- * @session  S019, S-RATES-REDESIGN
+ * @session  S019, S-RATES-REDESIGN, S-RECORD-REDESIGN
  */
 
 require_once realpath(dirname(__DIR__, 3) . '/config/app.php');
@@ -69,35 +88,144 @@ $categoryLabels = [];
 foreach (db_select("SELECT slug, label FROM equipment_subcategories WHERE deleted_at IS NULL") as $r) { $categoryLabels[$r['slug']] = $r['label']; }
 foreach (db_select("SELECT slug, label FROM equipment_categories WHERE deleted_at IS NULL") as $r) { $categoryLabels[$r['slug']] = $r['label']; }
 
-$today    = date('Y-m-d');
+// Company-local day (S-RECORD-REDESIGN: was PHP-local date('Y-m-d')).
+$today    = ff_today();
 $isActive = ($card['effective_from'] <= $today &&
              ($card['effective_to'] === null || $card['effective_to'] >= $today));
+$isExpired  = $card['effective_to'] !== null && $card['effective_to'] < $today;
+$isUpcoming = $card['effective_from'] > $today;
+$daysTo = static fn (string $d): int => (int) round((strtotime($d) - strtotime($today)) / 86400);
 
-$pageTitle = e($card['name']);
+// ── Rail / strip facts (S-RECORD-REDESIGN) ─────────────────────────────────
+// Rates with every price blank (a row the lookup would find but can't price).
+$emptyItems = 0;
+$templateItems = 0;
+foreach ($items as $it) {
+    $priced = false;
+    foreach (['daily_rate', 'weekly_rate', 'monthly_rate', 'mileage_rate', 'hourly_rate', 'gps_price'] as $col) {
+        if ($it[$col] !== null && bccomp((string) $it[$col], '0', 4) > 0) { $priced = true; break; }
+    }
+    if (!$priced) $emptyItems++;
+    if (!empty($it['equipment_template_id'])) $templateItems++;
+}
+$custActiveLeases = null;
+$otherCustCards   = [];
+if (!empty($card['customer_id'])) {
+    $custActiveLeases = (int) (db_row(
+        "SELECT COUNT(*) AS c FROM leases WHERE customer_id = ? AND status = 'active' AND deleted_at IS NULL",
+        [(int) $card['customer_id']]
+    )['c'] ?? 0);
+    // Other cards for the same customer whose window overlaps this one — the
+    // lookup then prefers is_default, then the newest effective_from.
+    $otherCustCards = db_select(
+        "SELECT id, name FROM rate_cards
+          WHERE customer_id = ? AND id <> ? AND deleted_at IS NULL
+            AND effective_from <= COALESCE(?, '9999-12-31')
+            AND COALESCE(effective_to, '9999-12-31') >= ?
+          ORDER BY is_default DESC, effective_from DESC LIMIT 5",
+        [(int) $card['customer_id'], $cardId, $card['effective_to'], $card['effective_from']]
+    );
+}
+
+// Raw: includes/header.php escapes it (was e() here → "53&#039; T/A" in the tab/topbar).
+$pageTitle = (string) $card['name'];
 require_once FF_ROOT . '/includes/header.php';
+
+// ── Header (S-RECORD-REDESIGN) ──────────────────────────────────────────────
+$heroTitle = e($card['name'])
+    . ' <span class="badge ' . ($isActive ? 'badge-success' : ($isExpired ? 'badge-danger' : 'badge-neutral')) . '">' . ($isActive ? 'Active' : ($isExpired ? 'Expired' : ($isUpcoming ? 'Upcoming' : 'Inactive'))) . '</span>'
+    . ($card['is_default'] ? ' <span class="badge badge-info">Default</span>' : '');
+$heroFacts = [];
+if ($card['customer_id']) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('user-group') . (can('customers', 'view')
+        ? '<a href="' . e(base_url('customers/show')) . '?id=' . (int) $card['customer_id'] . '">' . e($card['customer_name'] ?? 'Customer') . '</a>'
+        : e($card['customer_name'] ?? 'Customer'));
+} else {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('users') . 'All customers (general card)';
+}
+$heroFacts[] = \FleetForge\Sop\SopIcons::svg('calendar-days') . e(format_date($card['effective_from'])) . ' → ' . ($card['effective_to'] ? e(format_date($card['effective_to'])) : 'open-ended');
+if (!empty($card['description'])) {
+    $heroFacts[] = \FleetForge\Sop\SopIcons::svg('document-text') . e(mb_strimwidth((string) $card['description'], 0, 60, '…'));
+}
 ?>
+<?php ob_start(); /* secondary actions → the header's More menu */ ?>
+    <a href="<?= base_url('rates') ?>">All rate cards</a>
+    <?php if ($card['customer_id'] && can('rates', 'create')): ?>
+    <a href="<?= base_url('rates/create') ?>?customer_id=<?= (int) $card['customer_id'] ?>">New card for this customer</a>
+    <?php endif; ?>
+    <?php if ($card['customer_id'] && can('customers', 'view')): ?>
+    <a href="<?= base_url('customers/show') ?>?id=<?= (int) $card['customer_id'] ?>#rates">Customer's rate cards</a>
+    <?php endif; ?>
+    <?php if (can('rates', 'delete') && !$card['is_default']): ?>
+    <button class="btn btn-danger btn-sm" @click="deleteModal.open = true">Delete This Rate Card</button>
+    <?php endif; ?>
+<?php $heroMore = ob_get_clean(); ?>
+<?php ob_start(); ?>
+    <?= help_button('rates') ?>
+    <?php if (can('rates', 'edit')): ?>
+    <button class="btn btn-primary btn-sm" @click="addItem()">+ Add Rate</button>
+    <button class="btn btn-secondary btn-sm" x-show="!editMode" @click="editMode = true">Edit details</button>
+    <?php endif; ?>
+    <?= \FleetForge\Ui\RecordUi::more($heroMore) ?>
+<?php $heroActions = ob_get_clean(); ?>
 
-<div class="page-header">
-    <a href="<?= base_url('rates') ?>" class="btn btn-ghost btn-sm">← Back to Rates</a>
-    <h1 class="page-header-title"><?= e($card['name']) ?></h1>
-    <div style="display:flex;gap:8px;align-items:center;">
-        <span class="badge <?= $isActive ? 'badge-success' : 'badge-neutral' ?>">
-            <?= $isActive ? 'Active' : 'Inactive' ?>
-        </span>
-        <?php if ($card['is_default']): ?>
-        <span class="badge badge-info">Default</span>
-        <?php endif; ?>
-        <?php if ($card['customer_id']): ?>
-        <a href="<?= base_url('customers/show') ?>?id=<?= (int)$card['customer_id'] ?>" class="badge badge-neutral" style="text-decoration:none;">
-            <?= e($card['customer_name'] ?? 'Customer') ?>
-        </a>
-        <?php else: ?>
-        <span class="badge badge-neutral">Global</span>
-        <?php endif; ?>
-    </div>
-</div>
-
+<!-- The component opens ABOVE the header so + Add Rate / Edit / Delete can live there. -->
 <div x-data="FF_RateCardShow()">
+<?= \FleetForge\Ui\ModuleHero::render([
+    'entity'     => true,
+    'accent'     => $isExpired ? 'danger' : 'primary',
+    'icon'       => 'currency-dollar',
+    'avatar'     => $card['customer_id'] ? \FleetForge\Ui\ModuleHero::initials((string) ($card['customer_name'] ?? '')) : '',
+    'crumbs'     => [['Dashboard', base_url('dashboard')], ['Rates', base_url('rates')], [(string) $card['name'], null]],
+    'eyebrow'    => $card['customer_id'] ? 'Customer rate card' : 'General rate card',
+    'title_html' => $heroTitle,
+    'facts'      => $heroFacts,
+    'actions'    => $heroActions,
+]) ?>
+
+    <!-- KEY NUMBERS (S-RECORD-REDESIGN): how many rates the card carries
+         (live), who it prices, how long it stays in force, and when it last
+         changed. -->
+    <div class="stat-grid stat-grid--4 ff-stats">
+        <div class="stat-card stat-card--blue">
+            <span class="stat-icon stat-icon--blue"><svg><use href="#icon-tag"/></svg></span>
+            <div class="stat-label">Rates</div>
+            <div class="stat-value font-mono" x-text="items.length"><?= count($items) ?></div>
+            <div class="stat-delta" x-text="new Set(items.map(i => i.equipment_type).filter(Boolean)).size + ' types'"></div>
+        </div>
+        <?php if ($card['customer_id'] && can('customers', 'view')): ?>
+        <a class="stat-card stat-card--purple" href="<?= base_url('customers/show') ?>?id=<?= (int) $card['customer_id'] ?>#rates" title="The customer's rate cards">
+        <?php else: ?>
+        <div class="stat-card stat-card--purple">
+        <?php endif; ?>
+            <span class="stat-icon stat-icon--purple"><svg><use href="#icon-<?= $card['customer_id'] ? 'key' : 'building' ?>"/></svg></span>
+            <div class="stat-label">Applies to</div>
+            <div class="stat-value"><?= $card['customer_id'] ? 'One customer' : 'Everyone' ?></div>
+            <div class="stat-delta"><?= $card['customer_id'] ? e(mb_strimwidth((string) ($card['customer_name'] ?? ''), 0, 22, '…')) : ($card['is_default'] ? 'default' : 'general') ?></div>
+        <?= ($card['customer_id'] && can('customers', 'view')) ? '</a>' : '</div>' ?>
+        <?php
+        if ($isExpired) {
+            $effVal = format_date($card['effective_to']); $effDelta = (-$daysTo($card['effective_to'])) . 'd ago'; $effTone = 'red';
+        } elseif ($isUpcoming) {
+            $effVal = format_date($card['effective_from']); $effDelta = 'in ' . $daysTo($card['effective_from']) . 'd'; $effTone = 'amber';
+        } elseif ($card['effective_to']) {
+            $effVal = format_date($card['effective_to']); $effDelta = $daysTo($card['effective_to']) . 'd left'; $effTone = $daysTo($card['effective_to']) <= 30 ? 'amber' : 'green';
+        } else {
+            $effVal = 'Open-ended'; $effDelta = 'no end date'; $effTone = 'green';
+        }
+        ?>
+        <div class="stat-card stat-card--<?= $effTone ?>">
+            <span class="stat-icon stat-icon--<?= $effTone ?>"><svg><use href="#icon-<?= $effTone === 'red' ? 'exclamation-triangle' : 'clock' ?>"/></svg></span>
+            <div class="stat-label"><?= $isExpired ? 'Expired' : ($isUpcoming ? 'Starts' : 'In force until') ?></div>
+            <div class="stat-value stat-value--date font-mono"<?= $isExpired ? ' style="color:var(--color-danger);"' : '' ?>><?= e($effVal) ?></div>
+            <div class="stat-delta"><?= e($effDelta) ?></div>
+        </div>
+        <div class="stat-card stat-card--slate">
+            <span class="stat-icon stat-icon--slate"><svg><use href="#icon-pencil-square"/></svg></span>
+            <div class="stat-label">Last updated</div>
+            <div class="stat-value stat-value--date font-mono"><?= e(format_datetime($card['updated_at'], 'M j, Y')) ?></div>
+        </div>
+    </div>
 
     <!-- Global messages -->
     <div class="alert alert-danger" x-show="globalError" x-text="globalError"
@@ -105,8 +233,11 @@ require_once FF_ROOT . '/includes/header.php';
     <div class="alert alert-success" x-show="saveSuccess"
          style="margin-bottom:16px;" x-cloak>Rate card saved successfully.</div>
 
+<div class="rec-layout">
+<div class="rec-main">
+
     <!-- ── Card metadata ─────────────────────────────────────────────────── -->
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
             <h3 class="card-title">Card Details</h3>
             <?php if (can('rates', 'edit')): ?>
@@ -208,19 +339,12 @@ require_once FF_ROOT . '/includes/header.php';
                 </div>
 
             </div>
-
-            <!-- Meta info -->
-            <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border-color);
-                        display:flex;gap:24px;font-size:0.8125rem;color:var(--text-secondary);">
-                <span>Created by: <?= e($card['created_by_name'] ?? '—') ?></span>
-                <span>Created: <?= e(format_datetime($card['created_at'])) ?></span>
-                <span>Updated: <?= e(format_datetime($card['updated_at'])) ?></span>
-            </div>
+            <?php /* S-RECORD-REDESIGN: the created/updated meta row moved to the rail's Record card. */ ?>
         </div>
     </div>
 
     <!-- ── Rate Items ─────────────────────────────────────────────────────── -->
-    <div class="card" style="margin-bottom:24px;">
+    <div class="card" id="rate-items">
         <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;">
             <div>
                 <h3 class="card-title" style="display:inline;">Rate Items</h3>
@@ -499,12 +623,68 @@ require_once FF_ROOT . '/includes/header.php';
         </template>
     </div>
 
-    <!-- ── Delete card button ─────────────────────────────────────────────── -->
-    <?php if (can('rates', 'delete') && !$card['is_default']): ?>
-    <div style="margin-bottom:32px;">
-        <button class="btn btn-danger btn-sm" @click="deleteModal.open = true">Delete This Rate Card</button>
-    </div>
-    <?php endif; ?>
+</div><!-- /rec-main -->
+<?php
+// ── RAIL (S-RECORD-REDESIGN) — the rate card at a glance ────────────────────
+$R = \FleetForge\Ui\RecordUi::class;
+$rail = [];
+
+$alerts = [];
+if ($isExpired) {
+    $alerts[] = ['danger', 'Expired ' . e(format_date($card['effective_to'])) . ' — new leases no longer pick this card up.'];
+} elseif ($isUpcoming) {
+    $alerts[] = ['info', 'Not in force until ' . e(format_date($card['effective_from'])) . '.'];
+} elseif ($card['effective_to'] && $daysTo($card['effective_to']) <= 30) {
+    $alerts[] = ['warning', 'Ends in ' . $daysTo($card['effective_to']) . ' day' . ($daysTo($card['effective_to']) === 1 ? '' : 's') . ' (' . e(format_date($card['effective_to'])) . ') — renew or extend it.'];
+}
+if ($emptyItems > 0) {
+    $alerts[] = ['warning', $emptyItems . ' rate' . ($emptyItems === 1 ? ' has' : 's have') . ' no prices set.'];
+}
+if ($card['customer_id'] && $card['customer_name'] === null) {
+    $alerts[] = ['warning', 'The customer on this card is archived — it will not price any new lease.'];
+}
+if ($otherCustCards) {
+    $links = array_map(static fn ($c) => '<a href="' . e(base_url('rates/show')) . '?id=' . (int) $c['id'] . '">' . e($c['name']) . '</a>', $otherCustCards);
+    $alerts[] = ['info', 'Also in force for this customer: ' . implode(', ', $links) . '. A type on both cards is refused on save.'];
+}
+// The "no rates" item is live — it follows + Add Rate / Delete before saving.
+$attention = $R::alerts($alerts, '');
+if ($alerts === []) {
+    $attention = '<ul class="rec-alerts"></ul>';
+}
+$attention = str_replace('<ul class="rec-alerts">', '<ul class="rec-alerts"><li class="is-warning" x-show="items.length === 0" x-cloak><span>No rates yet — this card prices nothing.' . (can('rates', 'edit') ? ' Use <b>+ Add Rate</b>.' : '') . '</span></li>', $attention)
+    . ($alerts === [] ? '<p class="rec-alerts-ok" x-show="items.length > 0">All clear — nothing needs attention.</p>' : '');
+$rail[] = $R::card('Needs attention', $attention, ['icon' => 'exclamation-triangle']);
+
+// Customer.
+if ($card['customer_id']) {
+    $rail[] = $R::card('Customer',
+        $R::entity((string) ($card['customer_name'] ?? 'Archived customer'), can('customers', 'view') ? base_url('customers/show') . '?id=' . (int) $card['customer_id'] : '',
+            $custActiveLeases !== null ? $custActiveLeases . ' active lease' . ($custActiveLeases === 1 ? '' : 's') : 'Customer',
+            \FleetForge\Ui\ModuleHero::initials((string) ($card['customer_name'] ?? '')))
+        . (can('customers', 'view') && can('leases', 'view') && $custActiveLeases ? '<div style="margin-top:10px;">' . $R::links([['Their leases', base_url('customers/show') . '?id=' . (int) $card['customer_id'] . '#leases', 'calendar-days']]) . '</div>' : ''),
+        ['icon' => 'user-group', 'class' => 'rec-card--accent']);
+}
+
+// How the card is used — the lookup order new leases follow.
+$rail[] = $R::card('How it is used', $R::kv([
+    ['Priced first', $card['customer_id'] ? 'This customer\'s cards' : 'Customer cards'],
+    ['Then', $card['customer_id'] ? 'General cards' : ($card['is_default'] ? '<b>This card</b> (default)' : 'General cards — default first')],
+    ['Then', 'The unit type\'s default rates'],
+    ['Unit-specific', $templateItems > 0 ? $templateItems . ' rate' . ($templateItems === 1 ? '' : 's') . ' override a category' : null],
+]) . '<p class="text-secondary" style="margin:8px 0 0;font-size:11.5px;">Leases copy their rates when created, so editing this card never changes existing leases.</p>',
+    ['icon' => 'scale']);
+
+$rail[] = $R::card('Record', $R::kv([
+    ['Created by', e($card['created_by_name'] ?? '—')],
+    ['Created', e(format_datetime($card['created_at']))],
+    ['Updated', e(format_datetime($card['updated_at']))],
+]), ['icon' => 'clock']);
+?>
+<aside class="rec-rail" aria-label="Rate card at a glance">
+    <?= implode("\n    ", $rail) ?>
+</aside>
+</div><!-- /rec-layout -->
 
     <!-- ── Delete modal ───────────────────────────────────────────────────── -->
     <div class="modal-backdrop" x-show="deleteModal.open" x-cloak>

@@ -38,13 +38,13 @@ New units always start with a status of **Available**.
 ## Viewing a unit
 
 1. Click a **Unit #** (or **View**) in the list to open the unit's detail page.
-2. The hero strip shows **Health Score**, **Mileage**, **CVI Expiry** (with days remaining/overdue), and **VIN**. A pulsing **Live** badge and **Track in Samsara** button appear when the unit is linked to Samsara.
+2. The tiles show **Status** (and who has it on rent), **Odometer**, the **Next expiry** (CVI, registration, MVI or insurance — whichever is soonest), **Open work orders**, and — for roles that see money, when a fixed asset is linked — how much of the unit is **Paid off**. The panel on the right shows the current rental, what needs attention (expired or expiring documents, open work orders or claims, a stalled odometer, no Samsara link), the unit's identity (make, VIN, plate…) and its last Samsara location. A pulsing **Live** badge and **Track in Samsara** button appear when the unit is linked to Samsara.
 3. Move between tabs to drill in:
 
 | Tab | What it shows |
 |-----|---------------|
 | **Overview** | Identity, specifications, live Samsara summary, and notes |
-| **Payoff Analysis** | Investment-recovery projections from the linked fixed asset |
+| **Payoff Analysis** | The unit's whole payoff story on one page (roles that see money): how much it has paid for itself, what is still to recover and when, scenarios + a what-if, charts, the itemised costs (acquisition, earnings, fixed costs, financing, book value), revenue by lease and a month-by-month P&L |
 | **Compliance** | CVI, registration, MVI, and insurance expiry dates and status |
 | **Lease History** | Every lease this unit has been on |
 | **Damage Claims** | Damage claims filed against this unit |

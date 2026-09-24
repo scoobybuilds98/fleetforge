@@ -14,13 +14,15 @@ The home screen of FleetForge. It answers one question first — *what needs me 
 
 ## Needs attention
 
-A row of cards for the things waiting on you, most urgent first. Only the ones that apply appear:
+A row of cards for the things waiting on you, most urgent first. Only the ones that apply appear, and the row shows the **five most urgent** — when more apply, the heading says so and **Show all** opens the rest:
 
 - **Overdue invoices** — past their due date (with the amount owed if your role sees money).
 - **Leases waiting to start** — pending leases; red when a start date has already passed.
 - **Draft invoices** — not sent yet.
 - **Returns this week** — leases ending in the next 7 days.
+- **Customers waiting on a reply** — open service requests from the customer portal.
 - **Pickups today**, **Renewals due** (unit documents expiring within 30 days), **Open damage claims** and **Open work orders**.
+- **Units idle 30+ days** — ready to rent but not earning, with the longest wait.
 
 Click a card to open that list already filtered. When nothing needs you, the row says **Nothing needs you right now**.
 

@@ -133,33 +133,34 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <div id="invoices-table-card" x-data="FF_Invoices()">
 
-    <!-- ── TAB BAR ───────────────────────────────────────────────── -->
-    <div class="tab-bar" role="tablist">
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'outstanding' }"
-                @click="setTab('outstanding')" :aria-selected="activeTab === 'outstanding'" role="tab">
-            Outstanding
-        </button>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'paid' }"
-                @click="setTab('paid')" :aria-selected="activeTab === 'paid'" role="tab">
-            Paid
-        </button>
-        <button class="tab-btn" :class="{ 'is-active': activeTab === 'all' }"
-                @click="setTab('all')" :aria-selected="activeTab === 'all'" role="tab">
-            All
-        </button>
-    </div>
-
-    <!-- ── FILTER TOOLBAR ────────────────────────────────────────── -->
+    <!-- ── TABLE TOOLBAR — status tabs, search, sort, pager ─────────
+         The status tabs live in the table's own heading (S-LIST-COMPACT);
+         the page-wide tab bar and the full-width pager row are gone. -->
     <div class="table-toolbar">
 
         <div class="table-toolbar-left">
+            <div class="tab-bar" role="tablist" aria-label="Invoice status">
+                <button class="tab-btn" :class="{ 'is-active': activeTab === 'outstanding' }"
+                        @click="setTab('outstanding')" :aria-selected="activeTab === 'outstanding'" role="tab">
+                    Outstanding
+                </button>
+                <button class="tab-btn" :class="{ 'is-active': activeTab === 'paid' }"
+                        @click="setTab('paid')" :aria-selected="activeTab === 'paid'" role="tab">
+                    Paid
+                </button>
+                <button class="tab-btn" :class="{ 'is-active': activeTab === 'all' }"
+                        @click="setTab('all')" :aria-selected="activeTab === 'all'" role="tab">
+                    All
+                </button>
+            </div>
+
             <input type="search"
                    class="form-control form-control-sm"
                    placeholder="Search invoice #, company…"
                    x-model="filters.search"
                    @input.debounce.400ms="resetPage()"
                    maxlength="255"
-                   style="min-width:220px;"
+                   style="min-width:200px;"
                    aria-label="Search invoices">
 
             <!-- Status filter — only on All tab -->
@@ -222,19 +223,19 @@ require_once FF_ROOT . '/includes/header.php';
             <select class="form-select form-control-sm"
                     x-model="filters.dir"
                     @change="resetPage()"
-                    aria-label="Direction">
+                    aria-label="Direction"
+                    style="width:auto;">
                 <option value="DESC">↓ Desc</option>
                 <option value="ASC">↑ Asc</option>
             </select>
+
+            <?php $position = 'toolbar'; require FF_ROOT . '/includes/partials/pagination-bar.php'; ?>
         </div>
 
     </div>
 
     <!-- ── TABLE CARD ────────────────────────────────────────────── -->
     <div class="card">
-
-        <!-- Top pagination — reachable without scrolling past a page of rows -->
-        <?php $position = 'top'; require FF_ROOT . '/includes/partials/pagination-bar.php'; ?>
 
         <!-- Loading skeleton -->
         <template x-if="loading">

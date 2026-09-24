@@ -67,8 +67,10 @@ assertTrue(
     str_contains($src, '>Generate Invoice</a>')
 );
 assertTrue(
+    // S-RECORD-REDESIGN: the status actions moved into the record header,
+    // where every action button is btn-sm.
     "show.php button uses btn-primary class (matches Activate Lease pattern)",
-    (bool) preg_match('/class="btn btn-primary">Generate Invoice<\/a>/', $src)
+    (bool) preg_match('/class="btn btn-primary(?: btn-sm)?">Generate Invoice<\/a>/', $src)
 );
 
 echo "\nLogic truth table (status × permission):\n";
