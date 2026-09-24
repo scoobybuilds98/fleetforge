@@ -24,7 +24,13 @@ namespace FleetForge\AI;
  *   - Summaries cached in ai_summaries table (is_current = 1)
  *   - Default TTL: 24 hours (configurable via ai.summary_ttl_hours)
  *   - Cache can be bypassed with $forceRefresh parameter
- *   - Only one "current" summary per (entity_type, entity_id, summary_type)
+ *   - Only one "current" summary per (entity_type, entity_id, summary_type,
+ *     with_money). with_money = the viewer's can_view_financials() at generate
+ *     time: the gathered context is redacted per viewer, so the cached TEXT is
+ *     too — an admin's money-bearing summary must never be served to a
+ *     dispatcher (S-AI-SUMMARY-MONEY-KEY). Every cache read/write goes through
+ *     cachedSummary()/cacheSummary() with the same $withMoney the context was
+ *     gathered under.
  *
  * @depends lib/AI/ClaudeClient.php, lib/AI/Tools/FleetForgeTools.php
  * @session S027
@@ -55,10 +61,15 @@ class SummaryEngine
         bool   $forceRefresh = false,
         array  $reportContext = []
     ): ?array {
+        // WHY: resolve the viewer's money tier ONCE — gatherContext() redacts by
+        // the same predicate, so the tier we read/write under must be the tier
+        // the text was generated under (S-AI-SUMMARY-MONEY-KEY).
+        $withMoney = self::moneyTierFor($userId);
+
         // WHY: Check cache first unless explicitly refreshing. cachedSummary()
         // is shared with the streaming endpoint so the two read-paths can't drift.
         if (!$forceRefresh) {
-            $cached = self::cachedSummary($entityType, $entityId, $summaryType);
+            $cached = self::cachedSummary($entityType, $entityId, $summaryType, $withMoney);
             if ($cached !== null) {
                 return [
                     'summary'      => $cached['content'],
@@ -103,7 +114,7 @@ class SummaryEngine
         $tokensUsed = ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['output_tokens'] ?? 0);
 
         // WHY: Store in cache — mark old summaries as not current first
-        self::cacheSummary($entityType, $entityId, $summaryType, $summaryText, $tokensUsed, $ai->getModel(), $userId);
+        self::cacheSummary($entityType, $entityId, $summaryType, $summaryText, $tokensUsed, $ai->getModel(), $userId, $withMoney);
 
         return [
             'summary'      => $summaryText,
@@ -120,18 +131,44 @@ class SummaryEngine
     // Retrieves a non-expired cached summary. Returns null if
     // no valid cache exists.
     // ────────────────────────────────────────────────────────────
-    private static function getCached(string $entityType, int $entityId, string $summaryType): ?array
+    private static function getCached(string $entityType, int $entityId, string $summaryType, bool $withMoney): ?array
     {
         return db_row(
             "SELECT content, generated_at, expires_at
              FROM ai_summaries
              WHERE entity_type = ? AND entity_id = ? AND summary_type = ?
+               AND with_money = ?
                AND is_current = 1
                AND (expires_at IS NULL OR expires_at > NOW())
              ORDER BY generated_at DESC
              LIMIT 1",
-            [$entityType, $entityId, $summaryType]
+            [$entityType, $entityId, $summaryType, $withMoney ? 1 : 0]
         );
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // viewerWithMoney()
+    //
+    // The cache tier for the current session: can_view_financials(), the same
+    // predicate FleetForgeTools redacts by. No session (CLI) → false, so an
+    // unauthenticated caller can only ever reach money-free rows.
+    // ────────────────────────────────────────────────────────────
+    public static function viewerWithMoney(): bool
+    {
+        return \function_exists('can_view_financials') && \can_view_financials();
+    }
+
+    // ────────────────────────────────────────────────────────────
+    // moneyTierFor()
+    //
+    // The tier a context gathered for $userId lands in. Mirrors
+    // FleetForgeTools::canViewFinancials(): a null user is a system/cron call
+    // that gets UNREDACTED tool output, so its text belongs in the money tier —
+    // tagging it 0 would hand amounts to dispatchers.
+    // ────────────────────────────────────────────────────────────
+    public static function moneyTierFor(?int $userId): bool
+    {
+        return $userId === null ? true : self::viewerWithMoney();
     }
 
     // ────────────────────────────────────────────────────────────
@@ -142,8 +179,11 @@ class SummaryEngine
     // Honors ai.cache_summaries and the date-range skip rule (P&L / BS / CF /
     // budget_variance produce a different narrative per range → never cached).
     // Returns the cached row (content + generated_at + expires_at) or null.
+    //
+    // $withMoney = the viewer's money tier (S-AI-SUMMARY-MONEY-KEY); null →
+    // derived from the session. A row generated for the other tier is a miss.
     // ────────────────────────────────────────────────────────────
-    public static function cachedSummary(string $entityType, int $entityId, string $summaryType): ?array
+    public static function cachedSummary(string $entityType, int $entityId, string $summaryType, ?bool $withMoney = null): ?array
     {
         if (!(bool) settings_get('ai.cache_summaries', true)) {
             return null;
@@ -154,14 +194,18 @@ class SummaryEngine
         if ($skipCacheForDateRange) {
             return null;
         }
-        return self::getCached($entityType, $entityId, $summaryType);
+        return self::getCached($entityType, $entityId, $summaryType, $withMoney ?? self::viewerWithMoney());
     }
 
     // ────────────────────────────────────────────────────────────
     // cacheSummary()
     //
     // Upserts a generated summary into ai_summaries (one row per
-    // entity+type, keyed by UNIQUE(entity_type,entity_id,summary_type)).
+    // entity+type+money tier, keyed by
+    // UNIQUE(entity_type,entity_id,summary_type,with_money)).
+    //
+    // $withMoney MUST be the tier the context was gathered under; null →
+    // moneyTierFor($userId) (S-AI-SUMMARY-MONEY-KEY).
     // ────────────────────────────────────────────────────────────
     public static function cacheSummary(
         string $entityType,
@@ -170,8 +214,10 @@ class SummaryEngine
         string $content,
         int    $tokensUsed,
         string $model,
-        ?int   $userId
+        ?int   $userId,
+        ?bool  $withMoney = null
     ): void {
+        $withMoney ??= self::moneyTierFor($userId);
         try {
             $ttlHours  = (int) settings_get('ai.summary_ttl_hours', self::DEFAULT_TTL_HOURS);
             // S-LOCAL-DAY-TS: ai_summaries.generated_at/expires_at are UTC —
@@ -181,8 +227,8 @@ class SummaryEngine
             $expiresAt = \ff_now_utc("+{$ttlHours} hours");
             $now       = \ff_now_utc();
 
-            // WHY: ai_summaries has UNIQUE(entity_type,entity_id,summary_type) — at
-            // most one row per tuple. The old "UPDATE is_current=0 then INSERT the
+            // WHY: ai_summaries has UNIQUE(entity_type,entity_id,summary_type,
+            // with_money) — at most one row per tuple. The old "UPDATE is_current=0 then INSERT the
             // same tuple" collided with that key (1062) on EVERY regeneration; the
             // error was swallowed and the row left is_current=0, so getCached()
             // returned null forever and each later request re-billed Claude
@@ -190,9 +236,9 @@ class SummaryEngine
             // "history" rotation is impossible under the unique key.
             db_execute(
                 "INSERT INTO ai_summaries
-                    (entity_type, entity_id, summary_type, content, tokens_used,
+                    (entity_type, entity_id, summary_type, with_money, content, tokens_used,
                      model_used, generated_at, expires_at, generated_by, is_current)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                  ON DUPLICATE KEY UPDATE
                     content      = VALUES(content),
                     tokens_used  = VALUES(tokens_used),
@@ -201,7 +247,7 @@ class SummaryEngine
                     expires_at   = VALUES(expires_at),
                     generated_by = VALUES(generated_by),
                     is_current   = 1",
-                [$entityType, $entityId, $summaryType, $content, $tokensUsed,
+                [$entityType, $entityId, $summaryType, $withMoney ? 1 : 0, $content, $tokensUsed,
                  $model, $now, $expiresAt, $userId]
             );
         } catch (\Throwable $e) {
@@ -602,7 +648,7 @@ Total invoiced vs paid, outstanding balance, last billing date, next billing dat
 GPS tracking status, mileage tracking (from/to), any close notes or inspection issues.
 
 **Action Items**
-What needs to happen next? Be specific (e.g. "Invoice overdue $X since [date]", "Lease ending in 30 days — initiate renewal", "Mileage allowance nearly exhausted").
+What needs to happen next? Be specific (e.g. "Invoice overdue \$X since [date]", "Lease ending in 30 days — initiate renewal", "Mileage allowance nearly exhausted").
 
 Lease data:
 {$dataJson}

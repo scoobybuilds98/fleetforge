@@ -108,13 +108,20 @@ if ($needPerm !== null && !can($needPerm, 'view')) {
     $emitErr('You do not have permission to view this ' . $entityType . '.');
 }
 
+// ── Money tier (S-AI-SUMMARY-MONEY-KEY) ───────────────────────────────────────
+// gatherContext() redacts amounts unless can_view_financials(), so the streamed
+// text is only safe for viewers in the same tier. Resolve it ONCE and use it for
+// both the cache read and the cache write — an admin's summary (balances,
+// revenue) must never be served to a dispatcher from the cache.
+$withMoney = \FleetForge\AI\SummaryEngine::moneyTierFor($userId);
+
 // ── Serve from cache when allowed — skip the paid AI call ─────────────────────
 // The Generate button sends force=0 (use cache), Regenerate sends force=1. Without
 // this read the endpoint re-billed Claude on every open and the partial's "Cached
 // result" badge was dead. Gated on ai.cache_summaries via cachedSummary().
 // S-AI-AUDIT-HIGH-FIX.
 if (!$force) {
-    $cachedRow = \FleetForge\AI\SummaryEngine::cachedSummary($entityType, $entityId, $summaryType);
+    $cachedRow = \FleetForge\AI\SummaryEngine::cachedSummary($entityType, $entityId, $summaryType, $withMoney);
     if ($cachedRow !== null) {
         echo 'data: ' . json_encode(['t' => 'tok', 'c' => (string) $cachedRow['content']]) . "\n\n";
         // ai_summaries.generated_at is a UTC DATETIME and the card prints this value
@@ -171,7 +178,8 @@ $tokensUsed = ($response['usage']['input_tokens'] ?? 0) + ($response['usage']['o
     $fullText,
     $tokensUsed,
     $ai->getModel(),
-    $userId
+    $userId,
+    $withMoney
 );
 
 echo 'data: ' . json_encode(['t' => 'done']) . "\n\n";

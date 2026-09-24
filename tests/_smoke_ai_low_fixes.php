@@ -17,6 +17,9 @@ declare(strict_types=1);
  * C — summary cache read-side: SummaryEngine::cachedSummary returns null when
  *     ai.cache_summaries is off, and the cached row when it's on (the read the
  *     streaming endpoint now performs to skip a paid AI call).
+ *     S-AI-SUMMARY-MONEY-KEY: the seeded row is money-tier (with_money DEFAULT 1)
+ *     and this CLI has no session (→ redacted tier), so the reads pass the tier
+ *     explicitly; the cross-tier behavior is _smoke_ai_summary_money_tier.php.
  *
  * @session S-AI-AUDIT-HIGH-FIX
  */
@@ -89,12 +92,12 @@ try {
 
     // Setting OFF → no cache served (audit: settings were inert; now they decide).
     db_execute("UPDATE settings SET value='0' WHERE `key`='ai.cache_summaries'");
-    $offHit = SummaryEngine::cachedSummary('lease', $eid, 'lease_summary');
+    $offHit = SummaryEngine::cachedSummary('lease', $eid, 'lease_summary', true);
     ok('cache_summaries=0 → cachedSummary returns null', $offHit === null);
 
     // Setting ON → cache served.
     db_execute("UPDATE settings SET value='1' WHERE `key`='ai.cache_summaries'");
-    $onHit = SummaryEngine::cachedSummary('lease', $eid, 'lease_summary');
+    $onHit = SummaryEngine::cachedSummary('lease', $eid, 'lease_summary', true);
     ok('cache_summaries=1 → cachedSummary returns the row', is_array($onHit) && $onHit['content'] === 'CACHED body', json_encode($onHit));
 
     // Date-range narrative never caches even when the setting is on.
