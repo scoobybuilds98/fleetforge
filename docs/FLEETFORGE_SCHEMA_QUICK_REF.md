@@ -1,8 +1,8 @@
 # FleetForge — Schema Quick Reference
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
-**Generated:** 2026-07-09
-**Tables:** 162 total · **Columns:** 2596
+**Generated:** 2026-09-24
+**Tables:** 176 total · **Columns:** 2793
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -354,6 +354,7 @@ _12 tables._
 | `hourly_rate` | decimal(10,4) |  | YES |
 | `engine_hours_at_start` | decimal(10,2) |  | YES |
 | `engine_hours_at_end` | decimal(10,2) |  | YES |
+| `estimated_engine_hours_per_day` | decimal(10,2) |  | NO |
 | `cartage_amount` | decimal(10,2) |  | YES |
 | `cartage_billed_at` | datetime |  | YES |
 | `engine_version` | enum('period_independent','holistic') |  | NO |
@@ -398,6 +399,7 @@ _12 tables._
 | `origin` | enum('ff_native','qbo_payments_webhook','qbo_other') |  | NO |
 | `reference_number` | varchar(100) |  | YES |
 | `bank_name` | varchar(100) |  | YES |
+| `deposit_bank_account_id` | int unsigned | MUL | YES |
 | `check_number` | varchar(50) |  | YES |
 | `card_last_four` | varchar(4) |  | YES |
 | `payment_date` | date | MUL | NO |
@@ -493,6 +495,9 @@ _12 tables._
 | `last_login_ip` | varchar(45) |  | YES |
 | `login_attempts` | tinyint unsigned |  | NO |
 | `locked_until` | datetime |  | YES |
+| `locked_at` | datetime |  | YES |
+| `locked_by` | int unsigned | MUL | YES |
+| `lock_reason` | varchar(500) |  | YES |
 | `invite_token` | varchar(100) |  | YES |
 | `invite_token_expiry` | datetime |  | YES |
 | `invite_sent_at` | datetime |  | YES |
@@ -565,7 +570,7 @@ _12 tables._
 
 # Accounting (`acc_*`) tables
 
-_71 tables._
+_72 tables._
 
 ## `acc_accounts`
 
@@ -641,6 +646,7 @@ _71 tables._
 | `currency` | enum('CAD','USD') |  | NO |
 | `exchange_rate_to_cad` | decimal(10,6) |  | YES |
 | `status` | enum('pending','cleared','void') |  | NO |
+| `origin` | enum('ff_native','qbo_payments_webhook','qbo_other') |  | NO |
 | `void_reason` | text |  | YES |
 | `voided_by` | int unsigned | MUL | YES |
 | `voided_at` | datetime |  | YES |
@@ -708,6 +714,7 @@ _71 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `invoice_id` | int unsigned | MUL | NO |
 | `customer_id` | int unsigned | MUL | NO |
+| `damage_claim_id` | int unsigned | MUL | YES |
 | `writeoff_date` | date |  | NO |
 | `amount` | decimal(15,2) |  | NO |
 | `reason` | text |  | NO |
@@ -748,6 +755,8 @@ _71 tables._
 | `period_id` | int unsigned | MUL | NO |
 | `statement_date` | date |  | NO |
 | `statement_ending_balance` | decimal(15,2) |  | NO |
+| `beginning_balance` | decimal(15,2) |  | YES |
+| `cleared_balance` | decimal(15,2) |  | YES |
 | `book_balance` | decimal(15,2) |  | NO |
 | `outstanding_deposits` | decimal(15,2) |  | NO |
 | `outstanding_checks` | decimal(15,2) |  | NO |
@@ -805,6 +814,7 @@ _71 tables._
 | `capitalize` | tinyint(1) |  | NO |
 | `betterment_note` | text |  | YES |
 | `asset_id` | int unsigned | MUL | YES |
+| `equipment_unit_id` | int unsigned | MUL | YES |
 | `sort_order` | tinyint unsigned |  | NO |
 | `is_auto_categorized` | tinyint(1) |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
@@ -995,6 +1005,7 @@ _71 tables._
 | `amount` | decimal(15,2) |  | NO |
 | `currency` | enum('CAD','USD') |  | NO |
 | `received_date` | date |  | NO |
+| `bank_account_id` | int unsigned | MUL | YES |
 | `status` | enum('held','applied','refunded','forfeited') | MUL | NO |
 | `applied_to_invoice_id` | int unsigned | MUL | YES |
 | `applied_date` | date |  | YES |
@@ -1113,6 +1124,7 @@ _71 tables._
 | `monthly_licensing_cost` | decimal(10,2) |  | YES |
 | `monthly_registration_cost` | decimal(10,2) |  | YES |
 | `acquisition_bill_id` | int unsigned | MUL | YES |
+| `is_opening_balance` | tinyint(1) | MUL | NO |
 | `vendor_id` | int unsigned | MUL | YES |
 | `depreciation_method` | enum('straight_line','declining_balance','units_of_production','none') |  | NO |
 | `useful_life_years` | decimal(5,2) |  | YES |
@@ -1193,7 +1205,7 @@ _71 tables._
 | `approved_at` | datetime |  | YES |
 | `description` | varchar(500) |  | NO |
 | `reference` | varchar(255) |  | YES |
-| `source_type` | enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','impairment','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment') | MUL | YES |
+| `source_type` | enum('invoice','payment','credit_note','ap_bill','ap_payment','bank_transaction','depreciation','asset_disposal','impairment','tax_remittance','fx_revaluation','manual','year_end','recurring','damage_recovery','damage_repair','damage_writeoff','lease_inception','lease_period','lease_termination','lease_ni_reclass','lease_residual_impairment','customer_deposit','asset_acquisition','asset_betterment','bank_transfer','bank_opening_balance','bad_debt_recovery','credit_note_refund') | MUL | YES |
 | `source_id` | int unsigned |  | YES |
 | `is_reversal` | tinyint(1) |  | NO |
 | `reversal_of_id` | int unsigned | MUL | YES |
@@ -1433,6 +1445,9 @@ _71 tables._
 | `qbo_currency` | varchar(3) |  | YES |
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `ff_bill_snapshot_total` | decimal(15,2) |  | YES |
+| `origin` | enum('ff_push','cutover_link') |  | NO |
+| `link_method` | varchar(30) |  | YES |
+| `linked_at` | datetime |  | YES |
 | `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
@@ -1457,9 +1472,13 @@ _71 tables._
 | `qbo_txn_date` | date |  | YES |
 | `qbo_doc_number` | varchar(100) |  | YES |
 | `ff_payment_snapshot_total` | decimal(15,2) |  | YES |
-| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long') | MUL | NO |
+| `origin` | enum('ff_native','qbo_payments_webhook','qbo_other') | MUL | NO |
+| `webhook_event_id` | varchar(100) |  | YES |
+| `realm_id` | varchar(50) |  | YES |
+| `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_unmapped_void','skipped_by_mode','failed_preflight','failed_preflight_currency_mismatch','failed_preflight_field_too_long','pulled_from_qbo') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
+| `pulled_at` | datetime |  | YES |
 | `last_synced_at` | datetime |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
@@ -1504,6 +1523,9 @@ _71 tables._
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `qbo_item_type_used` | varchar(60) |  | YES |
 | `ff_credit_note_snapshot_total` | decimal(15,2) |  | YES |
+| `origin` | enum('ff_push','cutover_link') |  | NO |
+| `link_method` | varchar(30) |  | YES |
+| `linked_at` | datetime |  | YES |
 | `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
@@ -1531,6 +1553,7 @@ _71 tables._
 | `pushed_at` | datetime |  | YES |
 | `match_confidence` | enum('exact','high','medium','low','manual') |  | YES |
 | `match_notes` | text |  | YES |
+| `ff_created_in_qbo` | tinyint(1) |  | NO |
 | `last_synced_at` | datetime | MUL | YES |
 | `last_pull_at` | datetime |  | YES |
 | `last_push_at` | datetime |  | YES |
@@ -1618,9 +1641,30 @@ _71 tables._
 | `qbo_exchange_rate` | decimal(10,6) |  | YES |
 | `ff_invoice_snapshot_total` | decimal(15,2) |  | YES |
 | `ff_engine_version` | varchar(30) | MUL | YES |
+| `origin` | enum('ff_push','cutover_link') |  | NO |
+| `link_method` | varchar(30) |  | YES |
+| `linked_at` | datetime |  | YES |
 | `push_status` | enum('pending','pushed','voided','failed','skipped_voided','skipped_by_mode','skipped_soft_deleted','failed_preflight','failed_preflight_field_too_long','failed_preflight_currency_mismatch') | MUL | NO |
 | `push_error` | text |  | YES |
 | `pushed_at` | datetime | MUL | YES |
+| `last_synced_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `acc_qbo_invoice_writeoff_map`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `ff_writeoff_id` | int unsigned | UNI | NO |
+| `ff_invoice_id_snapshot` | int unsigned |  | NO |
+| `qbo_credit_memo_id` | varchar(50) | UNI | YES |
+| `qbo_payment_id` | varchar(50) | UNI | YES |
+| `qbo_invoice_id_ref` | varchar(50) |  | YES |
+| `amount_snapshot` | decimal(15,2) |  | YES |
+| `push_status` | enum('pending','pushed','failed','failed_preflight','skipped_by_mode') | MUL | NO |
+| `push_error` | text |  | YES |
+| `pushed_at` | datetime |  | YES |
 | `last_synced_at` | datetime |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
@@ -1775,7 +1819,7 @@ _71 tables._
 | Column | Type | Key | Nullable |
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
-| `entity_type` | enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','credit_application') | MUL | NO |
+| `entity_type` | enum('customer','vendor','invoice','payment','credit_memo','refund_receipt','bill','bill_payment','journal_entry','item','account','tax_code','credit_application','invoice_writeoff') | MUL | NO |
 | `entity_id` | int unsigned |  | NO |
 | `operation` | enum('create','update','void','delete') |  | NO |
 | `status` | enum('queued','processing','completed','failed','skipped') | MUL | NO |
@@ -1948,6 +1992,9 @@ _71 tables._
 | `filing_period_id` | int unsigned | MUL | NO |
 | `remittance_date` | date |  | NO |
 | `amount` | decimal(15,2) |  | NO |
+| `direction` | enum('payment','refund') |  | NO |
+| `tax_collected_cleared` | decimal(15,2) |  | YES |
+| `itc_cleared` | decimal(15,2) |  | YES |
 | `payment_method` | enum('online_banking','check','wire','other') |  | NO |
 | `reference_number` | varchar(100) |  | YES |
 | `bank_account_id` | int unsigned | MUL | YES |
@@ -2033,7 +2080,7 @@ _71 tables._
 
 # Other tables
 
-_79 tables._
+_92 tables._
 
 ## `ai_anomaly_alerts`
 
@@ -2184,6 +2231,80 @@ _79 tables._
 | `trigger_source` | enum('cron','manual') |  | NO |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ | MUL | NO |
 
+## `billing_cycle_readings`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `cycle_id` | int unsigned | MUL | NO |
+| `lease_id` | int unsigned | MUL | NO |
+| `odometer_km` | decimal(10,2) |  | YES |
+| `entered_unit` | enum('km','miles') |  | NO |
+| `engine_hours` | decimal(10,2) |  | YES |
+| `reading_date` | date |  | YES |
+| `notes` | varchar(500) |  | YES |
+| `entered_by` | int unsigned | MUL | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `billing_cycle_reviews`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `cycle_id` | int unsigned | MUL | NO |
+| `invoice_id` | int unsigned | MUL | NO |
+| `status` | enum('reviewed','query') |  | NO |
+| `note` | varchar(500) |  | YES |
+| `reviewed_by` | int unsigned | MUL | YES |
+| `reviewed_at` | datetime |  | NO |
+
+## `billing_cycles`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `reference` | varchar(20) | UNI | NO |
+| `period_start` | date | UNI | NO |
+| `period_end` | date |  | NO |
+| `status` | enum('open','closed') | MUL | NO |
+| `owner_user_id` | int unsigned | MUL | YES |
+| `bill_by_date` | date |  | YES |
+| `send_by_date` | date |  | YES |
+| `readiness_ack` | json |  | YES |
+| `readiness_checked_at` | datetime |  | YES |
+| `readiness_summary` | json |  | YES |
+| `notes` | text |  | YES |
+| `opened_by` | int unsigned | MUL | YES |
+| `closed_by` | int unsigned | MUL | YES |
+| `closed_at` | datetime |  | YES |
+| `close_note` | text |  | YES |
+| `close_snapshot` | json |  | YES |
+| `reopened_by` | int unsigned | MUL | YES |
+| `reopened_at` | datetime |  | YES |
+| `reopen_reason` | text |  | YES |
+| `last_nudged_at` | datetime |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
+## `billing_holds`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `scope` | enum('lease','customer') |  | NO |
+| `lease_id` | int unsigned | MUL | YES |
+| `customer_id` | int unsigned | MUL | NO |
+| `reason` | varchar(500) |  | NO |
+| `starts_on` | date |  | NO |
+| `ends_on` | date |  | YES |
+| `released_at` | datetime |  | YES |
+| `released_by` | int unsigned | MUL | YES |
+| `release_note` | varchar(500) |  | YES |
+| `created_by` | int unsigned | MUL | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+
 ## `chat_attachments`
 
 | Column | Type | Key | Nullable |
@@ -2298,6 +2419,24 @@ _79 tables._
 | `reversed_at` | datetime |  | YES |
 | `reversed_by` | int unsigned | MUL | YES |
 
+## `credit_note_refunds`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `credit_note_id` | int unsigned | MUL | NO |
+| `customer_id` | int unsigned | MUL | NO |
+| `amount` | decimal(15,2) |  | NO |
+| `amount_cad` | decimal(15,2) |  | NO |
+| `refund_date` | date |  | NO |
+| `method` | enum('cheque','eft','e_transfer','wire','credit_card','cash','other') |  | NO |
+| `reference` | varchar(100) |  | YES |
+| `bank_account_id` | int unsigned | MUL | YES |
+| `journal_entry_id` | int unsigned | MUL | YES |
+| `notes` | text |  | YES |
+| `created_by` | int unsigned | MUL | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
 ## `credit_notes`
 
 | Column | Type | Key | Nullable |
@@ -2311,11 +2450,12 @@ _79 tables._
 | `customer_email_snapshot` | varchar(255) |  | YES |
 | `customer_id` | int unsigned | MUL | NO |
 | `lease_id` | int unsigned | MUL | YES |
-| `source` | enum('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other','precharge_refund','base_rental_reconciliation_overflow') |  | NO |
+| `source` | enum('mileage_overpayment','invoice_adjustment','damage_resolution','goodwill','payment_returned','overpayment','other','precharge_refund','base_rental_reconciliation_overflow','hours_overpayment') |  | NO |
 | `source_invoice_id` | int unsigned | MUL | YES |
 | `source_payment_id` | int unsigned | MUL | YES |
 | `amount` | decimal(12,2) |  | NO |
 | `currency` | enum('CAD','USD') |  | NO |
+| `exchange_rate_to_cad` | decimal(10,6) |  | YES |
 | `amount_remaining` | decimal(12,2) |  | NO |
 | `status` | enum('active','partially_used','fully_used','expired','void') | MUL | NO |
 | `expires_at` | date |  | YES |
@@ -2430,6 +2570,17 @@ _79 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 | `deleted_at` | datetime |  | YES |
+
+## `customer_notification_audience`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `reminder_key` | varchar(64) | MUL | NO |
+| `customer_id` | int unsigned | MUL | NO |
+| `mode` | enum('include','exclude') |  | NO |
+| `created_by` | int unsigned |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 
 ## `customer_rate_history`
 
@@ -2572,6 +2723,20 @@ _79 tables._
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
+## `equipment_brands`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `slug` | varchar(50) | UNI | NO |
+| `label` | varchar(100) |  | NO |
+| `is_active` | tinyint(1) | MUL | NO |
+| `sort_order` | smallint unsigned |  | NO |
+| `created_by` | int unsigned |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime |  | YES |
+
 ## `equipment_categories`
 
 | Column | Type | Key | Nullable |
@@ -2648,7 +2813,6 @@ _79 tables._
 | `category` | varchar(50) |  | NO |
 | `category_id` | int unsigned | MUL | YES |
 | `subcategory_id` | int unsigned | MUL | YES |
-| `brand` | varchar(100) |  | YES |
 | `model` | varchar(100) |  | YES |
 | `default_length_ft` | decimal(6,2) |  | YES |
 | `default_height_ft` | decimal(6,2) |  | YES |
@@ -2686,6 +2850,7 @@ _79 tables._
 |--------|------|-----|----------|
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `template_id` | int unsigned | MUL | NO |
+| `brand_id` | int unsigned | MUL | YES |
 | `unit_number` | varchar(100) | UNI | NO |
 | `vin` | varchar(50) | UNI | YES |
 | `year` | smallint unsigned |  | YES |
@@ -2809,6 +2974,57 @@ _79 tables._
 | `section_data` | json |  | YES |
 | `sort_order` | tinyint unsigned |  | NO |
 
+## `invoice_batch_runs`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `reference` | varchar(40) | UNI | NO |
+| `period_start` | date | MUL | NO |
+| `period_end` | date |  | NO |
+| `status` | enum('pending','approved','rejected','generated','cancelled') | MUL | NO |
+| `lease_ids` | json |  | NO |
+| `snapshot` | json |  | NO |
+| `invoice_count` | int unsigned |  | NO |
+| `skipped_count` | int unsigned |  | NO |
+| `total_by_currency` | json |  | YES |
+| `note` | text |  | YES |
+| `decision_note` | text |  | YES |
+| `submitted_by` | int unsigned | MUL | YES |
+| `submitted_at` | datetime |  | YES |
+| `decided_by` | int unsigned | MUL | YES |
+| `decided_at` | datetime |  | YES |
+| `generated_by` | int unsigned | MUL | YES |
+| `generated_at` | datetime |  | YES |
+| `generated_invoice_ids` | json |  | YES |
+| `generation_result` | json |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime |  | YES |
+
+## `invoice_billing_exceptions`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `lease_id` | int unsigned | MUL | NO |
+| `customer_id` | int unsigned | MUL | YES |
+| `period_start` | date |  | NO |
+| `period_end` | date |  | NO |
+| `reason` | text |  | NO |
+| `source` | enum('batch_generate','batch_run','manual') |  | NO |
+| `batch_run_id` | int unsigned |  | YES |
+| `status` | enum('open','resolved','ignored') | MUL | NO |
+| `resolution_note` | text |  | YES |
+| `resolved_by` | int unsigned | MUL | YES |
+| `resolved_at` | datetime |  | YES |
+| `flagged_count` | int unsigned |  | NO |
+| `last_flagged_at` | datetime |  | YES |
+| `created_by` | int unsigned |  | YES |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
+| `deleted_at` | datetime |  | YES |
+
 ## `invoice_line_items`
 
 | Column | Type | Key | Nullable |
@@ -2816,7 +3032,7 @@ _79 tables._
 | `id` | int unsigned _(auto_increment)_ | PRI | NO |
 | `invoice_id` | int unsigned | MUL | NO |
 | `sort_order` | tinyint unsigned |  | NO |
-| `item_type` | enum('base_rental','mileage_precharge','mileage_adjustment','mileage_credit','insurance','warranty','late_fee','early_return_credit','manual_adjustment','damage','discount','account_credit_applied','other','gps','mileage_usage','mileage_drawdown_credit','base_rental_reconciliation_credit','mileage','hourly_usage','cartage','sweep','wash','fuel','mileage_estimate') |  | NO |
+| `item_type` | enum('base_rental','mileage_precharge','mileage_adjustment','mileage_credit','insurance','warranty','late_fee','early_return_credit','manual_adjustment','damage','discount','account_credit_applied','other','gps','mileage_usage','mileage_drawdown_credit','base_rental_reconciliation_credit','mileage','hourly_usage','cartage','sweep','wash','fuel','mileage_estimate','hours_estimate','hours_adjustment','hours_credit') |  | NO |
 | `description` | varchar(500) |  | NO |
 | `detail_lines` | json |  | YES |
 | `quantity` | decimal(10,4) |  | NO |
@@ -3351,6 +3567,27 @@ _79 tables._
 | `notification_type` | varchar(50) |  | YES |
 | `received_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
 
+## `sop_chapter_reads`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `user_id` | int unsigned | MUL | NO |
+| `chapter_slug` | varchar(80) | MUL | NO |
+| `content_hash` | char(16) |  | NO |
+| `read_at` | datetime |  | NO |
+
+## `sop_checklist_ticks`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `checklist_key` | varchar(40) | MUL | NO |
+| `period` | char(7) |  | NO |
+| `item_key` | varchar(60) |  | NO |
+| `checked_by` | int unsigned | MUL | NO |
+| `checked_at` | datetime |  | NO |
+
 ## `tax_rates`
 
 | Column | Type | Key | Nullable |
@@ -3368,6 +3605,36 @@ _79 tables._
 | `effective_to` | date |  | YES |
 | `notes` | text |  | YES |
 | `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `training_progress`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `user_id` | int unsigned | MUL | NO |
+| `video_id` | int unsigned | MUL | NO |
+| `position_seconds` | int unsigned |  | NO |
+| `max_position_seconds` | int unsigned |  | NO |
+| `percent` | tinyint unsigned |  | NO |
+| `completed_at` | datetime |  | YES |
+| `started_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `last_watched_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+
+## `training_videos`
+
+| Column | Type | Key | Nullable |
+|--------|------|-----|----------|
+| `id` | int unsigned _(auto_increment)_ | PRI | NO |
+| `slug` | varchar(80) | UNI | NO |
+| `chapter_no` | smallint unsigned |  | NO |
+| `title` | varchar(160) |  | NO |
+| `description` | varchar(500) |  | YES |
+| `duration_seconds` | int unsigned |  | NO |
+| `video_key` | varchar(255) |  | NO |
+| `captions_key` | varchar(255) |  | YES |
+| `is_active` | tinyint(1) | MUL | NO |
+| `created_at` | datetime _(DEFAULT_GENERATED)_ |  | NO |
+| `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `user_mfa_backup_codes`
 

@@ -34,7 +34,7 @@ declare(strict_types=1);
  *                invoices: [...], errors: [...] }
  *          409 INVALID_TRANSITION (not approved / already generated)
  *
- * @session S-BATCH-APPROVAL
+ * @session S-BATCH-APPROVAL, S-BILLING-MODULE (closed-cycle lock, holds, readings)
  */
 
 require_once dirname(__DIR__, 4) . '/api/bootstrap.php';
@@ -46,6 +46,9 @@ require_permission('invoices', 'create');
 use FleetForge\Billing\InvoiceGenerator;
 use FleetForge\Billing\BillingRateException;
 use FleetForge\Billing\BillingExceptions;
+use FleetForge\Billing\Cycle\BillingHolds;
+use FleetForge\Billing\Cycle\CycleClose;
+use FleetForge\Billing\Cycle\CycleReadings;
 
 $body = json_body();
 
@@ -64,6 +67,17 @@ if ($run['status'] !== 'approved') {
         $run['status'] === 'generated'
             ? "Batch run {$run['reference']} has already been generated."
             : "Batch run {$run['reference']} is '{$run['status']}' — it must be approved before generating.",
+        409
+    );
+}
+
+// S-BILLING-MODULE: a closed billing cycle locks the workbench out of its
+// month. Checked BEFORE the claim below so a refused run stays 'approved'
+// and can be generated once the cycle is reopened.
+if ($closedCycle = CycleClose::closedCycleFor((string) $run['period_start'], (string) $run['period_end'])) {
+    json_error(
+        'CYCLE_CLOSED',
+        "Billing cycle {$closedCycle['reference']} is closed. Reopen it on Billing to generate this run.",
         409
     );
 }
@@ -143,6 +157,13 @@ foreach (array_keys($approvedTotals) as $leaseId) {
         continue;
     }
 
+    // S-BILLING-MODULE: placed on a billing hold since approval — honour it.
+    if ($hold = BillingHolds::activeFor($leaseId, $periodStart, $periodEnd)) {
+        $skipped++;
+        $errors[] = ['lease_id' => $leaseId, 'reason' => BillingHolds::describe($hold) . ' — skipped.', 'held' => true];
+        continue;
+    }
+
     // The critical double-bill guard: something may have billed this period
     // since approval (monthly cron, another operator, another batch run).
     $overlap = InvoiceGenerator::findOverlappingInvoice($leaseId, $periodStart, $periodEnd);
@@ -156,7 +177,9 @@ foreach (array_keys($approvedTotals) as $leaseId) {
     }
 
     try {
-        $result = $generator->createFromLease([
+        // S-BILLING-MODULE: the cycle's period-end readings — the same
+        // parameters the approved snapshot was priced with (BatchPreviewService).
+        $result = $generator->createFromLease(CycleReadings::generatorParams($leaseId, $periodStart, $periodEnd) + [
             'lease_id'             => $leaseId,
             'period_start'         => $periodStart,
             'period_end'           => $periodEnd,
@@ -235,6 +258,9 @@ if ($errors) {
     }
 }
 foreach ($errors as $err) {
+    if (!empty($err['held'])) {
+        continue; // a billing hold is intentional, not an exception
+    }
     BillingExceptions::flag(
         (int) $err['lease_id'],
         $bexCustomer[(int) $err['lease_id']] ?? null,

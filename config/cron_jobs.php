@@ -26,6 +26,10 @@ return [
         'label' => 'Monthly invoice generation', 'category' => 'Billing', 'default' => '0',
         'description' => 'Generates full-month draft invoices for due monthly leases.',
     ],
+    'billing_cycle_open' => [
+        'label' => 'Open billing cycles', 'category' => 'Billing', 'default' => '1',
+        'description' => 'Opens the next monthly billing cycle on its open day (Billing → Settings) and reminds the owner when a cycle falls behind. Creates no invoices.',
+    ],
     'invoice_overdue' => [
         'label' => 'Mark overdue invoices', 'category' => 'Billing', 'default' => '1',
         'description' => 'Flags past-due invoices as overdue.',

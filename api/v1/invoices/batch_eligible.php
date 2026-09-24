@@ -38,7 +38,7 @@ declare(strict_types=1);
  * @returns 200 { period, customers: [...], summary: {...} }
  *
  * @depends lib/Billing/InvoiceGenerator.php (findOverlappingInvoice)
- * @session S-BATCH-INVOICING
+ * @session S-BATCH-INVOICING, S-BILLING-MODULE (hold + reading per lease, cycle)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -92,6 +92,7 @@ $search = clean_string($_GET['search'] ?? null, 255);
 // active lease is presumed ongoing.
 $sql = "SELECT l.id, l.contract_number, l.customer_id, l.start_date, l.end_date,
                l.billing_cycle, l.status AS lease_status,
+               l.mileage_tracking_mode, l.mileage_rate_km, l.mileage_rate, l.hourly_rate, l.precharge_enabled,
                eu.unit_number,
                c.id AS c_id, c.company_name, c.status AS customer_status,
                c.currency, c.email, c.billing_email, c.invoice_email,
@@ -118,9 +119,35 @@ $sql .= " ORDER BY c.company_name ASC, l.contract_number ASC";
 
 $rows = db_select($sql, $params);
 
+// ── S-BILLING-MODULE: billing holds + cycle readings for the period ──
+// A held lease is still listed (so the operator sees why it is missing) but
+// carries `hold` and is never auto-selected by the workbench. For a full
+// calendar month, `reading` says whether a lease that bills from a manual
+// reading (manual mileage / hourly) has its period-end reading on the
+// cycle's Readings sheet: 'entered' | 'missing' | null (not needed).
+$leaseIdsAll = array_map(static fn($r) => (int) $r['id'], $rows);
+$holdMap = \FleetForge\Billing\Cycle\BillingHolds::heldMap($leaseIdsAll, $periodStart, $periodEnd);
+$readingMap = [];
+$cycleForPeriod = null;
+if ($isFullCalendarMonth && $leaseIdsAll) {
+    try {
+        $cycleForPeriod = db_row("SELECT id, reference, status FROM billing_cycles WHERE period_start = ?", [$periodStart]);
+        if ($cycleForPeriod) {
+            foreach (db_select(
+                "SELECT lease_id, odometer_km, engine_hours FROM billing_cycle_readings WHERE cycle_id = ?",
+                [(int) $cycleForPeriod['id']]
+            ) as $rr) {
+                $readingMap[(int) $rr['lease_id']] = $rr;
+            }
+        }
+    } catch (\Throwable $e) {
+        error_log('[batch_eligible] cycle readings lookup failed: ' . $e->getMessage());
+    }
+}
+
 // ── Per-lease billing status for the requested period ──────────────
 $customersOut = [];
-$summary = ['customers_count' => 0, 'leases_count' => 0, 'unbilled_count' => 0, 'billed_count' => 0, 'void_count' => 0];
+$summary = ['customers_count' => 0, 'leases_count' => 0, 'unbilled_count' => 0, 'billed_count' => 0, 'void_count' => 0, 'held_count' => 0, 'reading_missing_count' => 0];
 
 foreach ($rows as $row) {
     $leaseId = (int) $row['id'];
@@ -201,7 +228,31 @@ foreach ($rows as $row) {
         $summary['customers_count']++;
     }
 
+    $hold = $holdMap[$leaseId] ?? null;
+    if ($hold) $summary['held_count']++;
+
+    $readingStatus = null;
+    if ($isFullCalendarMonth) {
+        $needsOdo = $row['mileage_tracking_mode'] === 'manual'
+            && (bccomp((string) ($row['mileage_rate_km'] ?? '0'), '0', 4) > 0
+                || bccomp((string) $row['mileage_rate'], '0', 4) > 0
+                || (int) $row['precharge_enabled'] === 1);
+        $needsHours = bccomp((string) ($row['hourly_rate'] ?? '0'), '0', 4) > 0;
+        if ($needsOdo || $needsHours) {
+            $rr = $readingMap[$leaseId] ?? null;
+            $ok = $rr && (!$needsOdo || $rr['odometer_km'] !== null) && (!$needsHours || $rr['engine_hours'] !== null);
+            $readingStatus = $ok ? 'entered' : 'missing';
+            if (!$ok && $billingStatus !== 'billed') $summary['reading_missing_count']++;
+        }
+    }
+
     $customersOut[$cid]['leases'][] = [
+        'hold'             => $hold ? [
+            'id'          => (int) $hold['id'],
+            'scope'       => (string) $hold['scope'],
+            'description' => \FleetForge\Billing\Cycle\BillingHolds::describe($hold),
+        ] : null,
+        'reading'          => $readingStatus,
         'id'               => $leaseId,
         'contract_number'  => (string) $row['contract_number'],
         'unit_number'      => $row['unit_number'] !== null ? (string) $row['unit_number'] : null,
@@ -220,4 +271,10 @@ json_success([
     ],
     'customers' => array_values($customersOut),
     'summary'   => $summary,
+    // S-BILLING-MODULE: the billing cycle this period belongs to (full month only).
+    'cycle'     => $cycleForPeriod ? [
+        'id'        => (int) $cycleForPeriod['id'],
+        'reference' => (string) $cycleForPeriod['reference'],
+        'status'    => (string) $cycleForPeriod['status'],
+    ] : null,
 ]);

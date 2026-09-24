@@ -24,7 +24,7 @@ When you open **Customers** in the sidebar, four tiles give you an instant snaps
 3. Fill in the **Primary Contact Name**, **Email**, and **Phone** as you have them.
 4. Set **Status** (defaults to Active) and **Risk Level** (Low / Medium / High).
 5. Choose **Currency** (CAD or USD) and **Billing Cycle**:
-   - *Monthly* — the customer's leases are billed month by month. Each month's invoices are created from **Invoices → Batch Invoicing** (or **Generate Invoice** on a lease) — nothing is invoiced automatically.
+   - *Monthly* — the customer's leases are billed month by month. Each month's invoices are created in **Monthly Billing** (or with **Generate Invoice** on a lease) — nothing is invoiced automatically.
    - *On Close Only* — invoices only generate when a lease is manually closed.
 6. Under **Commercial**, set **Payment Terms** (e.g. Net 30) and **Credit Limit** if applicable.
 7. If the customer is tax-exempt, check **GST Exempt** or **PST Exempt** and enter the exemption certificate number and expiry date.

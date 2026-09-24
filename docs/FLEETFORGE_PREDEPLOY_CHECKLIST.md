@@ -591,6 +591,31 @@ ITEM D-AI-DIGEST | 2026-06-07 | D — AWS infrastructure | Deploy digest param-f
 ### E — Data migrations
 
 ```
+ITEM E-BILLING-MODULE | 2026-09-24 | E — Data migrations | Deploy Monthly Billing: migrate + install the billing_cycle_open crontab line
+  Originating session: S-BILLING-MODULE
+  Surfaced into checklist: S-BILLING-MODULE
+  Detail: Monthly Billing (/billing) needs migration 202609250100_S-BILLING-MODULE_cycles.sql
+    (billing_cycles, billing_cycle_readings, billing_cycle_reviews, billing_holds; the batch
+    approval pair moves to Billing → Settings; 8 billing_cycle.* settings; cron toggle
+    cron.billing_cycle_open_enabled = 1). The new cron/billing_cycle_open.php opens each
+    month's cycle on the open day and reminds the owner — it creates NO invoices
+    (invoice_generate_monthly stays OFF; see PROGRESS KNOWN ISSUE #112 before ever enabling it).
+    No new permission → no re-login needed. The old /invoices/batch + /invoices/batch_run URLs
+    redirect to /billing/run + /billing/approval.
+  Action: 1. Deploy main (standard runbook — runs bin/migrate.php --apply). Verify
+       `php bin/migrate.php --status` → pending 0.
+    2. Add to the www-data crontab (sudo -u www-data crontab -e):
+       15 15 * * * /usr/bin/php /var/www/fleetforge/cron/billing_cycle_open.php >> /var/www/fleetforge/logs/cron.log 2>&1
+       (15:15 UTC = 08:15 Pacific.) Optional first run by hand:
+       `sudo -u www-data php /var/www/fleetforge/cron/billing_cycle_open.php` → prints
+       {"opened":"BC-YYYY-MM",...} the first time, {"opened":null,...} after.
+    3. Billing → Settings: pick the default owner; enter today's USD→CAD rate if any lease bills
+       in USD (the readiness check blocks with no rate on file).
+    4. Prod has ~1,550 unsent drafts (F66): Monthly Billing → Cycles lists them per month —
+       work them oldest-first as cycles, in stages.
+  Owner: Operator (deploy + crontab) + Code Desktop (shipped)
+  Status: PENDING (deploy)
+
 ITEM E1 | 2026-05-16 | E — Data | Seed Standard 2025 rate cards on prod
   Originating session: 2026-05-16 Lightsail deployment
   Surfaced into checklist: S-PROD-DEPLOYMENT-DOCS

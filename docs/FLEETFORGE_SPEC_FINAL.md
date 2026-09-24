@@ -371,6 +371,7 @@ Recommendation: Look up at invoice time for CRA compliance. Awaiting Avi's decis
 0 5 * * *   php /var/www/fleetforge/cron/ai_fleet_brief.php >> /var/www/fleetforge/logs/cron.log 2>&1
 0 6 * * *   php /var/www/fleetforge/cron/compliance_alerts.php >> /var/www/fleetforge/logs/cron.log 2>&1
 0 6 1 * *   php /var/www/fleetforge/cron/invoice_generate_monthly.php >> /var/www/fleetforge/logs/cron.log 2>&1
+15 15 * * * php /var/www/fleetforge/cron/billing_cycle_open.php >> /var/www/fleetforge/logs/cron.log 2>&1
 15 6 * * *  php /var/www/fleetforge/cron/invoice_overdue.php >> /var/www/fleetforge/logs/cron.log 2>&1
 30 6 * * *  php /var/www/fleetforge/cron/late_fee_apply.php >> /var/www/fleetforge/logs/cron.log 2>&1
 0 7 * * *   php /var/www/fleetforge/cron/gps_mileage_sync.php >> /var/www/fleetforge/logs/gps.log 2>&1
@@ -793,6 +794,23 @@ function calculate_period_charge(days, daily, weekly, monthly):
 - Drafts sit until manually reviewed and sent
 - **Invoice send vs email delivery are separate steps** [PASS-15:E3]: marking as 'sent' always succeeds (DB write). Email delivery may fail — invoice stays 'sent' with a yellow warning and Resend button.
 - Final reconciliation invoice at lease close
+- **Current practice (S-BILLING-MODULE, 2026-09-24):** the monthly cron ships OFF; each month is run as a **billing cycle** in the Billing module — see *Monthly Billing Cycle* below.
+
+### Monthly Billing Cycle (S-BILLING-MODULE, 2026-09-24)
+One record per calendar month (`billing_cycles`, reference `BC-YYYY-MM`), worked in seven steps at `/billing/cycle?id=N`:
+**Prepare** (26 readiness checks — `lib/Billing/Cycle/BillingReadiness.php`; blockers / warnings (acknowledgeable, recorded) / info) →
+**Readings** (period-end odometer + engine hours for ACTIVE manual-mileage and hourly leases — `billing_cycle_readings`, km; passed to `createFromLease()` by every workbench path, only when the billed period ends on the month end) →
+**Generate** (the workbench `/billing/run?cycle=N`, formerly Batch Invoicing — dry run, generate, submit for approval) →
+**Review** (every invoice vs the same lease last month: double billing, double mileage, big change, $0, no tax, no recipient… + Reviewed / Query marks — `billing_cycle_reviews`) →
+**Approve** (batch runs when `invoices.approval_required`) →
+**Send** (Delivery tab: email state per invoice from `email_logs`; Send & Email drafts via `bulk_send`, Email again via `api/v1/billing/deliver`) →
+**Close** (hard checks: no drafts / pending runs / queried; soft: to-bill, exceptions, readiness never run — override + note; freezes `close_snapshot`; locks the workbench out of the month; reopen = invoices:approve + reason).
+- **Membership is derived:** an invoice belongs to the cycle whose month contains its `billing_period_start` (lease invoices of type regular/final/mileage_only/adjustment). The generator does not know cycles exist.
+- **Lease universe:** active leases started by the month end + completed leases whose return reaches into the month. Coverage status per lease: billed / covered_elsewhere / held / exception / bills_at_close / closed_unbilled / void_rebillable / to_bill (rental billing types only count as billed).
+- **Billing holds** (`billing_holds`, lease or customer scope, dated, released): honoured by the workbench, dry run, approved runs and the monthly cron (pointer not advanced — deferred, not forgiven). Per-lease Generate Invoice / close are not blocked.
+- **Scheduled job** `cron/billing_cycle_open.php` (toggle `billing_cycle_open`, default ON): opens the target month's cycle on `billing_cycle.open_day`, runs readiness, notifies the owner; weekly reminders for cycles past their targets. Creates no invoices.
+- **Settings** (Billing → Settings, group `billing_cycle`): mode arrears/advance, open day, review-by / send-by days, variance % + $, close-requires-review, default owner, plus the approval pair (moved from General) and the USD→CAD rate entry (`exchange_rates`).
+- **Permissions:** reuses `invoices:*` (view / create / edit / approve / export); amounts only with `can_view_financials()`; settings writes need `settings_general:edit`. No new permission module (D-BILLING-MODULE-2).
 
 ### Invoice Generation Flow (Model B — current, S-MILEAGE-1 + S-MILEAGE-2A + S-MILEAGE-2B SHIPPED 2026-05-12)
 

@@ -55,9 +55,9 @@ require_once FF_ROOT . '/includes/header.php';
      ============================================================ -->
 <?php ob_start(); ?>
         <?= help_button('invoices') ?>
-        <a href="<?= base_url('invoices/batch') ?>" class="btn btn-primary btn-sm">
-            <?= heroicon('document-duplicate', 'icon-sm') ?>
-            Batch Invoicing
+        <a href="<?= base_url('billing') ?>" class="btn btn-primary btn-sm">
+            <?= heroicon('calendar-days', 'icon-sm') ?>
+            Monthly Billing
         </a>
         <?php if (can('invoices', 'create')): ?>
         <a href="<?= base_url('invoices/create') ?>" class="btn btn-primary btn-sm">
@@ -70,7 +70,7 @@ require_once FF_ROOT . '/includes/header.php';
     'icon'     => 'document-text',
     'accent'   => 'primary',
     'title'    => 'Invoices',
-    'subtitle' => 'Every invoice from draft to paid — batch billing, sending, credits and aging.',
+    'subtitle' => 'Every invoice from draft to paid — sending, credits and aging. The month\'s billing runs in Monthly Billing.',
     'art'      => 'invoices',
     'actions'  => ob_get_clean(),
 ]) ?>

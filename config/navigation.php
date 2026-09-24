@@ -90,18 +90,28 @@ return [
         'label'     => 'Billing',
     ],
     [
-        // Invoices is a collapsible GROUP (S-BATCH-INVOICING): the parent
-        // link still opens the invoice list, with Batch Invoicing nested
-        // beneath it rather than competing for a top-level slot.
+        // S-BILLING-MODULE: the monthly billing cycle — readiness, readings,
+        // the workbench (was Batch Invoicing under Invoices), review,
+        // approvals, delivery, close. First in the section: it is where a
+        // month's billing starts. '/billing' prefix-matches every billing
+        // page (cycle, run, approval, settings), so they all highlight it.
+        // Badge = open billing exceptions + runs waiting for approval.
+        'label'        => 'Monthly Billing',
+        'icon'         => 'calendar-days',
+        'accent'       => 'primary',
+        'url'          => '/billing',
+        'match_prefix' => '/billing',
+        'module'       => 'invoices',
+        'badge'        => 'billing_attention',
+    ],
+    [
+        // Invoices is a collapsible GROUP (S-BATCH-INVOICING). Its "Batch
+        // Invoicing" child moved to Monthly Billing (S-BILLING-MODULE) —
+        // /invoices/batch redirects to /billing/run. Credit Notes stays.
         //
         // No "All Invoices" child on purpose: active state is decided by
-        // str_starts_with, and a child pointing at '/invoices' would prefix-
-        // match '/invoices/batch' too, so BOTH children would highlight on
-        // the batch page. The parent link covers the list instead.
-        //
-        // The Batch child's '/invoices/batch' prefix also (deliberately)
-        // matches '/invoices/batch_run', so viewing an approval run keeps
-        // Batch Invoicing highlighted — a run belongs to that section.
+        // str_starts_with, and a child pointing at '/invoices' would never
+        // be distinct from the parent. The parent link covers the list.
         'label'        => 'Invoices',
         'icon'         => 'banknotes',
         'accent'       => 'primary',
@@ -110,16 +120,6 @@ return [
         'module'       => 'invoices',
         'badge'        => 'overdue_invoices',
         'children' => [
-            [
-                // Gated on the same 'invoices' view action as the list page;
-                // the page's own Generate/Send/Approve actions additionally
-                // require create/edit/approve (all checked server-side).
-                'label'  => 'Batch Invoicing',
-                'icon'   => 'document-duplicate',
-                'url'    => '/invoices/batch',
-                'module' => 'invoices',
-                'badge'  => null,
-            ],
             [
                 // Credit notes had no sidebar entry at all (only reachable via the
                 // New menu or a customer's Account Credit tile). They live under

@@ -46,8 +46,7 @@ declare(strict_types=1);
  *                emailed, email_errors: [{id, reason}] }
  *
  * @depends lib/AI/Actions/FinancialActions.php (sendInvoice),
- *          lib/Email/EmailService.php (sendFromTemplate),
- *          lib/Billing/InvoicePdfGenerator.php
+ *          lib/Billing/InvoiceDelivery.php (email — shared with api/v1/billing/deliver.php)
  * @decisions D12 (immutability after send), D45 (Path B counters — handled inside FinancialActions)
  * @session S-BATCH-INVOICING, S-INVOICE-PDF
  */
@@ -60,8 +59,7 @@ require_permission('invoices', 'edit');
 
 use FleetForge\AI\Actions\FinancialActions;
 use FleetForge\AI\Actions\ActionException;
-use FleetForge\Email\EmailService;
-use FleetForge\Billing\InvoicePdfGenerator;
+use FleetForge\Billing\InvoiceDelivery;
 
 $body = json_body();
 
@@ -128,78 +126,15 @@ foreach ($ids as $id) {
         continue;
     }
 
-    // ── Resolve recipient + dispatch the invoice_ready email ──────────
-    // (Separate try/catch: an email failure must not retroactively look
-    // like the send transition itself failed — $actioned already counted.)
-    try {
-        $inv = db_row(
-            "SELECT i.customer_id, i.invoice_number, i.customer_email_snapshot, i.customer_name_snapshot,
-                    i.company_name_snapshot,
-                    c.invoice_email, c.billing_email, c.email AS c_email,
-                    c.contact_name, c.company_name
-               FROM invoices i
-               LEFT JOIN customers c ON c.id = i.customer_id AND c.deleted_at IS NULL
-              WHERE i.id = ?",
-            [$id]
-        );
-
-        $toEmail = $override
-            ?: (($inv['invoice_email'] ?? null) ?: (($inv['billing_email'] ?? null) ?: (($inv['c_email'] ?? null) ?: ($inv['customer_email_snapshot'] ?? null))));
-        $toName  = (string) (($inv['contact_name'] ?? null) ?: ($inv['company_name'] ?? null) ?: ($inv['customer_name_snapshot'] ?? '') ?: ($inv['company_name_snapshot'] ?? ''));
-
-        if (!$toEmail) {
-            $emailErrors[] = ['id' => $id, 'reason' => 'No recipient email could be resolved for this customer.'];
-            continue;
-        }
-
-        $variables = array_merge(
-            $inv['customer_id'] ? EmailService::resolveCustomerVariables((int) $inv['customer_id']) : [],
-            EmailService::resolveEntityVariables('invoice', $id)
-        );
-
-        // EmailService::send() (which sendFromTemplate() delegates to) expects
-        // attachments PRE-RESOLVED to {path, name, type, source_type, source_id}
-        // — the {invoice_id} shorthand only api/v1/email/send.php's own inline
-        // code knows how to expand (it's endpoint-layer sugar, not part of
-        // EmailService itself). Resolve it here the same way that file does.
-        $attachments = [];
-        if ($attachPdf) {
-            try {
-                $pdf = InvoicePdfGenerator::generate($id);
-                $attachments[] = [
-                    'path'        => $pdf['pdf_path'],
-                    'name'        => $inv['invoice_number'] . '.pdf',
-                    'type'        => 'application/pdf',
-                    'source_type' => 'invoice_pdf',
-                    'source_id'   => $id,
-                ];
-            } catch (\Throwable $e) {
-                error_log("[bulk_send] Invoice #{$id} PDF generation failed (sending without attachment): " . $e->getMessage());
-            }
-        }
-
-        $sendResult = EmailService::sendFromTemplate(
-            'invoice_ready',
-            $toEmail,
-            $toName,
-            $variables,
-            [
-                'customer_id' => $inv['customer_id'] ? (int) $inv['customer_id'] : null,
-                'entity_type' => 'invoice',
-                'entity_id'   => $id,
-                'sent_by'     => $userId,
-                'attachments' => $attachments,
-            ]
-        );
-
-        if ($sendResult['success']) {
-            $emailed++;
-        } else {
-            $emailErrors[] = ['id' => $id, 'reason' => $sendResult['error'] ?? 'Email could not be sent.'];
-        }
-    } catch (\Throwable $e) {
-        $emailErrors[] = ['id' => $id, 'reason' => $e->getMessage()];
-        error_log("[bulk_send] Invoice #{$id} email dispatch failed: " . $e->getMessage());
+    // ── Dispatch the invoice_ready email (S-BILLING-MODULE: shared with
+    // api/v1/billing/deliver.php via InvoiceDelivery — one delivery path).
+    // A separate outcome from the send transition above: an email failure
+    // must not retroactively look like the send itself failed.
+    $mail = InvoiceDelivery::email($id, $override, $attachPdf, $userId);
+    if ($mail['success']) {
+        $emailed++;
+    } else {
+        $emailErrors[] = ['id' => $id, 'reason' => $mail['error'] ?? 'Email could not be sent.'];
     }
 }
 

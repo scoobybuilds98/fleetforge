@@ -73,7 +73,7 @@ $userName  = current_user()['name'] ?? 'System';
 $now       = ff_now_utc();
 
 // ── Two-eyes gate (S-BATCH-APPROVAL) ────────────────────────────────
-// Settings → General → Invoices & Billing → "Allow self-approval of batch
+// Billing → Settings → "Allow self-approval of batch
 // runs". When OFF, the submitter cannot sign off their own run — the whole
 // point of an approval step is that a second pair of eyes sees the figures.
 // Applies to APPROVE only: rejecting your own run is just withdrawing it,
@@ -87,7 +87,7 @@ if ($decision === 'approve'
     json_error(
         'SELF_APPROVAL_BLOCKED',
         'You submitted this run, so someone else has to approve it. '
-        . '(Settings → General → Invoices & Billing → "Allow self-approval of batch runs".)',
+        . '(Billing → Settings → "Allow self-approval of batch runs".)',
         403
     );
 }

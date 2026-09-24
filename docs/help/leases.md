@@ -33,7 +33,7 @@ Use the three tabs to filter: **Active & Pending**, **Closed**, or **All**.
    - Set the **Start Date**.
    - Set an **End Date** (or leave blank for an open-ended lease).
    - Set a **Minimum End Date** if an early return fee applies before that date.
-   - Choose **Billing Cycle**: *Monthly* bills the lease month by month — each month's invoice is created from **Invoices → Batch Invoicing** or the lease's **Generate Invoice** (nothing is invoiced automatically); *On Close Only* generates one invoice when the lease is closed.
+   - Choose **Billing Cycle**: *Monthly* bills the lease month by month — each month's invoice is created in **Monthly Billing** or with the lease's **Generate Invoice** (nothing is invoiced automatically); *On Close Only* generates one invoice when the lease is closed.
 
 4. **Rental Rates** section:
    - Enter **Daily Rate**, **Weekly Rate**, and **Monthly Rate**. At least one must be greater than zero. For monthly billing, all three must be filled in.

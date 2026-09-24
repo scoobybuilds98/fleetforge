@@ -1400,10 +1400,13 @@ require_once FF_ROOT . '/includes/' . ($isEmbed ? 'header_embed.php' : 'header.p
 <?php $heroOwn = ob_get_clean(); ?>
 <?php ob_start(); /* secondary actions → the header's More menu (S-RECORD-REDESIGN) */ ?>
     <?php if (!$isEmbed): ?>
-        <?php if ($canEdit && !$isDraft): ?>
-            <!-- Send Invoice (S-MILEAGE-2B C5: HARD review gate retired per D-I) -->
+        <?php if ($canEdit && !$isDraft && ($invoice['status'] ?? '') !== 'void'): ?>
+            <!-- Re-send (S-BILLING-MODULE): emails the ALREADY-SENT invoice again
+                 via api/v1/billing/deliver (the same delivery code as batch
+                 Send & Email). It used to call send.php, which only moves a
+                 draft to sent, so on a sent invoice it could only ever 409. -->
             <button class="btn btn-primary btn-sm"
-                    @click="sendInvoice()"
+                    @click="resendInvoice()"
                     :disabled="sending">
                 <span x-show="!sending">Re-send Invoice</span>
                 <span x-show="sending">Sending…</span>
@@ -3657,6 +3660,26 @@ function FF_InvoiceShow() {
                     setTimeout(() => location.reload(), 1200);
                 } else {
                     this.showToast(r.error?.message || 'Failed to send', 'error');
+                }
+            } catch(e) {
+                this.showToast('Network error', 'error');
+            }
+            this.sending = false;
+        },
+
+        /* ── Re-send (email again) — S-BILLING-MODULE ───────── */
+        async resendInvoice() {
+            const ok = await FF_Confirm.ask('Email this invoice to the customer again, with the PDF attached? Nothing else about the invoice changes.');
+            if (!ok) return;
+            this.sending = true;
+            try {
+                const r = await FF_Api.post('<?= base_url('api/v1/billing/deliver') ?>', {
+                    ids: [<?= (int)$invoiceId ?>], attach_pdf: true
+                });
+                if (r.success && r.data.emailed > 0) {
+                    this.showToast('Invoice emailed to ' + (r.data.results[0]?.to || 'the customer'), 'success');
+                } else {
+                    this.showToast(r.error?.message || r.data?.errors?.[0]?.reason || 'The email could not be sent', 'error');
                 }
             } catch(e) {
                 this.showToast('Network error', 'error');

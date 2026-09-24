@@ -31,6 +31,7 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 0 14 1 * *    /usr/bin/php /var/www/fleetforge/cron/invoice_generate_monthly.php >> /var/www/fleetforge/logs/cron.log 2>&1
 
 # Overdue invoice detection — daily at 07:00 UTC
+15 15 * * *   /usr/bin/php /var/www/fleetforge/cron/billing_cycle_open.php >> /var/www/fleetforge/logs/cron.log 2>&1
 0 7 * * *     /usr/bin/php /var/www/fleetforge/cron/invoice_overdue.php >> /var/www/fleetforge/logs/cron.log 2>&1
 
 # Late fee application — daily at 07:30 UTC
@@ -96,6 +97,7 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 | `backup_db.php` | Every 6 hours | `ff_cron_backup_db` | mysqldump → S3, tiered retention |
 | `backup_storage.php` | Sunday 03:00 UTC | `ff_cron_backup_storage` | storage/uploads/ tarball → S3 |
 | `invoice_generate_monthly.php` | 1st of month 06:00 local / 14:00 UTC | `ff_cron_invoice_generate_monthly` | Monthly invoice generation (tz-safe `<=` catch-up, idempotent — S-CRON-FIX-1) |
+| `billing_cycle_open.php` | Daily 15:15 UTC (08:15 Pacific) | `ff_cron_billing_cycle_open` | Open the month's billing cycle on its open day + weekly reminders for cycles past their targets (S-BILLING-MODULE). Creates no invoices |
 | `invoice_overdue.php` | Daily 07:00 | `ff_cron_invoice_overdue` | Mark overdue invoices + expire past-`expires_at` credit notes (S-AUDIT-BILLING-ENGINE-1 #20) |
 | `late_fee_apply.php` | Daily 07:30 | `ff_cron_late_fee_apply` | Apply late fees |
 | `collections_auto_escalate.php` | Daily 08:00 | `ff_cron_collections` | Auto-escalate collections |

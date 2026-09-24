@@ -48,6 +48,10 @@ $sql  .= " ORDER BY r.id DESC LIMIT {$limit}";
 
 $rows = db_select($sql, $params);
 
+// S-BILLING-MODULE: run totals are amounts — redacted for roles that cannot
+// see financials (the list now shows on the Billing home, open to invoices:view).
+$showMoney = can_view_financials();
+
 $runs = array_map(static fn ($r) => [
     'id'                => (int) $r['id'],
     'reference'         => $r['reference'],
@@ -56,7 +60,7 @@ $runs = array_map(static fn ($r) => [
     'status'            => $r['status'],
     'invoice_count'     => (int) $r['invoice_count'],
     'skipped_count'     => (int) $r['skipped_count'],
-    'total_by_currency' => json_decode((string) $r['total_by_currency'], true) ?: [],
+    'total_by_currency' => $showMoney ? (json_decode((string) $r['total_by_currency'], true) ?: []) : null,
     'note'              => $r['note'],
     'submitted_at'      => $r['submitted_at'],
     'submitted_by_name' => $r['submitted_by_name'],

@@ -75,6 +75,14 @@ function sidebar_badge_count(string $key): int
                 "SELECT COUNT(*) FROM invoices WHERE status = 'overdue' AND deleted_at IS NULL",
                 []
             ),
+            // S-BILLING-MODULE: billing work waiting on someone — open billing
+            // exceptions (leases a run could not bill) + batch runs pending a
+            // decision. Same predicates as api/v1/billing/kpis.php.
+            'billing_attention' => db_count(
+                "SELECT (SELECT COUNT(*) FROM invoice_billing_exceptions WHERE status = 'open' AND deleted_at IS NULL)
+                      + (SELECT COUNT(*) FROM invoice_batch_runs WHERE status = 'pending' AND deleted_at IS NULL)",
+                []
+            ),
             // Compliance tracks CVI + Registration ONLY — MVI and Insurance were
             // removed from every compliance UI (S-UNIT-COMPLIANCE-HIDE-MVI-INS), so
             // counting them made the badge disagree with the Compliance page. Same

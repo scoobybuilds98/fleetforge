@@ -70,6 +70,8 @@ if ($entityType === '' || $entityId <= 0) {
 // for unknown types, and this endpoint must fail closed instead. A new show
 // page that adds the Activity card must add its type here or the card 403s.
 $activityGates = [
+    // S-BILLING-MODULE: the billing cycle record page (app/admin/billing/cycle.php).
+    'billing_cycle'  => 'invoices',
     'credit_note'    => 'invoices',
     'customer'       => 'customers',
     'damage_claim'   => 'maintenance',

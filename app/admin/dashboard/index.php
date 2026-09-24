@@ -194,7 +194,7 @@ $dashLoading = static function (int $height): string {
                 <a href="<?= base_url('payments/create') ?>" class="btn btn-secondary btn-sm dash-qa"><?= SopIcons::svg('banknotes') ?>Record payment</a>
                 <?php endif; ?>
                 <?php if (can('invoices', 'view')): ?>
-                <a href="<?= base_url('invoices/batch') ?>" class="btn btn-secondary btn-sm dash-qa"><?= SopIcons::svg('document-duplicate') ?>Batch invoicing</a>
+                <a href="<?= base_url('billing') ?>" class="btn btn-secondary btn-sm dash-qa"><?= SopIcons::svg('calendar-days') ?>Monthly billing</a>
                 <?php endif; ?>
                 <?= help_button('dashboard') ?>
             </div>

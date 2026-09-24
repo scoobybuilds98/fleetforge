@@ -34,7 +34,7 @@ Click any tile to filter the list to that aging bucket. Use the **Outstanding**,
 7. Enter a **PO Number** if required, and any **Notes** (customer-facing) or **Internal Notes**.
 8. Click **Create Invoice**. The invoice is created in **Draft** status.
 
-> **Tip:** Invoices are never created automatically — the monthly invoice job is switched off. Each month's invoices for monthly leases come from **Invoices → Batch Invoicing**, or from **Generate Invoice** on an individual lease. Manual creation here is for corrections, final invoices, or custom billing periods.
+> **Tip:** Invoices are never created automatically — the monthly invoice job is switched off. Each month's invoices for monthly leases come from **Monthly Billing** (its workbench), or from **Generate Invoice** on an individual lease. Manual creation here is for corrections, final invoices, or custom billing periods.
 
 ---
 
@@ -44,7 +44,7 @@ A draft invoice must be sent before it counts toward the customer's outstanding 
 
 1. Open the invoice and click **Send Invoice**.
 2. The invoice status changes to **Sent**, it is posted to the ledger as revenue, the customer and lease outstanding balances are updated, the invoice appears in the customer portal, and it is queued for QuickBooks.
-3. **Sending does not email the invoice.** To email it to the customer, click **Email Invoice** on the invoice page (see *Printing or emailing an invoice* below). Batch Invoicing's **Send & Email** does both in one step.
+3. **Sending does not email the invoice.** To email it to the customer, click **Email Invoice** on the invoice page (see *Printing or emailing an invoice* below). The Monthly Billing workbench's **Send & Email** (or a cycle's **Delivery** tab) does both in one step, and **Re-send Invoice** (More menu) emails an already-sent invoice again.
 
 > **Note:** Once sent, all financial fields on the invoice are locked and cannot be changed. You can still edit the PO number, internal notes, and delivery details.
 
@@ -160,7 +160,7 @@ Sending an invoice posts a double-entry journal: DR Accounts Receivable / CR Rev
 If odometer readings are captured, the invoice records `odometer_at_period_start_km` and `odometer_at_period_end_km`. Distance driven that period is calculated from these and used for mileage billing.
 
 **Monthly invoicing is manual**
-The `invoice_generate_monthly` cron job exists but ships **off** (Settings → Intelligence → Scheduled Jobs). Invoices for leases with `billing_cycle = 'monthly'` are created on purpose via **Invoices → Batch Invoicing** (active monthly leases) or a lease's **Generate Invoice**. Either way they start as drafts and must be sent.
+The `invoice_generate_monthly` cron job exists but ships **off** (Settings → Intelligence → Scheduled Jobs). Invoices for leases with `billing_cycle = 'monthly'` are created on purpose in **Monthly Billing** (active monthly leases, from its workbench) or a lease's **Generate Invoice**. Either way they start as drafts and must be sent.
 
 </details>
 

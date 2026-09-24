@@ -58,7 +58,7 @@ declare(strict_types=1);
  *
  * @depends lib/Billing/InvoiceGenerator.php (createFromLease, findOverlappingInvoice)
  * @decisions D14 (inclusive days), D16 (bcmath)
- * @session S-BATCH-INVOICING
+ * @session S-BATCH-INVOICING, S-BILLING-MODULE (holds, cycle readings, closed-cycle lock)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -70,6 +70,9 @@ require_permission('invoices', 'create');
 use FleetForge\Billing\InvoiceGenerator;
 use FleetForge\Billing\BillingRateException;
 use FleetForge\Billing\BillingExceptions;
+use FleetForge\Billing\Cycle\BillingHolds;
+use FleetForge\Billing\Cycle\CycleClose;
+use FleetForge\Billing\Cycle\CycleReadings;
 
 $body = json_body();
 
@@ -109,7 +112,7 @@ if (!$leaseIds) {
 }
 
 // ── Approval gate (S-BATCH-APPROVAL) ────────────────────────────────
-// Settings → General → Invoices & Billing → "Require approval before batch
+// Billing → Settings → "Require approval before batch
 // billing". When on, this direct path is closed and billing must go through
 // a submitted+approved run (api/v1/invoices/batch_runs/*), which is what
 // makes the approval workflow enforceable rather than advisory.
@@ -123,6 +126,20 @@ if ((string) settings_get('invoices.approval_required', '0') === '1') {
         'APPROVAL_REQUIRED',
         'Approval is required before batch billing. Submit these leases for approval instead — '
         . 'once a run is approved it can be generated from its own page.',
+        409
+    );
+}
+
+// ── Closed-cycle lock (S-BILLING-MODULE) ─────────────────────────────
+// A closed billing cycle means that month's billing is signed off. The
+// workbench may not add to it; reopening the cycle (Billing, "approve"
+// permission, reason required) is the way back. A lease's own Generate
+// Invoice / close is deliberately NOT locked — see lib/Billing/Cycle/CycleClose.php.
+if ($closedCycle = CycleClose::closedCycleFor($periodStart, $periodEnd)) {
+    json_error(
+        'CYCLE_CLOSED',
+        "Billing cycle {$closedCycle['reference']} is closed, so the workbench cannot bill that month. "
+        . 'Reopen the cycle on Billing to bill more leases for it.',
         409
     );
 }
@@ -173,6 +190,15 @@ foreach ($leaseIds as $leaseId) {
         continue;
     }
 
+    // ── Billing hold (S-BILLING-MODULE) — a standing "do not bill"
+    // instruction. Reported, but NOT flagged as an exception below: nothing
+    // is wrong, billing is paused on purpose. ────────────────────────────
+    if ($hold = BillingHolds::activeFor($leaseId, $periodStart, $periodEnd)) {
+        $skipped++;
+        $errors[] = ['lease_id' => $leaseId, 'reason' => BillingHolds::describe($hold), 'held' => true];
+        continue;
+    }
+
     // ── Overlap guard — replicates generateForLease()'s assertNoOverlap()
     // without its unconditional json_error() exit (see docblock #2). ──
     $overlap = InvoiceGenerator::findOverlappingInvoice($leaseId, $periodStart, $periodEnd);
@@ -186,7 +212,10 @@ foreach ($leaseIds as $leaseId) {
     }
 
     try {
-        $result = $generator->createFromLease([
+        // S-BILLING-MODULE: period-end readings from the cycle's Readings
+        // sheet (manual mileage / hours), exactly as the single-invoice form
+        // passes them. [] when none apply.
+        $result = $generator->createFromLease(CycleReadings::generatorParams($leaseId, $periodStart, $periodEnd) + [
             'lease_id'              => $leaseId,
             'period_start'          => $periodStart,
             'period_end'            => $periodEnd,
@@ -260,6 +289,9 @@ if ($errors) {
     }
 }
 foreach ($errors as $err) {
+    if (!empty($err['held'])) {
+        continue; // a billing hold is intentional, not an exception
+    }
     BillingExceptions::flag(
         (int) $err['lease_id'],
         $exceptionCustomer[(int) $err['lease_id']] ?? null,
@@ -281,5 +313,5 @@ json_success([
     'errors'   => $errors,
     'invoices' => $invoices,
     // How many of the skips are now sitting in the review queue.
-    'flagged'  => count($errors),
+    'flagged'  => count(array_filter($errors, static fn($e) => empty($e['held']))),
 ], 201);

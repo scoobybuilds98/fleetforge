@@ -30,6 +30,7 @@ require_auth_api();
 require_permission('invoices', 'create');
 
 use FleetForge\Billing\BatchPreviewService;
+use FleetForge\Billing\Cycle\CycleClose;
 
 $body = json_body();
 
@@ -69,6 +70,15 @@ if (!$leaseIds) {
 }
 
 $note = clean_string($body['note'] ?? null, 2000);
+
+// S-BILLING-MODULE: no new run for a month whose billing cycle is closed.
+if ($closedCycle = CycleClose::closedCycleFor($periodStart, $periodEnd)) {
+    json_error(
+        'CYCLE_CLOSED',
+        "Billing cycle {$closedCycle['reference']} is closed. Reopen it on Billing before submitting a run for that month.",
+        409
+    );
+}
 
 // ── Freeze the dry run ──────────────────────────────────────────────
 $snapshot = BatchPreviewService::run($leaseIds, $periodStart, $periodEnd, current_user_id());
@@ -134,7 +144,7 @@ try {
                   . (current_user()['name'] ?? 'a user') . '.',
         entityType: 'batch_run',
         entityId:   $runId,
-        url:        '/fleetforge/invoices/batch_run?id=' . $runId
+        url:        '/fleetforge/billing/approval?id=' . $runId
     );
 } catch (\Throwable $e) {
     error_log('[NOTIF invoice.batch_run_submitted] ' . $e->getMessage());
@@ -147,5 +157,5 @@ json_success([
     'invoice_count'     => (int) $run['invoice_count'],
     'skipped_count'     => (int) $run['skipped_count'],
     'total_by_currency' => json_decode((string) $run['total_by_currency'], true),
-    'url'               => base_url('invoices/batch_run') . '?id=' . $runId,
+    'url'               => base_url('billing/approval') . '?id=' . $runId,
 ], 201);

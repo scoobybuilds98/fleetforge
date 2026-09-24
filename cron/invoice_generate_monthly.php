@@ -64,6 +64,10 @@ declare(strict_types=1);
  *   wrapper at the bottom is skipped when FF_MONTHLY_BILLING_INCLUDE is defined,
  *   so tests/_smoke_model_b_lifecycle.php can require this file and drive the
  *   runner with deterministic dates inside BEGIN/ROLLBACK.
+ *
+ * S-BILLING-MODULE: leases on a billing hold (Billing → Holds) are skipped
+ * without advancing next_billing_date, so releasing the hold lets the
+ * catch-up loop bill the held months in order.
  */
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -172,6 +176,27 @@ function ff_run_monthly_billing(string $today): array
             $isLastPeriod = ((string) $cur['next_after'] > $today); // most-recent due period
             $periodStart  = date('Y-m-01', strtotime($nbd));
             $periodEnd    = date('Y-m-t', strtotime($nbd));
+
+            // ── S-BILLING-MODULE: billing hold ───────────────────────────────
+            // A held lease is not billed, and its pointer is NOT advanced: the
+            // hold defers billing rather than forgiving it, so once released
+            // this same catch-up loop bills the held months in order.
+            if ($hold = \FleetForge\Billing\Cycle\BillingHolds::activeFor($leaseId, $periodStart, $periodEnd)) {
+                $skipped++;
+                db_insert('audit_log', [
+                    'user_id'      => null,
+                    'user_name'    => 'system',
+                    'action'       => 'cron',
+                    'module'       => 'invoices',
+                    'entity_type'  => 'lease',
+                    'entity_id'    => $leaseId,
+                    'entity_label' => $lease['contract_number'],
+                    'notes'        => "invoice_generate_monthly: skipped {$periodStart}..{$periodEnd} for lease #{$leaseId} — "
+                                    . \FleetForge\Billing\Cycle\BillingHolds::describe($hold),
+                    'ip_address'   => '127.0.0.1',
+                ]);
+                break;
+            }
 
             try {
                 // ── Idempotency guard (D-BILLING-MATCH-LTE) ──────────────────

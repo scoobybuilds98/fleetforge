@@ -8,7 +8,7 @@ part: Operations & billing
 audience: manager, accountant
 reviewed: 2026-09-24
 ---
-Invoices are made on purpose, never automatically: the monthly invoice job is switched off, so each month's invoices come from Batch Invoicing or a lease's Generate Invoice. A draft changes nothing. **Sending** is the moment the invoice becomes revenue, is added to the customer's balance, and goes to QuickBooks.
+Invoices are made on purpose, never automatically: the monthly invoice job is switched off, so each month's invoices come from the Monthly Billing workbench or a lease's Generate Invoice. A draft changes nothing. **Sending** is the moment the invoice becomes revenue, is added to the customer's balance, and goes to QuickBooks.
 
 :::diagram invoice-lifecycle An invoice's life. Only Send touches the books; a sent invoice is corrected with a credit note, never edited.
 
@@ -34,19 +34,23 @@ Each invoice re-prices the whole lease, from its start to the end of this period
 
 ## Month-end billing
 
-Manager, from {{Invoices › Batch Invoicing @/invoices/batch}}:
+Each month is a **billing cycle**: {{Billing › Monthly Billing @/billing}}. The **Open billing cycles** scheduled job opens last month's cycle on the 1st and tells the billing owner; **Start the … cycle** does the same by hand. On the cycle page, work the steps left to right (click a step to open its tab):
 
-1. **1. Billing Period**: **Last Month** (or a custom range).
-2. **2. Customers & Leases**: **Select all unbilled**. Untick anything not ready.
-3. **Delivery Options**: tick "Also email the invoice to the customer" and "Attach the invoice PDF" if emailing now. Check **3. Recipient Emails**.
-4. Press **Preview totals**. Nothing is saved yet. Use **Hold for review** on anything that looks wrong, then **Looks right — Generate N**.
-5. Clear **Needs Attention** (**Fixed** or **Skip**).
-6. In **4. Review & Send**, open the PDFs of a sample, or **Download combined PDF**.
-7. Press **Mark N as Sent**, or **Send & Email N** to email as well.
+1. **Prepare**: the **Readiness** tab. Fix every blocker (no rate, no US-dollar rate). Fix or **Acknowledge** each warning — earlier months never billed, missing readings, Samsara units not reporting, leases past their end date, customers with no email or a bounced one, missing PO numbers, expired tax exemptions, a closed ledger month, older drafts.
+2. **Readings**: enter the month-end odometer (and engine hours) for every Manual-mileage and hourly lease, then **Save readings**. Generation passes them to the invoice.
+3. **Generate**: **Open workbench**. **Preview totals** (nothing is saved), **Hold for review** anything wrong, then **Looks right — Generate N**. Leases on a billing hold are never pre-selected. The **Leases** tab shows what is still **To bill**; a **Closed, unbilled** lease uses its own **Generate Invoice**.
+4. **Review**: the **Review** tab. Clear every red flag (double billing, double mileage), look at the amber ones (big change against last month, $0, no tax, no recipient), then **Mark reviewed**. **Query** anything that needs a second look.
+5. **Approve** (only when "Require approval before batch billing" is on in {{Billing › Settings @/billing/settings}}): **Submit for approval** from the workbench; a manager approves on {{Billing › Approvals @/billing#approvals}}, then **Generate**.
+6. **Send**: the **Delivery** tab. Tick the drafts → **Send & email N draft(s)**. Invoices already sent without an email → **Email N sent invoice(s)**. Print and post the **Print & mail** ones.
+7. **Close**: the **Close** tab → **Close and lock**. It needs no drafts, no pending runs and no queried invoices; leases still to bill or open exceptions need **Close anyway** and a note. The month's figures are frozen and the workbench can no longer bill it (a lease's own Generate Invoice still can). **Download billing register (CSV)** for the accountant.
 
-:::callout info What batch does not cover
-Batch only covers active monthly leases. A completed lease with an unbilled month uses **Generate Invoice** on the lease. If "Require approval before batch billing" is on ({{Settings › General @/settings?tab=general}}), **Submit for approval** replaces Generate.
+:::callout info What the workbench does not cover
+The workbench bills active monthly leases only. A completed lease with an unbilled month uses **Generate Invoice** on the lease; a lease set to bill at close bills when it closes. Both still show on the cycle.
 :::
+
+**Billing holds** ({{Billing › Holds @/billing#holds}}): hold a lease or a whole customer (dispute, paperwork) — it is left out of the workbench and the monthly job until released. **Billing exceptions** (leases a run could not bill) are on {{Billing › Exceptions @/billing#exceptions}}: **Fixed**, **Ignore** with a note, or **Hold**.
+
+**Draft backlog**: {{Billing › Cycles @/billing#cycles}} lists months with unsent drafts and no cycle. Open the oldest, send or void its drafts, close it, move on.
 
 ## One lease
 

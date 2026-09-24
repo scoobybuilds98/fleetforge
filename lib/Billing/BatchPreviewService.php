@@ -31,7 +31,11 @@ namespace FleetForge\Billing;
  * approval snapshot a manager signs off). If those ever drifted, a manager
  * would approve figures the generator would not reproduce.
  *
- * @session S-BATCH-APPROVAL
+ * S-BILLING-MODULE: honours billing holds and feeds the cycle's period-end
+ * readings (Cycle\CycleReadings::generatorParams) to the generator, the same
+ * as batch_generate / batch_runs/generate, so all three stay byte-identical.
+ *
+ * @session S-BATCH-APPROVAL, S-BILLING-MODULE
  */
 final class BatchPreviewService
 {
@@ -99,6 +103,13 @@ final class BatchPreviewService
                 continue;
             }
 
+            // S-BILLING-MODULE: a lease on billing hold is not previewed as billable.
+            if ($hold = Cycle\BillingHolds::activeFor($leaseId, $periodStart, $periodEnd)) {
+                $previews[] = self::errRow($leaseId, $lease, Cycle\BillingHolds::describe($hold));
+                $errCount++;
+                continue;
+            }
+
             $existing = InvoiceGenerator::findOverlappingInvoice($leaseId, $periodStart, $periodEnd);
             if ($existing) {
                 $previews[] = self::errRow($leaseId, $lease,
@@ -111,7 +122,10 @@ final class BatchPreviewService
                 \db_transaction(static function () use (
                     $generator, $leaseId, $periodStart, $periodEnd, $billingType, $userId
                 ): void {
-                    $res = $generator->createFromLease([
+                    // S-BILLING-MODULE: the cycle's period-end readings, so the
+                    // dry run (and a frozen approval snapshot) prices usage
+                    // exactly as generation will.
+                    $res = $generator->createFromLease(Cycle\CycleReadings::generatorParams($leaseId, $periodStart, $periodEnd) + [
                         'lease_id'             => $leaseId,
                         'period_start'         => $periodStart,
                         'period_end'           => $periodEnd,
