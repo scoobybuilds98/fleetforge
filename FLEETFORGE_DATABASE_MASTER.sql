@@ -2250,6 +2250,7 @@ CREATE TABLE `conversation_reads` (
   `user_id` int unsigned DEFAULT NULL,
   `portal_user_id` int unsigned DEFAULT NULL,
   `last_read_message_id` int unsigned NOT NULL DEFAULT '0',
+  `cleared_message_id` int unsigned DEFAULT NULL COMMENT 'Delete chat: hide messages with id <= this from this reader (NULL = never deleted)',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_conv_read_user` (`conversation_id`,`user_id`),

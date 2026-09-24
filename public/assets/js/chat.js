@@ -92,6 +92,39 @@
             confirmUnsend: null,
             picker: { open: false, type: '', q: '', results: [], loading: false },
 
+            // ── delete chat / leave group (staff) ────────────────────
+            // For me only: the other side keeps every message (S-CHAT-DELETE).
+            async deleteChat() {
+                if (!this.conv || !this.activeId) return;
+                const c = this.conv;
+                const group = c.kind === 'group';
+                const who = c.kind === 'customer'
+                    ? c.title + ' and your teammates keep the conversation.'
+                    : c.title + ' keeps their copy.';
+                const ok = await FF_Confirm.ask({
+                    title: group ? 'Leave ' + c.title + '?' : 'Delete this chat?',
+                    message: group
+                        ? 'You will stop getting its messages and it is removed from your Messages. The others keep the conversation.'
+                        : 'It is removed from your Messages only — ' + who + ' If anyone writes again, it comes back with just the new messages.',
+                    confirmLabel: group ? 'Leave group' : 'Delete chat',
+                    dangerMode: true,
+                });
+                if (!ok) return;
+                const id = this.activeId;
+                const res = await FF_Api.post(FF_Api.url(this.api.delete), { conversation_id: id }, { quiet: true }).catch(() => null);
+                if (!res || !res.success) { this.error = res?.error?.message || 'Couldn\'t delete this chat. Try again.'; return; }
+                for (const key of ['team', 'customers']) this.lists[key] = this.lists[key].filter(x => x.id !== id);
+                this.recount();
+                this.activeId = null;
+                this.conv = null;
+                this.messages = [];
+                this.chips = [];
+                this.draft = '';
+                this.mobileThread = false;
+                try { history.replaceState(null, '', location.pathname); } catch (e) {}
+                if (window.FF_Toast) FF_Toast.success(group ? 'Left the group' : 'Chat deleted', group ? '' : 'Removed from your Messages.');
+            },
+
             // ── new conversation (staff) ─────────────────────────────
             newer: { open: false, mode: 'direct', q: '', staff: [], customers: [], title: '', ids: [], busy: false, error: '' },
 

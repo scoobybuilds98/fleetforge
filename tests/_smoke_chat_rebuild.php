@@ -16,6 +16,7 @@
  *                money redaction for dispatchers, portal isolation, live status
  *   F. unread totals — staff badge (team / customers) and portal badge
  *   G. search — all 8 types execute against the real schema
+ *   I. delete chat / leave group — mine only, others keep theirs, comes back on a new message (S-CHAT-DELETE)
  *   H. static — no code references the retired tables/endpoints
  *
  * Run: php tests/_smoke_chat_rebuild.php
@@ -261,6 +262,54 @@ try {
     Conversations::send($ctRow, $admin, 'Got it, checking now', []);
     check('a new staff text → portal unread 1', Conversations::portalUnread($portal) === 1);
 
+    // ── I. Delete chat / leave group (S-CHAT-DELETE) ──────────────────
+    echo "I. Delete chat / leave group\n";
+    $inList = fn(array $v, int $id, string $b = 'team') => (bool) array_filter(Conversations::listForStaff($v)[$b], fn($i) => $i['id'] === $id);
+    as_role('super_admin');
+    $dd = Conversations::openDirect($admin['user_id'], $acct['user_id']);
+    $ddRow = Conversations::find($dd, $admin);
+    Conversations::send($ddRow, $admin, 'before delete 1', []);
+    Conversations::send($ddRow, $admin, 'before delete 2', []);
+    check('delete: DM result is "deleted"', Conversations::deleteForViewer(Conversations::find($dd, $acct), $acct) === 'deleted');
+    check('delete: gone from MY list', !$inList($acct, $dd));
+    check('delete: still in the OTHER person\'s list', $inList($admin, $dd));
+    check('delete: my history is empty', Conversations::messages($ddRow, $acct)['messages'] === []);
+    check('delete: the other person keeps both messages', count(Conversations::messages($ddRow, $admin)['messages']) === 2);
+    check('delete: my bell item for it is cleared', unread_notifs('user_id', $acct['user_id'], $dd) === 0);
+    Conversations::send($ddRow, $admin, 'after delete', []);
+    $back = current(array_filter(Conversations::listForStaff($acct)['team'], fn($i) => $i['id'] === $dd));
+    check('delete: a new message brings it back with 1 unread', $back && $back['unread'] === 1, json_encode($back));
+    $after = Conversations::messages($ddRow, $acct)['messages'];
+    check('delete: it comes back holding ONLY the new message', count($after) === 1 && $after[0]['body'] === 'after delete');
+    Conversations::deleteForViewer(Conversations::find($dd, $acct), $acct);
+    Conversations::deleteForViewer(Conversations::find($dd, $acct), $acct);
+    check('delete: deleting twice is harmless', !$inList($acct, $dd) && count(Conversations::messages($ddRow, $admin)['messages']) === 3);
+
+    $empty = Conversations::openDirect($acct['user_id'], $disp['user_id']);
+    Conversations::deleteForViewer(Conversations::find($empty, $acct), $acct);
+    check('delete: an empty DM deleted before anyone wrote stays out of my list', !$inList($acct, $empty));
+
+    $grp = Conversations::createGroup($admin['user_id'], 'Delete smoke', [$mgr['user_id'], $disp['user_id']]);
+    Conversations::send(Conversations::find($grp, $admin), $admin, 'hi group', []);
+    check('leave: result is "left"', Conversations::deleteForViewer(Conversations::find($grp, $mgr), $mgr) === 'left');
+    check('leave: I can no longer open the group', Conversations::find($grp, $mgr) === null);
+    check('leave: the others are still members', db_count('SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ?', [$grp]) === 2);
+    Conversations::deleteForViewer(Conversations::find($grp, $disp), $disp);
+    check('leave: the last member leaving removes the group',
+        Conversations::deleteForViewer(Conversations::find($grp, $admin), $admin) === 'removed'
+        && !db_row('SELECT id FROM conversations WHERE id = ?', [$grp])
+        && db_count('SELECT COUNT(*) FROM conversation_messages WHERE conversation_id = ?', [$grp]) === 0);
+
+    $ctNow = Conversations::find($ct, $admin);
+    $portalBefore = count(Conversations::messages($ctNow, $portal)['messages']);
+    Conversations::deleteForViewer($ctNow, $admin);
+    check('delete customer thread: gone from my Customers list', !$inList($admin, $ct, 'customers'));
+    check('delete customer thread: a colleague still has it', $inList($disp, $ct, 'customers'));
+    check('delete customer thread: the customer keeps every message', count(Conversations::messages($ctNow, $portal)['messages']) === $portalBefore);
+    Conversations::send(Conversations::find($ct, $portal), $portal, 'customer writes again', []);
+    check('delete customer thread: the customer writing again brings it back', $inList($admin, $ct, 'customers')
+        && count(Conversations::messages($ctNow, $admin)['messages']) === 1);
+
     // ── G. Search ──────────────────────────────────────────────────────
     echo "G. Search (every type, real schema)\n";
     as_role('super_admin');
@@ -299,7 +348,7 @@ foreach ($it as $f) {
 }
 check('no code references retired chat/messenger tables, endpoints or components', !$hits, implode(', ', array_slice($hits, 0, 8)));
 foreach (['api/v1/chat/conversations.php', 'api/v1/chat/conversation.php', 'api/v1/chat/send.php', 'api/v1/chat/unsend.php',
-          'api/v1/chat/records.php', 'api/v1/chat/people.php', 'api/v1/chat/start.php', 'api/v1/chat/unread.php',
+          'api/v1/chat/records.php', 'api/v1/chat/people.php', 'api/v1/chat/start.php', 'api/v1/chat/unread.php', 'api/v1/chat/delete.php',
           'app/portal/api/chat/thread.php', 'app/portal/api/chat/send.php', 'app/portal/api/chat/unsend.php', 'app/portal/api/chat/records.php',
           'app/admin/chat/index.php', 'app/portal/chat/index.php', 'public/assets/js/chat.js', 'public/assets/css/chat.css'] as $f) {
     $ok = is_file(FF_ROOT . '/' . $f);

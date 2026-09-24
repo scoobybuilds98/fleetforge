@@ -2,7 +2,7 @@
 **Auto-generated from live database. Do NOT edit manually.**
 **Regenerate:** `php scripts/generate_schema_ref.php`
 **Generated:** 2026-09-24
-**Tables:** 174 total · **Columns:** 2761
+**Tables:** 174 total · **Columns:** 2762
 
 > This file is the authoritative source for on-disk column names.
 > Use it instead of spec files when writing column references in
@@ -2404,6 +2404,7 @@ _89 tables._
 | `user_id` | int unsigned | MUL | YES |
 | `portal_user_id` | int unsigned | MUL | YES |
 | `last_read_message_id` | int unsigned |  | NO |
+| `cleared_message_id` | int unsigned |  | YES |
 | `updated_at` | datetime _(DEFAULT_GENERATED on update CURRENT_TIMESTAMP)_ |  | NO |
 
 ## `credit_note_applications`

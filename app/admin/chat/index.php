@@ -17,6 +17,9 @@
  *   ?to=USER_ID             open (or start) a DM
  *   ?attach=invoice:42      pre-attach a record ("Send in chat" on record pages)
  *
+ * Delete chat (S-CHAT-DELETE): the trash button in the thread header removes
+ * the conversation from YOUR Messages only (groups: Leave group).
+ *
  * Dependencies: includes/auth.php, includes/header.php, includes/footer.php,
  *               includes/partials/chat-thread.php, api/v1/chat/*,
  *               public/assets/js/chat.js (FF_ChatApp), public/assets/css/chat.css
@@ -53,6 +56,7 @@ $chatConfig = [
         'records' => '/api/v1/chat/records.php',
         'people'  => '/api/v1/chat/people.php',
         'start'   => '/api/v1/chat/start.php',
+        'delete'  => '/api/v1/chat/delete.php',
     ],
 ];
 ?>
@@ -148,6 +152,12 @@ $chatConfig = [
                         <div class="cx-thread-sub" x-text="conv ? conv.subtitle : ''" :title="conv ? conv.subtitle : ''"></div>
                     </div>
                     <span class="cx-visible" x-show="conv && conv.kind === 'customer'" title="Everything in this thread is visible to the customer's portal users">Customer can see this</span>
+                    <!-- S-CHAT-DELETE: removes it from MY Messages only (groups: leave) -->
+                    <button type="button" class="cx-icon-btn cx-delete" @click="deleteChat()" x-show="conv"
+                            :title="conv && conv.kind === 'group' ? 'Leave group' : 'Delete chat'"
+                            :aria-label="conv && conv.kind === 'group' ? 'Leave group' : 'Delete chat'">
+                        <?= ff_chat_icon('trash') ?>
+                    </button>
                 </header>
 
                 <?php $cxPlaceholder = "conv && conv.kind === 'customer' ? 'Text ' + conv.title + '…' : 'Message'"; ?>

@@ -25,6 +25,10 @@ use FleetForge\Notifications\NotificationService;
  * staff reader only counts CUSTOMER messages (a colleague's reply isn't news)
  * and never anything from before their account existed.
  *
+ * Delete chat: per reader (conversation_reads.cleared_message_id) — hides
+ * my history + drops the chat from my list until something newer arrives;
+ * groups are left instead. Nobody else's copy changes (S-CHAT-DELETE).
+ *
  * Notifications (bell): coalesced — at most ONE unread "new messages"
  * notification per reader per conversation, so a burst of texts is one
  * bell item, not twenty.
@@ -86,7 +90,8 @@ final class Conversations
 
     /**
      * Staff inbox: team conversations I'm in + (with customers.view) every
-     * customer thread that has messages. Newest activity first.
+     * customer thread that has messages. Newest activity first. Chats I
+     * deleted stay out until a message newer than my delete arrives.
      *
      * @return array{team: list<array>, customers: list<array>}
      */
@@ -99,7 +104,7 @@ final class Conversations
                     COALESCE(r.last_read_message_id, 0) AS read_mark,
                     (SELECT COUNT(*) FROM conversation_messages m
                       WHERE m.conversation_id = cv.id
-                        AND m.id > COALESCE(r.last_read_message_id, 0)
+                        AND m.id > GREATEST(COALESCE(r.last_read_message_id, 0), COALESCE(r.cleared_message_id, 0))
                         AND m.deleted_at IS NULL
                         AND (   (cv.kind <> 'customer' AND NOT (m.sender_type = 'staff' AND m.user_id <=> ?))
                              OR (cv.kind = 'customer' AND m.sender_type = 'customer' AND m.created_at >= me.created_at))
@@ -108,9 +113,11 @@ final class Conversations
                JOIN users me ON me.id = ?
                LEFT JOIN customers c ON c.id = cv.customer_id
                LEFT JOIN conversation_reads r ON r.conversation_id = cv.id AND r.user_id = ?
-              WHERE (cv.kind IN ('direct','group')
-                     AND EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = cv.id AND cm.user_id = ?))
-                 OR (cv.kind = 'customer' AND ? = 1 AND cv.last_message_id IS NOT NULL)
+              WHERE (   (cv.kind IN ('direct','group')
+                         AND EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = cv.id AND cm.user_id = ?))
+                     OR (cv.kind = 'customer' AND ? = 1 AND cv.last_message_id IS NOT NULL))
+                -- Deleted by me: hidden until someone writes again.
+                AND (r.cleared_message_id IS NULL OR COALESCE(cv.last_message_id, 0) > r.cleared_message_id)
               ORDER BY COALESCE(cv.last_message_at, cv.created_at) DESC, cv.id DESC
               LIMIT 300",
             [$uid, $uid, $uid, $uid, $viewer['customers'] ? 1 : 0]
@@ -178,8 +185,8 @@ final class Conversations
      */
     public static function messages(array $cv, array $viewer, int $afterId = 0, int $beforeId = 0): array
     {
-        $params = [(int) $cv['id']];
-        $where  = 'm.conversation_id = ?';
+        $params = [(int) $cv['id'], self::clearedMark($cv, $viewer)];
+        $where  = 'm.conversation_id = ? AND m.id > ?';   // "Delete chat" hides everything up to the reader's mark
         if ($afterId > 0) {
             $where .= ' AND m.id > ?';
             $params[] = $afterId;
@@ -321,6 +328,66 @@ final class Conversations
         return true;
     }
 
+    /**
+     * "Delete chat" for THIS reader only — like deleting a thread on a phone.
+     *   direct / customer: history up to now is hidden from me and the chat
+     *     leaves my list; the other side (teammate, customer, colleagues
+     *     sharing the customer thread) keeps everything. A newer message
+     *     brings it back holding only the new messages.
+     *   group: I leave (membership removed, so no access and no more
+     *     notifications); the last member to leave deletes the group.
+     *
+     * @return string 'deleted' | 'left' | 'removed' (group had no one left)
+     */
+    public static function deleteForViewer(array $cv, array $viewer): string
+    {
+        $convId = (int) $cv['id'];
+        $col    = $viewer['side'] === 'staff' ? 'user_id' : 'portal_user_id';
+        $who    = $viewer['side'] === 'staff' ? $viewer['user_id'] : $viewer['portal_user_id'];
+
+        $result = \db_transaction(function () use ($cv, $convId, $col, $who) {
+            if ($cv['kind'] === 'group') {
+                \db_execute('DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?', [$convId, $who]);
+                if (\db_count('SELECT COUNT(*) FROM conversation_members WHERE conversation_id = ?', [$convId]) === 0) {
+                    \db_execute('DELETE FROM conversations WHERE id = ?', [$convId]);   // cascades messages/records/reads
+                    return 'removed';
+                }
+                \db_execute("DELETE FROM conversation_reads WHERE conversation_id = ? AND {$col} = ?", [$convId, $who]);
+                return 'left';
+            }
+            // Read the newest id inside the transaction so a message landing
+            // mid-delete stays visible rather than vanishing unseen.
+            $last = (int) (\db_row('SELECT last_message_id AS m FROM conversations WHERE id = ? FOR UPDATE', [$convId])['m'] ?? 0);
+            \db_execute(
+                "INSERT INTO conversation_reads (conversation_id, {$col}, last_read_message_id, cleared_message_id) VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    last_read_message_id = GREATEST(last_read_message_id, VALUES(last_read_message_id)),
+                    cleared_message_id   = GREATEST(COALESCE(cleared_message_id, 0), VALUES(cleared_message_id))",
+                [$convId, $who, $last, $last]
+            );
+            return 'deleted';
+        });
+
+        \db_execute(
+            "UPDATE notifications SET is_read = 1, read_at = NOW()
+              WHERE {$col} = ? AND entity_type = 'conversation' AND entity_id = ? AND is_read = 0",
+            [$who, $convId]
+        );
+        return $result;
+    }
+
+    /** Highest message id this reader deleted (0 = never). */
+    private static function clearedMark(array $cv, array $viewer): int
+    {
+        $col = $viewer['side'] === 'staff' ? 'user_id' : 'portal_user_id';
+        $who = $viewer['side'] === 'staff' ? $viewer['user_id'] : $viewer['portal_user_id'];
+        $row = \db_row(
+            "SELECT cleared_message_id AS c FROM conversation_reads WHERE conversation_id = ? AND {$col} = ?",
+            [(int) $cv['id'], $who]
+        );
+        return (int) ($row['c'] ?? 0);
+    }
+
     /** Advance my read mark (never moves backwards). */
     public static function markRead(array $cv, array $viewer, int $messageId): void
     {
@@ -361,7 +428,7 @@ final class Conversations
                JOIN conversations cv ON cv.id = m.conversation_id AND cv.kind = 'customer' AND cv.customer_id = ?
                LEFT JOIN conversation_reads r ON r.conversation_id = cv.id AND r.portal_user_id = ?
               WHERE m.sender_type = 'staff' AND m.deleted_at IS NULL
-                AND m.id > COALESCE(r.last_read_message_id, 0)",
+                AND m.id > GREATEST(COALESCE(r.last_read_message_id, 0), COALESCE(r.cleared_message_id, 0))",
             [$viewer['customer_id'], $viewer['portal_user_id']]
         );
     }

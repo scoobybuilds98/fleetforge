@@ -38,6 +38,12 @@ The card in the message is **live**: it always shows the record's current status
 - In a customer thread you can only attach **that customer's** leases, invoices and payments — and only ones they can already see in their portal (no internal draft invoices, nothing voided).
 - Customers reply from **Messages** in their portal and can attach their own leases, invoices and payments. **Message us** on a portal invoice or lease page starts a message with it attached.
 
+## Deleting a chat or leaving a group
+
+1. Open the conversation and click the **trash icon** at the top right.
+2. For a direct message or a customer thread, choose **Delete chat**. It disappears from **your** Messages only — the other person, the customer and your teammates keep every message. If anyone writes again, it comes back with just the new messages.
+3. For a group, the button is **Leave group**. You stop getting its messages and it leaves your list; the others carry on. When the last person leaves, the group is deleted.
+
 ## Unsending a message
 
 Hover your own message and click **Unsend**, then **Unsend?** to confirm. The text and any attached records are removed; a small "Message unsent" note stays so the conversation still reads in order.
@@ -52,6 +58,7 @@ Hover your own message and click **Unsend**, then **Unsend?** to confirm. The te
 - **Records are stored as type + id only.** Title, status and amount are looked up when the message is shown, for the person looking (`lib/Chat/RecordRefs.php`). Staff without **Payments → View** see cards without amounts and payment cards as *Not available*. A deleted record, or one you can't open, reads *Not available*.
 - **Unread** — Team counts messages from others you haven't opened; Customers counts only the customer's messages (a colleague's reply isn't news to you). Opening a thread marks it read and clears its bell notification.
 - **Notifications** — at most one unread bell notification per conversation, however many texts arrive. Customers get a portal notification for new staff messages. Customer texts notify the staff who have already replied in that thread; everyone else sees the Chat badge.
+- **Delete chat is per person** — it stores how far *you* deleted (`conversation_reads.cleared_message_id`); nothing is removed for anyone else, so a customer's record of the conversation is never lost. Groups are left instead; the last member leaving deletes the group and its messages.
 - **Refresh** — an open conversation checks for new messages every 4 seconds and the list every 15 seconds, and both pause while the browser tab is in the background.
 
 </details>
