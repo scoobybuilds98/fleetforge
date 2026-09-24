@@ -33,7 +33,8 @@ Dispatcher and manager, every morning:
 2. Press **Create Customer**.
 3. Set **GPS Revenue Presentation** on the customer's **Overview** tab: **Tax & regulatory** card → **Edit**, choose Net (Agent) or Gross (Principal).
 4. **Portal access**: {{Users › Portal Users @/users?tab=portal}} → choose the customer → **Create & Invite**.
-5. **Credit application**: customer → **Credit Application** tab → **+ Send Application**. When it comes back, {{Credit Applications @/credit_applications}} → **View** → set an Outcome in **Review**. Tick "Apply credit limit to customer record" if it should change the customer, then **Save Review**.
+5. **Credit application**: customer → **Credit Application** tab → **+ Send Application**. The customer's form opens already filled in with the name, email, phone, address and GST/PST on file, so fill those in on the customer first. When it comes back, {{Credit Applications @/credit_applications}} → **View** → set an Outcome in **Review**. Tick "Apply credit limit to customer record" if it should change the customer, then **Save Review**.
+   - **Needs Info**: write what's missing in the notes, **Save Review**, then **Re-send Application Link**. The notes go in the email, and the new form opens with the customer's previous answers, so they only fix what you asked about. They sign again each time.
 
 :::callout warning Customer rules that surprise people
 - **Payment Terms sets the due date.** "Net 15" makes each new invoice due 15 days after its invoice date; "Due on receipt" the same day. Blank or unusual terms ("2% 10 Net 30") fall back to 30 days (Settings default). The matching term goes to QuickBooks on every invoice, so type terms as "Net 15", "Net 30"…

@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-CCA-PREFILL** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-CCA-PREFILL-1). **The online credit application now opens already filled in: the first time from what the customer record holds (name, email, phone, address, GST/PST), and after a "Needs Info" re-send from the customer's previous answers, so they fix only what was asked. They still sign, date and accept the terms each time.** Everything else in the online flow had already shipped in June. Deploy with F93.
+
 **S-TOPBAR-CHROME** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-TOPBAR-CHROME-1). **The top bar now stands out from the page: in the light theme it takes the sidebar's dark colour, so the two frame the page; in the dark theme it is a slightly raised band. The menus that open from it (New, search results, notifications, your account) look the same as before.**
 
 **S-SIDEBAR-LOGO** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row + D-SIDEBAR-LOGO-1). **The company logo no longer shows as a black box in the sidebar: the empty border around an uploaded logo is trimmed automatically, a dark background blends into the sidebar (a white one becomes a neat badge), and the collapsed sidebar shows just the logo's icon. The uploaded file itself is unchanged, and nothing needs re-uploading.**

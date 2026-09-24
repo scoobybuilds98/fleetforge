@@ -20,11 +20,17 @@ declare(strict_types=1);
  *   document_type='credit_application') → uploaded_document_ids JSON.
  *   PDF generation and manager notifications are S-CCA-3 scope (D-CCA-2-G).
  *
+ * GET pre-fill (S-CCA-PREFILL): the first load starts from the customer's
+ *   last submission, topped up from the customer record, so a "needs info"
+ *   re-send is a correction, not a retype. Signature / date / printed name /
+ *   terms are never pre-filled. See includes/partials/credit_application_prefill.php.
+ *
  * @session S-CCA-2
  */
 
 require_once FF_ROOT . '/includes/auth.php';
 require_once FF_ROOT . '/includes/partials/credit_application_render.php';
+require_once FF_ROOT . '/includes/partials/credit_application_prefill.php';
 require_once FF_ROOT . '/vendor/autoload.php';
 
 use FleetForge\Storage\StorageClient;
@@ -157,6 +163,24 @@ $csrfToken = $_SESSION[$csrfKey];
 // ── POST handler ─────────────────────────────────────────────────────────────
 $errors = [];
 $old    = $_POST; // re-fill form inputs on validation error
+
+// ── GET pre-fill (S-CCA-PREFILL) ─────────────────────────────────────────────
+// Only on a GET of a live form. On a POST, $old must stay exactly what the
+// applicant sent — a field they deliberately cleared must not come back.
+// Invalid/expired/submitted links never reach here with pageState 'form', so
+// a dead token reveals nothing about the customer.
+$prefillSource     = null;
+$prefillHadUploads = false;
+if ($pageState === 'form'
+    && !$isAdminPreview
+    && $app !== null
+    && $_SERVER['REQUEST_METHOD'] === 'GET'
+) {
+    $prefill           = cca_prefill_for_application((int)$app['customer_id'], (int)$app['id']);
+    $old               = $prefill['values'];
+    $prefillSource     = $prefill['source'];
+    $prefillHadUploads = $prefill['previous_had_uploads'];
+}
 
 if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminPreview) {
 
@@ -1124,6 +1148,18 @@ $pageTitle = 'Credit Application — ' . e($companyName);
     </div>
     <?php endif; ?>
 
+    <?php // S-CCA-PREFILL: say where the starting values came from, so the applicant checks them rather than trusting them. ?>
+    <?php if ($prefillSource === 'previous'): ?>
+    <div class="cca-note" id="cca-prefill-note" style="margin-top:0;">
+        We've filled this in from your last application. Check each section, update anything that has
+        changed or that our team asked about, then sign at the bottom.
+    </div>
+    <?php elseif ($prefillSource === 'customer'): ?>
+    <div class="cca-note" id="cca-prefill-note" style="margin-top:0;">
+        We've filled in the details we already have on file. Check them, complete the rest, then sign at the bottom.
+    </div>
+    <?php endif; ?>
+
     <!-- §1 COMPANY INFORMATION ──────────────────────────────────────────── -->
     <div class="cca-section">
         <div class="cca-section-title">§1 Company Information</div>
@@ -1430,6 +1466,11 @@ $pageTitle = 'Credit Application — ' . e($companyName);
     <!-- §7 DOCUMENT UPLOAD ──────────────────────────────────────────────── -->
     <div class="cca-section">
         <div class="cca-section-title">§7 Document Upload</div>
+        <?php if ($prefillHadUploads): ?>
+        <div class="cca-note" style="margin-top:0;">
+            The files you uploaded with your last application are already on file. Only add new or updated documents.
+        </div>
+        <?php endif; ?>
         <?php if (isset($errors['documents'])): ?>
         <div class="cca-error-msg" style="margin-bottom:10px;"><?= e($errors['documents']) ?></div>
         <?php endif; ?>

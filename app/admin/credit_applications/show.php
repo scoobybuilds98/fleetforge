@@ -681,7 +681,7 @@ if ($canReview) {
                         Re-send Application Link
                     </button>
                     <p style="font-size:11px;color:var(--text-secondary);margin:4px 0 0;">
-                        Sends a fresh link. The notes above will be included in the email.
+                        Sends a fresh link. The notes above will be included in the email, and the form opens with the customer's previous answers filled in.
                     </p>
                     <?php endif; ?>
 
@@ -705,7 +705,7 @@ if ($app['status'] === 'submitted') {
         . ($canReview ? '<a href="#review-panel">waiting for review</a>.' : 'waiting for review.')];
 }
 if ($app['review_outcome'] === 'needs_info' && !$newerApp) {
-    $alertsC[] = ['info', 'Marked <b>Needs Info</b> — re-send the link so the customer can complete it.'];
+    $alertsC[] = ['info', 'Marked <b>Needs Info</b> — re-send the link so the customer can correct it. Their previous answers are filled in for them.'];
 }
 if (in_array($app['status'], ['sent', 'opened'], true)) {
     $alertsC[] = $linkExpired
