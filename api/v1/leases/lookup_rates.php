@@ -47,7 +47,7 @@ declare(strict_types=1);
  * }
  *
  * Decisions: D5 (soft delete on rate_cards), D16 (bcmath strings), D7 (routing)
- * Session: S019
+ * Session: S019, S-RATES-MODULE (lookup moved to lib/RateCards/RateResolver.php)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -75,161 +75,26 @@ if (!db_exists('customers', 'id = ? AND deleted_at IS NULL', [$customerId])) {
 }
 
 // Load template to get equipment_type name and default rates
-$template = db_row(
-    "SELECT id, name, category,
-            default_daily_rate, default_weekly_rate, default_monthly_rate,
-            default_mileage_rate, default_mileage_unit, default_currency,
-            default_hourly_rate
-     FROM equipment_templates
-     WHERE id = ? AND deleted_at IS NULL",
-    [$equipmentTemplateId]
-);
+// S-RATES-MODULE: the lookup itself now lives in FleetForge\RateCards\RateResolver
+// so the Rates module's Price check / "what they pay" views run the SAME code
+// and can never disagree with what this form pre-fills. The response shape,
+// labels and priority order are unchanged (the resolver adds rc.id / rci.id
+// DESC as final tie-breakers so an exact tie is deterministic).
+$template = \FleetForge\RateCards\RateResolver::template($equipmentTemplateId);
 if (!$template) {
     json_error('NOT_FOUND', 'Equipment template not found.', 404);
 }
 
-// The equipment_type key used in rate tables is the template CATEGORY enum
-// value (chassis|dry_van|reefer|container|flatbed|step_deck|lowboy|tanker|dump|other).
-// rate_card_items.equipment_type and customer_equipment_rates.equipment_type
-// both store this category string. This matches what scripts/demo_seed.php and
-// scripts/seed_dataset.php write, and aligns with the per-category rate semantic
-// (one rate covers all templates sharing a category — e.g. "53ft Dry Van" and
-// "Seed: 53ft Dry Van Wabash" both resolve to category=dry_van and share rates).
+// The equipment_type key used in rate tables is the template CATEGORY slug
+// (rate_card_items.equipment_type) — one category line covers every template
+// sharing that category, and a line naming a Specific Unit Type
+// (equipment_template_id) beats it. HISTORY: pre-S-LOOKUP-RATES-NAMESPACE this
+// keyed on the template NAME, which never matched live data (the zero-rate bug
+// class closed by S-MILEAGE-RATE-ZERO-FIX / S-BILLING-RATE-FIX).
 //
-// HISTORY: Pre-S-LOOKUP-RATES-NAMESPACE this used $template['name'] which never
-// matched live data. Lookup silently fell through to Priority 3 (template
-// defaults) for every production template — root cause of the zero-rate bug
-// class closed by S-MILEAGE-RATE-ZERO-FIX (data side) and S-BILLING-RATE-FIX
-// (base_rental side). The rate UIs (rates/create.php, rates/show.php) now store
-// category slugs, and customers/show.php has no rate-lookup dropdown — the
-// category/name mismatch and the per-category dedup are CLOSED (S-RATES-REDESIGN
-// / S-RATES-UI-CATEGORY-DEDUP, 2026-06-12; memory project_rates_ui_category_dedup).
-// (customer_equipment_rates retains legacy template-name data but lookup ignores it.)
-$equipmentType = $template['category'];
-$today         = date('Y-m-d');
-
-// S-RATE-CARD-LABEL-EQTYPE: the selected equipment's name, surfaced in the rate
-// banner so it's clear WHICH line item of a card was used. Customer cards bundle
-// several equipment types under one card named after the customer's main product
-// (e.g. a "53' T/A Dry HWY" card that also carries a Combo line item). Showing
-// just the card name made a correct Combo rate look like it came from "dry van";
-// prefixing the matched equipment type ("Combo rate · card …") removes that.
-$typeLabel = (string) $template['name'];
-
-// -----------------------------------------------------------------------
-// 2. Priority 1 — active rate_cards with a matching item.
-//    S-RATE-CARD-TEMPLATE-ITEM: a row can be template-specific
-//    (rci.equipment_template_id = $equipmentTemplateId) or category-level
-//    (rci.equipment_template_id IS NULL). Template-specific beats category.
-//    Customer-specific card beats global. D5: filter deleted_at.
-// -----------------------------------------------------------------------
-$rateCardItem = db_row(
-    "SELECT rci.daily_rate, rci.weekly_rate, rci.monthly_rate,
-            rci.mileage_rate, rci.mileage_unit, rci.hourly_rate, rci.gps_price, rci.currency,
-            rci.minimum_days,
-            rc.id AS rate_card_id, rc.name AS card_name, rc.customer_id
-     FROM rate_card_items rci
-     JOIN rate_cards rc ON rc.id = rci.rate_card_id
-     WHERE (
-         (rci.equipment_template_id = ? AND rci.equipment_type = ?)
-         OR
-         (rci.equipment_template_id IS NULL AND rci.equipment_type = ?)
-     )
-       AND rc.deleted_at IS NULL
-       AND rc.effective_from <= ?
-       AND (rc.effective_to IS NULL OR rc.effective_to >= ?)
-       AND (rc.customer_id = ? OR rc.customer_id IS NULL)
-     ORDER BY
-         (rc.customer_id IS NOT NULL) DESC,
-         (rci.equipment_template_id IS NOT NULL) DESC,
-         rc.is_default DESC,
-         rc.effective_from DESC
-     LIMIT 1",
-    [$equipmentTemplateId, $equipmentType, $equipmentType, $today, $today, $customerId]
-);
-
-if ($rateCardItem) {
-    $isCustomerCard = $rateCardItem['customer_id'] !== null;
-    json_success([
-        'source'       => $isCustomerCard ? 'customer' : 'rate_card',
-        'source_label' => $isCustomerCard
-            ? $typeLabel . ' rate · custom card "' . $rateCardItem['card_name'] . '"'
-            : $typeLabel . ' rate · card "' . $rateCardItem['card_name'] . '"',
-        'daily_rate'   => $rateCardItem['daily_rate'],
-        'weekly_rate'  => $rateCardItem['weekly_rate'],
-        'monthly_rate' => $rateCardItem['monthly_rate'],
-        'mileage_rate' => $rateCardItem['mileage_rate'],
-        'mileage_unit' => $rateCardItem['mileage_unit'],
-        'hourly_rate'  => $rateCardItem['hourly_rate'],
-        'currency'     => $rateCardItem['currency'],
-        'gps_price'    => $rateCardItem['gps_price'],
-        // S-HOURLY-ONLY: the resolved card id so the lease form can deep-link an
-        // operator to THIS card ("add an hourly rate here") when a unit has no
-        // billing basis yet. Only rate-card sources carry an id; template/none
-        // sources return null (no card to open — the form offers "create a card").
-        'rate_card_id' => (int) $rateCardItem['rate_card_id'],
-        // S-LEASE-MIN-DAYS: per-item short-lease floor (Config Layer 1, highest
-        // priority). NULL when this rate-card item sets no minimum. The lease
-        // create form pre-fills minimum_billing_days from this when present.
-        'minimum_days' => $rateCardItem['minimum_days'],
-    ]);
-}
-
-// -----------------------------------------------------------------------
-// 3. Priority 2 — equipment_templates default rates
-// -----------------------------------------------------------------------
-$hasTemplateRates = (
-    $template['default_daily_rate']   !== null ||
-    $template['default_weekly_rate']  !== null ||
-    $template['default_monthly_rate'] !== null ||
-    // S-AUDIT-BILLING-ENGINE-1 #24: a template with ONLY a default hourly (or
-    // mileage) rate used to return source 'none' and DROP those defaults.
-    // NB: default_mileage_rate is NOT NULL DEFAULT 0.0000 (0 = mileage
-    // disabled, D135) — so a strict !== null check would make EVERY template
-    // register as "has rates". Compare > 0 for mileage; hourly stays nullable.
-    $template['default_hourly_rate']  !== null ||
-    bccomp((string)($template['default_mileage_rate'] ?? '0'), '0', 4) > 0
-);
-
-if ($hasTemplateRates) {
-    json_success([
-        'source'       => 'template',
-        'source_label' => $typeLabel . ' rate · template default',
-        'daily_rate'   => $template['default_daily_rate'],
-        'weekly_rate'  => $template['default_weekly_rate'],
-        'monthly_rate' => $template['default_monthly_rate'],
-        'mileage_rate' => $template['default_mileage_rate'],
-        'mileage_unit' => $template['default_mileage_unit'] ?? 'km',
-        'hourly_rate'  => $template['default_hourly_rate'],
-        'currency'     => $template['default_currency'] ?? 'CAD',
-        'gps_price'    => null,
-        // S-HOURLY-ONLY: template defaults are not a card — no id to deep-link to.
-        'rate_card_id' => null,
-        // S-LEASE-MIN-DAYS: templates carry no per-item minimum (Config Layer 1
-        // lives on rate_card_items only). Always null here so the response shape
-        // is consistent across all branches; the lease falls back to its frozen
-        // minimum_billing_days / the global setting default downstream.
-        'minimum_days' => null,
-    ]);
-}
-
-// -----------------------------------------------------------------------
-// 5. No rates found
-// -----------------------------------------------------------------------
-json_success([
-    'source'       => 'none',
-    'source_label' => 'No rates configured for ' . $typeLabel,
-    'daily_rate'   => null,
-    'weekly_rate'  => null,
-    'monthly_rate' => null,
-    'mileage_rate' => null,
-    'mileage_unit' => 'km',
-    'hourly_rate'  => null,
-    'currency'     => 'CAD',
-    'gps_price'    => null,
-    // S-HOURLY-ONLY: no source resolved → no card to deep-link to.
-    'rate_card_id' => null,
-    // S-LEASE-MIN-DAYS: no rate source resolved → no per-item minimum. Keep the
-    // key present (null) so every lookup_rates response has an identical shape.
-    'minimum_days' => null,
-]);
+// Priority: 1) in-force rate-card line — customer card before general card,
+// template-specific before category, is_default, newest effective_from;
+// 2) the template's default rates; 3) none. S-HOURLY-ONLY: rate_card_id lets
+// the form deep-link to the card; S-LEASE-MIN-DAYS: minimum_days is the
+// per-line short-lease floor (Config Layer 1), null outside a card match.
+json_success(\FleetForge\RateCards\RateResolver::resolve($customerId, $template, date('Y-m-d')));

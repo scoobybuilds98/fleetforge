@@ -449,7 +449,9 @@ require_once FF_ROOT . '/includes/header.php';
                         <strong>engine hours</strong> for this equipment type, add an <strong>hourly rate</strong>
                         to its rate card and it’ll pre-fill here — or type one into the Hourly Rate field above.
                     </div>
-                    <a :href="rateCardId ? (ratesShowUrl + '?id=' + rateCardId) : ratesCreateUrl"
+                    <!-- S-RATES-MODULE: open the card straight in edit mode, or start a
+                         new card for THIS customer with THIS equipment type ticked. -->
+                    <a :href="rateCardId ? (ratesShowUrl + '?id=' + rateCardId + '&action=edit') : (ratesCreateUrl + '?customer_id=' + (form.customer_id || '') + '&template_id=' + (_currentTemplateId || ''))"
                        target="_blank" rel="noopener"
                        style="display:inline-block;padding:5px 12px;border-radius:var(--radius-md);font-weight:600;
                               text-decoration:none;border:1px solid currentColor;color:inherit;">

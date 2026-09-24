@@ -12,7 +12,7 @@
 - 🟢 **DEFERRED** — queued for a future session; documented for tracking
 - ✅ **CLOSED** — operator completed; moved to archive at bottom
 
-**Last updated:** 2026-09-24 via S-BILLING-MODULE — **F95** added (deploy Monthly Billing + its crontab line, run October as the first cycle, decide #113). Previously 2026-09-24 via S-PDF-LETTERHEAD — **F94** added (deploy, then open one of each PDF on prod). Previously 2026-09-24 via S-CCA-PREFILL — **F93** added (deploy, then send the next credit application through FleetForge: the form now opens pre-filled). Previously 2026-09-24 via S-SIDEBAR-LOGO / S-TOPBAR-CHROME — **F90** widened again (the top bar is now dark and the sidebar logo trimmed — every chapter's chrome changed; nothing to do for the logo itself: it is rebuilt automatically on the first page load after deploy). Previously 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
+**Last updated:** 2026-09-24 via S-RATES-MODULE — **F96** added (deploy the new Rates module, fix the three rate cards with no prices — the main standard list has a Chassis line with no prices on prod — and re-record training chapter 5 with F90). Previously 2026-09-24 via S-BILLING-MODULE — **F95** added (deploy Monthly Billing + its crontab line, run October as the first cycle, decide #113). Previously 2026-09-24 via S-PDF-LETTERHEAD — **F94** added (deploy, then open one of each PDF on prod). Previously 2026-09-24 via S-CCA-PREFILL — **F93** added (deploy, then send the next credit application through FleetForge: the form now opens pre-filled). Previously 2026-09-24 via S-SIDEBAR-LOGO / S-TOPBAR-CHROME — **F90** widened again (the top bar is now dark and the sidebar logo trimmed — every chapter's chrome changed; nothing to do for the logo itself: it is rebuilt automatically on the first page load after deploy). Previously 2026-09-24 via S-RECORD-REDESIGN / S-BACKGROUNDS — **F90** widened (the list + profile pages were redesigned too: re-record the chapters that show them; the "Find a page" box is gone), **F91** added (deploying switches everyone to the Midnight background — keep it or pick another in Settings → Design), **F92** added (decide whether dispatchers should see repair costs on work orders and damage claims). Previously 2026-09-24 via S-SHELL-REDESIGN — **F90** added (re-record training chapter 1 after the dashboard/sidebar redesign; tell staff the menu is grouped).
 
 ---
 
@@ -99,6 +99,24 @@ Safety net: anything dated before go-live is refused as a NEW push until linked 
 - If rental revenue should split by equipment category, that needs a small code change (the revenue lookup must use the unit's category) — ask for it; until then add a plain `base_rental` entry to the revenue map to at least move it out of "Other Revenue".
 - Past entries stay where they are (a reclass journal is the accountant's call).
 **Done when:** the Items page warning is gone (or only shows the GPS-net note the accountant accepted).
+
+---
+
+### F96 — Deploy the new Rates module, then fix the three rate cards with no prices 🟡 OPEN (next deploy)
+
+**Surfaced by:** S-RATES-MODULE (2026-09-24), from the operator's "completely redesign the rates module and rate cards … make it one of the best modules".
+**Why:** Rates is rebuilt (customer prices, standard prices, Price check, Change prices from a date, price history, leases on older prices, guided New rate card, rate sheet PDF, export). A read-only check of prod found three cards that price nothing (KNOWN ISSUE #116):
+- **#27 "Chassis Minimum Days"** — your MAIN standard price list — has a Chassis line with a 3-day minimum and **no prices**. Any customer without their own chassis card gets a chassis lease that pre-fills with no prices ("This lease can't be billed yet").
+- **#64 "Genset - Supersonic"** — an Other line with no prices.
+- **#20 "40' Tridem C/C - Aquatrans"** — no lines at all.
+**Operator action:**
+1. Deploy `main` (PHP + two new asset files; no migration, no `FF_ASSET_VERSION` bump): `sudo /var/www/fleetforge/bin/deploy.sh`.
+2. Open **Rates** → **Needs a look** lists the three cards.
+3. **#27:** either open it → **Edit** → give the Chassis line standard daily / weekly / monthly prices (then it is a real standard price list), or remove that line. The 3-day chassis minimum no longer needs this card — the Chassis category enforces it and the company default is 3 days.
+4. **#64 / #20:** add the prices they should carry, or **End these prices…** / delete them.
+5. Try **Rates → Price check** with a customer and a dry van before you next quote a price.
+**Note:** managers can change prices but not export (roles without export permission don't see **Export**). Training chapter 5 (Rates) now shows the old screens; its script is updated — re-record it with F90. Optional decision (KNOWN ISSUE #117): new leases take the prices in force on the day the lease is created, not on its start date.
+**Done when:** Rates → Needs a look shows no "no prices" items on prod.
 
 ---
 

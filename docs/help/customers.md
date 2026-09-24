@@ -95,7 +95,7 @@ Open a customer to see their profile. Use the tabs to navigate:
 - **Payments** — every payment received from this customer (roles that see money).
 - **Damage Claims** — claims filed against equipment this customer had on lease.
 - **Mileage Logs** — GPS sync and manual odometer records for their leased units.
-- **Rates** — the customer-specific rate cards that hold this customer's negotiated pricing.
+- **Rates** — **What they pay**: the price a new lease would get for each equipment type, whether it is their own negotiated price or the standard price, how it compares with the standard, and the prices on their leases (**Show every equipment type** lists all). Below, **Their rate cards** with what each covers and its status. **Price check**, **Rate sheet (PDF)** and **+ New rate card** sit in the header.
 - **Documents** — uploaded files like tax exemption certificates or credit agreements.
 - **Email History** — every email sent to this customer from FleetForge, with the body and status.
 
@@ -126,14 +126,14 @@ Notes are internal only and never visible to the customer.
 
 ## Setting custom pricing for a customer
 
-Customer-specific pricing lives on a **customer rate card** (the old per-customer "overrides" have been retired). If a customer has negotiated special pricing on specific equipment types:
+Customer-specific pricing lives on a **customer rate card**. If a customer has negotiated special pricing:
 
-1. Open the customer profile and click the **Rates** tab.
-2. Click **+ New Rate Card** — the new card opens with this customer already selected.
-3. Name the card, set the **Effective From** / **Effective To** dates, and add a rate for each equipment type (daily, weekly, monthly, and/or mileage).
-4. Click **Create Rate Card**.
+1. Open the customer profile and click the **Rates** tab. **What they pay** shows today's price for each equipment type.
+2. Click **+ New rate card** — the guided page opens with this customer already chosen.
+3. Tick the equipment. Each line starts from what they pay today (or **Use their lease prices**), so you only change what is different.
+4. Choose when the prices start (and end, if the deal has a term), then click **Create rate card**.
 
-You can also start from **Rates → + New Rate Card** and pick the customer there. When a new lease is created for this customer, their card's rates pre-fill the lease (ahead of any general rate card) and are frozen on the lease from then on.
+When a new lease is created for this customer, their card's prices pre-fill the lease (ahead of any standard price) and are frozen on the lease from then on. To change their prices later, open the card and use **Change prices** — the old prices end the day before the new ones start. **Rate sheet (PDF)** prints their prices on your letterhead to send them.
 
 → See the [Rates guide](/help/rates) for the full rate-card walkthrough.
 

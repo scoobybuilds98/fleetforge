@@ -590,11 +590,15 @@ try {
         sprintf('gps_val=%s hourly_val=%s', $negGps, $negHrly)
     );
     // Confirm both fields are in the rateLabels array that drives the validation loop.
+    // S-RATES-MODULE: create.php / update.php validate lines through the shared
+    // lib/RateCards/RateCardItems::normalize() — the guard now lives there.
     $createSrc = file_get_contents(FF_ROOT . '/api/v1/rate_cards/create.php');
+    $itemsSrc  = file_get_contents(FF_ROOT . '/lib/RateCards/RateCardItems.php');
     ok(
-        str_contains($createSrc, "'gps_price'") && str_contains($createSrc, "'hourly_rate'")
-        && str_contains($createSrc, 'bccomp($val') && str_contains($createSrc, 'cannot be negative'),
-        'T16b create.php rateLabels has gps_price + hourly_rate wired into bccomp negative guard'
+        str_contains($createSrc, 'RateCardItems::normalize(')
+        && str_contains($itemsSrc, "'gps_price'") && str_contains($itemsSrc, "'hourly_rate'")
+        && str_contains($itemsSrc, 'bccomp($val') && str_contains($itemsSrc, 'cannot be negative'),
+        'T16b create.php line rules (RateCardItems) have gps_price + hourly_rate wired into bccomp negative guard'
     );
 
     // T17: customer_rate_history also gets hourly_rate

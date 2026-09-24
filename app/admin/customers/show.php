@@ -1213,31 +1213,98 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     <?php if (can('rates', 'view')): ?>
     <div x-show="activeTab === 'rates'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
 
-        <!-- ── Rate Cards linked to this customer ──── -->
+        <!-- S-RATES-MODULE: what this customer pays for every equipment type
+             (the same resolver the lease form uses — api/v1/rate_cards/customer_prices),
+             then their rate cards. -->
+        <link rel="stylesheet" href="<?= asset_url('assets/css/rates.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+        <script src="<?= asset_url('assets/js/rates.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+
+        <div class="card" style="margin-bottom:16px;">
+            <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+                <div>
+                    <span class="card-title">What they pay</span>
+                    <span class="rt-faint text-sm" style="margin-left:8px;" x-show="ratePrices" x-text="ratePrices ? (ratePrices.own_prices ? ratePrices.own_prices + ' negotiated price' + (ratePrices.own_prices === 1 ? '' : 's') + ', the rest standard' : 'standard prices — no card of their own') : ''"></span>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <a href="<?= base_url('rates') ?>?check_customer=<?= (int) $customerId ?>#check" class="btn btn-ghost btn-sm">Price check</a>
+                    <a href="<?= base_url('api/v1/rate_cards/sheet_pdf') ?>?customer_id=<?= (int) $customerId ?>" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">Rate sheet (PDF)</a>
+                    <?php if (can('rates', 'create')): ?>
+                    <a href="<?= base_url('rates/create') ?>?customer_id=<?= (int) $customerId ?>" class="btn btn-secondary btn-sm">+ New rate card</a>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div x-show="rateCardsLoading && !ratePrices" class="card-body"><div class="skeleton skeleton-row"></div><div class="skeleton skeleton-row"></div></div>
+            <template x-if="ratePrices">
+                <div>
+                    <div style="overflow-x:auto;">
+                        <table class="table" aria-label="What this customer pays">
+                            <thead>
+                                <tr>
+                                    <th>Equipment</th>
+                                    <th class="num">Daily</th>
+                                    <th class="num">Weekly</th>
+                                    <th class="num">Monthly</th>
+                                    <th class="num">Distance</th>
+                                    <th>Price comes from</th>
+                                    <th class="num">On rent</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="p in ratePricesShown()" :key="p.template_id">
+                                    <tr>
+                                        <td style="min-width:150px;"><b x-text="p.name"></b><div class="rt-faint text-sm" x-text="p.category_label"></div></td>
+                                        <td class="num rt-nowrap">
+                                            <span class="rt-num" x-text="FF_Rates.money(p.price.daily_rate)"></span>
+                                            <template x-if="FF_Rates.vsPct(p.vs.daily)"><div class="rt-vs" :class="FF_Rates.vsPct(p.vs.daily).cls" x-text="FF_Rates.vsPct(p.vs.daily).text"></div></template>
+                                        </td>
+                                        <td class="num rt-num" x-text="FF_Rates.money(p.price.weekly_rate)"></td>
+                                        <td class="num rt-nowrap">
+                                            <span class="rt-num" x-text="FF_Rates.money(p.price.monthly_rate)"></span>
+                                            <template x-if="FF_Rates.vsPct(p.vs.monthly)"><div class="rt-vs" :class="FF_Rates.vsPct(p.vs.monthly).cls" x-text="FF_Rates.vsPct(p.vs.monthly).text"></div></template>
+                                        </td>
+                                        <td class="num rt-nowrap"><span class="rt-num" x-text="FF_Rates.money(p.price.mileage_rate, 4)"></span><span class="rt-faint text-sm" x-show="Number(p.price.mileage_rate) > 0" x-text="' /' + (p.price.mileage_unit === 'miles' ? 'mi' : 'km')"></span></td>
+                                        <td>
+                                            <template x-if="p.price.source === 'customer'"><span><span class="rt-status rt-status--active">Their card</span><a class="link text-sm" style="display:block;margin-top:3px;" :href="'<?= base_url('rates/show') ?>?id=' + p.price.rate_card_id" x-text="p.card_name"></a></span></template>
+                                            <template x-if="p.price.source === 'rate_card'"><span class="rt-status rt-status--upcoming">Standard (general card)</span></template>
+                                            <template x-if="p.price.source === 'template'"><span class="rt-status rt-status--expired">Standard</span></template>
+                                            <template x-if="p.price.source === 'none'"><span class="rt-status rt-status--ending">No price set</span></template>
+                                        </td>
+                                        <td class="num">
+                                            <span class="rt-num" x-text="p.lease ? p.lease.count : '—'"></span>
+                                            <template x-if="p.lease && (Number(p.lease.daily_rate) !== Number(p.price.daily_rate || 0) || Number(p.lease.monthly_rate) !== Number(p.price.monthly_rate || 0))">
+                                                <div class="rt-faint text-sm" x-text="'at ' + FF_Rates.chipPrices(p.lease)"></div>
+                                            </template>
+                                        </td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="tab-table-footer" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span x-text="ratePricesAll ? 'Every equipment type' : 'Their own prices and what they rent'"></span>
+                        <button type="button" class="btn btn-link btn-sm" @click="ratePricesAll = !ratePricesAll" x-text="ratePricesAll ? 'Show fewer' : 'Show every equipment type'"></button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- ── Rate cards linked to this customer ──── -->
         <div class="card" style="margin-bottom:16px;">
             <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
                 <div>
-                    <span class="card-title">Rate Cards</span>
+                    <span class="card-title">Their rate cards</span>
                     <span x-show="rateCards.length > 0" class="badge badge-neutral"
                           style="font-size:0.75rem;margin-left:8px;" x-text="rateCards.length"></span>
                 </div>
-                <?php if (can('rates', 'create')): ?>
-                <a href="<?= base_url('rates/create') ?>?customer_id=<?= (int)$customerId ?>"
-                   class="btn btn-secondary btn-sm">+ New Rate Card</a>
-                <?php endif; ?>
-            </div>
-
-            <div x-show="rateCardsLoading && rateCards.length === 0" class="card-body" style="text-align:center;padding:32px;">
-                <span class="text-secondary">Loading…</span>
             </div>
 
             <div x-show="rateCardsLoaded && !rateCardsLoading && rateCards.length === 0" class="card-body">
                 <div class="empty-state" style="padding:24px 0;">
-                    <p class="empty-state-title" style="font-size:0.9375rem;">No rate cards for this customer</p>
-                    <p class="empty-state-text">Customer-specific rate cards are prioritised over global cards when creating leases.</p>
+                    <p class="empty-state-title" style="font-size:0.9375rem;">No rate card for this customer</p>
+                    <p class="empty-state-text">Without one, their new leases pre-fill with standard prices. A customer card sets negotiated prices that win over the standard ones.</p>
                     <?php if (can('rates', 'create')): ?>
                     <a href="<?= base_url('rates/create') ?>?customer_id=<?= (int)$customerId ?>"
-                       class="btn btn-primary btn-sm" style="margin-top:10px;">+ Create Rate Card</a>
+                       class="btn btn-primary btn-sm" style="margin-top:10px;">+ Create their rate card</a>
                     <?php endif; ?>
                 </div>
             </div>
@@ -1248,9 +1315,9 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                         <table class="table">
                             <thead>
                                 <tr>
-                                    <th>Card Name</th>
-                                    <th style="text-align:center;">Items</th>
-                                    <th>Effective Period</th>
+                                    <th>Card</th>
+                                    <th>Covers</th>
+                                    <th>In force</th>
                                     <th>Status</th>
                                     <th style="text-align:right;"></th>
                                 </tr>
@@ -1259,26 +1326,19 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                                 <template x-for="rc in rateCards" :key="rc.id">
                                     <tr>
                                         <td>
-                                            <div style="display:flex;align-items:center;gap:8px;">
-                                                <a :href="'<?= base_url('rates/show') ?>?id=' + rc.id"
-                                                   class="link font-medium" x-text="rc.name"></a>
-                                                <span x-show="rc.is_default" class="badge badge-info" style="font-size:0.7rem;">Default</span>
-                                            </div>
+                                            <a :href="'<?= base_url('rates/show') ?>?id=' + rc.id" class="link font-medium" x-text="rc.name"></a>
                                             <div x-show="rc.description" class="text-secondary" style="font-size:0.775rem;margin-top:2px;" x-text="rc.description"></div>
                                         </td>
-                                        <td class="font-mono" style="text-align:center;" x-text="rc.item_count ?? 0"></td>
-                                        <td style="white-space:nowrap;">
-                                            <span class="font-mono" style="font-size:0.8125rem;" x-text="rc.effective_from || '—'"></span>
-                                            <span class="text-secondary" style="font-size:0.8125rem;"> → </span>
-                                            <span class="font-mono" style="font-size:0.8125rem;" x-text="rc.effective_to || 'Open'"></span>
-                                        </td>
                                         <td>
-                                            <span class="badge" :class="rc.is_active ? 'badge-success' : 'badge-neutral'"
-                                                  x-text="rc.is_active ? 'Active' : 'Inactive'"></span>
+                                            <div class="rt-chips">
+                                                <template x-for="l in (rc.lines || [])" :key="l.label"><span class="rt-chip" :class="{ 'rt-chip--issue': l.issues }" :title="l.scope"><b x-text="l.label"></b></span></template>
+                                                <span class="rt-faint text-sm" x-show="!(rc.lines || []).length">No prices</span>
+                                            </div>
                                         </td>
+                                        <td class="rt-nowrap text-sm" x-text="FF_Rates.window(rc.effective_from, rc.effective_to)"></td>
+                                        <td><span class="rt-status" :class="'rt-status--' + rc.status" x-text="FF_Rates.statusLabel(rc.status)"></span></td>
                                         <td style="text-align:right;">
-                                            <a :href="'<?= base_url('rates/show') ?>?id=' + rc.id"
-                                               class="btn btn-secondary btn-sm">Edit</a>
+                                            <a :href="'<?= base_url('rates/show') ?>?id=' + rc.id" class="btn btn-secondary btn-sm">Open</a>
                                         </td>
                                     </tr>
                                 </template>
@@ -1915,6 +1975,8 @@ function FF_CustomerProfile() {
         rateCards:         [],
         rateCardsLoaded:   false,
         rateCardsLoading:  false,
+        ratePrices:        null,   // S-RATES-MODULE: api/v1/rate_cards/customer_prices
+        ratePricesAll:     false,
 
         // ── Documents ─────────────────────────────────────────────
         documents:       [],
@@ -2209,18 +2271,29 @@ function FF_CustomerProfile() {
         loadMoreMileageLogs()     { this.mileageLogsPage++; this.loadMileageLogs(true); },
         applyMileageLogsFilters() { this.mileageLogs = []; this.mileageLogsPage = 1; this.mileageLogsTotal = 0; this.mileageLogsLoaded = false; this.loadMileageLogs(); },
 
-        // ── Rate Overrides ─────────────────────────────────────────
+        // ── Rates (S-RATES-MODULE) ─────────────────────────────────
+        // What the customer pays per equipment type + their cards.
         async loadRateCards() {
             this.rateCardsLoading = true;
             try {
                 const p = new URLSearchParams({ customer_id: <?= $customerId ?>, per_page: 100, sort: 'effective_from', dir: 'DESC' });
-                const json = await FF_Api.get('<?= base_url('api/v1/rate_cards/index') ?>?' + p);
-                if (json.success) {
-                    this.rateCards       = json.data?.items ?? [];
+                const [cards, prices] = await Promise.all([
+                    FF_Api.get('<?= base_url('api/v1/rate_cards/index') ?>?' + p),
+                    FF_Api.get('<?= base_url('api/v1/rate_cards/customer_prices') ?>?customer_id=<?= $customerId ?>'),
+                ]);
+                if (cards.success) {
+                    this.rateCards       = cards.data?.items ?? [];
                     this.rateCardsLoaded = true;
                 }
+                if (prices.success) this.ratePrices = prices.data;
             } catch (e) { /* silent */ }
             this.rateCardsLoading = false;
+        },
+        ratePricesShown() {
+            const all = this.ratePrices?.prices ?? [];
+            if (this.ratePricesAll) return all;
+            const mine = all.filter(p => p.price.source === 'customer' || p.lease);
+            return mine.length ? mine : all.slice(0, 6);
         },
 
         // ── Documents ─────────────────────────────────────────────

@@ -27,8 +27,13 @@ declare(strict_types=1);
  * @returns 200 { id, name, effective_from, updated_at }
  *          404 NOT_FOUND | 409 STALE_DATA | 409 ALREADY_EXISTS
  *
+ * S-RATES-MODULE: line validation is shared (lib/RateCards/RateCardItems);
+ * dates must fall between 2000 and 2100; when items[] is sent the audit row
+ * carries before/after line snapshots so the card's price history can show
+ * exactly which price changed.
+ *
  * Decisions: D5 (soft delete), D16 (bcmath), D19 (optimistic lock), §7 (audit)
- * Session: S019, S-RATE-CARD-TEMPLATE-ITEM
+ * Session: S019, S-RATE-CARD-TEMPLATE-ITEM, S-RATES-MODULE
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -100,7 +105,7 @@ if (array_key_exists('customer_id', $body)) {
 
 $effectiveFrom = $existing['effective_from'];
 if (!empty($body['effective_from'])) {
-    $effectiveFrom = clean_date($body['effective_from']);
+    $effectiveFrom = \FleetForge\RateCards\RateCardItems::validDate($body['effective_from']);
     if (!$effectiveFrom) {
         $fields['effective_from'] = 'Effective from must be a valid date.';
     }
@@ -111,7 +116,7 @@ if (array_key_exists('effective_to', $body)) {
     if (empty($body['effective_to'])) {
         $effectiveTo = null;
     } else {
-        $effectiveTo = clean_date($body['effective_to']);
+        $effectiveTo = \FleetForge\RateCards\RateCardItems::validDate($body['effective_to']);
         if (!$effectiveTo) {
             $fields['effective_to'] = 'Effective to must be a valid date.';
         }
@@ -134,121 +139,14 @@ if ($name !== $existing['name']) {
 }
 
 // -----------------------------------------------------------------------
-// 4. Validate items (optional — if provided, replaces existing items)
+// 4. Validate items (optional — if provided, replaces existing items).
+//    S-RATES-MODULE: shared rules (lib/RateCards/RateCardItems) — the same
+//    messages create.php returns; S-LEASE-MIN-DAYS minimum_days 0..90.
 // -----------------------------------------------------------------------
-$validCurrencies   = ['CAD', 'USD'];
-$validMileageUnits = ['km', 'miles'];
-$replaceItems      = array_key_exists('items', $body);
-$itemsToInsert     = [];
-$itemErrors        = [];
-
-$rateLabels = [
-    'daily_rate'   => 'Daily rate',
-    'weekly_rate'  => 'Weekly rate',
-    'monthly_rate' => 'Monthly rate',
-    'mileage_rate' => 'Mileage rate',
-    'hourly_rate'  => 'Hourly rate',
-    'gps_price'    => 'GPS rate',
-];
-
-if ($replaceItems && is_array($body['items'])) {
-    $seenKeys = []; // "c:{equipment_type}" or "t:{template_id}"
-    foreach ($body['items'] as $idx => $item) {
-        $lineNum   = $idx + 1;
-        $equipType = clean_string($item['equipment_type'] ?? null, 255);
-        if (!$equipType) {
-            $itemErrors[] = "Item {$lineNum}: equipment type is required.";
-            continue;
-        }
-
-        // S-RATE-CARD-TEMPLATE-ITEM: optional equipment_template_id
-        $templateId = null;
-        if (!empty($item['equipment_template_id'])) {
-            $templateId = clean_int($item['equipment_template_id']);
-            if (!$templateId || !db_exists('equipment_templates', 'id = ? AND deleted_at IS NULL', [$templateId])) {
-                $itemErrors[] = "Item {$lineNum}: equipment template not found.";
-                continue;
-            }
-            $tmpl = db_row("SELECT category FROM equipment_templates WHERE id = ?", [$templateId]);
-            if ($tmpl && $tmpl['category'] !== $equipType) {
-                $equipType = $tmpl['category'];
-            }
-        }
-
-        $dedupeKey = $templateId !== null ? "t:{$templateId}" : "c:{$equipType}";
-        if (in_array($dedupeKey, $seenKeys, true)) {
-            $itemErrors[] = "Item {$lineNum}: this equipment type / template combination is listed more than once.";
-            continue;
-        }
-        $seenKeys[] = $dedupeKey;
-
-        $rates = [
-            'daily_rate'   => null,
-            'weekly_rate'  => null,
-            'monthly_rate' => null,
-            'mileage_rate' => null,
-            'hourly_rate'  => null,
-            'gps_price'    => null,
-        ];
-        $itemHadError = false;
-        foreach ($rateLabels as $field => $label) {
-            if (!isset($item[$field]) || $item[$field] === '' || $item[$field] === null) continue;
-            $val = clean_decimal((string)$item[$field]);
-            if ($val === null) {
-                $itemErrors[] = "Item {$lineNum}: {$label} must be a valid number.";
-                $itemHadError = true;
-                continue;
-            }
-            if (bccomp($val, '0', 6) < 0) {
-                $itemErrors[] = "Item {$lineNum}: {$label} cannot be negative.";
-                $itemHadError = true;
-                continue;
-            }
-            $rates[$field] = $val;
-        }
-
-        $currency    = clean_string($item['currency'] ?? null, 10) ?? 'CAD';
-        $mileageUnit = clean_string($item['mileage_unit'] ?? null, 10) ?? 'km';
-
-        if (!in_array($currency, $validCurrencies, true)) {
-            $itemErrors[] = "Item {$lineNum}: currency must be CAD or USD.";
-            $itemHadError = true;
-        }
-        if (!in_array($mileageUnit, $validMileageUnits, true)) {
-            $itemErrors[] = "Item {$lineNum}: mileage unit must be km or miles.";
-            $itemHadError = true;
-        }
-
-        // S-LEASE-MIN-DAYS: per-equipment short-lease floor (rate_card_items.minimum_days
-        // TINYINT UNSIGNED NULL). Nullable unsigned int 0..90; empty/absent → NULL (no floor).
-        // 0/1 persist but disable the floor downstream (NO-OP in the billing engines).
-        $minimumDays = null;
-        if (isset($item['minimum_days']) && $item['minimum_days'] !== '' && $item['minimum_days'] !== null) {
-            $minimumDays = clean_int($item['minimum_days']);
-            if ($minimumDays === null || $minimumDays < 0 || $minimumDays > 90) {
-                $itemErrors[] = "Item {$lineNum}: minimum days must be a whole number between 0 and 90.";
-                $itemHadError = true;
-            }
-        }
-
-        if ($itemHadError) continue;
-
-        $itemsToInsert[] = [
-            'equipment_type'        => $equipType,
-            'equipment_template_id' => $templateId,
-            'daily_rate'            => $rates['daily_rate'],
-            'weekly_rate'           => $rates['weekly_rate'],
-            'monthly_rate'          => $rates['monthly_rate'],
-            'mileage_rate'          => $rates['mileage_rate'],
-            'mileage_unit'          => $mileageUnit,
-            'hourly_rate'           => $rates['hourly_rate'],
-            'gps_price'             => $rates['gps_price'],
-            'minimum_days'          => $minimumDays, // S-LEASE-MIN-DAYS: NULL = no short-lease floor
-            'currency'              => $currency,
-            'notes'                 => clean_string($item['notes'] ?? null, 1000),
-        ];
-    }
-}
+$replaceItems = array_key_exists('items', $body);
+[$itemsToInsert, $itemErrors] = ($replaceItems && is_array($body['items']))
+    ? \FleetForge\RateCards\RateCardItems::normalize($body['items'])
+    : [[], []];
 
 if ($itemErrors) {
     json_validation_error(['items' => implode(' ', $itemErrors)], implode(' ', $itemErrors));
@@ -293,7 +191,17 @@ $newValues = [
     'customer_id'    => $customerId,
 ];
 
-db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceItems, $itemsToInsert) {
+// S-RATES-MODULE: the lines before the change, for the price-history diff.
+$oldItemsSnapshot = $replaceItems
+    ? \FleetForge\RateCards\RateCardItems::snapshot(db_select(
+        "SELECT equipment_type, equipment_template_id, daily_rate, weekly_rate, monthly_rate,
+                mileage_rate, mileage_unit, hourly_rate, gps_price, minimum_days, currency
+           FROM rate_card_items WHERE rate_card_id = ?",
+        [$id]
+      ))
+    : null;
+
+db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceItems, $itemsToInsert, $oldItemsSnapshot) {
     // If setting as default, clear others first
     if ($isDefault && !$existing['is_default']) {
         db_execute(
@@ -326,14 +234,16 @@ db_transaction(function() use ($id, $newValues, $existing, $isDefault, $replaceI
             'effective_to'   => $existing['effective_to'],
             'is_default'     => $existing['is_default'],
             'customer_id'    => $existing['customer_id'] ?? null,
-        ]),
+            'description'    => $existing['description'],
+        ] + ($replaceItems ? ['items' => $oldItemsSnapshot] : [])),
         'new_values'   => json_encode([
             'name'           => $newValues['name'],
             'effective_from' => $newValues['effective_from'],
             'effective_to'   => $newValues['effective_to'],
             'is_default'     => $newValues['is_default'],
             'customer_id'    => $newValues['customer_id'],
-        ]),
+            'description'    => $newValues['description'],
+        ] + ($replaceItems ? ['items' => \FleetForge\RateCards\RateCardItems::snapshot($itemsToInsert)] : [])),
         'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
     ]);
 });

@@ -48,11 +48,11 @@ Dispatcher and manager, every morning:
 1. **Add a unit**: {{Equipment › New Unit @/equipment/create}}. Required: Equipment Type, Unit Number, Ownership. Add VIN, Year, Brand, Yard, Tracking Provider (Samsara + device), mileage and the compliance expiry dates, then **Register Unit**. The unit starts **Available**.
 2. **Types, categories, brands**: {{Equipment › Equipment Type @/equipment/templates}} (**+ Add new equipment type**, **Manage Categories**, **Manage Brands**). The short-lease minimum switch lives on the category.
 3. **Samsara**: open the unit → **Samsara Mapping** tab → choose the vehicle or trailer → **Link to Samsara**.
-4. **Rate cards**: {{Rates › New Rate Card @/rates/create}}. Leave Customer blank for a general card, or pick one for a customer card. **+ Add Rate** per equipment type with daily, weekly and monthly rates, mileage rate, hourly rate, the GPS daily rate and minimum days, then **Create Rate Card**.
+4. **Rate cards**: {{Rates › New rate card @/rates/create}}. Choose **One customer** (and pick them) or **Everyone** for a standard price list, tick the equipment (each line starts from today's price), set daily, weekly and monthly (all three, or none), distance, engine-hours and GPS prices and minimum days, the dates, then **Create rate card**. Before quoting a price, use {{Rates › Price check @/rates#check}}. To change prices from a date, open the card → **Change prices** → **Preview** → **Save new prices** (the old prices end the day before).
 
 :::callout info How rates reach a lease
 - **Where a new lease gets its rates**, in order: the customer's card (locked; **Unlock** to override), then the general card, then the equipment type's defaults.
-- **Changing a rate card never re-prices existing leases** or sent invoices.
+- **Changing a rate card never re-prices existing leases** or sent invoices. The card's **Leases on these prices** flags leases on older prices; move one with **Amend Rates** on the lease.
 - **Unit status is set by the lease**: Reserved, then On Lease, then Available. Use the list's bulk bar for Maintenance or Inactive.
 :::
 

@@ -1,130 +1,134 @@
 ---
-description: Set rental pricing with rate cards — general cards for everyone and customer rate cards for negotiated pricing — the rates that pre-fill new leases.
+description: What every customer pays — standard prices for everyone, customer rate cards for negotiated deals, a price check that shows which price a new lease gets, and changing prices from a date.
 ---
 
 # Rates
 
-Set the daily, weekly, monthly, and mileage rates FleetForge suggests when you create a lease.
+Rates is where you set what you charge. It answers three everyday questions:
 
-## Reading the dashboard
+- **What does this customer pay?** — for every piece of equipment, and how that compares with your standard price.
+- **What would a new lease get?** — the Price check shows the exact price a new lease would pre-fill, where it comes from and why, and estimates a rental with the same rules invoicing uses.
+- **How do I change prices?** — pick the date the new prices start. The old prices end the day before and stay on record as history.
 
-All pricing lives on **rate cards**. A card is either **general** (applies to every customer) or a **customer rate card** (applies to one customer only). The Rates page shows four tiles at the top — each counts rate lines (one per equipment type on a card):
-
-- **Rate Cards** — total rate lines across all cards.
-- **Active Today** — lines on cards whose effective date range covers today.
-- **Customer Cards** — lines on customer rate cards. Click to jump to the customer section.
-- **Global Cards** — lines on general cards. Click to jump to the global section.
-
-Below the tiles:
-
-- **Customer Rate Cards** — one tile per customer that has its own card(s). Use the search box to find a customer; click a tile to see that customer's rates, with **Edit** / **Delete** on each and **+ New Card** to add another.
-- **Global Rate Cards** — your general price lists. This section is hidden by default; flip its toggle to show it.
+All prices live on **rate cards**. A card is either for **one customer** (their negotiated prices) or for **everyone** (a standard price list). Each card holds **lines** — one per equipment category or per equipment type — with daily, weekly and monthly prices, a distance price, an engine-hours price, a GPS price per day and a minimum number of days.
 
 ---
 
-## Creating a rate card
+## The Rates page
 
-1. Click **+ New Rate Card** (top right of the Rates page).
+**Key numbers** across the top — click one to open the matching view:
 
-2. Fill in the **Rate Card Details** section:
-   - **Card Name** (required) — e.g. *Standard 2025 Rates*.
-   - **Customer** (optional) — leave blank for a general card that applies to everyone, or pick a customer to make this that customer's own rate card.
-   - **Effective From** (required) — the date this card starts applying.
-   - **Effective To** — leave blank for open-ended (no expiry).
-   - **Set as Default Rate Card** — tick this to make it the fallback card. A warning reminds you that setting a new default removes default status from the existing default card.
-   - **Description** — optional notes.
+- **Customer deals** — customers with their own prices today, and how many cards they hold.
+- **Standard prices** — how many equipment types have a price for customers without a card.
+- **Ending in 30 days** — cards whose end date is close. Renew them with **Change prices**.
+- **Needs a look** — problems to fix before they reach a lease.
 
-3. In the **Rate Items** section, click **+ Add Rate** for each equipment type you want to price.
+**Needs a look** lists, most urgent first:
 
-4. For each item:
-   - Pick the **Equipment Type** category from the dropdown (e.g. Dry Van, Reefer) and the **Currency** (*CAD* or *USD*).
-   - Optionally narrow it with **Specific Unit Type** — search for one Equipment Type (from **Equipment → Equipment Types**). Leave it blank and the rate applies to every unit in that category.
-   - Enter **Daily Rate**, **Weekly Rate**, **Monthly Rate**, and **Mileage Rate** (choose */ km* or */ mi*) as needed, plus **Hourly (reefer) $/hr**, **GPS $/day**, and **Min days** if they apply. Any rate left blank is simply not set.
+- a line with **no prices**, or with only some of daily / weekly / monthly — a lease would start at $0, or could not be saved as-is;
+- a card with **no lines** at all;
+- prices **ending soon**, and customer prices that **ended without a renewal** while the customer still rents;
+- **customers on rent with no card of their own** — their prices live only on each lease (use **Create their card**);
+- cards for **archived customers**, and **new prices starting** within two weeks.
 
-5. Click **Create Rate Card**.
+Below are four views:
 
-> **Note:** Each equipment type can appear only once per card, and rates cannot be negative. A card name must be unique among non-deleted cards.
+| View | What it shows |
+|------|---------------|
+| **Customer prices** | One row per customer with their own card, with their prices on the row. Click a row to see every line: each price, how it compares with the standard price (green = below, amber = above), the card it comes from and its dates. Search, filter by status or equipment, and sort by name, ending first or most on rent. |
+| **Standard prices** | What a customer *without* their own card pays for each equipment type, where that price comes from (a general card, or the equipment type's own prices), how many customers have a deal on it, and how many units are on rent. **Edit** changes the equipment type's own prices in place. **Standard price sheet (PDF)** prints the list. |
+| **All rate cards** | Every card with who it is for, what it covers, its dates and status. Tick cards to **Change prices** on all of them at once, or **Delete**. |
+| **Price check** | Pick a customer (or none, for the standard price) and an equipment type. See the price a new lease would pre-fill, which card it comes from, how it compares with the standard price, and the three steps that decided it. Tick **Estimate a rental** and choose dates (plus distance, engine hours and GPS) to see what it would bill before tax. |
 
-> **Tip:** You don't have to fill every rate column. A card can define just a monthly rate for one equipment type and full daily/weekly/monthly for another.
-
----
-
-## Editing a rate card
-
-1. On the Rates page, click **Edit** on the card (for a customer card, click the customer's tile first; for a general card, show **Global Rate Cards**).
-
-2. To change the header, click **Edit** in the **Card Details** panel, adjust the fields, then click **Save Changes**. Click **Cancel** to discard.
-
-3. To change pricing, use the **Rate Items** table:
-   - Click **+ Add Rate** to add an equipment type.
-   - Click **Edit** on a row to change its values inline.
-   - Click the **×** button to remove a row.
-   - Click **Save All Items** (or **Save All**) to commit. All rows are saved together.
-
-> **Note:** If two people edit the same card at the same time, the last save wins. Reload the card before editing if someone else may have changed it.
+**Export** downloads every line in force today as a spreadsheet (roles with export permission).
 
 ---
 
-## Setting a default rate card
+## Setting up prices for a customer
 
-1. Open a rate card (or use **+ New Rate Card**).
-2. Tick **Set as Default Rate Card** / **Set as Default** and save.
+1. Click **+ New rate card** (on Rates, or on the customer's **Rates** tab — the customer is then already chosen).
+2. **Who are these prices for?** Choose **One customer** and pick them. You'll see the cards they already have.
+3. **Which equipment?** Tick an **equipment type** (one model) or a **whole category** (every type in it). Each option shows what the customer pays today. **Pick what they rent** ticks every type they have on rent.
+4. **Prices** — each line starts from today's price, so you only change what is different. **Use their lease prices** copies the prices on their current leases. **Adjust** raises or lowers every daily, weekly and monthly price by a percentage, rounded to the cent, $1 or $5.
+5. **When?** Starts today by default. Choose an end date (6 months, 1 year, end of year) or leave it open-ended.
+6. **Name it** — a name is suggested from the equipment and customer; change it if you like.
+7. The summary on the right says in plain words what will change and checks everything as you type. Click **Create rate card**.
 
-Only one card can be the default at a time — setting a new one automatically clears the previous default. The default card is preferred whenever more than one active rate card matches an equipment type during lease pricing.
+> **Rules the check enforces:** daily, weekly and monthly go together — set all three, or leave all three blank for an engine-hours-only or distance-only line. A customer can't have two cards in force at the same time for the same equipment. Minimum days is a whole number from 0 to 90. Card names are unique.
 
----
+A **standard price list** is the same, with **Everyone** in step 1. Tick **Make this the main price list** if it should win when two standard lists price the same equipment.
 
-## Deleting a rate card
-
-1. On the Rates page, click **Delete** on the card, or open the card and click **Delete This Rate Card**.
-2. Confirm in the **Delete Rate Card** dialog by clicking **Delete**.
-
-> **Note:** The **default** card cannot be deleted — its Delete button is disabled. Make another card the default first. Deleting a card does not change rates already saved on existing leases ("Historical lease rates are unaffected").
-
----
-
-## Setting a custom rate for one customer
-
-A customer's negotiated pricing is simply a **customer rate card** — a rate card with that customer chosen in the **Customer** field. (The old per-customer "overrides" have been retired; any that existed were converted into customer rate cards.)
-
-1. Click **+ New Rate Card** on the Rates page and pick the customer — or open the customer (**Customers → the customer → Rates** tab) and click **+ New Rate Card** there, which pre-selects them.
-2. Fill in the card exactly as in *Creating a rate card* above, adding an item for each equipment type the customer has special pricing on.
-3. Click **Create Rate Card**.
-
-The customer's **Rates** tab lists all of their cards. To change one, click **Edit** on it (or use its customer tile on the Rates page).
-
-→ See the [Customers guide](/help/customers) for the full customer-page walkthrough.
+**Duplicate…** (in a card's **More** menu) starts a new card from that card's lines — handy for giving another customer the same deal.
 
 ---
 
-## How a lease picks its rates
+## A rate card
 
-When you choose a customer and an equipment unit on a new lease, FleetForge looks up rates and pre-fills the rate fields, showing where they came from. It checks three sources **in this order** and stops at the first match:
+The card page shows:
 
-| Priority | Source | Banner shown on the lease form |
-|----------|--------|-------------------------------|
-| 1 | **Customer rate card** — an active card for that customer with a matching equipment-type item | *Contracted rates — {type} rate · custom card "{card name}"* (rate fields locked; click **Unlock** to change them) |
-| 2 | **General rate card** — an active card for everyone with a matching item | *{type} rate · card "{card name}"* |
-| 3 | **Equipment type defaults** — the default rates set on the unit's Equipment Type | *{type} rate · template default* |
+- **Prices** — one table for every line. On a customer card, each price shows how it compares with the standard price. A red note under a line means it would pre-fill a lease wrongly.
+- **Details** — name, who it is for, dates, notes.
+- **Leases on these prices** — the leases on rent that this card prices today. Any lease on **different prices** (usually created before a price change) is flagged with the difference. A card never changes a lease that is already out — use **Amend rate** on the lease to move one.
+- **Price history** — each line's price over time across the customer's cards, and every change to this card with who made it (e.g. *Daily $45.00 → $50.00*).
 
-If none match, the fields are left empty (*No rates configured for {type}*). A rate is only "active" when today falls within its card's **Effective From** / **Effective To** range. Within a tier, an item set for the unit's **Specific Unit Type** beats a category-wide item; after that the **default** card wins, then the one with the latest **Effective From**.
+**Edit** makes the prices and details editable together (the side panel steps aside to give the table room). Changed prices are highlighted; the bar at the bottom shows **Unsaved changes** — click **Save changes** or **Discard**. You can add a line, remove one, **Adjust rent prices** by a percentage, or **Fill blanks from standard**.
 
-> **Tip:** Pre-filled rates are only a starting point — you can always type over them on the lease before saving.
+**More** menu: **Duplicate…**, **Rate sheet (PDF)** for the customer, **Price check for this customer**, **End these prices…**, **Make this the main price list** (standard lists only), **Delete this rate card**.
+
+---
+
+## Changing prices from a date
+
+Use **Change prices** on a card (or **Renew prices** on an ended card), or tick several cards on **All rate cards** and choose **Change prices…**.
+
+1. Choose when the **new prices start** (1st of next month, tomorrow, or any date after the card started).
+2. Either **raise or lower by %** (rounded to the cent, $1 or $5; optionally also distance, engine hours and GPS), or **type the new prices** (single card).
+3. Choose when the new card ends — **the same end date as before**, open-ended, or a date — and optionally a name and a note for the history.
+4. Click **Preview**. You see every line before and after, and exactly what happens to each card. Nothing is saved yet.
+5. Click **Save new prices** (or **Change prices on N cards**).
+
+What happens: each card keeps its prices until the day before the new ones start; a new card with the same customer carries the new prices from that date (named "*old name* · from *Mon YYYY*" unless you name it). The main-price-list flag moves to the new card. Both cards stay on record and point at each other in their history. **Leases already on rent keep their prices.**
+
+When several cards are changed together, it is all-or-nothing: if any card can't change as asked (for example another card already covers that equipment from that date), the preview says why and nothing is saved until every card can.
+
+---
+
+## Ending or deleting prices
+
+- **End these prices…** sets the last day the card is in force. From the next day, new leases get the next price in line (usually the standard price). The card stays as history.
+- **Delete this rate card** removes it from use. Leases on rent keep their prices. The main price list can't be deleted — make another list the main one first.
+
+---
+
+## How a new lease picks its price
+
+When you choose a customer and a unit on a new lease, FleetForge looks for a price **in this order** and uses the first it finds:
+
+| Order | Source | Banner on the lease form |
+|-------|--------|--------------------------|
+| 1 | **The customer's own card** — a line for that equipment, in force today | *Contracted rates — {type} rate · custom card "{card}"* (prices locked; **Unlock** to change) |
+| 2 | **A general card** (standard price list) | *{type} rate · card "{card}"* |
+| 3 | **The equipment type's own prices** | *{type} rate · template default* |
+
+If none matches, the fields stay empty. Within a step, a line for the **exact equipment type** beats a whole-category line, then the **main price list** wins, then the card that started most recently (then the newest card). The **Price check** shows this decision for any customer and equipment, step by step.
+
+If a lease can't be billed because its equipment has no price, the lease form links straight to the card (open in Edit) — or to **New rate card** with that customer and equipment already picked.
+
+> **Tip:** pre-filled prices are a starting point — you can type over them on the lease before saving.
 
 ---
 
 <details>
 <summary>Under the hood — how it works technically</summary>
 
-- **Tables** — `rate_cards` (header + `is_default`, `effective_from`, `effective_to`, soft-deleted via `deleted_at`, and `customer_id` — NULL = general card), and `rate_card_items` (one row per equipment type: `equipment_type` category slug, optional `equipment_template_id`, `daily_rate`, `weekly_rate`, `monthly_rate`, `mileage_rate`, `mileage_unit`, `hourly_rate`, `gps_price`, `minimum_days`, `currency`). The retired `customer_equipment_rates` override table is kept but no longer read.
-- **Resolution lives in** `api/v1/leases/lookup_rates.php`. Order is strictly: active rate card, ordered `customer card first → template-specific item first → is_default DESC → effective_from DESC` → equipment-type (template) defaults → none.
-- **Active = date window** — every lookup filters `effective_from <= today AND (effective_to IS NULL OR effective_to >= today)`.
-- **Matching key is the equipment type's `category`** — the lookup keys on the category slug (`dry_van`, `reefer`, `flatbed`, etc.), so all Equipment Types sharing a category share one rate unless an item names a **Specific Unit Type** (`equipment_template_id`). The rate-card dropdowns store category slugs.
-- **Money is exact** — all rates are stored and validated as decimal strings (bcmath); the UI uses `step="0.01"` for daily/weekly/monthly and `step="0.0001"` for mileage. Negative values are rejected.
-- **Default is singular** — saving a card with default on clears `is_default` on every other card in the same transaction.
-- **Soft delete** — rate cards are soft-deleted (recoverable in data, hidden everywhere), and all changes are written to the `audit_log` (module `rates`).
-- **Optimistic locking (D19)** — card edits send the row's `updated_at`; a `STALE_DATA` conflict is only raised when optimistic locking is switched on (it is currently off — last write wins).
-- **No retroactive repricing** — changing a card never alters rates already frozen on existing leases or sent invoices; new values apply only to leases created (or rates looked up) afterward.
+- **Tables** — `rate_cards` (`customer_id` NULL = standard / general card, `is_default` = main price list, `effective_from`/`effective_to`, soft-deleted via `deleted_at`) and `rate_card_items` (one row per line: `equipment_type` category slug, optional `equipment_template_id`, `daily_rate`, `weekly_rate`, `monthly_rate`, `mileage_rate` + `mileage_unit`, `hourly_rate`, `gps_price`, `minimum_days`, `currency`). No schema change in S-RATES-MODULE.
+- **One resolver** — `lib/RateCards/RateResolver.php` decides the price; the lease form's `api/v1/leases/lookup_rates.php`, the Price check, "what they pay", "leases on these prices" and the rate sheet all call it, so they always agree. Final tie-breakers `rc.id DESC, rci.id DESC` make an exact tie deterministic (newest card wins).
+- **Estimates use the billing law** — `RateResolver::quote()` runs `HolisticLeaseEngine::cumulativeCorrect()`; the minimum-days floor binds only when the equipment's category enforces minimums (`equipment_categories.enforce_minimum_billing_days`).
+- **Line rules** — `lib/RateCards/RateCardItems.php` (shared by create, update and change-prices): prices ≥ 0 and within the column size, D132 rent trio (all of daily / weekly / monthly above $0, or none), CAD/USD, km/miles, minimum days 0–90, one line per category / type. The conflict guard (`lib/RateCards/ConflictGuard.php`) refuses two in-force customer cards covering the same equipment.
+- **Change prices** — `lib/RateCards/RateCardRevision.php` via `api/v1/rate_cards/revise.php`; the preview runs the same code inside a transaction that is rolled back; each card runs in its own savepoint; apply is all-or-nothing. Audit rows link old ↔ new (`replaced_by` / `replaces_card_id`).
+- **History** — create, update and change-prices write line snapshots into `audit_log` (module `rates`); `api/v1/rate_cards/history.php` turns them into per-line diffs and a price timeline.
+- **Leases on a card** — leases keep no `rate_card_id`; each active lease's customer + equipment type is resolved today and counted when the card wins (`api/v1/rate_cards/leases.php`).
+- **Money is exact** — decimal strings end to end (bcmath). Changing a card never re-prices existing leases or sent invoices.
 
 </details>
 
