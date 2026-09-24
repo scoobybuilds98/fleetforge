@@ -105,13 +105,11 @@ return [
         'badge'        => 'billing_attention',
     ],
     [
-        // Invoices is a collapsible GROUP (S-BATCH-INVOICING). Its "Batch
+        // Invoices was a collapsible GROUP (S-BATCH-INVOICING). Its "Batch
         // Invoicing" child moved to Monthly Billing (S-BILLING-MODULE) —
-        // /invoices/batch redirects to /billing/run. Credit Notes stays.
-        //
-        // No "All Invoices" child on purpose: active state is decided by
-        // str_starts_with, and a child pointing at '/invoices' would never
-        // be distinct from the parent. The parent link covers the list.
+        // /invoices/batch redirects to /billing/run — and Credit Notes became
+        // its own Billing item below Rates (S-NAV-CREDIT-NOTES), so Invoices
+        // is a plain link again.
         'label'        => 'Invoices',
         'icon'         => 'banknotes',
         'accent'       => 'primary',
@@ -119,21 +117,6 @@ return [
         'match_prefix' => '/invoices',
         'module'       => 'invoices',
         'badge'        => 'overdue_invoices',
-        'children' => [
-            [
-                // Credit notes had no sidebar entry at all (only reachable via the
-                // New menu or a customer's Account Credit tile). They live under
-                // the invoices permission scope (§12 matrix — every credit_notes
-                // page/API gates on invoices:*), so they nest here. '/credit_notes'
-                // shares no prefix with '/invoices', so highlighting stays exact
-                // and a credit-note page still expands this group.
-                'label'  => 'Credit Notes',
-                'icon'   => 'receipt-percent',
-                'url'    => '/credit_notes',
-                'module' => 'invoices',
-                'badge'  => null,
-            ],
-        ],
     ],
     [
         'label'  => 'Payments',
@@ -149,6 +132,20 @@ return [
         'accent' => 'primary',
         'url'    => '/rates',
         'module' => 'rates',
+        'badge'  => null,
+    ],
+    [
+        // S-NAV-CREDIT-NOTES (operator: "bring credit notes from under
+        // invoices to under the billing section, below rates … its own
+        // item"). Was a child of the Invoices group. Credit notes stay in the
+        // invoices permission scope (§12 matrix — every credit_notes page/API
+        // gates on invoices:*). '/credit_notes' shares no prefix with any
+        // other item, so highlighting stays exact.
+        'label'  => 'Credit Notes',
+        'icon'   => 'receipt-percent',
+        'accent' => 'primary',
+        'url'    => '/credit_notes',
+        'module' => 'invoices',
         'badge'  => null,
     ],
     [

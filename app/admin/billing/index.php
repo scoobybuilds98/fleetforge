@@ -100,7 +100,7 @@ require_once FF_ROOT . '/includes/header.php';
             </div>
             <div class="bc-rules">
                 <div class="bc-rule"><strong>Drafts count for nothing</strong>An invoice only becomes real — customer balance, revenue, QuickBooks — when it is sent. A draft can be edited, regenerated or deleted freely.</div>
-                <div class="bc-rule"><strong>Sent invoices are never edited</strong>Correct a sent invoice with a credit note (Invoices → Credit Notes), or void it and bill again.</div>
+                <div class="bc-rule"><strong>Sent invoices are never edited</strong>Correct a sent invoice with a credit note (Billing → Credit Notes), or void it and bill again.</div>
                 <div class="bc-rule"><strong>Payments and collections live elsewhere</strong>Payments, statements, aging and dunning are in Payments and Accounting → Receivables. Billing ends when the month is sent and closed.</div>
             </div>
             <details style="margin-top:12px;">

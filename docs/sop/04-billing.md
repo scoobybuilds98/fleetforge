@@ -82,7 +82,7 @@ From the lease → **Generate Invoice**:
 
 ## Credit notes
 
-From {{Invoices › Credit Notes › New Credit Note @/credit_notes/create}}:
+From {{Credit Notes › New Credit Note @/credit_notes/create}}:
 
 1. Customer, **Source Type** (Goodwill, Invoice Adjustment, Damage Resolution, Mileage Overpayment, Payment Returned, Other), amount, currency, **Reason**. The reason appears on statements.
 2. **Issue Credit Note**. It changes no invoice until applied.
