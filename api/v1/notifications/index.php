@@ -16,11 +16,22 @@ declare(strict_types=1);
  *          category      string  optional, e.g. "leases", "invoices"
  *          date_range    today|week|month|all  default 'all'
  *          limit         int   alias of per_page (kept for legacy FF_Notifications JS)
+ *          order         unread_first (default) | recent
+ *                        recent = strictly newest first — the bell's Updates
+ *                        tab, which draws a "new since you last looked" line
+ *                        where the unread rows end (S-ATTENTION-INBOX)
  *
  * @returns 200 paginated envelope with `data.items[]` and `data.meta.total_unread`
  *
  * Items are returned newest-first within their read/unread group: every
- * unread row first (is_read ASC) then read rows, both ordered by created_at DESC.
+ * unread row first (is_read ASC) then read rows, both ordered by created_at DESC
+ * (or strictly newest-first with order=recent).
+ *
+ * S-ATTENTION-INBOX: each item carries group_count (a burst of the same update
+ * folds into one row, "42 invoices created") and day_label (Today / Yesterday
+ * / "Mon 22 Sep", business timezone). Money in title/message is scrubbed at
+ * serve time for users without payments:view (can_view_financials()) — the
+ * same redact-at-serve-time rule as the dashboard.
  *
  * @session NOTIF-1
  * @depends api/bootstrap.php (require_auth_api, json_paginated)
@@ -50,6 +61,7 @@ $offset  = ($page - 1) * $perPage;
 $isReadParam = strtolower(trim((string) ($_GET['is_read'] ?? 'all')));
 $category    = trim((string) ($_GET['category'] ?? ''));
 $dateRange   = strtolower(trim((string) ($_GET['date_range'] ?? 'all')));
+$orderRecent = ($_GET['order'] ?? '') === 'recent';
 
 // ── Build WHERE ─────────────────────────────────────────────────────────────
 $where  = ['user_id = ?', 'deleted_at IS NULL'];
@@ -65,7 +77,7 @@ if ($isReadParam === '0' || $isReadParam === 'unread') {
 $allowedCategories = [
     'leases', 'invoices', 'payments', 'customers', 'equipment',
     'compliance', 'maintenance', 'damage', 'reservations',
-    'samsara', 'accounting', 'system',
+    'samsara', 'accounting', 'quickbooks', 'system',
 ];
 if ($category !== '' && in_array($category, $allowedCategories, true)) {
     $where[]  = 'category = ?';
@@ -106,23 +118,32 @@ $totalUnread = db_count(
 // LIMIT/OFFSET are SAFE int interpolation (validated above)
 $rows = db_select(
     "SELECT id, title, message, type, category, url, entity_type, entity_id,
-            severity, is_read, read_at, created_at
+            group_count, severity, is_read, read_at, created_at
        FROM notifications
       WHERE $whereSql
-   ORDER BY is_read ASC, created_at DESC
+   ORDER BY " . ($orderRecent ? 'created_at DESC, id DESC' : 'is_read ASC, created_at DESC') . "
       LIMIT $perPage OFFSET $offset",
     $params
 );
 
 // ── Decorate ───────────────────────────────────────────────────────────────
 // time_ago is computed server-side so the UI doesn't need a date library.
-$now = time();
-$items = array_map(static function (array $row) use ($now): array {
+$now      = time();
+$canMoney = can_view_financials();
+$items = array_map(static function (array $row) use ($now, $canMoney): array {
     $createdTs = strtotime((string) $row['created_at'] . ' UTC') ?: $now;
+    // Redact at serve time (never stored pre-redacted): dispatchers keep the
+    // update, minus the dollar amounts.
+    $title   = (string) $row['title'];
+    $message = (string) $row['message'];
+    if (!$canMoney) {
+        $title   = ff_scrub_money_text($title);
+        $message = ff_scrub_money_text($message);
+    }
     return [
         'id'          => (int) $row['id'],
-        'title'       => (string) $row['title'],
-        'message'     => (string) $row['message'],
+        'title'       => $title,
+        'message'     => $message,
         'type'        => $row['type'],
         'category'    => $row['category'] ?? 'system',
         'url'         => $row['url'] ?? '#',
@@ -133,6 +154,8 @@ $items = array_map(static function (array $row) use ($now): array {
         'read_at'     => $row['read_at'],
         'created_at'  => $row['created_at'],
         'time_ago'    => _notif_time_ago($now - $createdTs),
+        'group_count' => (int) ($row['group_count'] ?? 1),
+        'day_label'   => _notif_day_label((string) $row['created_at']),
     ];
 }, $rows);
 
@@ -167,4 +190,29 @@ function _notif_time_ago(int $secondsAgo): string
     if ($secondsAgo < 86400)     return floor($secondsAgo / 3600) . ' hr ago';
     if ($secondsAgo < 86400 * 7) return floor($secondsAgo / 86400) . ' days ago';
     return date('M j', time() - $secondsAgo);
+}
+
+/**
+ * _notif_day_label — "Today" / "Yesterday" / "Mon 22 Sep" for a UTC stamp,
+ * in the business timezone (S-ATTENTION-INBOX: the Updates tab groups by day).
+ *
+ * @param  string $utc  created_at (UTC DATETIME)
+ * @return string
+ */
+function _notif_day_label(string $utc): string
+{
+    try {
+        $local = (new DateTimeImmutable($utc, new DateTimeZone('UTC')))->setTimezone(ff_business_timezone());
+    } catch (Throwable) {
+        return '';
+    }
+    $day   = $local->format('Y-m-d');
+    $today = ff_today();
+    if ($day === $today) {
+        return 'Today';
+    }
+    if ($day === date('Y-m-d', strtotime($today . ' -1 day'))) {
+        return 'Yesterday';
+    }
+    return $local->format('D j M');
 }

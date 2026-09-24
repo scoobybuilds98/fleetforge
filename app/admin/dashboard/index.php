@@ -14,7 +14,9 @@ declare(strict_types=1);
  *                2. Needs attention: action cards built from the KPIs + lists
  *                   (overdue, leases waiting to start, drafts, returns this
  *                   week, pickups, renewals, claims, work orders) — only the
- *                   ones that apply, or an "all clear" state.
+ *                   ones that apply, or an "all clear" state. Above them
+ *                   (S-ATTENTION-INBOX) a strip summarising the team's
+ *                   shared Needs attention list, naming urgent items.
  *                3. The 12 key numbers, grouped Money / Fleet / Pipeline
  *                   (#kpi-grid; tile labels unchanged).
  *                4. A sticky section bar with scroll-spy, then numbered
@@ -95,6 +97,21 @@ $dashUrls = [
         ],
     ],
 ];
+
+// S-ATTENTION-INBOX: the shared Needs attention list (the bell's number) is
+// summarised above the attention cards — urgent items by name, so an urgent
+// problem is on the home page, not only behind the bell. badge() never throws.
+$dashAttUid   = (int) current_user_id();
+$dashAttRole  = (string) (current_user()['role_slug'] ?? '');
+$dashAttBadge = \FleetForge\Attention\AttentionService::badge($dashAttUid, $dashAttRole);
+$dashAttUrgent = [];
+if ($dashAttBadge['urgent'] > 0) {
+    try {
+        $dashAttUrgent = \FleetForge\Attention\AttentionService::listFor($dashAttUid, $dashAttRole, ['priority' => 'urgent', 'limit' => 3])['items'];
+    } catch (\Throwable $e) {
+        error_log('[dashboard] urgent attention items failed: ' . $e->getMessage());
+    }
+}
 
 // S-DASHBOARD-ATTN-2: attention cards that link into a module only show to
 // roles that can open it (the sidebar would show those modules locked).
@@ -235,6 +252,24 @@ $dashLoading = static function (int $height): string {
             <button type="button" class="dash-attn-more" x-show="attnReady && attn.length > 5" style="display:none;"
                     @click="attnAll = !attnAll" x-text="attnAll ? 'Show fewer' : 'Show all ' + attn.length"></button>
         </div>
+        <?php if ($dashAttBadge['total'] > 0): ?>
+        <!-- S-ATTENTION-INBOX: the team's shared list (same items as the bell). -->
+        <a class="att-dash-strip<?= $dashAttBadge['urgent'] > 0 ? ' att-dash-strip--urgent' : '' ?>" href="<?= e(base_url('notifications')) ?>">
+            <span class="att-dash-strip-n"><?= (int) $dashAttBadge['total'] ?></span>
+            <span class="att-dash-strip-text">
+                <?php if ($dashAttBadge['urgent'] > 0): ?>
+                    <strong><?= (int) $dashAttBadge['urgent'] ?> urgent:</strong>
+                    <?= e(implode(' · ', array_map(static fn($r) => (string) $r['title'], $dashAttUrgent))) ?><?= $dashAttBadge['urgent'] > count($dashAttUrgent) ? ' · …' : '' ?>
+                <?php else: ?>
+                    <strong>open item<?= $dashAttBadge['total'] === 1 ? '' : 's' ?> in the team's list</strong>
+                <?php endif; ?>
+                <?php if ($dashAttBadge['mine'] > 0): ?>
+                    <span class="att-dash-strip-mine"><?= (int) $dashAttBadge['mine'] ?> yours</span>
+                <?php endif; ?>
+            </span>
+            <span class="att-dash-strip-cta">Open the list <span aria-hidden="true">→</span></span>
+        </a>
+        <?php endif; ?>
         <div class="dash-attn-grid">
             <template x-if="!attnReady">
                 <div class="dash-attn-skel" aria-hidden="true"><span></span><span></span><span></span><span></span></div>

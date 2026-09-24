@@ -6,7 +6,7 @@ icon: truck
 accent: success
 part: Operations & billing
 audience: dispatcher, manager
-reviewed: 2026-09-24
+reviewed: 2026-09-25
 ---
 A unit earns money only while it is on an active lease, and every invoice is priced from the lease. So the lease — dates, rates, mileage mode, readings — must be right before anything is billed. Where the in-app Help and a screen disagree, follow the screen: several Help pages predate the current screens.
 
@@ -14,13 +14,14 @@ A unit earns money only while it is on an active lease, and every invoice is pri
 
 Dispatcher and manager, every morning:
 
-1. {{Dashboard @/dashboard}} — work **Needs attention** left to right, then the panels:
+1. The **bell** ({{Notifications @/notifications}}) — the team's shared list: one item per problem, until it's fixed. Work **Urgent** first. **Take it** so others see it's yours; fix it in FleetForge and it closes by itself; otherwise **Done** with a note ("called, paying Friday") or **Snooze** it to a date. Nothing repeats, and an urgent item nobody takes for 24 hours goes to the owner.
+2. {{Dashboard @/dashboard}} — work **Needs attention** left to right, then the panels:
    - **Leases › Starting** — units leaving today (red = start date already passed);
    - **Leases › Returning**;
    - **Receivables › Drafts**;
    - **Receivables › Overdue**.
-2. {{Leases @/leases}} → *Active & Pending*: an amber **Billed Thru** date means usage not yet invoiced.
-3. Open Service Requests and today's inspections.
+3. {{Leases @/leases}} → *Active & Pending*: an amber **Billed Thru** date means usage not yet invoiced.
+4. Open Service Requests and today's inspections.
 
 ## Customers
 

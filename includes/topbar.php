@@ -31,24 +31,17 @@ declare(strict_types=1);
  * @session  S009 (enhanced), S-SHELL-REDESIGN
  */
 
-// ── Notification unread count ─────────────────────────────────────────────────
-// [NOTIF-1] Initial count for first paint. After load, FF_Notifications() Alpine
-// factory polls /api/v1/notifications/count.php every 60s to refresh the badge.
-// Wrapped in try/catch so the topbar renders even if the table is missing.
-$_unreadCount = 0;
-try {
-    $_uid = current_user_id();
-    if ($_uid) {
-        $_unreadCount = db_count(
-            'SELECT COUNT(*) FROM notifications
-              WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL',
-            [$_uid]
-        );
-    }
-    unset($_uid);
-} catch (Throwable) {
-    $_unreadCount = 0;
+// ── Bell badge (S-ATTENTION-INBOX) ─────────────────────────────────────────────
+// First-paint numbers: Needs attention (the number on the bell) + unread
+// updates (a dot). FF_Notifications() then polls /api/v1/attention/count.php
+// every 60s. AttentionService::badge() never throws, so the topbar always
+// renders.
+$_bellBadge = ['total' => 0, 'urgent' => 0, 'mine' => 0, 'updates_unread' => 0];
+$_uid = current_user_id();
+if ($_uid) {
+    $_bellBadge = \FleetForge\Attention\AttentionService::badge($_uid, (string) (current_user()['role_slug'] ?? ''));
 }
+unset($_uid);
 
 // ── Current user ──────────────────────────────────────────────────────────────
 $_me = current_user() ?? [];
@@ -632,34 +625,36 @@ $_topbarCompany = (string) settings_get('company.name', 'FleetForge');
 
         </div><!-- /topbar-tray -->
 
-        <!-- ── Notifications bell (NOTIF-1 — Alpine factory) ────────── -->
-        <!-- FF_Notifications() factory is in public/assets/js/app.js.
-             It owns: open, loading, notifications[], unreadCount, _pollTimer.
-             Initial $_unreadCount is rendered server-side for first paint;
-             Alpine.init() then refreshes it via /api/v1/notifications/count.php
-             every 60s. -->
+        <!-- ── Notifications bell (S-ATTENTION-INBOX) ──────────────── -->
+        <!-- FF_Notifications() is in public/assets/js/app.js. Two tabs:
+             Needs attention (the number — shared items, one per problem)
+             and Updates (activity; a dot, never a number). The first-paint
+             badge comes from $_bellBadge above; seed() hands it to Alpine
+             (NOT x-init="init()" — Alpine calls init() itself). -->
         <div class="notif-wrapper"
              x-data="FF_Notifications()"
-             x-init="unreadCount = <?= (int) $_unreadCount ?>;"
+             x-init="seed(<?= e(json_encode($_bellBadge)) ?>)"
              @click.outside="open = false"
              @keydown.escape.window="open = false">
 
             <button type="button"
                     class="btn-icon topbar-bell-btn notif-bell-btn"
-                    :class="{ 'has-unread': unreadCount > 0 }"
+                    :class="{ 'has-unread': badge.total > 0, 'is-urgent': badge.urgent > 0 }"
                     @click="toggleDropdown()"
                     :aria-expanded="open"
-                    :aria-label="unreadCount > 0
-                        ? 'Notifications (' + unreadCount + ' unread)'
-                        : 'Notifications'">
+                    :aria-label="ariaLabel()">
                 <?= heroicon('bell', 'nav-icon') ?>
                 <span class="notif-badge"
-                      x-show="unreadCount > 0"
-                      x-text="unreadCount > 99 ? '99+' : unreadCount"
+                      :class="badge.urgent > 0 ? 'notif-badge--urgent' : 'notif-badge--todo'"
+                      x-show="badge.total > 0"
+                      x-text="badgeText()"
+                      aria-hidden="true"></span>
+                <span class="notif-dot"
+                      x-show="badge.total === 0 && badge.updates_unread > 0"
                       aria-hidden="true"></span>
             </button>
 
-            <div class="notif-dropdown"
+            <div class="notif-dropdown att-panel"
                  x-show="open"
                  x-cloak
                  x-transition:enter="dropdown-enter"
@@ -668,106 +663,123 @@ $_topbarCompany = (string) settings_get('company.name', 'FleetForge');
                  x-transition:leave="dropdown-leave"
                  x-transition:leave-start="dropdown-leave-start"
                  x-transition:leave-end="dropdown-leave-end"
-                 role="menu"
                  aria-label="Notifications">
 
-                <!-- Header -->
-                <div class="notif-dropdown-header">
-                    <span class="notif-dropdown-title">Notifications</span>
-                    <div style="display:flex;align-items:center;gap:10px;">
-                        <div class="notif-view-toggle">
-                            <button @click="setView('flat')"
-                                    :class="{ 'notif-view-toggle--active': viewMode === 'flat' }">Flat</button>
-                            <button @click="setView('grouped')"
-                                    :class="{ 'notif-view-toggle--active': viewMode === 'grouped' }">Grouped</button>
-                        </div>
-                        <button type="button"
-                                class="notif-mark-all"
-                                @click="markAllRead()"
-                                x-show="unreadCount > 0">
-                            Mark all read
-                        </button>
+                <!-- Tabs -->
+                <div class="att-tabs" role="tablist">
+                    <button type="button" role="tab" class="att-tab"
+                            :aria-selected="tab === 'attention'"
+                            @click="setTab('attention')">
+                        Needs attention
+                        <span class="att-count"
+                              :class="badge.urgent > 0 ? 'att-count--urgent' : 'att-count--todo'"
+                              x-show="badge.total > 0"
+                              x-text="badgeText()"></span>
+                    </button>
+                    <button type="button" role="tab" class="att-tab"
+                            :aria-selected="tab === 'updates'"
+                            @click="setTab('updates')">
+                        Updates
+                        <span class="att-newdot" x-show="badge.updates_unread > 0" aria-label="new"></span>
+                    </button>
+                </div>
+
+                <!-- ── Needs attention ── -->
+                <div x-show="tab === 'attention'" role="tabpanel">
+                    <div class="att-filters">
+                        <button type="button" class="att-chip" :aria-pressed="owner === 'all'"  @click="setOwner('all')">All</button>
+                        <button type="button" class="att-chip" :aria-pressed="owner === 'mine'" @click="setOwner('mine')">Mine</button>
+                        <button type="button" class="att-chip" :aria-pressed="owner === 'free'" @click="setOwner('free')">Nobody on it</button>
                     </div>
-                </div>
 
-                <!-- Loading -->
-                <div class="notif-loading" x-show="loading" x-cloak>
-                    Loading notifications…
-                </div>
+                    <div class="notif-loading" x-show="loadingAtt" x-cloak>Loading…</div>
 
-                <!-- Empty (shown only when there are genuinely no notifications) -->
-                <div class="notif-empty"
-                     x-show="!loading && notifications.length === 0"
-                     x-cloak>
-                    <?= heroicon('bell', 'nav-icon') ?>
-                    <p>No notifications yet</p>
-                </div>
+                    <div class="att-empty" x-show="!loadingAtt && loadedAtt && items.length === 0" x-cloak>
+                        <?= heroicon('check-circle', 'nav-icon') ?>
+                        <p class="att-empty-title" x-text="owner === 'mine' ? 'Nothing is yours right now.' : (owner === 'free' ? 'Everything has someone on it.' : 'All clear.')"></p>
+                        <p class="att-empty-sub" x-show="owner === 'all'">Nothing needs anyone right now.</p>
+                    </div>
 
-                <!-- ── FLAT view (x-show keeps it in DOM so x-for stays initialised) ── -->
-                <div x-show="viewMode === 'flat'">
-                    <template x-for="n in notifications" :key="n.id">
-                        <a :href="n.url || '#'"
-                           class="notif-item"
-                           :class="{ 'notif-item--unread': !n.is_read }"
-                           @click="markRead(n.id)">
-                            <div class="notif-icon" :class="categoryClass(n)" x-html="iconFor(n.category)"></div>
-                            <div class="notif-content">
-                                <div class="notif-title" x-text="n.title"></div>
-                                <div class="notif-message" x-text="n.message"></div>
-                                <div class="notif-time" x-text="n.time_ago"></div>
+                    <template x-for="grp in groups" :key="grp.key">
+                        <div class="att-group">
+                            <div class="att-group-h" :class="'att-group-h--' + grp.key">
+                                <span x-text="grp.label"></span> · <span x-text="grp.items.length"></span>
                             </div>
-                            <div class="notif-unread-dot" x-show="!n.is_read"></div>
-                        </a>
-                    </template>
-                </div>
-
-                <!-- ── GROUPED view ── -->
-                <div x-show="viewMode === 'grouped'">
-                    <template x-for="group in groupedEntries()" :key="group.cat">
-                        <div class="notif-group-block">
-                            <!-- Group header -->
-                            <div class="notif-group-row" @click="toggleGroup(group.cat)">
-                                <div class="notif-icon notif-icon--sm"
-                                     :class="'notif-icon--' + group.cat"
-                                     x-html="iconFor(group.cat)"></div>
-                                <span class="notif-group-row-label" x-text="categoryLabel(group.cat)"></span>
-                                <span class="notif-group-row-badge"
-                                      x-show="group.unread > 0"
-                                      x-text="group.unread"></span>
-                                <svg class="notif-group-row-chevron"
-                                     :class="{ 'is-collapsed': !expandedGroups[group.cat] }"
-                                     viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                                </svg>
-                            </div>
-                            <!-- Group items — x-show instead of x-if to keep x-for alive -->
-                            <div x-show="expandedGroups[group.cat]">
-                                <template x-for="n in group.items" :key="n.id">
-                                    <a :href="n.url || '#'"
-                                       class="notif-item notif-item--indented"
-                                       :class="{ 'notif-item--unread': !n.is_read }"
-                                       @click="markRead(n.id)">
-                                        <div class="notif-content">
-                                            <div class="notif-title" x-text="n.title"></div>
-                                            <div class="notif-message" x-text="n.message"></div>
-                                            <div class="notif-time" x-text="n.time_ago"></div>
+                            <template x-for="it in grp.items" :key="it.id">
+                                <div class="att-item" :class="'att-item--' + it.priority">
+                                    <span class="att-stripe" aria-hidden="true"></span>
+                                    <div class="att-body">
+                                        <a class="att-title" :href="it.url || '#'" x-text="it.title"></a>
+                                        <div class="att-facts" x-show="it.facts.length" x-text="it.facts.join(' · ')"></div>
+                                        <div class="att-pills">
+                                            <span class="att-pill att-pill--age" x-text="'open ' + it.age"></span>
+                                            <span class="att-pill att-pill--esc" x-show="it.escalated">Escalated</span>
+                                            <span class="att-pill" :class="it.assigned ? 'att-pill--owner' : ''" x-text="FF_Attention.ownerLabel(it)"></span>
                                         </div>
-                                        <div class="notif-unread-dot" x-show="!n.is_read"></div>
-                                    </a>
-                                </template>
-                            </div>
+                                        <div class="att-actions">
+                                            <a class="att-btn att-btn--primary" :href="it.url || '#'">Open</a>
+                                            <button type="button" class="att-btn" x-show="!it.assigned || !it.assigned.is_me"
+                                                    :disabled="!!busy[it.id]" @click="act(it, 'take')">Take it</button>
+                                            <button type="button" class="att-btn" :disabled="!!busy[it.id]"
+                                                    :aria-expanded="panel[it.id] === 'snooze'"
+                                                    @click="setPanel(it.id, 'snooze')">Snooze</button>
+                                            <button type="button" class="att-btn att-btn--ghost" :disabled="!!busy[it.id]"
+                                                    :aria-expanded="panel[it.id] === 'done'"
+                                                    @click="setPanel(it.id, 'done')">Done</button>
+                                        </div>
+                                        <div class="att-inline" x-show="panel[it.id] === 'snooze'" x-cloak>
+                                            <template x-for="c in FF_Attention.snoozeChoices" :key="c.v">
+                                                <button type="button" class="att-chip" :disabled="!!busy[it.id]" @click="snoozeTo(it, c.v)" x-text="c.label"></button>
+                                            </template>
+                                            <input type="date" class="att-date" :min="FF_Attention.tomorrowIso()"
+                                                   :aria-label="'Snooze ' + it.title + ' until'"
+                                                   x-model="snoozeDate[it.id]">
+                                            <button type="button" class="att-btn" :disabled="!!busy[it.id]" @click="snoozeTo(it, snoozeDate[it.id])">Snooze to date</button>
+                                        </div>
+                                        <div class="att-inline att-inline--done" x-show="panel[it.id] === 'done'" x-cloak>
+                                            <input type="text" class="att-note" maxlength="500"
+                                                   :placeholder="it.done_needs_note ? 'What was done? e.g. Called, paying Friday' : 'Note (optional)'"
+                                                   :aria-label="'Note for ' + it.title"
+                                                   x-model="notes[it.id]"
+                                                   @keydown.enter.prevent="confirmDone(it)">
+                                            <button type="button" class="att-btn att-btn--primary" :disabled="!!busy[it.id]" @click="confirmDone(it)">Mark done</button>
+                                        </div>
+                                        <p class="att-error" x-show="errors[it.id]" x-text="errors[it.id]" role="alert"></p>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </template>
+
+                    <a href="<?= e(base_url('notifications')) ?>" class="notif-dropdown-footer">
+                        <span x-show="more > 0" x-text="'+ ' + more + ' more · '"></span>Open the full list
+                    </a>
                 </div>
 
-                <!-- Footer -->
-                <a href="<?= e(base_url('notifications')) ?>"
-                   class="notif-dropdown-footer">
-                    See all notifications
-                    <span x-show="unreadCount > 0">
-                        (<span x-text="unreadCount"></span> unread)
-                    </span>
-                </a>
+                <!-- ── Updates ── -->
+                <div x-show="tab === 'updates'" role="tabpanel" x-cloak>
+                    <div class="notif-loading" x-show="loadingUpd">Loading…</div>
+                    <div class="att-empty" x-show="!loadingUpd && loadedUpd && updates.length === 0">
+                        <p class="att-empty-title">No updates yet.</p>
+                    </div>
+                    <template x-for="row in updates" :key="row.key">
+                        <div>
+                            <div class="att-day" x-show="row.kind === 'day'" x-text="row.label"></div>
+                            <div class="att-divider" x-show="row.kind === 'divider'">Earlier</div>
+                            <template x-if="row.kind === 'item'">
+                                <a :href="row.n.url || '#'" class="notif-item upd-item" :class="{ 'notif-item--unread': row.isNew }">
+                                    <div class="notif-icon" :class="'notif-icon--' + (row.n.category || 'system')" x-html="iconFor(row.n.category)"></div>
+                                    <div class="notif-content">
+                                        <div class="notif-title" x-text="row.n.title"></div>
+                                        <div class="notif-message" x-text="row.n.message"></div>
+                                    </div>
+                                    <div class="notif-time" x-text="row.n.time_ago"></div>
+                                </a>
+                            </template>
+                        </div>
+                    </template>
+                    <a href="<?= e(base_url('notifications?tab=updates')) ?>" class="notif-dropdown-footer">All updates</a>
+                </div>
             </div>
         </div>
 
@@ -906,6 +918,6 @@ $_topbarCompany = (string) settings_get('company.name', 'FleetForge');
 </header>
 
 <?php
-unset($_unreadCount, $_topbarTitle, $_topbarCompany, $_me, $_initials, $_roleMap, $_roleLabel, $_creates,
+unset($_bellBadge, $_topbarTitle, $_topbarCompany, $_me, $_initials, $_roleMap, $_roleLabel, $_creates,
       $_moduleIcon, $_moduleAccent, $_moduleHref, $_moduleLabel);
 ?>

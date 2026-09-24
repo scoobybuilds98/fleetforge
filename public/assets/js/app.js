@@ -1431,220 +1431,302 @@ window.FF_Validate = FF_Validate;
 
 
 // ============================================================
-// 07. FF_Notifications — Alpine factory for the topbar bell + dropdown
+// 07. FF_Notifications — the topbar bell (S-ATTENTION-INBOX)
 // ============================================================
 //
 // Used by includes/topbar.php as:
-//   <div x-data="FF_Notifications()" x-init="init()">
+//   <div x-data="FF_Notifications()" x-init="seed({...server badge...})">
+//   (never x-init="init()" — Alpine already calls init(); see the
+//   double-init trap in S-PERF-POLL)
 //
-// Features:
-//   - Initial fetch of recent 10 notifications + unread count
-//   - 60s polling for unread count (lightweight)
-//   - Mark single read on click-through
-//   - Mark all read
-//   - Category icon + colour mapping
-//   - Cleans up the polling timer on Alpine destroy
+// Two tabs:
+//   Needs attention — one shared item per problem (api/v1/attention/*).
+//                     The bell's NUMBER counts only these; red when any
+//                     is urgent, amber otherwise. Take / snooze / done
+//                     right in the panel; done needs a short note while
+//                     the problem is still there.
+//   Updates         — the activity feed (api/v1/notifications/index.php
+//                     ?order=recent). Never adds to the number, only a
+//                     dot. Opening the tab marks them read after a beat,
+//                     so what was new stays highlighted while you look.
 //
-// Endpoint contract (api/v1/notifications/):
-//   GET  index.php?per_page=10  → { items[], pagination, meta.total_unread, total_unread }
-//   GET  count.php              → { unread_count }
-//   POST mark_read.php { notification_id | mark_all }
+// Polls the badge every 60s, paused while the tab is hidden (and caught
+// up the moment it's visible again). Dings only when Needs attention
+// grows — updates never make a sound.
 //
+
+/**
+ * Shared helpers for the bell and the full Notifications page.
+ */
+const FF_Attention = {
+    /** POST an action; resolves with the API envelope (FF_Api.post resolves on 4xx). */
+    act(itemId, action, extra = {}) {
+        return FF_Api.post(FF_Api.url('/api/v1/attention/act.php'),
+            { item_id: itemId, action, ...extra }, { quiet: true });
+    },
+
+    /** Snooze presets (the server turns them into 08:00 business time). */
+    snoozeChoices: [
+        { v: 'tomorrow', label: 'Tomorrow' },
+        { v: 'monday',   label: 'Next Monday' },
+        { v: 'week',     label: 'In a week' },
+    ],
+
+    /** Owner pill text. */
+    ownerLabel(it) {
+        if (!it || !it.assigned) return 'Nobody on it';
+        return it.assigned.is_me ? 'You have this' : it.assigned.name + ' has this';
+    },
+
+    /** Toast after a successful action (plain words: what happened). */
+    toast(action, it) {
+        if (!window.FF_Toast) return;
+        const msg = {
+            take:    ['You have this', 'Everyone can see it’s yours.'],
+            release: ['Released', 'It’s back with the team.'],
+            assign:  ['Handed over', it && it.assigned ? it.assigned.name + ' has it now.' : ''],
+            snooze:  ['Snoozed', it && it.snoozed_label ? 'It comes back ' + it.snoozed_label + '.' : 'It comes back by itself.'],
+            wake:    ['Back in the list', ''],
+            done:    ['Done for everyone', 'It reopens only if the problem gets worse.'],
+            reopen:  ['Reopened', ''],
+            note:    ['Note added', ''],
+        }[action];
+        if (msg) FF_Toast.success(msg[0], msg[1]);
+    },
+
+    /** Today as YYYY-MM-DD in the browser (min for the snooze date input). */
+    tomorrowIso() {
+        const d = new Date(Date.now() + 86400000);
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    },
+};
+window.FF_Attention = FF_Attention;
 
 function FF_Notifications() {
     return {
         open: false,
-        loading: false,
-        notifications: [],
-        unreadCount: 0,
+        tab: 'attention',
+        owner: 'all',
+        badge: { total: 0, urgent: 0, mine: 0, updates_unread: 0 },
+        items: [],
+        groups: [],
+        more: 0,
+        updates: [],
+        loadingAtt: false,
+        loadingUpd: false,
+        loadedAtt: false,
+        loadedUpd: false,
+        busy: {},
+        panel: {},
+        notes: {},
+        snoozeDate: {},
+        errors: {},
         _pollTimer: null,
-        // flat | grouped — persisted to localStorage
-        viewMode: 'flat',
-        // tracks which category sections are expanded in grouped mode
-        // default (key absent) = collapsed, so sections start closed
-        expandedGroups: {},
-        // MEDIA-1: _initialized gates sound playback so we don't
-        // ding the user on first page load just for seeing the
-        // current unread total.
+        _markTimer: null,
         _initialized: false,
 
-        async init() {
-            // S-PERF-POLL: guard against Alpine's double init (auto-init from
-            // x-data + the explicit init() in includes/topbar.php's x-init).
+        init() {
+            // Double-init guard BEFORE anything async (S-PERF-POLL).
             if (this._pollTimer) return;
-
-            try { this.viewMode = localStorage.getItem('ff_notif_view') || 'flat'; } catch {}
-
-            // S-PERF-POLL: no initial fetchCount() here any more. topbar.php
-            // already computed this exact COUNT server-side and seeds
-            // unreadCount from the same x-init attribute — which runs AFTER
-            // this, so the fetched value was always overwritten and thrown
-            // away. That made it a guaranteed-wasted round trip on every page
-            // load. Marking _initialized here means the seeded value is the
-            // baseline the first 60s poll compares against, so a genuine
-            // increase still dings; without it that first ding is swallowed.
-            this._initialized = true;
-
-            // Refresh badge every 60s — lightweight COUNT only.
-            this._pollTimer = setInterval(() => { this.fetchCount(); }, 60000);
-            // Stop polling when Alpine tears the component down.
-            // Without this, navigating away leaks the timer until GC.
+            this._pollTimer = setInterval(() => { if (!document.hidden) this.fetchCount(); }, 60000);
+            // A background tab skips polls; catch up as soon as it's looked at.
+            this._onVisible = () => { if (!document.hidden) this.fetchCount(); };
+            document.addEventListener('visibilitychange', this._onVisible);
             this.$el?.addEventListener?.('alpine:destroyed', () => {
                 if (this._pollTimer) clearInterval(this._pollTimer);
+                document.removeEventListener('visibilitychange', this._onVisible);
             });
+        },
+
+        /** Server-rendered first paint (includes/topbar.php). */
+        seed(b) {
+            this.badge = { ...this.badge, ...(b || {}) };
+            this._initialized = true;
+        },
+
+        badgeText() {
+            const n = this.badge.total || 0;
+            return n > 99 ? '99+' : String(n);
+        },
+
+        ariaLabel() {
+            const n = this.badge.total || 0;
+            if (!n) return this.badge.updates_unread ? 'Notifications (new updates)' : 'Notifications';
+            return 'Notifications (' + n + ' need attention' + (this.badge.urgent ? ', ' + this.badge.urgent + ' urgent' : '') + ')';
         },
 
         async fetchCount() {
             try {
-                const data = await FF_Api.get(FF_Api.url('/api/v1/notifications/count.php'));
-                if (data?.success) {
-                    const newCount = data.data?.unread_count ?? 0;
-                    // MEDIA-1: only ding when the count INCREASES and
-                    // only after the first successful poll has primed
-                    // _initialized. First-load is always silent.
-                    if (this._initialized && newCount > this.unreadCount) {
-                        if (window.FF_Sound) FF_Sound.play();
-                        // S-ANIMATIONS-PACK Bundle C: ring the bell visually.
-                        // Adds .ff-anim-bell-ringing to the SVG icon for one
-                        // shake cycle, and .ff-anim-badge-pop to the count
-                        // badge so it bounces in when the new total appears.
-                        try {
-                            const bellSvg = this.$el?.querySelector?.('.notif-bell-btn .nav-icon');
-                            const badge   = this.$el?.querySelector?.('.notif-badge');
-                            if (bellSvg) {
-                                bellSvg.classList.remove('ff-anim-bell-ringing');
-                                void bellSvg.offsetWidth;
-                                bellSvg.classList.add('ff-anim-bell-ringing');
-                                setTimeout(() => bellSvg.classList.remove('ff-anim-bell-ringing'), 600);
-                            }
-                            if (badge) {
-                                badge.classList.remove('ff-anim-badge-pop');
-                                void badge.offsetWidth;
-                                badge.classList.add('ff-anim-badge-pop');
-                                setTimeout(() => badge.classList.remove('ff-anim-badge-pop'), 500);
-                            }
-                        } catch { /* never block the bell on animation errors */ }
-                    }
-                    this.unreadCount = newCount;
-                    this._initialized = true;
+                const data = await FF_Api.get(FF_Api.url('/api/v1/attention/count.php'));
+                if (!data?.success) return;
+                const next = data.data || {};
+                const grew = this._initialized && (next.total || 0) > (this.badge.total || 0);
+                this.badge = { ...this.badge, ...next };
+                this._initialized = true;
+                if (grew) {
+                    this.ring();
+                    if (this.open && this.tab === 'attention') this.loadAttention();
                 }
-            } catch { /* silent — bell never crashes the page */ }
+            } catch { /* the bell never breaks the page */ }
         },
 
-        async fetchNotifications() {
-            this.loading = true;
-            // Fetch more items in grouped mode so all categories have representation
-            const perPage = this.viewMode === 'grouped' ? 40 : 10;
+        /** Sound + a visual ring when something new needs attention. */
+        ring() {
+            if (window.FF_Sound) FF_Sound.play();
             try {
-                const data = await FF_Api.get(FF_Api.url(`/api/v1/notifications/index.php?per_page=${perPage}`));
-                if (data?.success) {
-                    this.notifications = data.data?.items ?? [];
-                    this.unreadCount = data.data?.total_unread
-                                     ?? data.data?.meta?.total_unread
-                                     ?? this.unreadCount;
-                } else {
-                    this.notifications = [];
-                }
-            } catch {
-                this.notifications = [];
-            } finally {
-                this.loading = false;
-            }
+                const bellSvg = this.$el?.querySelector?.('.notif-bell-btn .nav-icon');
+                const badge   = this.$el?.querySelector?.('.notif-badge');
+                [[bellSvg, 'ff-anim-bell-ringing', 600], [badge, 'ff-anim-badge-pop', 500]].forEach(([el, cls, ms]) => {
+                    if (!el) return;
+                    el.classList.remove(cls);
+                    void el.offsetWidth;
+                    el.classList.add(cls);
+                    setTimeout(() => el.classList.remove(cls), ms);
+                });
+            } catch { /* never block the bell on animation errors */ }
         },
 
-        async setView(v) {
-            this.viewMode = v;
-            try { localStorage.setItem('ff_notif_view', v); } catch {}
-            // Refetch since per_page differs between modes
-            await this.fetchNotifications();
-        },
-
-        toggleGroup(cat) {
-            this.expandedGroups = { ...this.expandedGroups, [cat]: !this.expandedGroups[cat] };
-        },
-
-        // Returns [{cat, items, unread}] sorted: most unread first, then by total
-        groupedEntries() {
-            const map = {};
-            this.notifications.forEach(n => {
-                const cat = n.category || 'system';
-                if (!map[cat]) map[cat] = [];
-                map[cat].push(n);
-            });
-            return Object.keys(map)
-                .map(cat => ({
-                    cat,
-                    items:  map[cat],
-                    unread: map[cat].filter(n => !n.is_read).length,
-                }))
-                .sort((a, b) => b.unread - a.unread || b.items.length - a.items.length);
-        },
-
-        categoryLabel(cat) {
-            const labels = {
-                leases: 'Leases', invoices: 'Invoices', payments: 'Payments',
-                customers: 'Customers', equipment: 'Equipment', compliance: 'Compliance',
-                maintenance: 'Maintenance', damage: 'Damage Claims',
-                reservations: 'Reservations', samsara: 'GPS / Samsara',
-                accounting: 'Accounting', quickbooks: 'QuickBooks', system: 'System',
-            };
-            return labels[cat] || (cat.charAt(0).toUpperCase() + cat.slice(1));
-        },
-
-        async toggleDropdown() {
+        toggleDropdown() {
             this.open = !this.open;
-            if (this.open) {
-                // Always refetch on open so we don't show stale data after polling
-                await this.fetchNotifications();
-            }
+            if (this.open) this.setTab(this.tab);
         },
 
-        async markRead(id) {
-            // Optimistic UI: flip the local flag immediately
-            const n = this.notifications.find(x => x.id === id);
-            if (n && !n.is_read) {
-                n.is_read = true;
-                this.unreadCount = Math.max(0, this.unreadCount - 1);
-            }
-            try {
-                await FF_Api.post(FF_Api.url('/api/v1/notifications/mark_read.php'),
-                    { notification_id: id });
-            } catch { /* server-side error doesn't undo optimistic UI */ }
+        setTab(t) {
+            this.tab = t;
+            if (t === 'attention') this.loadAttention();
+            else this.loadUpdates();
         },
 
-        async markAllRead() {
+        setOwner(o) {
+            this.owner = o;
+            this.loadAttention();
+        },
+
+        async loadAttention() {
+            this.loadingAtt = !this.loadedAtt;
             try {
-                const data = await FF_Api.post(FF_Api.url('/api/v1/notifications/mark_read.php'),
-                    { mark_all: true });
+                const data = await FF_Api.get(FF_Api.url('/api/v1/attention/index.php?view=open&limit=30&owner=' + encodeURIComponent(this.owner)));
                 if (data?.success) {
-                    this.notifications.forEach(n => { n.is_read = true; });
-                    this.unreadCount = 0;
-                    if (window.FF_Toast) FF_Toast.success('Done', 'All notifications marked as read.');
+                    this.items = data.data.items || [];
+                    this.more  = Math.max(0, (data.data.total || 0) - this.items.length);
+                    if (data.data.counts) this.badge = { ...this.badge, ...data.data.counts };
+                    this.regroup();
                 }
+            } catch { /* keep what we had */ }
+            this.loadingAtt = false;
+            this.loadedAtt = true;
+        },
+
+        /** Urgent first, then To do — computed once, not in x-for (scale trap). */
+        regroup() {
+            const urgent = this.items.filter(i => i.priority === 'urgent');
+            const todo   = this.items.filter(i => i.priority !== 'urgent');
+            this.groups = [
+                { key: 'urgent', label: 'Urgent', items: urgent },
+                { key: 'todo',   label: 'To do',  items: todo },
+            ].filter(g => g.items.length);
+        },
+
+        setPanel(id, which) {
+            this.panel = { ...this.panel, [id]: this.panel[id] === which ? null : which };
+            this.errors = { ...this.errors, [id]: '' };
+        },
+
+        async act(it, action, extra = {}) {
+            if (this.busy[it.id]) return;
+            this.busy = { ...this.busy, [it.id]: true };
+            this.errors = { ...this.errors, [it.id]: '' };
+            try {
+                const res = await FF_Attention.act(it.id, action, extra);
+                if (!res?.success) {
+                    this.errors = { ...this.errors, [it.id]: res?.error?.message || 'That didn’t work. Try again.' };
+                    return;
+                }
+                const updated = res.data.item;
+                if (res.data.counts) this.badge = { ...this.badge, ...res.data.counts };
+                this.panel = { ...this.panel, [it.id]: null };
+                // Snoozed / done items leave the open list; anything else is
+                // replaced in place with the server's version.
+                const gone = updated.status !== 'open'
+                    || (this.owner === 'mine' && !(updated.assigned && updated.assigned.is_me))
+                    || (this.owner === 'free' && updated.assigned);
+                this.items = gone
+                    ? this.items.filter(x => x.id !== it.id)
+                    : this.items.map(x => (x.id === it.id ? updated : x));
+                this.regroup();
+                FF_Attention.toast(action, updated);
             } catch {
-                if (window.FF_Toast) FF_Toast.error('Error', 'Could not mark notifications as read.');
+                this.errors = { ...this.errors, [it.id]: 'Network error. Try again.' };
+            } finally {
+                this.busy = { ...this.busy, [it.id]: false };
             }
         },
 
-        // Inline SVG by category — kept compact so the dropdown is one round-trip
+        confirmDone(it) {
+            const note = (this.notes[it.id] || '').trim();
+            if (it.done_needs_note && !note) {
+                this.errors = { ...this.errors, [it.id]: 'Add a short note: the problem is still there, so say what was done.' };
+                return;
+            }
+            this.act(it, 'done', { note });
+        },
+
+        snoozeTo(it, until) {
+            if (!until) {
+                this.errors = { ...this.errors, [it.id]: 'Pick a date.' };
+                return;
+            }
+            this.act(it, 'snooze', { until });
+        },
+
+        async loadUpdates() {
+            this.loadingUpd = !this.loadedUpd;
+            try {
+                const data = await FF_Api.get(FF_Api.url('/api/v1/notifications/index.php?per_page=30&order=recent'));
+                if (data?.success) {
+                    const rows = [];
+                    let day = null;
+                    let sawRead = false;
+                    let anyNew = false;
+                    (data.data.items || []).forEach(n => {
+                        if (n.day_label !== day) {
+                            day = n.day_label;
+                            rows.push({ kind: 'day', key: 'd-' + n.id, label: day });
+                        }
+                        if (n.is_read && !sawRead && anyNew) {
+                            rows.push({ kind: 'divider', key: 'x-' + n.id });
+                        }
+                        if (n.is_read) sawRead = true; else anyNew = true;
+                        rows.push({ kind: 'item', key: 'n-' + n.id, n, isNew: !n.is_read });
+                    });
+                    this.updates = rows;
+                    // Seen = read. Wait a beat so the highlight registers first.
+                    if (anyNew) {
+                        clearTimeout(this._markTimer);
+                        this._markTimer = setTimeout(() => this.markUpdatesRead(), 1500);
+                    }
+                }
+            } catch { /* keep what we had */ }
+            this.loadingUpd = false;
+            this.loadedUpd = true;
+        },
+
+        async markUpdatesRead() {
+            if (!this.open || this.tab !== 'updates') return;
+            try {
+                const res = await FF_Api.post(FF_Api.url('/api/v1/notifications/mark_read.php'), { mark_all: true }, { quiet: true });
+                if (res?.success) this.badge = { ...this.badge, updates_unread: 0 };
+            } catch { /* try again next open */ }
+        },
+
         iconFor(category) {
             return _NOTIF_ICONS[category] ?? _NOTIF_ICONS.system;
-        },
-
-        categoryClass(n) {
-            // Map (type, severity) to a CSS class for the icon background colour
-            const t = n.type ?? '';
-            if (t === 'compliance.expired'      || n.severity === 'critical') return 'notif-icon--danger';
-            if (t === 'compliance.expiring_7'   || n.severity === 'warning')  return 'notif-icon--warning';
-            if (t === 'samsara.battery_critical') return 'notif-icon--danger';
-            if (t === 'samsara.battery_low')      return 'notif-icon--warning';
-            const cat = n.category ?? 'system';
-            return 'notif-icon--' + cat;
         },
     };
 }
 
 // Inline SVG icons keyed by notification category. Outline Heroicons.
+// Used by the bell's Updates tab (and the portal bell).
 const _NOTIF_ICONS = {
     leases:       '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9z"/></svg>',
     invoices:     '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>',
@@ -1659,6 +1741,9 @@ const _NOTIF_ICONS = {
     accounting:   '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V13.5Zm0 2.25h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V18Zm2.498-6.75h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V13.5Zm0 2.25h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V18Zm2.504-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5Zm0 2.25h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V18Zm2.498-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5ZM8.25 6h7.5v2.25h-7.5V6ZM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 0 0 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0 0 12 2.25Z"/></svg>',
     system:       '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>',
 };
+
+// QuickBooks updates share the accounting icon (it had none and fell back to the gear).
+_NOTIF_ICONS.quickbooks = _NOTIF_ICONS.accounting;
 
 window.FF_Notifications = FF_Notifications;
 

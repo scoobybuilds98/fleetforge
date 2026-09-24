@@ -283,7 +283,7 @@ export default {
       },
     },
     {
-      say: 'The bell shows your notifications, such as overdue invoices or expiring documents. Switch between a flat list and grouped by category, or mark them all read.',
+      say: 'The bell is your team\'s Needs attention list: one item per problem, like an overdue customer or an expiring document, until it\'s fixed. The number counts only these. Take an item so everyone knows it\'s yours, snooze it, or mark it done. The Updates tab shows everything else that happened.',
       run: async (d) => {
         await d.click('.notif-bell-btn');
         await d.wait(1200);

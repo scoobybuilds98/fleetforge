@@ -287,15 +287,21 @@ foreach ($recipients as $recipient) {
             'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
         ]);
 
-        // Notify account managers so a human knows.
+        // Tell a human. S-ATTENTION-INBOX: this called notifyRole(), a method
+        // NotificationService never had — the catch below swallowed the
+        // fatal, so no bounce was ever surfaced. notify() now routes it to a
+        // "Customer emails off" Needs attention item that stays open until
+        // someone fixes the address and switches emails back on.
         try {
-            NotificationService::notifyRole(
-                'manager',
+            NotificationService::notify(
                 'email.bounce_auto_disabled',
                 "Customer email disabled: {$email} ({$type})",
-                "SES reported a {$type} bounce for {$email}. Email sending has been automatically disabled for this customer. Review and re-enable from the customer edit page if the address is valid.",
-                'warning',
-                ['customer_id' => $customer['id'], 'bounce_type' => $type]
+                "SES reported a {$type} bounce for {$email}. Email sending has been automatically disabled for this customer. Review and re-enable from the customer page if the address is valid.",
+                'customer',
+                (int) $customer['id'],
+                '/fleetforge/customers/show?id=' . (int) $customer['id'],
+                null,
+                'warning'
             );
         } catch (\Throwable $ex) {
             error_log('[ses_webhook] NotificationService failed: ' . $ex->getMessage());

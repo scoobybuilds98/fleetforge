@@ -413,4 +413,10 @@ if (!empty($existing['samsara_vehicle_id'])
     }
 }
 
+// S-ATTENTION-INBOX: document dates / status / health edited here can open,
+// change or close this unit's Needs attention items right away. Never throws.
+foreach (['compliance', 'unit_health', 'gps_battery'] as $attentionKind) {
+    \FleetForge\Attention\AttentionService::recheck($attentionKind, (int) $id);
+}
+
 json_success(['id' => $id, 'updated_at' => $newUpdatedAt]);

@@ -74,6 +74,8 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-ATTENTION-INBOX** — SHIPPED 2026-09-25 (see PROGRESS.md SESSION LOG row + D-ATTENTION-1..4). **The bell is split in two. "Needs attention" is the team's shared list: one item per problem (an overdue customer, an expiring document, a credit application, a customer request…), kept until it's fixed, then it closes by itself. Anyone can take it, snooze it or mark it done with a note, and everyone sees who did. The bell's number counts only these; red when something is urgent, and urgent items nobody takes for 24 hours go to the owner. "Updates" is everything else that happened, grouped ("42 invoices created") and never counted. New Notifications page, dashboard strip, Settings → Notifications and Profile → Notifications. Also fixes the bounced-email warning that never sent.** Operator: deploy + migrate, add the hourly cron line, run the switch-over script — F101. WhatsApp (Part 2) next.
+
 **S-CHAT-SEEN-TIME** — SHIPPED 2026-09-25 (see PROGRESS.md SESSION LOG row). **"Seen" now says when — "Seen · 3:42 PM", "Seen · Yesterday 5:10 PM" — in each person's own time zone; in groups, hovering shows each reader's time. One small migration.** Deploy with F100 step 1b.
 
 **S-CHAT-SEEN** — SHIPPED 2026-09-24 (see PROGRESS.md SESSION LOG row). **Messages shows "Sent" / "Seen" under your newest message — "Seen by Mike and Sara" or "Seen by everyone" in groups, "Seen by Dana" when a customer's portal user reads it, and "Seen" for customers once your team has read theirs. It updates live. No migration.** Deploy with F100.

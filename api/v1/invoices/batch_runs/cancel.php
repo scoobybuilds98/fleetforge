@@ -84,4 +84,8 @@ db_insert('audit_log', [
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
 ]);
 
+// S-ATTENTION-INBOX: a cancelled run no longer needs approval — close its
+// Needs attention item now (approve/reject close it via their notification).
+\FleetForge\Attention\AttentionService::recheck('batch_run_approval', (int) $id);
+
 json_success(['id' => $id, 'reference' => $run['reference'], 'status' => 'cancelled']);

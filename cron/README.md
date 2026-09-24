@@ -51,6 +51,12 @@ Test locally by running directly: `php /Users/avi/Documents/fleetforge/cron/<scr
 # GPS mileage sync — daily at 02:00 UTC
 0 2 * * *     /usr/bin/php /var/www/fleetforge/cron/gps_mileage_sync.php >> /var/www/fleetforge/logs/cron.log 2>&1
 
+# ── Needs attention (S-ATTENTION-INBOX) ───────────────────────────────────────
+# Hourly at :05 — re-check open problems (open/refresh/close items), wake snoozed
+# items, escalate urgent items nobody has taken for 24h. Not switchable from
+# Settings (infrastructure, like the notification digest).
+5 * * * *     /usr/bin/php /var/www/fleetforge/cron/attention_sweep.php >> /var/www/fleetforge/logs/cron.log 2>&1
+
 # ── Compliance ────────────────────────────────────────────────────────────────
 # Compliance alerts — daily at 06:30 UTC
 30 6 * * *    /usr/bin/php /var/www/fleetforge/cron/compliance_alerts.php >> /var/www/fleetforge/logs/cron.log 2>&1

@@ -41,6 +41,7 @@ $me = db_row(
             u.theme_preference, u.last_login_at, u.last_login_ip,
             u.display_font_size, u.display_density,
             u.mfa_enabled, u.mfa_required, u.mfa_enabled_at,
+            u.notification_preferences,
             u.created_at, u.updated_at,
             ur.id AS role_id, ur.name AS role_name, ur.slug AS role_slug
      FROM users u
@@ -81,6 +82,25 @@ $statusBadgeClass = match($me['status']) {
     default     => 'badge-neutral',
 };
 
+// ── S-ATTENTION-INBOX: My notifications tab data ─────────────────────────────
+// Update categories a person can switch off for themselves (stored as the
+// opted-OUT list in users.notification_preferences, NULL = everything).
+// Needs attention isn't switchable per person: it's the team's shared list,
+// and which kinds each role sees is set in Settings → Notifications.
+$myNotifCategories = [
+    'leases' => 'Leases', 'invoices' => 'Invoices', 'payments' => 'Payments',
+    'customers' => 'Customers', 'equipment' => 'Equipment', 'maintenance' => 'Maintenance',
+    'damage' => 'Damage claims', 'reservations' => 'Reservations', 'samsara' => 'GPS / Samsara',
+    'accounting' => 'Accounting', 'quickbooks' => 'QuickBooks', 'system' => 'System',
+];
+$myOptedOut = json_decode((string) ($me['notification_preferences'] ?? ''), true);
+$myOptedOut = is_array($myOptedOut) ? array_values(array_intersect($myOptedOut, array_keys($myNotifCategories))) : [];
+$myAttentionKinds = [];
+foreach (\FleetForge\Attention\KindRegistry::kindsForRole((string) $me['role_slug']) as $_k) {
+    $myAttentionKinds[] = \FleetForge\Attention\KindRegistry::get($_k)?->label() ?? $_k;
+}
+unset($_k);
+
 $pageTitle = 'My Profile';
 require_once FF_ROOT . '/includes/header.php';
 ?>
@@ -107,6 +127,11 @@ require_once FF_ROOT . '/includes/header.php';
                 @click="tab = 'display'"
                 :aria-selected="tab === 'display'" role="tab">
             Display
+        </button>
+        <button class="tab-btn" :class="{ 'is-active': tab === 'notifications' }"
+                @click="tab = 'notifications'"
+                :aria-selected="tab === 'notifications'" role="tab">
+            Notifications
         </button>
         <button class="tab-btn" :class="{ 'is-active': tab === 'login_history' }"
                 @click="tab = 'login_history'"
@@ -327,6 +352,45 @@ require_once FF_ROOT . '/includes/header.php';
                 <div x-show="saveError"
                      x-text="saveError"
                      style="color:var(--color-danger);font-size:0.8125rem;margin-top:8px;"></div>
+            </div>
+        </div>
+    </template>
+
+    <!-- ══════════════════════════════════════════════════════
+         TAB — My notifications (S-ATTENTION-INBOX)
+         ══════════════════════════════════════════════════════ -->
+    <template x-if="tab === 'notifications'">
+        <div class="card ff-tab-animated" x-data="FF_MyNotifications(<?= e(json_encode(['categories' => $myNotifCategories, 'opted_out' => $myOptedOut])) ?>)">
+            <div class="card-header"><span style="font-weight:600;">My notifications</span></div>
+            <div class="card-body" style="display:grid;gap:22px;font-size:0.875rem;">
+                <section>
+                    <h3 style="font-size:0.9375rem;margin:0 0 4px;">Needs attention</h3>
+                    <p class="text-secondary" style="margin:0 0 8px;">
+                        The team's shared list: one item per problem, until it's fixed. It's what the number on the bell counts.
+                        <?= e((string) $me['role_name']) ?> accounts see:
+                    </p>
+                    <?php if ($myAttentionKinds): ?>
+                    <div class="att-pills">
+                        <?php foreach ($myAttentionKinds as $_label): ?><span class="att-pill"><?= e($_label) ?></span><?php endforeach; ?>
+                    </div>
+                    <?php else: ?>
+                    <p class="text-secondary" style="margin:0;">Nothing yet. Only items you're named on (for example a customer request routed to you).</p>
+                    <?php endif; ?>
+                    <p class="text-secondary" style="margin:8px 0 0;font-size:0.8125rem;">Your super admin chooses this for each role in Settings → Notifications.</p>
+                </section>
+                <section>
+                    <h3 style="font-size:0.9375rem;margin:0 0 4px;">Updates</h3>
+                    <p class="text-secondary" style="margin:0 0 10px;">Things that happened, for your information. They never add to the bell's number. Untick what you don't want.</p>
+                    <div class="att-roles">
+                        <template x-for="(label, slug) in categories" :key="slug">
+                            <label><input type="checkbox" :checked="!optedOut.includes(slug)" @change="toggle(slug, $event.target.checked)"> <span x-text="label"></span></label>
+                        </template>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+                        <button type="button" class="btn btn-primary btn-sm" :disabled="saving" @click="save()" x-text="saving ? 'Saving…' : 'Save'"></button>
+                        <span class="text-sm" :class="error ? 'text-danger' : 'text-secondary'" x-text="error || status"></span>
+                    </div>
+                </section>
             </div>
         </div>
     </template>
@@ -688,6 +752,44 @@ function mfaCard() {
 }
 
 // ── profilePage Alpine component ──────────────────────────────────────────────
+/**
+ * FF_MyNotifications — the profile's Notifications tab (S-ATTENTION-INBOX):
+ * which update categories this person receives. Saves the opted-OUT list.
+ */
+function FF_MyNotifications(init) {
+    return {
+        categories: init.categories,
+        optedOut: init.opted_out,
+        saving: false,
+        status: '',
+        error: '',
+
+        toggle(slug, on) {
+            this.optedOut = on ? this.optedOut.filter(s => s !== slug) : [...new Set([...this.optedOut, slug])];
+            this.status = '';
+        },
+
+        async save() {
+            if (this.saving) return;
+            this.saving = true;
+            this.error = '';
+            try {
+                const res = await FF_Api.post(FF_Api.url('/api/v1/account/notification_preferences.php'), { opted_out: this.optedOut });
+                if (res?.success) {
+                    this.optedOut = res.data.opted_out || [];
+                    this.status = 'Saved.';
+                } else {
+                    this.error = res?.error?.message || 'Could not save.';
+                }
+            } catch {
+                this.error = 'Network error. Try again.';
+            } finally {
+                this.saving = false;
+            }
+        },
+    };
+}
+
 function profilePage() {
     return {
         tab:       'profile',
@@ -719,7 +821,7 @@ function profilePage() {
         },
 
         init() {
-            const _tabs = ['profile','display','login_history'];
+            const _tabs = ['profile','display','notifications','login_history'];
             const _initTab = FF_TabHash.init(_tabs, 'profile');
             this.tab = _initTab;
             FF_TabHash.write(_initTab);

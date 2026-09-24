@@ -1,0 +1,380 @@
+/* ============================================================
+   attention.css — Needs attention + Updates (S-ATTENTION-INBOX)
+   ============================================================
+   The bell panel (includes/topbar.php), the full Notifications page
+   (app/admin/notifications/index.php), the dashboard "Needs attention"
+   card and Settings → Notifications.
+
+   Tokens only (Atelier, app.css :root / [data-theme]) — no hardcoded brand
+   colour: accents use var(--color-primary), which the brand override in
+   includes/header.php reaches (--color-primary-text is NOT re-tinted by the
+   brand override, so it's avoided here).
+
+   Loaded globally from includes/header.php because the bell is on every page.
+   ============================================================ */
+
+/* ── Bell button ──────────────────────────────────────────── */
+.notif-badge--urgent { background: var(--color-danger); }
+/* Amber with dark ink: white on amber fails contrast in both themes. */
+.notif-badge--todo   { background: var(--color-warning); color: #1a1815; }
+
+.notif-dot {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    border: 2px solid var(--bg-body);
+    pointer-events: none;
+}
+
+/* ── Panel ────────────────────────────────────────────────── */
+.att-panel {
+    width: 440px;
+    max-height: min(640px, calc(100vh - 90px));
+    padding: 0;
+}
+
+.att-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px 0;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--bg-card, var(--bg-surface));
+}
+.att-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 12px 10px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.att-tab:hover { color: var(--text-primary); }
+.att-tab[aria-selected="true"] {
+    color: var(--text-primary);
+    border-bottom-color: var(--color-primary);
+}
+.att-count {
+    min-width: 20px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.5;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.att-count--urgent { background: var(--color-danger); color: #fff; }
+.att-count--todo   { background: var(--color-warning); color: #1a1815; }
+.att-newdot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--color-primary);
+}
+
+.att-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px 4px;
+}
+.att-chip {
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.att-chip:hover { color: var(--text-primary); border-color: var(--border-color-strong); }
+.att-chip[aria-pressed="true"] {
+    background: var(--bg-hover);
+    border-color: var(--border-color-strong);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.att-chip:disabled { opacity: .55; cursor: default; }
+
+/* ── Groups + items ───────────────────────────────────────── */
+.att-group-h {
+    padding: 12px 14px 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.att-group-h--urgent { color: var(--color-danger-text, var(--color-danger)); }
+.att-group-h--todo   { color: var(--color-warning-text, var(--color-warning)); }
+
+.att-item {
+    display: grid;
+    grid-template-columns: 4px minmax(0, 1fr);
+    gap: 0 12px;
+    padding: 10px 14px 12px 0;
+    border-top: 1px solid var(--border-color);
+}
+.att-stripe { border-radius: 0 3px 3px 0; background: var(--border-color); }
+.att-item--urgent .att-stripe { background: var(--color-danger); }
+.att-item--todo   .att-stripe { background: var(--color-warning); }
+
+.att-body { display: grid; gap: 3px; min-width: 0; }
+.att-title {
+    font-size: 13.5px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--text-primary);
+    text-decoration: none;
+}
+.att-title:hover { text-decoration: underline; text-underline-offset: 2px; }
+.att-facts {
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--text-secondary);
+}
+.att-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
+.att-pill {
+    padding: 1px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    background: var(--bg-surface-2);
+    color: var(--text-secondary);
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.att-pill--age   { font-family: var(--font-mono); font-weight: 500; }
+.att-pill--esc   { background: var(--color-danger-light); color: var(--color-danger-text, var(--color-danger)); border-color: transparent; }
+.att-pill--owner { background: var(--color-success-light); color: var(--color-success-text, var(--color-success)); border-color: transparent; }
+
+.att-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.att-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 11px;
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-md, 6px);
+    background: var(--bg-surface-2);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+}
+.att-btn:hover { background: var(--bg-hover); text-decoration: none; }
+.att-btn:disabled { opacity: .55; cursor: default; }
+.att-btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+.att-btn--primary:hover { background: var(--color-primary-hover, var(--color-primary)); color: #fff; }
+.att-btn--ghost { background: transparent; border-color: transparent; color: var(--text-secondary); }
+.att-btn--ghost:hover { color: var(--text-primary); }
+
+.att-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+}
+.att-date,
+.att-note {
+    padding: 4px 8px;
+    border: 1px solid var(--border-color-strong);
+    border-radius: var(--radius-md, 6px);
+    background: var(--bg-input, var(--bg-surface-2));
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 12.5px;
+}
+.att-note { flex: 1 1 200px; min-width: 0; }
+.att-error {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--color-danger-text, var(--color-danger));
+}
+
+.att-empty {
+    padding: 26px 16px 22px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+.att-empty .nav-icon { width: 28px; height: 28px; color: var(--color-success); }
+.att-empty-title { margin: 8px 0 2px; font-weight: 600; color: var(--text-primary); font-size: 14px; }
+.att-empty-sub { margin: 0; font-size: 12.5px; }
+
+/* ── Updates tab ──────────────────────────────────────────── */
+.att-day {
+    padding: 10px 14px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.att-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 14px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+.att-divider::before,
+.att-divider::after { content: ""; flex: 1; height: 1px; background: var(--border-color); }
+.upd-item .notif-time { flex-shrink: 0; margin-top: 2px; }
+.upd-item .notif-message { white-space: normal; }
+
+@media (max-width: 767px) {
+    .att-panel { width: auto; }
+}
+
+/* ============================================================
+   Full Notifications page
+   ============================================================ */
+.att-page-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 14px;
+}
+.att-page-tabs .att-tab { text-decoration: none; }
+
+.att-page-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+.att-page-toolbar .form-control { width: auto; min-width: 200px; }
+
+.att-list {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl, 14px);
+    overflow: hidden;
+}
+.att-list .att-group-h:first-child { padding-top: 14px; }
+.att-list .att-item { padding: 14px 18px 14px 0; gap: 0 16px; }
+.att-list .att-title { font-size: 14.5px; }
+.att-list .att-facts { font-size: 13.5px; }
+
+.att-detail {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg, 10px);
+    background: var(--bg-surface-2);
+    display: grid;
+    gap: 10px;
+}
+.att-history { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.att-history li {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 10px;
+    font-size: 12.5px;
+    color: var(--text-secondary);
+}
+.att-history time { font-family: var(--font-mono); color: var(--text-muted); white-space: nowrap; }
+.att-history b { color: var(--text-primary); font-weight: 600; }
+.att-closed-note {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+}
+.att-closed-note b { color: var(--text-primary); }
+@media (max-width: 560px) {
+    .att-history li { grid-template-columns: 1fr; gap: 0; }
+}
+
+/* ============================================================
+   Dashboard card
+   ============================================================ */
+.att-card .att-item { padding: 10px 16px 12px 0; }
+.att-card .att-actions { display: none; } /* the card links out; acting happens in the bell/page */
+.att-card-empty {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 18px;
+    color: var(--text-secondary);
+    font-size: 13.5px;
+}
+.att-card-empty .nav-icon { width: 22px; height: 22px; color: var(--color-success); }
+
+/* ============================================================
+   Settings → Notifications
+   ============================================================ */
+.att-settings-table td { vertical-align: top; }
+.att-settings-table .att-kind-desc { font-size: 12.5px; color: var(--text-secondary); margin-top: 2px; max-width: 46ch; }
+.att-roles { display: flex; flex-wrap: wrap; gap: 6px 12px; }
+.att-roles label { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; white-space: nowrap; }
+.att-rule { font-size: 12.5px; color: var(--text-secondary); max-width: 26ch; }
+
+/* Dashboard strip above the attention cards (app/admin/dashboard/index.php) */
+.att-dash-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--color-warning);
+    border-radius: var(--radius-lg, 10px);
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    font-size: 13.5px;
+    text-decoration: none;
+}
+.att-dash-strip:hover { border-color: var(--border-color-strong); text-decoration: none; }
+.att-dash-strip--urgent {
+    border-left-color: var(--color-danger);
+    background: color-mix(in srgb, var(--color-danger) 6%, var(--bg-surface));
+}
+.att-dash-strip-n {
+    min-width: 28px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--color-warning);
+    color: #1a1815;
+    font-weight: 700;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+.att-dash-strip--urgent .att-dash-strip-n { background: var(--color-danger); color: #fff; }
+.att-dash-strip-text { flex: 1; min-width: 0; line-height: 1.45; }
+.att-dash-strip-text strong { color: var(--text-primary); font-weight: 600; }
+.att-dash-strip-mine {
+    margin-left: 6px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--color-success-light);
+    color: var(--color-success-text, var(--color-success));
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.att-dash-strip-cta { color: var(--color-primary); font-weight: 600; white-space: nowrap; }
+@media (max-width: 640px) {
+    .att-dash-strip { flex-wrap: wrap; }
+    .att-dash-strip-cta { width: 100%; }
+}

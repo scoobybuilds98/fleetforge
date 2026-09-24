@@ -73,4 +73,7 @@ db_insert('audit_log', [
     'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0',
 ]);
 
+// S-ATTENTION-INBOX: closes the "Customer emails off" Needs attention item.
+\FleetForge\Attention\AttentionService::recheck('email_bounce', $id);
+
 json_success(['id' => $id]);

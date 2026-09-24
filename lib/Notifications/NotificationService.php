@@ -11,6 +11,14 @@ namespace FleetForge\Notifications;
  * Every business event in FleetForge that should reach a human user goes
  * through NotificationService::notify(). The service:
  *
+ *   0. (S-ATTENTION-INBOX) Asks NotificationRouter where the event goes.
+ *      Problems that need a person (overdue customer, expiring document,
+ *      credit application…) become ONE shared "Needs attention" item
+ *      (attention_items) and write no per-person rows. Everything else is an
+ *      update and continues below; a burst of the same update (e.g. a Batch
+ *      Invoicing run) collapses into one row per person ("42 invoices
+ *      created") via group_key/group_count. If routing throws, the event
+ *      still goes out as a plain update — it can never vanish.
  *   1. Looks up which users to notify based on the type prefix
  *      (e.g. "lease.activated" → all users with leases.view permission +
  *      all super_admin users — overrides applied via user_permission_overrides
@@ -109,6 +117,22 @@ class NotificationService
         string $severity = 'info'
     ): void {
         try {
+            // S-ATTENTION-INBOX: problems become one shared Needs attention
+            // item instead of a row per person. Fail OPEN: a routing error
+            // logs and falls through to the plain update path below.
+            $group = null;
+            try {
+                $route = \FleetForge\Attention\NotificationRouter::route(
+                    $type, $title, $message, $entityType, $entityId, $url, $specificUserIds
+                );
+                if ($route['handled']) {
+                    return;
+                }
+                $group = $route['group'];
+            } catch (\Throwable $routeError) {
+                error_log('[NotificationService] attention routing failed for ' . $type . ' — ' . $routeError->getMessage());
+            }
+
             // Resolve targets
             $userIds = $specificUserIds !== null
                 ? self::filterActiveUsers($specificUserIds)
@@ -129,6 +153,11 @@ class NotificationService
             // others. Each insert is its own statement.
             foreach ($userIds as $uid) {
                 try {
+                    // A burst of the same update folds into the person's
+                    // existing unread row for it ("42 invoices created").
+                    if ($group !== null && self::bumpGroup((int) $uid, $type, $group, $title)) {
+                        continue;
+                    }
                     \db_insert('notifications', [
                         'user_id'        => (int) $uid,
                         'portal_user_id' => null,
@@ -139,6 +168,7 @@ class NotificationService
                         'url'            => $url,
                         'entity_type'    => $entityType,
                         'entity_id'      => $entityId,
+                        'group_key'      => $group !== null ? $type : null,
                         'severity'       => self::normalizeSeverity($severity),
                     ]);
                 } catch (\Throwable $perRowError) {
@@ -152,6 +182,48 @@ class NotificationService
             // Catch-all so notification failures never propagate
             error_log('[NotificationService] notify() failed: ' . $e->getMessage());
         }
+    }
+
+    /**
+     * Fold an update into the person's existing unread row for the same type
+     * when it arrived in the last 30 minutes (S-ATTENTION-INBOX grouping).
+     *
+     * WHY only UNREAD rows: once someone has read "12 invoices created", the
+     * next burst starts a fresh row they'll notice, instead of silently
+     * bumping a row they've already seen.
+     *
+     * @param  int    $userId
+     * @param  string $type    Also the group_key
+     * @param  array  $group   ['title' => '{n} invoices created', 'url' => …]
+     * @param  string $title   The new event's own title (becomes "Latest: …")
+     * @return bool            True when folded (caller skips the insert)
+     */
+    private static function bumpGroup(int $userId, string $type, array $group, string $title): bool
+    {
+        $row = \db_row(
+            'SELECT id, group_count FROM notifications
+              WHERE user_id = ? AND group_key = ? AND is_read = 0 AND deleted_at IS NULL
+                AND created_at >= ?
+              ORDER BY id DESC LIMIT 1',
+            [$userId, $type, \ff_now_utc('-30 minutes')]
+        );
+        if ($row === null) {
+            return false;
+        }
+        $n = (int) $row['group_count'] + 1;
+        \db_execute(
+            'UPDATE notifications
+                SET group_count = ?, title = ?, message = ?, url = ?, created_at = UTC_TIMESTAMP()
+              WHERE id = ?',
+            [
+                $n,
+                mb_substr(str_replace('{n}', (string) $n, (string) ($group['title'] ?? '{n} updates')), 0, 500),
+                'Latest: ' . mb_substr(trim($title), 0, 400),
+                mb_substr((string) ($group['url'] ?? ''), 0, 500),
+                (int) $row['id'],
+            ]
+        );
+        return true;
     }
 
     /**

@@ -121,6 +121,8 @@ $PAGES = [
     'analytics'               => ['app/admin/analytics/index.php', 'info', false],
     // S-SETTINGS-REDESIGN
     'settings'                => ['app/admin/settings/index.php', 'primary', false],
+    // S-ATTENTION-INBOX
+    'notifications'           => ['app/admin/notifications/index.php', 'warning', false],
 ];
 
 // ══ C1 ══════════════════════════════════════════════════════════

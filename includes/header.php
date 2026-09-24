@@ -123,6 +123,8 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
     <link rel="stylesheet" href="<?= asset_url('assets/css/tables.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
     <!-- S-RECORD-REDESIGN: record pages — tabs, main + rail layout, rail cards, More menu -->
     <link rel="stylesheet" href="<?= asset_url('assets/css/records.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <!-- S-ATTENTION-INBOX: the bell's Needs attention / Updates panel, the Notifications page, dashboard card, settings -->
+    <link rel="stylesheet" href="<?= asset_url('assets/css/attention.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
 
     <?php
     // ============================================================

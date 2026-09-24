@@ -1,0 +1,37 @@
+<svg class="dg dg--art-notifications" viewBox="0 0 440 200" xmlns="http://www.w3.org/2000/svg">
+  <title>Many repeats become one item per problem</title>
+  <!-- the old way: the same alert again and again -->
+  <g opacity=".75">
+    <rect class="dg-surface-2" x="22" y="30" width="128" height="22" rx="7"/>
+    <rect class="dg-surface-2" x="28" y="58" width="128" height="22" rx="7"/>
+    <rect class="dg-surface-2" x="34" y="86" width="128" height="22" rx="7"/>
+    <rect class="dg-surface-2" x="40" y="114" width="128" height="22" rx="7"/>
+    <text class="dg-t-xs dg-t-start" x="32" y="45">UNIT 2021 · CVI</text>
+    <text class="dg-t-xs dg-t-start" x="38" y="73">UNIT 2021 · CVI</text>
+    <text class="dg-t-xs dg-t-start" x="44" y="101">UNIT 2021 · CVI</text>
+    <text class="dg-t-xs dg-t-start" x="50" y="129">UNIT 2021 · CVI</text>
+  </g>
+  <text class="dg-t-xs" x="96" y="168">37 REPEATS</text>
+
+  <!-- collapse into one -->
+  <path class="dg-acc-flow" d="M176,86 C204,86 216,82 244,82"/>
+  <circle class="dg-packet--acc" r="4"><animateMotion dur="2s" repeatCount="indefinite" path="M176,86 C204,86 216,82 244,82"/></circle>
+
+  <!-- the new way: one shared item that ages, with a name on it -->
+  <g class="dg-float">
+    <rect class="dg-surface" x="250" y="26" width="176" height="124" rx="12"/>
+    <rect class="dg-warn-soft" x="250" y="26" width="6" height="124" rx="3"/>
+    <text class="dg-t-xs dg-t-warn dg-t-start" x="266" y="46">TO DO</text>
+    <text class="dg-t dg-t-start" x="266" y="68">CVI expires 30 Sep</text>
+    <text class="dg-t-sm dg-t-start" x="266" y="86">Unit 2021 · on rent</text>
+    <rect class="dg-surface-2" x="266" y="98" width="62" height="16" rx="8"/>
+    <text class="dg-t-xs" x="297" y="109.5">OPEN 3 DAYS</text>
+    <rect class="dg-ok-soft" x="334" y="98" width="80" height="16" rx="8"/>
+    <text class="dg-t-xs" x="374" y="109.5">TOM HAS THIS</text>
+    <rect class="dg-acc-soft" x="266" y="124" width="46" height="16" rx="8"/>
+    <text class="dg-acc-t" x="289" y="135.5" style="font-size:9.5px">Open</text>
+  </g>
+  <circle class="dg-pulse" cx="426" cy="30" r="6"/>
+  <circle class="dg-acc" cx="426" cy="30" r="5"/>
+  <text class="dg-t-xs" x="338" y="176">CLOSES WHEN FIXED</text>
+</svg>

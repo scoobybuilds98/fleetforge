@@ -24,7 +24,9 @@ declare(strict_types=1);
  *                                  AND deleted_at IS NULL
  *
  * Alert logic:
- *   - Any drift > $0.01 → notify via NotificationService (type accounting.reconciliation_drift)
+ *   - Any drift > $0.01 → notify via NotificationService (type accounting.reconciliation_drift),
+ *     which S-ATTENTION-INBOX routes to ONE "Balance check" Needs attention item
+ *     for super admins, refreshed in place each night; a clean run closes it
  *     + write logs/reconciliation/{date}.log + audit_log entry
  *   - Spike detection: prior run was clean AND today's total drift ≥ $1,000.00
  *     → escalate to 'critical' (likely code regression — not just data drift)
@@ -287,6 +289,19 @@ try {
         $notes = 'Reconciliation clean — zero drift on '
             . count($customers) . ' customer(s), '
             . count($leases) . ' lease(s).';
+
+        // S-ATTENTION-INBOX: the drift alert is ONE "Balance check" item that
+        // stays open (updated in place each night) while drift persists —
+        // it used to be a fresh notification per person every night (699
+        // rows since June). A clean run is what closes it.
+        try {
+            $kind = \FleetForge\Attention\KindRegistry::get('counter_drift');
+            if ($kind !== null) {
+                \FleetForge\Attention\AttentionService::clear($kind, 0, 'Nightly check came back clean');
+            }
+        } catch (\Throwable $clearErr) {
+            error_log('[CRON reconcile_counters] could not close the Balance check item: ' . $clearErr->getMessage());
+        }
     }
 
     db_insert('audit_log', [

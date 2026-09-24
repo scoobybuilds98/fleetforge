@@ -123,6 +123,12 @@ class RequestMessageService
             }
         }
 
+        // S-ATTENTION-INBOX: our reply (or a resolve/close) means the request
+        // is no longer waiting on us — close its Needs attention item now.
+        // Internal notes change nothing the customer sees, so the re-check
+        // leaves the item open for them. Never throws.
+        \FleetForge\Attention\AttentionService::recheck('customer_request', $requestId);
+
         return $messageId;
     }
 

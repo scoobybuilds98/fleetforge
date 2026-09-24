@@ -127,6 +127,10 @@ db_transaction(function () use ($unitId, $unit, $expiryCol, $fromCol, $expiryDat
     ]);
 });
 
+// S-ATTENTION-INBOX: a renewed date updates or closes the unit's "Unit
+// documents" Needs attention item immediately. Never throws.
+\FleetForge\Attention\AttentionService::recheck('compliance', $unitId);
+
 // -----------------------------------------------------------------------
 // 7. Return fresh updated_at so client keeps D19 in sync
 // -----------------------------------------------------------------------

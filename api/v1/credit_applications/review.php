@@ -249,6 +249,10 @@ db_transaction(function () use (
     }
 });
 
+// S-ATTENTION-INBOX: a reviewed application closes its "Credit application"
+// Needs attention item now, not at the next hourly sweep. Never throws.
+\FleetForge\Attention\AttentionService::recheck('credit_application', $appId);
+
 // ── Return the updated application data ────────────────────────────────────
 $updated = db_row(
     "SELECT ca.id, ca.status, ca.review_outcome, ca.review_notes,

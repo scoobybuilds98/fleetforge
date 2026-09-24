@@ -674,6 +674,11 @@ $tabPermMap = [
     'credit_application' => 'settings_general', // same permission as General
     'backup'             => 'settings_system',  // S-BACKUP-3b — backups are a system concern
     'customer_notifications' => 'settings_customer_notifications', // S-CUSTOMER-NOTIFICATIONS
+    // S-ATTENTION-INBOX: staff notifications (who sees which Needs attention
+    // kind, priority, WhatsApp). Like lockout, not granted to any role in
+    // config/permissions.php — super_admin only via can()'s bypass, and the
+    // nav entry is hidden (not locked) for everyone else.
+    'notifications'          => 'settings_notifications',
     // S-USER-LOCKOUT: intentionally NOT added to config/permissions.php for
     // any role — super_admin reaches it via can()'s unconditional bypass,
     // every other role falls through to `?? false`. There is no per-user/
@@ -712,6 +717,7 @@ $setTabs = [
     'users'                  => ['Users', 'users', 'Staff accounts — managed in the Users module', 'People & access', (int) $userCount, 'purple'],
     'lockout'                => ['Lockout', 'x-circle', 'Lock a staff account out immediately', 'People & access', $lockedUserCount > 0 ? (int) $lockedUserCount : null, 'danger'],
     'portal_users'           => ['Portal & Requests', 'building-storefront', 'Customer portal logins and where service requests go', 'People & access', (int) $portalUserCount, 'purple'],
+    'notifications'          => ['Notifications', 'bell', 'What needs attention, who sees it, and what goes to WhatsApp', 'Communication', null, 'info'],
     'customer_notifications' => ['Customer Emails', 'envelope', 'Reminders and notices FleetForge sends to customers', 'Communication', null, 'info'],
     'integrations'           => ['Integrations', 'arrow-path', 'QuickBooks, Samsara, email, file storage and AI keys', 'Connections & automation', null, 'success'],
     'intelligence'           => ['Intelligence', 'sparkles', 'AI briefings, alerts and scheduled jobs', 'Connections & automation', null, 'success'],
@@ -720,7 +726,7 @@ $setTabs = [
     'audit'                  => ['Audit Log', 'list-bullet', 'Who changed what, and when', 'System', (int) $recentAuditCount, 'warning'],
 ];
 if (!$isSuperAdmin) {
-    unset($setTabs['lockout']);
+    unset($setTabs['lockout'], $setTabs['notifications']);
 }
 // Panel header data for Alpine (icons pre-rendered here; trusted markup).
 $setTabsJs = [];
@@ -1293,6 +1299,13 @@ $_graceMinutes = settings_get('lease.return_grace_minutes', '0') ?? '0';
 <!-- ════════════════════════════════════════════════════════════════════════ -->
 <!-- TAB: CUSTOMER EMAILS (S-CUSTOMER-NOTIFICATIONS)                          -->
 <!-- ════════════════════════════════════════════════════════════════════════ -->
+<?php if ($isSuperAdmin): ?>
+<!-- TAB: NOTIFICATIONS (S-ATTENTION-INBOX) — staff Needs attention routing -->
+<div x-show="activeTab === 'notifications'" x-transition:enter class="ff-tab-enter">
+    <?php require_once __DIR__ . '/notifications.php'; ?>
+</div>
+<?php endif; ?>
+
 <?php if (can('settings_customer_notifications', 'view')): ?>
 <div x-show="activeTab === 'customer_notifications'" x-transition:enter class="ff-tab-enter">
     <?php require_once __DIR__ . '/customer_notifications.php'; ?>

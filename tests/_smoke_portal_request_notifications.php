@@ -24,12 +24,13 @@ declare(strict_types=1);
  * C11: resolveRecipients unknown request_type normalizes to 'general'
  * C12: resolveRoleSlugsToUserIds returns active users in given roles only
  * C13: filterActiveUsers excludes inactive/deleted from explicit ID list
- * C14: notify() resolves recipients + inserts notifications rows per recipient
- *      (integration: end-to-end Pusher path)
- * C15: notify() title + message + url shape — includes customer company,
- *      submitted-by name, subject, drill-down URL
- * C16: notify() severity heuristic — damage_report + early_return → warning;
- *      rest → info
+ * C14: notify() resolves recipients → ONE shared "Customer request" Needs
+ *      attention item whose audience is exactly the routed people, and no
+ *      per-person notification rows (S-ATTENTION-INBOX; was: one row each)
+ * C15: the item's title + facts + url — customer company, submitted-by name,
+ *      subject, drill-down URL under /fleetforge/
+ * C16: every request type is an urgent item (S-ATTENTION-INBOX replaced the
+ *      warning/info severity heuristic: a customer is waiting either way)
  * C17: notify() returns 0 + logs when request_id not found
  * C18: notify() returns 0 when no recipients resolve (still no throw)
  * C19: app/portal/requests/create.php contains the PortalRequestNotifier hook
@@ -77,6 +78,8 @@ function ff_smoke_prn_get_setting(string $key): ?string
 function ff_smoke_prn_cleanup(): void
 {
     db_execute("DELETE FROM notifications WHERE entity_type='service_request' AND entity_id BETWEEN 999990 AND 999999");
+    // S-ATTENTION-INBOX: requests now raise Needs attention items (events cascade).
+    db_execute("DELETE FROM attention_items WHERE kind = 'customer_request' AND entity_id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM portal_service_requests WHERE id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM portal_users WHERE id BETWEEN 999990 AND 999999");
     db_execute("DELETE FROM customers WHERE id BETWEEN 999990 AND 999999");
@@ -369,26 +372,35 @@ try {
     ff_smoke_prn_set_setting('portal_requests.routing.billing_inquiry.user_ids', json_encode([$activeId, $acctId]));
     db_execute("DELETE FROM notifications WHERE entity_type='service_request' AND entity_id BETWEEN 999990 AND 999999");
     ff_smoke_prn_seed_request(999990, 'billing_inquiry', ['subject' => 'C14 smoke subject']);
+    db_execute("DELETE FROM attention_items WHERE kind = 'customer_request' AND entity_id BETWEEN 999990 AND 999999");
     $c14Errors = [];
     $count14 = PortalRequestNotifier::notify(999990);
     if ($count14 !== 2) $c14Errors[] = "expected 2 recipients; notify returned {$count14}";
-    $rows = db_select("SELECT user_id, title, message, url, type, category, entity_type, entity_id, severity FROM notifications WHERE entity_type='service_request' AND entity_id = 999990 ORDER BY user_id");
-    if (count($rows) !== 2) $c14Errors[] = "expected 2 notification rows; got " . count($rows);
-    foreach ($rows as $row) {
-        if ($row['entity_id'] != 999990) $c14Errors[] = "entity_id wrong: " . json_encode($row);
-        if ($row['type'] !== 'service_request.billing_inquiry') $c14Errors[] = "type wrong: " . json_encode($row);
-        if ($row['category'] !== 'system') $c14Errors[] = "category should be system; got " . json_encode($row['category']);
+    $rows = db_select("SELECT user_id FROM notifications WHERE entity_type='service_request' AND entity_id = 999990");
+    if (count($rows) !== 0) $c14Errors[] = "expected no per-person rows (one shared item instead); got " . count($rows);
+    $item14 = db_row("SELECT * FROM attention_items WHERE live_key = 'customer_request:service_request:999990'");
+    if (!$item14) {
+        $c14Errors[] = "expected one live customer_request item for request 999990";
+    } else {
+        $aud = json_decode((string) $item14['audience_user_ids'], true) ?: [];
+        sort($aud);
+        $want = [$activeId, $acctId];
+        sort($want);
+        if ($aud !== $want) $c14Errors[] = "audience should be the routed users " . json_encode($want) . "; got " . json_encode($aud);
+        if ($item14['status'] !== 'open') $c14Errors[] = "item should be open; got " . $item14['status'];
     }
-    if (empty($c14Errors)) { echo "PASS C14 end-to-end notify() inserts 1 row per recipient with correct type/category/entity\n"; $pass++; }
+    if (empty($c14Errors)) { echo "PASS C14 end-to-end notify() raises one shared item for exactly the routed people (no per-person rows)\n"; $pass++; }
     else { echo "FAIL C14 " . implode('; ', $c14Errors) . "\n"; $failures[] = 'C14'; }
 
     // ── C15: title / message / url shape ───────────────────────────────
     $c15Errors = [];
-    $r15Row = db_row("SELECT title, message, url FROM notifications WHERE entity_type='service_request' AND entity_id=999990 LIMIT 1");
-    if (strpos((string) $r15Row['title'], 'Billing Inquiry') === false) $c15Errors[] = "title should mention 'Billing Inquiry'; got " . json_encode($r15Row['title']);
-    if (strpos((string) $r15Row['title'], 'Smoke PRN Customer Inc.') === false) $c15Errors[] = "title should mention customer company; got " . json_encode($r15Row['title']);
-    if (strpos((string) $r15Row['message'], 'C14 smoke subject') === false) $c15Errors[] = "message should include subject; got " . json_encode($r15Row['message']);
-    if (strpos((string) $r15Row['message'], 'Smoke Portal User') === false) $c15Errors[] = "message should include submitted-by name; got " . json_encode($r15Row['message']);
+    $r15Item = db_row("SELECT title, facts, url FROM attention_items WHERE live_key = 'customer_request:service_request:999990'");
+    $r15Facts = implode(' | ', array_column(json_decode((string) ($r15Item['facts'] ?? '[]'), true) ?: [], 't'));
+    $r15Row = ['title' => $r15Item['title'] ?? null, 'message' => $r15Facts, 'url' => $r15Item['url'] ?? null];
+    if (strpos((string) $r15Row['title'], 'C14 smoke subject') === false) $c15Errors[] = "title should carry the subject; got " . json_encode($r15Row['title']);
+    if (strpos($r15Facts, 'Billing Inquiry') === false) $c15Errors[] = "facts should mention 'Billing Inquiry'; got " . json_encode($r15Facts);
+    if (strpos($r15Facts, 'Smoke PRN Customer Inc.') === false) $c15Errors[] = "facts should mention customer company; got " . json_encode($r15Facts);
+    if (strpos($r15Facts, 'Smoke Portal User') === false) $c15Errors[] = "facts should include submitted-by name; got " . json_encode($r15Facts);
     // URL must include the /fleetforge subpath prefix (D7) so the bell's
     // raw :href renders work cross-page. base_url() injects it.
     if (strpos((string) $r15Row['url'], 'requests/view?id=999990') === false) $c15Errors[] = "url should drill-down to request; got " . json_encode($r15Row['url']);
@@ -415,16 +427,12 @@ try {
     PortalRequestNotifier::notify(999993);
 
     $c16Errors = [];
-    // K-22: filter by entity_type too — entity_id sentinel range overlaps with
-    // notifications from other smoke runs (e.g. QBO invoice push notifications
-    // with entity_id=999991, entity_type='invoice', severity='critical').
-    $sevDmg = db_row("SELECT severity FROM notifications WHERE entity_type='service_request' AND entity_id=999991 LIMIT 1");
-    $sevErn = db_row("SELECT severity FROM notifications WHERE entity_type='service_request' AND entity_id=999992 LIMIT 1");
-    $sevGen = db_row("SELECT severity FROM notifications WHERE entity_type='service_request' AND entity_id=999993 LIMIT 1");
-    if (($sevDmg['severity'] ?? null) !== 'warning') $c16Errors[] = "damage_report severity should be 'warning'; got " . json_encode($sevDmg);
-    if (($sevErn['severity'] ?? null) !== 'warning') $c16Errors[] = "early_return severity should be 'warning'; got " . json_encode($sevErn);
-    if (($sevGen['severity'] ?? null) !== 'info') $c16Errors[] = "general severity should be 'info'; got " . json_encode($sevGen);
-    if (empty($c16Errors)) { echo "PASS C16 severity heuristic — damage_report + early_return → warning; general → info\n"; $pass++; }
+    // S-ATTENTION-INBOX: each request is a shared item; all types urgent.
+    foreach ([999991 => 'damage_report', 999992 => 'early_return', 999993 => 'general'] as $rid => $rtype) {
+        $pri = db_row("SELECT priority FROM attention_items WHERE live_key = ?", ['customer_request:service_request:' . $rid]);
+        if (($pri['priority'] ?? null) !== 'urgent') $c16Errors[] = "{$rtype} should be an urgent item; got " . json_encode($pri);
+    }
+    if (empty($c16Errors)) { echo "PASS C16 every request type is an urgent Needs attention item\n"; $pass++; }
     else { echo "FAIL C16 " . implode('; ', $c16Errors) . "\n"; $failures[] = 'C16'; }
 
     // ── C17: missing request_id returns 0 ──────────────────────────────
@@ -796,11 +804,15 @@ try {
         $c34Errors[] = "resolved_at should be cleared on re-open";
     }
 
-    // Admin notified per routing config (activeId via user_ids)
-    $adminNotif = db_row("SELECT title, severity, url FROM notifications WHERE user_id = ? AND entity_type='service_request' AND entity_id = 999996 LIMIT 1", [$activeId]);
-    if (!$adminNotif) $c34Errors[] = "expected admin notification for routed user {$activeId}";
-    elseif (strpos((string) $adminNotif['title'], 'Customer reply') === false) {
-        $c34Errors[] = "title missing 'Customer reply': " . json_encode($adminNotif['title']);
+    // Routed admin gets the (shared) item — S-ATTENTION-INBOX: the reply
+    // re-raises the request's Needs attention item with the routed audience.
+    $adminNotif = db_row("SELECT title, url, audience_user_ids FROM attention_items WHERE live_key = 'customer_request:service_request:999996'");
+    if (!$adminNotif) $c34Errors[] = "expected a live item for the customer's reply";
+    elseif (!in_array($activeId, json_decode((string) $adminNotif['audience_user_ids'], true) ?: [], true)) {
+        $c34Errors[] = "routed user {$activeId} should be in the item's audience: " . json_encode($adminNotif['audience_user_ids']);
+    }
+    if ($adminNotif && strpos((string) $adminNotif['title'], 'Customer replied') === false) {
+        $c34Errors[] = "title missing 'Customer replied': " . json_encode($adminNotif['title']);
     }
     if ($adminNotif && strpos((string) $adminNotif['url'], '/fleetforge/') === false) {
         $c34Errors[] = "url should include /fleetforge subpath; got " . json_encode($adminNotif['url']);
