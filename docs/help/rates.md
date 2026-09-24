@@ -10,7 +10,7 @@ Rates is where you set what you charge. It answers three everyday questions:
 - **What would a new lease get?** — the Price check shows the exact price a new lease would pre-fill, where it comes from and why, and estimates a rental with the same rules invoicing uses.
 - **How do I change prices?** — pick the date the new prices start. The old prices end the day before and stay on record as history.
 
-All prices live on **rate cards**. A card is either for **one customer** (their negotiated prices) or for **everyone** (a standard price list). Each card holds **lines** — one per equipment category or per equipment type — with daily, weekly and monthly prices, a distance price, an engine-hours price, a GPS price per day and a minimum number of days.
+All prices live on **rate cards**. A card is either for **one customer** (their negotiated prices) or for **everyone** (a standard price list). Each card holds **lines** — one per equipment category or per equipment type — with daily, weekly and monthly prices, a distance price, an engine-hours price, a GPS price per day and a minimum number of days. A line can also carry **only a minimum** (no prices) — see *Lines that set only a minimum* below.
 
 ---
 
@@ -25,7 +25,7 @@ All prices live on **rate cards**. A card is either for **one customer** (their 
 
 **Needs a look** lists, most urgent first:
 
-- a line with **no prices**, or with only some of daily / weekly / monthly — a lease would start at $0, or could not be saved as-is;
+- a line with **no prices and no minimum** (it does nothing), a line with no prices that only switches the minimum **off** (0 or 1 day — worth a second look), or a line with only some of daily / weekly / monthly (a lease from it could not be saved as-is);
 - a card with **no lines** at all;
 - prices **ending soon**, and customer prices that **ended without a renewal** while the customer still rents;
 - **customers on rent with no card of their own** — their prices live only on each lease (use **Create their card**);
@@ -112,6 +112,15 @@ When you choose a customer and a unit on a new lease, FleetForge looks for a pri
 
 If none matches, the fields stay empty. Within a step, a line for the **exact equipment type** beats a whole-category line, then the **main price list** wins, then the card that started most recently (then the newest card). The **Price check** shows this decision for any customer and equipment, step by step.
 
+### Lines that set only a minimum
+
+A line with a **minimum number of days but no prices** never decides the price. Its minimum is kept, and the prices come from the next line in the order above that has prices, or from the equipment type's own prices. For example, the standard price list's Chassis line sets a 3-day minimum and no prices, so a customer without a chassis card of their own gets the 40' Tridem Chassis type's $50 / $300 / $650 **with a 3-day minimum**. The banner and the Price check name both sources: *40' Tridem Chassis rate · template default · 3-day minimum from card "Chassis Minimum Days"*.
+
+- A line **with any price** (even just GPS or engine hours) still decides the price on its own. Prices are never mixed from two lines.
+- When several lines set a minimum, the one **highest in the order** wins, as long as it is at or above the line that sets the price. A customer's minimum-only line therefore beats the minimum on a general card. A minimum-only line *below* the priced line has no effect.
+- A minimum of **0** counts: it switches the minimum off for that equipment.
+- A line with **no prices and no minimum** is skipped. **Needs a look** lists it.
+
 If a lease can't be billed because its equipment has no price, the lease form links straight to the card (open in Edit) — or to **New rate card** with that customer and equipment already picked.
 
 > **Tip:** pre-filled prices are a starting point — you can type over them on the lease before saving.
@@ -123,6 +132,7 @@ If a lease can't be billed because its equipment has no price, the lease form li
 
 - **Tables** — `rate_cards` (`customer_id` NULL = standard / general card, `is_default` = main price list, `effective_from`/`effective_to`, soft-deleted via `deleted_at`) and `rate_card_items` (one row per line: `equipment_type` category slug, optional `equipment_template_id`, `daily_rate`, `weekly_rate`, `monthly_rate`, `mileage_rate` + `mileage_unit`, `hourly_rate`, `gps_price`, `minimum_days`, `currency`). No schema change in S-RATES-MODULE.
 - **One resolver** — `lib/RateCards/RateResolver.php` decides the price; the lease form's `api/v1/leases/lookup_rates.php`, the Price check, "what they pay", "leases on these prices" and the rate sheet all call it, so they always agree. Final tie-breakers `rc.id DESC, rci.id DESC` make an exact tie deterministic (newest card wins).
+- **Minimum-only lines** (S-RATES-MINIMUM-OVERLAY) — `RateResolver::priceWinner()` is the first candidate where `hasPrices()` is true (any price column above $0); `minimumIndex()` is the first candidate at or above it with `minimum_days` set (0 counts). `resolve()` returns the price winner's prices (or the type defaults / none) with that minimum. The response keys are unchanged; `source_label` gains *· N-day minimum from card "X"* when another card supplied the minimum, and `explain()` adds `minimum_card_id` / `minimum_card_name` plus each candidate's `priceless` and `used_for`. "Leases on these prices" counts a lease against the card that sets its price, never a minimum-only card.
 - **Estimates use the billing law** — `RateResolver::quote()` runs `HolisticLeaseEngine::cumulativeCorrect()`; the minimum-days floor binds only when the equipment's category enforces minimums (`equipment_categories.enforce_minimum_billing_days`).
 - **Line rules** — `lib/RateCards/RateCardItems.php` (shared by create, update and change-prices): prices ≥ 0 and within the column size, D132 rent trio (all of daily / weekly / monthly above $0, or none), CAD/USD, km/miles, minimum days 0–90, one line per category / type. The conflict guard (`lib/RateCards/ConflictGuard.php`) refuses two in-force customer cards covering the same equipment.
 - **Change prices** — `lib/RateCards/RateCardRevision.php` via `api/v1/rate_cards/revise.php`; the preview runs the same code inside a transaction that is rolled back; each card runs in its own savepoint; apply is all-or-nothing. Audit rows link old ↔ new (`replaced_by` / `replaces_card_id`).

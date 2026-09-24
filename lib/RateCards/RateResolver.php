@@ -25,6 +25,20 @@ declare(strict_types=1);
  *   2. the equipment type's own default prices (equipment_templates.default_*)
  *   3. nothing.
  *
+ * Minimum-only lines (S-RATES-MINIMUM-OVERLAY): a line that carries no price
+ * at all (every PRICE_FIELDS column blank or $0) — e.g. general card #27
+ * "Chassis Minimum Days", a whole-category chassis line with only
+ * minimum_days=3 — never wins on PRICE. Before this it outranked the equipment
+ * type's defaults and pre-filled every chassis lease for a customer without a
+ * chassis card of their own with blank prices. Now prices come from the first
+ * line that HAS a price (else tier 2 / 3), and minimum_days comes from the
+ * first line, ranked at or above that priced line, that sets one — so a
+ * minimum-only line OVERLAYS its minimum onto the next tier's prices. A line
+ * with any price still wins outright and prices are never mixed field by
+ * field (operator decision 2026-09-24). Lines ranked below the priced line
+ * never contribute a minimum (unchanged: a priced winner with a blank
+ * minimum still falls back to the 'lease.minimum_billing_days' setting).
+ *
  * "In force" = effective_from <= date AND (effective_to IS NULL OR
  * effective_to >= date), cards not soft-deleted (D5).
  *
@@ -115,8 +129,82 @@ final class RateResolver
     }
 
     /**
+     * Does a rate-card line (or candidates() row) carry any price at all?
+     *
+     * A price = any PRICE_FIELDS column above $0. A line with none of them is
+     * a minimum-only line (or an empty one) — it can set minimum_days but
+     * never the price (S-RATES-MINIMUM-OVERLAY). mileage_rate 0 already means
+     * "no distance charge" (D135), so > 0 is the test for every field.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function hasPrices(array $row): bool
+    {
+        foreach (self::PRICE_FIELDS as $f) {
+            $v = $row[$f] ?? null;
+            if ($v !== null && $v !== '' && bccomp((string) $v, '0', 4) > 0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Index of the candidate that sets the PRICE — the first line with any
+     * price — or null when no candidate carries one (tier 2 / 3 prices it).
+     *
+     * @param list<array<string,mixed>> $candidates from candidates()
+     */
+    public static function priceWinnerIndex(array $candidates): ?int
+    {
+        foreach ($candidates as $i => $c) {
+            if (self::hasPrices($c)) {
+                return $i;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The candidate that sets the price (see priceWinnerIndex), or null.
+     *
+     * @param  list<array<string,mixed>> $candidates
+     * @return array<string,mixed>|null
+     */
+    public static function priceWinner(array $candidates): ?array
+    {
+        $i = self::priceWinnerIndex($candidates);
+        return $i === null ? null : $candidates[$i];
+    }
+
+    /**
+     * Index of the candidate whose minimum_days applies: the first line ranked
+     * at or above the price-setting line (every line when none has a price)
+     * whose minimum_days is set. 0 counts as set (an explicit "no minimum").
+     * Null = no line sets one → the 'lease.minimum_billing_days' setting.
+     *
+     * @param list<array<string,mixed>> $candidates
+     */
+    public static function minimumIndex(array $candidates): ?int
+    {
+        $upTo = self::priceWinnerIndex($candidates) ?? (count($candidates) - 1);
+        for ($i = 0; $i <= $upTo; $i++) {
+            $m = $candidates[$i]['minimum_days'] ?? null;
+            if ($m !== null && $m !== '') {
+                return $i;
+            }
+        }
+        return null;
+    }
+
+    /**
      * The price a new lease gets — the exact lookup_rates.php response shape
      * (same keys, same order, same label wording).
+     *
+     * S-RATES-MINIMUM-OVERLAY: prices come from the first candidate WITH a
+     * price (else the equipment type's defaults, else none); minimum_days from
+     * minimumIndex(). When the minimum comes from a different card than the
+     * prices, source_label says so ("· 3-day minimum from card "X"").
      *
      * @param  array<string,mixed>            $template   row from template()
      * @param  list<array<string,mixed>>|null $candidates pass when already loaded
@@ -130,14 +218,26 @@ final class RateResolver
         // it is clear WHICH line of a card was used.
         $typeLabel = (string) $template['name'];
 
-        if ($candidates !== []) {
-            $r = $candidates[0];
+        $r       = self::priceWinner($candidates);
+        $minIdx  = self::minimumIndex($candidates);
+        $minLine = $minIdx === null ? null : $candidates[$minIdx];
+        $minimum = $minLine['minimum_days'] ?? null;
+
+        // "· 3-day minimum from card "X"" — only when a minimum-only line on
+        // ANOTHER card (or over the type defaults) supplied it.
+        $minNote = '';
+        if ($minLine !== null && ($r === null || (int) $minLine['rate_card_id'] !== (int) $r['rate_card_id'])) {
+            $minNote = ' · ' . (int) $minimum . '-day minimum from '
+                . ($minLine['customer_id'] !== null ? 'custom card' : 'card') . ' "' . $minLine['card_name'] . '"';
+        }
+
+        if ($r !== null) {
             $isCustomerCard = $r['customer_id'] !== null;
             return [
                 'source'       => $isCustomerCard ? 'customer' : 'rate_card',
-                'source_label' => $isCustomerCard
+                'source_label' => ($isCustomerCard
                     ? $typeLabel . ' rate · custom card "' . $r['card_name'] . '"'
-                    : $typeLabel . ' rate · card "' . $r['card_name'] . '"',
+                    : $typeLabel . ' rate · card "' . $r['card_name'] . '"') . $minNote,
                 'daily_rate'   => $r['daily_rate'],
                 'weekly_rate'  => $r['weekly_rate'],
                 'monthly_rate' => $r['monthly_rate'],
@@ -147,7 +247,7 @@ final class RateResolver
                 'currency'     => $r['currency'],
                 'gps_price'    => $r['gps_price'],
                 'rate_card_id' => (int) $r['rate_card_id'],
-                'minimum_days' => $r['minimum_days'],
+                'minimum_days' => $minimum,
             ];
         }
 
@@ -155,17 +255,10 @@ final class RateResolver
         // NB: default_mileage_rate is NOT NULL DEFAULT 0.0000 (0 = mileage
         // disabled, D135), so it counts only when > 0; hourly stays nullable
         // (S-AUDIT-BILLING-ENGINE-1 #24).
-        $hasTemplateRates = (
-            $template['default_daily_rate']   !== null ||
-            $template['default_weekly_rate']  !== null ||
-            $template['default_monthly_rate'] !== null ||
-            $template['default_hourly_rate']  !== null ||
-            bccomp((string) ($template['default_mileage_rate'] ?? '0'), '0', 4) > 0
-        );
-        if ($hasTemplateRates) {
+        if (self::templateHasPrices($template)) {
             return [
                 'source'       => 'template',
-                'source_label' => $typeLabel . ' rate · template default',
+                'source_label' => $typeLabel . ' rate · template default' . $minNote,
                 'daily_rate'   => $template['default_daily_rate'],
                 'weekly_rate'  => $template['default_weekly_rate'],
                 'monthly_rate' => $template['default_monthly_rate'],
@@ -175,13 +268,13 @@ final class RateResolver
                 'currency'     => $template['default_currency'] ?? 'CAD',
                 'gps_price'    => null,
                 'rate_card_id' => null,
-                'minimum_days' => null,
+                'minimum_days' => $minimum,
             ];
         }
 
         return [
             'source'       => 'none',
-            'source_label' => 'No rates configured for ' . $typeLabel,
+            'source_label' => 'No rates configured for ' . $typeLabel . $minNote,
             'daily_rate'   => null,
             'weekly_rate'  => null,
             'monthly_rate' => null,
@@ -191,7 +284,7 @@ final class RateResolver
             'currency'     => 'CAD',
             'gps_price'    => null,
             'rate_card_id' => null,
-            'minimum_days' => null,
+            'minimum_days' => $minimum,
         ];
     }
 
@@ -219,10 +312,28 @@ final class RateResolver
         $candidates = self::candidates($customerId, $template, $date);
         $price      = self::resolve($customerId, $template, $date, $candidates);
         $standard   = self::standard($template, $date);
-        $winner     = $candidates[0] ?? null;
+        // S-RATES-MINIMUM-OVERLAY: the winner is the line that sets the PRICE;
+        // a minimum-only line ranked above it only supplies minimum_days.
+        $winIdx     = self::priceWinnerIndex($candidates);
+        $winner     = $winIdx === null ? null : $candidates[$winIdx];
+        $minIdx     = self::minimumIndex($candidates);
+        $minLine    = $minIdx === null ? null : $candidates[$minIdx];
 
         $lines = [];
         foreach ($candidates as $i => $c) {
+            $priced = self::hasPrices($c);
+            if ($i === $winIdx) {
+                $why = 'Used — the best match.' . ($minIdx !== null && $minIdx !== $i ? ' The minimum comes from the line above.' : '');
+            } elseif (!$priced && $i === $minIdx) {
+                $why = 'Sets only a minimum — its ' . (int) $c['minimum_days'] . '-day minimum is used; the prices come from '
+                    . ($winner !== null ? 'the next line with prices.' : ($price['source'] === 'template' ? "the equipment type's defaults." : 'nowhere — no price is set.'));
+            } elseif (!$priced && ($winIdx === null || $i < $winIdx)) {
+                $why = $c['minimum_days'] !== null && $c['minimum_days'] !== ''
+                    ? 'Sets only a minimum — a higher line already set the minimum.'
+                    : 'Sets no prices and no minimum — skipped.';
+            } else {
+                $why = self::whyLost($c, $winner);
+            }
             $lines[] = [
                 'rank'           => $i + 1,
                 'item_id'        => (int) $c['item_id'],
@@ -234,27 +345,39 @@ final class RateResolver
                 'effective_from' => $c['effective_from'],
                 'effective_to'   => $c['effective_to'],
                 'prices'         => self::pickPrices($c),
-                'why'            => $i === 0 ? 'Used — the best match.' : self::whyLost($c, $winner),
+                'priceless'      => !$priced,
+                'used_for'       => array_values(array_filter([$i === $winIdx ? 'price' : null, $i === $minIdx ? 'minimum' : null])),
+                'why'            => $why,
             ];
         }
 
         $hasCustomer = $customerId !== null && array_filter($candidates, static fn ($c) => $c['customer_id'] !== null) !== [];
         $hasGeneral  = array_filter($candidates, static fn ($c) => $c['customer_id'] === null) !== [];
         $source      = (string) $price['source'];
+        // Which tier supplied only the minimum (never the price).
+        $minTier = null;
+        if ($minLine !== null && ($winner === null || $minIdx !== $winIdx)) {
+            $minTier = $minLine['customer_id'] !== null ? 'customer' : 'general';
+        }
+        $minDetail = $minLine !== null
+            ? ' Sets only a minimum (' . (int) $minLine['minimum_days'] . ' days) — used for the minimum; the price comes from below.'
+            : '';
 
         $tiers = [
             [
                 'key'    => 'customer',
                 'label'  => "This customer's own cards",
-                'state'  => $customerId === null ? 'skipped' : ($source === 'customer' ? 'used' : 'none'),
+                'state'  => $customerId === null ? 'skipped' : ($source === 'customer' || $minTier === 'customer' ? 'used' : 'none'),
                 'detail' => $customerId === null ? 'No customer chosen.'
-                    : ($hasCustomer ? 'Has a line for this equipment.' : 'No in-force line for this equipment.'),
+                    : ($minTier === 'customer' ? ltrim($minDetail)
+                        : ($hasCustomer ? 'Has a line for this equipment.' : 'No in-force line for this equipment.')),
             ],
             [
                 'key'    => 'general',
                 'label'  => 'General cards (everyone)',
-                'state'  => $source === 'rate_card' ? 'used' : ($hasGeneral ? 'available' : 'none'),
-                'detail' => $hasGeneral ? 'Has a line for this equipment.' : 'No in-force line for this equipment.',
+                'state'  => $source === 'rate_card' || $minTier === 'general' ? 'used' : ($hasGeneral ? 'available' : 'none'),
+                'detail' => $minTier === 'general' ? ltrim($minDetail)
+                    : ($hasGeneral ? 'Has a line for this equipment.' : 'No in-force line for this equipment.'),
             ],
             [
                 'key'    => 'type_default',
@@ -267,9 +390,13 @@ final class RateResolver
         return [
             'date'       => $date,
             'price'      => $price + [
-                'card_name'  => $winner['card_name'] ?? null,
-                'line_scope' => $winner ? ($winner['equipment_template_id'] !== null ? 'type' : 'category') : null,
-                'item_id'    => $winner ? (int) $winner['item_id'] : null,
+                'card_name'         => $winner['card_name'] ?? null,
+                'line_scope'        => $winner ? ($winner['equipment_template_id'] !== null ? 'type' : 'category') : null,
+                'item_id'           => $winner ? (int) $winner['item_id'] : null,
+                // S-RATES-MINIMUM-OVERLAY: set only when a minimum-only line on
+                // another card supplied minimum_days.
+                'minimum_card_id'   => $minTier !== null ? (int) $minLine['rate_card_id'] : null,
+                'minimum_card_name' => $minTier !== null ? (string) $minLine['card_name'] : null,
             ],
             'standard'   => $standard,
             'candidates' => $lines,

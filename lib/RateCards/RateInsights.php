@@ -209,15 +209,21 @@ final class RateInsights
     {
         $pos = static fn ($v): bool => $v !== null && $v !== '' && bccomp((string) $v, '0', 4) > 0;
         $issues = [];
-        $any = false;
-        foreach (RateResolver::PRICE_FIELDS as $f) {
-            if ($pos($it[$f] ?? null)) {
-                $any = true;
-            }
-        }
         $trio = array_filter(['daily_rate', 'weekly_rate', 'monthly_rate'], static fn ($f) => $pos($it[$f] ?? null));
-        if (!$any) {
-            $issues[] = 'No prices set — a lease would start at $0.';
+        if (!RateResolver::hasPrices($it)) {
+            // S-RATES-MINIMUM-OVERLAY: a line with only a minimum is a valid
+            // "minimum-only" line — the resolver takes its minimum and prices
+            // from the next line / the equipment type. Only a line that sets
+            // NOTHING is a problem (it is skipped entirely). A 0 / 1-day
+            // "minimum" with no prices only switches the minimum OFF for that
+            // equipment — legitimate, but on prod it came from a line typed
+            // as all-$0 (card #64), so surface it for a second look.
+            $min = $it['minimum_days'] ?? null;
+            if ($min === null || $min === '') {
+                $issues[] = 'No prices and no minimum — this line does nothing.';
+            } elseif ((int) $min < 2) {
+                $issues[] = 'No prices — this line only switches the short-lease minimum off; prices come from the next line or the equipment type.';
+            }
         } elseif ($trio !== [] && count($trio) < 3) {
             // D132: the lease form refuses an incomplete rent trio, and the
             // engine bills $0 rent in whichever tier is missing (past 7 days
@@ -521,6 +527,7 @@ final class RateInsights
             }
             $candidates = RateResolver::candidates($customerId, $t, $today);
             $price      = RateResolver::resolve($customerId, $t, $today, $candidates);
+            $priced     = RateResolver::priceWinner($candidates);
             $std        = self::standardFor($id, $today);
 
             $lease = null;
@@ -551,8 +558,10 @@ final class RateInsights
                 'category_label' => RateCardItems::label((string) $t['category']),
                 'is_active'      => (int) $t['is_active'] === 1,
                 'price'          => $price,
-                'card_name'      => $candidates[0]['card_name'] ?? null,
-                'line_scope'     => isset($candidates[0]) ? ($candidates[0]['equipment_template_id'] !== null ? 'type' : 'category') : null,
+                // S-RATES-MINIMUM-OVERLAY: the card that sets the PRICE, not a
+                // minimum-only line ranked above it.
+                'card_name'      => $priced['card_name'] ?? null,
+                'line_scope'     => $priced !== null ? ($priced['equipment_template_id'] !== null ? 'type' : 'category') : null,
                 'standard'       => $std,
                 'vs'             => [
                     'daily'   => $price['source'] === 'customer' ? RateResolver::pctDiff($price['daily_rate'], $std['daily_rate'] ?? null) : null,
@@ -639,8 +648,10 @@ final class RateInsights
             }
             $k = (int) $r['customer_id'] . ':' . $tid;
             if (!isset($resolved[$k])) {
-                $cands = RateResolver::candidates((int) $r['customer_id'], $t, $today);
-                $resolved[$k] = $cands[0] ?? null;
+                // S-RATES-MINIMUM-OVERLAY: a lease is "on" the card that sets
+                // its price — a minimum-only line prices nothing, so comparing
+                // leases to its blank prices would flag every one as different.
+                $resolved[$k] = RateResolver::priceWinner(RateResolver::candidates((int) $r['customer_id'], $t, $today));
             }
             $win = $resolved[$k];
             if ($win === null || (int) $win['rate_card_id'] !== $cardId) {

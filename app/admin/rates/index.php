@@ -541,6 +541,7 @@ require_once FF_ROOT . '/includes/header.php';
                                         <template x-if="t.standard.source === 'template'">
                                             <span class="rt-muted">Equipment type's own prices</span>
                                         </template>
+                                        <span class="rt-sub" x-show="minimumNoteOf(t.standard)" x-text="minimumNoteOf(t.standard)"></span>
                                         <template x-if="t.standard.source === 'none'">
                                             <span class="rt-issue" style="margin:0;">Not priced</span>
                                         </template>
@@ -769,12 +770,20 @@ require_once FF_ROOT . '/includes/header.php';
                                         <span class="rt-muted" x-text="check.result.customer ? '· they have no line of their own for this' : ''"></span></span>
                                 </template>
                                 <template x-if="check.result.price.source === 'template'">
-                                    <span>The equipment type's own default prices <span class="rt-muted" x-text="check.result.customer ? '· no card covers it for this customer' : '· no general card covers it'"></span></span>
+                                    <span>The equipment type's own default prices <span class="rt-muted" x-text="check.result.customer ? '· no card prices it for this customer' : '· no general card prices it'"></span></span>
                                 </template>
                                 <template x-if="check.result.price.source === 'none'">
                                     <span><b>No price set</b> — a new lease would start with empty prices.</span>
                                 </template>
                             </div>
+                            <!-- S-RATES-MINIMUM-OVERLAY: a minimum-only line on another card set the minimum. -->
+                            <template x-if="check.result.price.minimum_card_id">
+                                <div class="rt-faint text-sm" style="margin-top:6px;">
+                                    <span x-text="check.result.price.minimum_days + '-day minimum from'"></span>
+                                    <a class="link" :href="baseUrl + 'rates/show?id=' + check.result.price.minimum_card_id"><b x-text="check.result.price.minimum_card_name"></b></a>
+                                    <span>— that line sets only a minimum, so the prices come from the step that follows.</span>
+                                </div>
+                            </template>
                             <dl class="rt-check-price" style="margin-top:12px;">
                                 <template x-for="f in [['daily_rate','Daily',2,'daily'],['weekly_rate','Weekly',2,'weekly'],['monthly_rate','Monthly',2,'monthly']]" :key="f[0]">
                                     <div>
@@ -841,14 +850,14 @@ require_once FF_ROOT . '/includes/header.php';
                                     </li>
                                 </template>
                             </ol>
-                            <template x-if="check.result.candidates.length > 1">
+                            <template x-if="check.result.candidates.length > 1 || check.result.candidates.some(c => c.priceless)">
                                 <div class="rt-cands">
                                     <div class="rt-faint text-sm">Every card line that could have priced it, best first:</div>
                                     <template x-for="c in check.result.candidates" :key="c.item_id">
-                                        <div class="rt-cand" :class="{ 'is-winner': c.rank === 1 }">
+                                        <div class="rt-cand" :class="{ 'is-winner': c.used_for.includes('price') }">
                                             <span><a class="link" :href="baseUrl + 'rates/show?id=' + c.rate_card_id" x-text="c.card_name"></a>
                                                 <span class="rt-muted" x-text="(c.is_customer ? ' · their card' : ' · general') + (c.line_scope === 'type' ? ' · this type' : ' · whole category')"></span></span>
-                                            <span class="rt-num" x-text="FF_Rates.money(c.prices.daily_rate) + '/day'"></span>
+                                            <span class="rt-num" x-text="c.priceless ? (c.prices.minimum_days !== null ? 'min. ' + c.prices.minimum_days + ' d' : '—') : FF_Rates.money(c.prices.daily_rate) + '/day'"></span>
                                             <small x-text="c.why"></small>
                                         </div>
                                     </template>
@@ -1142,8 +1151,15 @@ function FF_RatesHome() {
         },
         /** The card name out of a lookup label ('… card "X"'). */
         cardNameOf(price) {
-            const m = /card "(.*)"$/.exec(price.source_label || '');
+            // First quoted card = the one that sets the price (a trailing
+            // "· N-day minimum from card …" note may follow, S-RATES-MINIMUM-OVERLAY).
+            const m = /card "([^"]*)"/.exec(price.source_label || '');
             return m ? m[1] : 'Open card';
+        },
+        /** "3-day minimum from card "X"" when a minimum-only line set the minimum, else ''. */
+        minimumNoteOf(price) {
+            const m = /· (\d+-day minimum from (?:custom )?card ".*")$/.exec(price.source_label || '');
+            return m ? m[1] : '';
         },
         checkForType(id) {
             this.check.template_id = String(id);

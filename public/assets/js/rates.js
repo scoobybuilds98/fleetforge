@@ -274,7 +274,10 @@
                         }
                         const any = PRICE_FIELDS.some(f => !isBlank(l[f]) && Number(l[f]) > 0);
                         const trio = ['daily_rate', 'weekly_rate', 'monthly_rate'].filter(f => Number(l[f]) > 0).length;
-                        if (!any) out.push(name + ' has no prices — a lease would start at $0.');
+                        // S-RATES-MINIMUM-OVERLAY: a minimum-only line (no prices, a minimum
+                        // set) is valid — new leases take its minimum and get their prices
+                        // from the next line or the equipment type. Only an empty line is wrong.
+                        if (!any && isBlank(l.minimum_days)) out.push(name + ' has no prices and no minimum — it does nothing.');
                         else if (trio > 0 && trio < 3) {
                             out.push(name + ': daily, weekly and monthly go together — set all three, or leave all three blank.');
                         }

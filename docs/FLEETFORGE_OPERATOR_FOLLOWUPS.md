@@ -151,11 +151,11 @@ Safety net: anything dated before go-live is refused as a NEW push until linked 
 **Operator action:**
 1. Deploy `main` (PHP + two new asset files; no migration, no `FF_ASSET_VERSION` bump): `sudo /var/www/fleetforge/bin/deploy.sh`.
 2. Open **Rates** → **Needs a look** lists the three cards.
-3. **#27:** either open it → **Edit** → give the Chassis line standard daily / weekly / monthly prices (then it is a real standard price list), or remove that line. The 3-day chassis minimum no longer needs this card — the Chassis category enforces it and the company default is 3 days.
-4. **#64 / #20:** add the prices they should carry, or **End these prices…** / delete them.
+3. **#27:** nothing to do any more (S-RATES-MINIMUM-OVERLAY, same day). A line with only a minimum now adds its minimum on top of the next price in line, so chassis leases for customers without a chassis card pre-fill the chassis types' own prices ($50 / $300 / $650 for the 40' Tridem, $125 / $750 / $1,500 for the Genset Chassis) with the 3-day minimum. If those type prices are not your standard chassis prices, change them in **Rates → Standard prices → Edit**. Check one with **Rates → Price check** (no customer, 40' Tridem Chassis) after the deploy.
+4. **#64** (Supersonic's "Other" line, all prices $0, minimum 0): Supersonic now gets the standard price for that equipment with the minimum switched off. If that is wrong, put their real prices on the line, or delete the line. **#20** (no lines): add the prices it should carry, or **End these prices…** / delete it.
 5. Try **Rates → Price check** with a customer and a dry van before you next quote a price.
 **Note:** managers can change prices but not export (roles without export permission don't see **Export**). Training chapter 5 (Rates) now shows the old screens; its script is updated — re-record it with F90. Optional decision (KNOWN ISSUE #117): new leases take the prices in force on the day the lease is created, not on its start date.
-**Done when:** Rates → Needs a look shows no "no prices" items on prod.
+**Done when:** Rates → Needs a look shows no "no prices" items on prod, and a standard-price Price check for the 40' Tridem Chassis shows $50 / $300 / $650 with a 3-day minimum.
 
 ---
 

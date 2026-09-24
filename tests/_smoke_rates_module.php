@@ -99,7 +99,7 @@ try {
     $section('R1 resolver parity with the legacy lookup (every customer × equipment type)');
     $customers = array_map('intval', array_column(db_select("SELECT id FROM customers WHERE deleted_at IS NULL"), 'id'));
     $templates = RateInsights::templates();
-    $combos = 0; $mismatch = []; $priceMismatch = 0;
+    $combos = 0; $mismatch = []; $priceMismatch = 0; $overlay = 0;
     foreach ($customers as $cid) {
         foreach ($templates as $t) {
             $combos++;
@@ -107,6 +107,19 @@ try {
             $new = RateResolver::resolve($cid, $t, $today);
             if ($old === null) {
                 if ($new['rate_card_id'] !== null) { $mismatch[] = "c{$cid}/t{$t['id']}: legacy none, resolver card {$new['rate_card_id']}"; }
+                continue;
+            }
+            // S-RATES-MINIMUM-OVERLAY deliberately departs from the legacy SQL
+            // when its winner is a minimum-only line (e.g. general card #27
+            // "Chassis Minimum Days"): prices now come from the next priced
+            // line / the type's defaults, and the minimum is overlaid. Those
+            // combos are covered by tests/_smoke_rates_minimum_overlay.php;
+            // here we only require the legacy winner's minimum to carry over.
+            if (!RateResolver::hasPrices($old)) {
+                $overlay++;
+                if ($old['minimum_days'] !== null && (string) $old['minimum_days'] !== (string) $new['minimum_days']) {
+                    $mismatch[] = "c{$cid}/t{$t['id']}: minimum-only line's {$old['minimum_days']}-day minimum not overlaid";
+                }
                 continue;
             }
             if ((int) $old['rate_card_id'] !== $new['rate_card_id']) {
@@ -123,7 +136,7 @@ try {
             }
         }
     }
-    $check($mismatch === [], "{$combos} customer × equipment combos pick the same card as the legacy SQL" . ($mismatch ? ' — ' . implode('; ', array_slice($mismatch, 0, 3)) : ''));
+    $check($mismatch === [], "{$combos} customer × equipment combos pick the same card as the legacy SQL ({$overlay} minimum-only overlays)" . ($mismatch ? ' — ' . implode('; ', array_slice($mismatch, 0, 3)) : ''));
     $check($priceMismatch === 0, 'and carry identical prices, units, currency and minimum days');
     $anyT = reset($templates);
     $std  = RateResolver::standard($anyT, $today);
@@ -353,7 +366,10 @@ try {
                                             'effective_to' => (new DateTimeImmutable(ff_today()))->modify('+5 days')->format('Y-m-d')]);
     db_insert('rate_card_items', ['rate_card_id' => $endingCard, 'equipment_type' => $cat . 'e', 'hourly_rate' => '5.0000']);
     $issueCard = db_insert('rate_cards', ['name' => 'ZZ RT Issue ' . $cat, 'effective_from' => '2020-01-01']);
-    db_insert('rate_card_items', ['rate_card_id' => $issueCard, 'equipment_type' => $cat . 'i', 'minimum_days' => 3]);
+    // S-RATES-MINIMUM-OVERLAY: a minimum-only line is valid now; only a line
+    // with no prices AND no minimum (it does nothing) needs a look.
+    db_insert('rate_card_items', ['rate_card_id' => $issueCard, 'equipment_type' => $cat . 'i']);
+    db_insert('rate_card_items', ['rate_card_id' => $issueCard, 'equipment_type' => $cat . 'm', 'minimum_days' => 3]);
     $custC = db_insert('customers', ['company_name' => 'ZZ Rates Smoke C']);
     $unitC = db_insert('equipment_units', ['template_id' => $tTwo, 'unit_number' => 'ZZRTC' . bin2hex(random_bytes(3)), 'ownership_type' => 'owned']);
     db_insert('leases', ['contract_number' => 'ZZRTC-' . bin2hex(random_bytes(3)), 'customer_id' => $custC, 'equipment_unit_id' => $unitC,
@@ -363,7 +379,9 @@ try {
     foreach ($att['items'] as $a) { $kinds[$a['kind']][] = $a['card_id'] ?? $a['customer_id'] ?? null; }
     $check(in_array($emptyCard, $kinds['empty'] ?? [], true), 'attention: empty card');
     $check(in_array($endingCard, $kinds['ending'] ?? [], true), 'attention: ending within 30 days (tone danger at ≤ 7 days)');
-    $check(in_array($issueCard, $kinds['line_issue'] ?? [], true), 'attention: a line with no prices');
+    $check(in_array($issueCard, $kinds['line_issue'] ?? [], true), 'attention: a line with no prices and no minimum');
+    $issueTitles = array_column(array_filter($att['items'], fn ($a) => $a['kind'] === 'line_issue' && ($a['card_id'] ?? null) === $issueCard), 'title');
+    $check(count($issueTitles) === 1, 'attention: the minimum-only line on the same card is NOT flagged');
     $check(in_array($custC, $kinds['no_card'] ?? [], true), 'attention: customer on rent with no card');
     $check($att['items'][0]['kind'] === 'line_issue', 'most urgent (a line that would pre-fill $0) sorts first');
     $k = RateInsights::kpis(ff_today());
