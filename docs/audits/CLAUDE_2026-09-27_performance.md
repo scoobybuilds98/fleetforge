@@ -96,3 +96,25 @@ What users actually feel comes from elsewhere:
   436,105 rows from the **dev** DB (never prod). It was reversed exactly from the local binlog
   (ROW/FULL) — 435,733 rows re-inserted, 353 updates reverted, per-table counts equal; 378,436 rows
   byte-identical to the 2026-09-23 prod snapshot on every column. Sweeps now hard-exclude that smoke.
+
+---
+
+## Results on production (deployed 2026-09-28 ~19:13 UTC, measured before and after on the live box)
+
+| What | Before | After |
+|---|---|---|
+| A click after a 3 s pause (64 KB page, 285 ms RTT link, median of 6) | **888 ms** | **311 ms** |
+| A click after a 10 s pause with a background poll | 884 ms | 286 ms |
+| Brand-new connection (unchanged — TLS handshake) | 841 ms | 838 ms |
+| Session lifetime as Ubuntu's cleaner reads it | 24 min | 24 h (app still enforces 8 h idle) |
+| GPS sync per run (every 5 min) | 29–50 s | **2.5 s** (same 160 processed / 7 skipped / 0 failed) |
+| Bell unread check, heaviest user (74 k-row table) | 23.4 ms (COUNT) | **0.03 ms** (EXISTS + index) |
+| Updates list, first 20 | 42.3 ms (filesort) | **0.04 ms** (index, no sort) |
+| Logo revalidation | full 48 KB + `Pragma: no-cache` | 304, 0 B |
+| Favicon | fresh S3 URL every page (never cached) | same-origin, immutable |
+| Login page S3 presigns | 2 | 1 (login logo — deferred) |
+| `health?strict=1` | 200 always + Set-Cookie | 503 when unhealthy, no cookie |
+| Theme toggle endpoint | 404 | saves (POST save_preference) |
+| php-fpm reload | killed in-flight requests | drains up to 10 s; 600 s cap; 3 s slow log |
+| Request latency visibility | none | `rt=` / `urt=` / `rtt=` on every nginx line |
+| Live S3 files | expiring at 90 d (15 already hidden) | no expiry; 15 restored |
