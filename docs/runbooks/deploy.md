@@ -75,6 +75,44 @@ FF_DEPLOY_BASE_URL=https://staging.mainlandrentals.com/fleetforge sudo -E bin/de
 
 - `migrations.pending > 0` **or** a missing critical table (`users`, `user_roles`, `role_permission_overrides`, `user_permission_overrides`, `settings`, `schema_migrations`, `customers`, `leases`, `invoices`) → `status: "degraded"`.
 - A **schema lag is now a one-curl check** any monitor or the deploy gate can read. Authenticated callers additionally get `schema.missing[]` (the public payload hides which table is gone, to avoid fingerprinting).
+- The **default** response is HTTP **200 in every state** (`ok` and `degraded`). Step 9 above (`curl -fsS`) depends on that: it needs a parseable 200 body so it can print *why* the gate failed. Never change the default status code.
+
+### Uptime monitor (strict health) — S-PERF-3
+
+`GET /api/v1/health?strict=1` returns the **same body**, but HTTP **503** whenever `status != "ok"` (DB down, pending migration, missing critical table, disk < 0.5 GB). Only the exact value `strict=1` switches it on.
+
+- **Strict mode is for uptime monitors only.** Sentry uptime treats non-2xx as down and never reads the JSON. The previous monitor polled `/` → the login page, which still renders 200 with MySQL down, so the recurring `[2002] Connection refused` outage never alerted.
+- **Never** point the deploy gate (`FF_DEPLOY_HEALTH_URL`) or a load balancer at `?strict=1`. The gate must keep getting a 200 plus the JSON it parses.
+- Expect a strict alert during a deploy window with pending migrations. That is intended. The deploy's maintenance window also answers 503 on every URL, health included (`public/index.php`, strict or not), so a slow deploy can page too. Sentry needs consecutive failures before it opens an issue.
+- When the DB is down, the endpoint skips the migration-state check (it would only repeat the connect-retry loop). A DB-down answer takes about one retry cycle (~1.4 s locally), not two.
+- Anonymous callers (no `ff_session` / `ff_remember` cookie) get **no session file and no Set-Cookie**. Authenticated callers are unchanged and still get `version` / `disk` / `schema.missing`.
+
+Operator setup (per deployment; Mainland **and** Northland):
+
+```sh
+curl -s -w '\n%{http_code}\n' 'https://mainlandrentals.com/fleetforge/api/v1/health?strict=1'   # expect 200 + "status":"ok"
+```
+
+Then, in Sentry: create an uptime monitor for that URL and disable the auto-detected `/` monitor. The next day, `access.log` should show ~1,440 `health?strict=1` hits and no more `/` + `/auth/login` pairs from `SentryUptimeBot`.
+
+---
+
+## Server config the repo cannot carry: PHP session GC (S-PERF-3 / OP-2)
+
+`config/app.php` raises `session.gc_maxlifetime` with `ini_set()` (to `max(SESSION_LIFETIME, 86400)`, which covers the 8 h admin and 24 h portal sessions). **On Debian/Ubuntu that is not enough.** The distro's `phpsessionclean.timer` (`:09` and `:39`) runs `/usr/lib/php/sessionclean`, which reads `gc_maxlifetime` from `php.ini` plus `conf.d` only. It never sees the app's runtime `ini_set()`. With the stock `1440` it deletes every session after 24–54 min idle. Users see silent logouts, and saves from a tab opened before a remember-me restore fail with 403 `CSRF_INVALID`.
+
+Every server (and any rebuild) must carry:
+
+```sh
+printf '%s\n' '; FleetForge: phpsessionclean reads THIS ini, not config/app.php ini_set. Must be >= SESSION_LIFETIME and portal 24h.' 'session.gc_maxlifetime = 86400' \
+ | sudo tee /etc/php/8.2/fpm/conf.d/99-fleetforge-session.ini
+PHP_INI_SCAN_DIR=/etc/php/8.2/fpm/conf.d/ php8.2 -c /etc/php/8.2/fpm/php.ini -r 'echo ini_get("session.gc_maxlifetime"),"\n";'   # 86400
+# after >70 min:
+sudo find /var/lib/php/sessions -name 'sess_*' -cmin +60 | wc -l     # > 0
+# rollback: sudo rm /etc/php/8.2/fpm/conf.d/99-fleetforge-session.ini
+```
+
+No FPM reload is needed, because the cleaner spawns a fresh `php` on each run. This does **not** lengthen any login. The in-app inactivity checks (admin 8 h in `includes/auth.php`, portal 24 h in `app/portal/includes/auth.php`) still sign people out on time. The setting only stops the OS deleting a still-valid session file. If `SESSION_LIFETIME` is ever raised above 86400, raise this ini to match.
 
 ---
 

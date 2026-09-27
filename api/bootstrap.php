@@ -38,6 +38,18 @@ require_once FF_ROOT . '/includes/auth.php';
 
 // ── Session ─────────────────────────────────────────────────
 // Must start before any output and before CSRF is checked.
+// (auth.php already started it on include; this call is a no-op guard.)
+//
+// S-PERF-3 session rules for API endpoints:
+//   • GET/HEAD: require_auth_api() saves the session and releases its file
+//     lock (so a page's parallel XHRs stop queueing on it). A GET endpoint
+//     must therefore NEVER write $_SESSION after require_auth_api() — the
+//     write is silently dropped. Session writes belong in POST/PUT/PATCH/
+//     DELETE endpoints. Guarded by tests/_smoke_session_get_close.php.
+//   • An endpoint may `define('FF_SKIP_ANON_SESSION', true)` BEFORE requiring
+//     this file to skip session start for cookie-less (anonymous) callers —
+//     no session file, no Set-Cookie. Only for public endpoints that never
+//     need a session for anonymous callers (today: api/v1/health.php).
 _ff_session_start();
 
 // ── API context flag ─────────────────────────────────────────

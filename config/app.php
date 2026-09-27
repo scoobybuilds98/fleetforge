@@ -164,7 +164,21 @@ ini_set('log_errors', '1');
 // ============================================================
 $_sessionLifetime = (int) env('SESSION_LIFETIME', 28800); // 8 hours default
 
-ini_set('session.gc_maxlifetime',  (string) $_sessionLifetime);
+// S-PERF-3: gc_maxlifetime is the FILE-retention floor, not the login timeout.
+// It must cover the LONGEST session the app promises: admin SESSION_LIFETIME
+// (8 h, enforced by includes/auth.php via ff_last_activity) AND the customer
+// portal's 24 h (app/portal/includes/auth.php). Both share this session
+// save_path, so the floor is 86400 whenever SESSION_LIFETIME is shorter.
+// Raising it does NOT lengthen any login — the in-app inactivity checks still
+// log people out on time; it only stops PHP deleting a still-valid session file.
+//
+// !! On Debian/Ubuntu prod this ini_set is NOT enough. The distro's
+// phpsessionclean cron (/usr/lib/php/sessionclean, :09/:39) never sees runtime
+// ini_set — it reads php.ini + conf.d only, and with the stock 1440 it deletes
+// sessions after 24-54 min idle (silent logouts + stale-CSRF 403s on save).
+// Every server MUST also carry /etc/php/8.2/fpm/conf.d/99-fleetforge-session.ini
+// with `session.gc_maxlifetime = 86400` (OP-2; see docs/runbooks/deploy.md).
+ini_set('session.gc_maxlifetime',  (string) max($_sessionLifetime, 86400));
 ini_set('session.cookie_lifetime', '0');           // Cookie expires when browser closes
 ini_set('session.cookie_httponly', '1');           // JS cannot read the cookie
 ini_set('session.cookie_samesite', 'Lax');         // CSRF mitigation

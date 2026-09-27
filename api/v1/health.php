@@ -29,7 +29,25 @@ declare(strict_types=1);
 // HTTP 200 is returned in both "ok" and "degraded" states so
 // that load balancers do not route traffic away from degraded
 // nodes — the caller decides how to interpret "degraded".
+// bin/deploy.sh's health gate relies on that default (curl -f).
+//
+// STRICT MODE (S-PERF-3) — GET /fleetforge/api/v1/health?strict=1
+// Same body, but HTTP 503 whenever status !== "ok". This exists for
+// UPTIME MONITORS ONLY (Sentry uptime treats non-2xx as down, and it
+// never parses JSON). Before this, the monitor polled the login page,
+// which renders 200 even with MySQL down (settings_get() falls back to
+// defaults), so the known [2002] outage mode was invisible to it.
+// Never point the deploy gate or a load balancer at strict mode.
+// See docs/runbooks/deploy.md "Uptime monitor (strict health)".
 // ============================================================
+
+// S-PERF-3: anonymous callers (the uptime bot, 1,440×/day) get no session
+// file and no Set-Cookie. Only skipped when the request has NO ff_session /
+// ff_remember cookie — see _ff_session_start() in includes/auth.php — so an
+// authenticated caller still gets version / disk / schema.missing below.
+if (!defined('FF_SKIP_ANON_SESSION')) {
+    define('FF_SKIP_ANON_SESSION', true);
+}
 
 require_once dirname(__DIR__) . '/bootstrap.php';
 
@@ -81,21 +99,27 @@ if (is_dir($cacheDir)) {
 // (e.g. schema_migrations itself missing) degrades, never 500s the check.
 $migPending = null;
 $migOk      = false;
-try {
-    $runner   = new \FleetForge\Migrations\Runner(null, 'health-noop-never-applies');
-    $files    = $runner->listFiles();
-    $applied  = $runner->listApplied();
-    $migPending = 0;
-    foreach ($files as $f) {
-        if (!isset($applied[$f])) {
-            $migPending++;
+// S-PERF-3: with the DB already known to be down, skip the Runner entirely —
+// listApplied() would just run the whole connect-retry cycle a second time
+// (2.8 s → 1.4 s for a DB-down check). The result is exactly what the catch
+// below produced before: pending unknown (null), ok false.
+if ($dbOk) {
+    try {
+        $runner   = new \FleetForge\Migrations\Runner(null, 'health-noop-never-applies');
+        $files    = $runner->listFiles();
+        $applied  = $runner->listApplied();
+        $migPending = 0;
+        foreach ($files as $f) {
+            if (!isset($applied[$f])) {
+                $migPending++;
+            }
         }
+        $migOk = ($migPending === 0);
+    } catch (Throwable $e) {
+        error_log('[Health] migrate-state check failed: ' . $e->getMessage());
+        $migPending = null;   // unknown
+        $migOk      = false;
     }
-    $migOk = ($migPending === 0);
-} catch (Throwable $e) {
-    error_log('[Health] migrate-state check failed: ' . $e->getMessage());
-    $migPending = null;   // unknown
-    $migOk      = false;
 }
 
 // ── Critical-table presence (D-DEPLOY-2) ─────────────────────
@@ -169,4 +193,10 @@ if ($isAuthed) {
     }
 }
 
-json_success($data);
+// ── Strict mode (S-PERF-3) ──────────────────────────────────
+// Opt-in only (exactly `strict=1`): 503 + the SAME body when not "ok".
+// The default stays 200 in every state — bin/deploy.sh:356-380 curls
+// without strict and must keep getting a parseable 200.
+$strict = (($_GET['strict'] ?? '') === '1');
+
+json_success($data, ($strict && $status !== 'ok') ? 503 : 200);

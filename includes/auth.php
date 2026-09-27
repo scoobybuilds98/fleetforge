@@ -31,6 +31,23 @@ function _ff_session_start(): void
     if ($started) return;
     $started = true;
 
+    // S-PERF-3: opt-in anonymous session skip (FF_SKIP_ANON_SESSION, defined
+    // by an endpoint BEFORE it requires api/bootstrap.php — today only
+    // api/v1/health.php). The uptime monitor polls health once a minute with
+    // no cookies; each hit used to mint a brand-new session file and a
+    // Set-Cookie it never sends back. Skip ONLY when the request carries
+    // neither the session cookie nor a remember-me cookie — any caller that
+    // could be (or become) logged in goes through the normal path unchanged,
+    // so authenticated health callers still get their extra fields.
+    // With no session, $_SESSION stays unset and every reader here uses `??`,
+    // so current_user() is simply null.
+    if (defined('FF_SKIP_ANON_SESSION') && FF_SKIP_ANON_SESSION === true
+        && session_status() === PHP_SESSION_NONE
+        && !isset($_COOKIE[session_name()])
+        && !isset($_COOKIE['ff_remember'])) {
+        return;
+    }
+
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
     }
@@ -98,6 +115,13 @@ function require_auth(): void
 }
 
 // require_auth_api() — return 401 JSON if no valid admin session
+//
+// S-PERF-3 CONTRACT: a GET/HEAD API endpoint must NEVER write $_SESSION after
+// calling this function. For GET/HEAD the session is saved and its file lock
+// released at the end of this function (see _ff_release_session_lock_for_read()),
+// so a later $_SESSION write in the same request stays in memory and is
+// silently dropped. Anything that must persist session state belongs in a
+// POST/PUT/PATCH/DELETE endpoint. Enforced by tests/_smoke_session_get_close.php.
 function require_auth_api(): void
 {
     if (!current_user()) {
@@ -109,6 +133,72 @@ function require_auth_api(): void
     // when multiple endpoints chain (rare) or when a page invokes both
     // require_auth() + an inline API call within one PHP process.
     _ff_check_permission_freshness(true); // API context → 401 on revocation
+
+    // S-PERF-3: must stay AFTER _ff_check_permission_freshness() — that call can
+    // rewrite the override maps in $_SESSION['ff_user'], and _ff_session_start()
+    // already stamped ff_last_activity / ran any remember-me restore. Closing
+    // any earlier would drop those writes and turn the refreshed overrides into
+    // a re-query on every request.
+    _ff_release_session_lock_for_read();
+}
+
+/**
+ * S-PERF-3: save the session and release its file lock early on read-only
+ * (GET/HEAD) API requests.
+ *
+ * WHY: PHP's `files` session handler holds an exclusive flock on the session
+ * file from session_start() until the script exits. Every XHR a page fires in
+ * "parallel" (the dashboard's 4 data calls + the topbar's badge polls, a list
+ * page's rows + KPIs) therefore ran one after another, and a slow GET (a cold
+ * dashboard/charts rebuild, an invoice PDF) held every sibling request hostage
+ * for its whole run. Measured locally: dashboard 6-XHR burst 23 → 14 ms warm,
+ * and a badge count behind a PDF render 26 → 6 ms.
+ *
+ * Guards:
+ *   - PHP_SAPI 'cli' is skipped so smokes/CLI scripts that call
+ *     require_auth_api() keep their session open exactly as before.
+ *   - Only an ACTIVE session is closed (a destroyed/never-started one is a no-op).
+ *   - The method must be literally GET or HEAD — no default-to-GET fallback.
+ *     Write methods keep the lock for the whole request so their $_SESSION
+ *     writes (theme, MFA setup, bank-import preview) persist and stay
+ *     serialised against concurrent requests.
+ *
+ * $_SESSION stays readable after the close (current_user(), can(),
+ * can_view_financials() all read the in-memory copy), so reads are unaffected.
+ *
+ * Outside production a shutdown tripwire logs any $_SESSION change made after
+ * the close, so a future GET endpoint that (wrongly) writes session state shows
+ * up in the dev error log instead of failing silently.
+ */
+function _ff_release_session_lock_for_read(): void
+{
+    if (PHP_SAPI === 'cli') return;
+    if (session_status() !== PHP_SESSION_ACTIVE) return;
+    $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? ''));
+    if ($method !== 'GET' && $method !== 'HEAD') return;
+
+    session_write_close();
+
+    // Dev-only tripwire (never on production — zero cost there). Diagnostic
+    // only: any failure to hash is swallowed so it can never break a response.
+    if (APP_ENV !== 'production') {
+        try {
+            $closedHash = md5(serialize($_SESSION ?? []));
+        } catch (\Throwable) {
+            return;
+        }
+        register_shutdown_function(static function () use ($closedHash): void {
+            try {
+                if (md5(serialize($_SESSION ?? [])) !== $closedHash) {
+                    error_log('[FF auth] S-PERF-3: $_SESSION was modified after the GET session close in '
+                        . ($_SERVER['REQUEST_URI'] ?? '?') . ' — that write was NOT saved. '
+                        . 'Move session writes to a POST endpoint.');
+                }
+            } catch (\Throwable) {
+                // diagnostic only
+            }
+        });
+    }
 }
 
 // require_permission() — 403 if the current user lacks the given permission
