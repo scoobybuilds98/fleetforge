@@ -1109,6 +1109,8 @@ $renderGuide = static function (string $tab) use ($guides, $canEdit, $isClosed):
         $activityEntityId   = (int) $cycle['id'];
         $activityOriginAt   = (string) $cycle['created_at'];
         $activityOriginBy   = $cycle['opened_by_name'] ?? 'scheduled job';
+        // S-PERF-3: fetch the timeline on first reveal, not on every view.
+        $activityLazyWhen   = "tab === 'activity'";
         require FF_ROOT . '/includes/partials/activity-log.php';
         ?>
     </section>

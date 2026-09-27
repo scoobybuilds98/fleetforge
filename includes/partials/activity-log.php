@@ -5,9 +5,12 @@ declare(strict_types=1);
  * FleetForge — Reusable Activity Log Partial
  *
  * @file        includes/partials/activity-log.php
- * @description Renders a lazy-loaded, paginated timeline of every human-
+ * @description Renders a paginated, client-fetched timeline of every human-
  *              initiated change to an entity. Consumed by every entity show
  *              page (customers, leases, equipment, users, vendors, etc.).
+ *              By default the timeline is fetched as soon as Alpine boots
+ *              (eager); a caller that hosts it inside a hidden tab opts into
+ *              lazy loading with $activityLazyWhen (see below).
  *
  * Required PHP variables (set by the including page before this require):
  *   string      $activityEntityType  — audit_log.entity_type  (e.g. 'customer')
@@ -16,6 +19,24 @@ declare(strict_types=1);
  * Optional PHP variables for guaranteed origin event:
  *   string      $activityOriginAt    — entity created_at datetime (always shows creation)
  *   string|null $activityOriginBy    — name of the user who created the entity
+ *
+ * Optional PHP variable for lazy loading (S-PERF-3):
+ *   string      $activityLazyWhen    — a JS expression, evaluated in the
+ *                                      including page's Alpine scope, that is
+ *                                      true while the Activity panel is shown
+ *                                      (e.g. "tab === 'activity'"). When set,
+ *                                      the first fetch waits until it turns
+ *                                      true — reactively, so a hash-restored
+ *                                      #activity tab still loads on its own —
+ *                                      and happens once; tab away/back does
+ *                                      not refetch. Only the 4 tab-hosted
+ *                                      callers set it (leases, equipment,
+ *                                      customers, billing/cycle). The inline
+ *                                      callers (vendors, payments, users, …)
+ *                                      leave it unset: their card is always
+ *                                      visible, so fetching at boot is right.
+ *                                      Must be a trusted, page-authored literal
+ *                                      — it is emitted as Alpine code.
  *
  * When $activityOriginAt is set the API will inject a "Record created" entry at
  * the bottom of the last page if no 'create' action already exists in audit_log,
@@ -35,6 +56,11 @@ $activityEntityType = (string) $activityEntityType;
 $activityEntityId   = (int) $activityEntityId;
 $activityOriginAt   = isset($activityOriginAt) ? (string) $activityOriginAt : '';
 $activityOriginBy   = isset($activityOriginBy) ? (string) ($activityOriginBy ?? '') : '';
+// S-PERF-3: opt-in lazy load. Prod logs showed one audit/history GET per
+// lease/unit/customer view (180 in 14 days, zero Activity clicks behind them)
+// because the tab panels are x-show — hidden but mounted — so x-init="load()"
+// fired on every page view. The default stays eager for the inline callers.
+$activityLazyWhen   = isset($activityLazyWhen) ? trim((string) $activityLazyWhen) : '';
 ?>
 
 <div x-data="FF_ActivityLog(
@@ -44,7 +70,11 @@ $activityOriginBy   = isset($activityOriginBy) ? (string) ($activityOriginBy ?? 
         '<?= e($activityOriginAt) ?>',
         '<?= e($activityOriginBy) ?>'
      )"
+<?php if ($activityLazyWhen !== ''): ?>
+     x-effect="if ((<?= e($activityLazyWhen) ?>) && !loaded) { loaded = true; load(); }">
+<?php else: ?>
      x-init="load()">
+<?php endif; ?>
 
     <!-- Loading skeleton -->
     <template x-if="loading">
@@ -146,6 +176,11 @@ function FF_ActivityLog(entityType, entityId, apiUrl, originAt, originBy) {
         perPage:  25,
         loading:  false,
         error:    null,
+        // S-PERF-3: set by the lazy x-effect the moment it first fires, BEFORE
+        // the fetch — so a failed fetch can't re-trigger the effect in a loop
+        // (loading flipping back to false would otherwise re-run it); Retry
+        // and pagination call load() directly and are unaffected.
+        loaded:   false,
 
         get totalPages() {
             return this.perPage > 0 ? Math.ceil(this.total / this.perPage) : 1;
@@ -241,14 +276,30 @@ function FF_ActivityLog(entityType, entityId, apiUrl, originAt, originBy) {
 
         formatDate(dt) {
             if (!dt) return '';
-            // MySQL DATETIME is stored in server local time (America/Vancouver).
-            // Replace the space separator so Date() parses it without a TZ suffix.
+            // S-PERF-3 timezone fix: audit_log.created_at (DEFAULT
+            // CURRENT_TIMESTAMP) and the origin_at created_at stamps are UTC —
+            // includes/db.php has pinned the session to '+00:00' since session 1,
+            // so this holds for historical rows too. The old
+            // new Date('Y-m-d H:i:s') parsed them as the BROWSER's local time,
+            // showing every entry 7h (PDT) / 8h (PST) ahead. FF_parseUtc (the
+            // S-UTC-STAMPS helper in all three headers) appends the Z; render in
+            // the company timezone like FF_formatUtc / format_datetime(), so the
+            // synthetic "Record created" row matches the rail's "Created" line.
+            const opts = {
+                year: 'numeric', month: 'short', day: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+            };
             try {
-                const d = new Date(dt.replace(' ', 'T'));
-                return d.toLocaleString(undefined, {
-                    year: 'numeric', month: 'short', day: 'numeric',
-                    hour: '2-digit', minute: '2-digit',
-                });
+                const d = window.FF_parseUtc
+                    ? window.FF_parseUtc(dt)
+                    : new Date(String(dt).replace(' ', 'T') + 'Z');
+                if (!d || isNaN(d.getTime())) return dt;
+                try {
+                    return d.toLocaleString(undefined, Object.assign({ timeZone: window.FF_TIMEZONE || undefined }, opts));
+                } catch (_) {
+                    // Unknown/invalid IANA zone in settings → browser zone.
+                    return d.toLocaleString(undefined, opts);
+                }
             } catch (_) {
                 return dt;
             }

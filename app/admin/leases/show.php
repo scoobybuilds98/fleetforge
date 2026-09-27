@@ -945,7 +945,10 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     <template x-if="tab === 'status_log'">
         <div class="card ff-tab-animated">
             <div class="card-header"><div class="card-title">Status Log</div></div>
-            <template x-if="!lease || !lease.status_log || lease.status_log.length === 0">
+            <!-- S-PERF-3: a #status_log deep link now shows this tab while the
+                 lease is still loading — hold the empty state until it lands
+                 (or the load fails) so it doesn't flash "No status history". -->
+            <template x-if="(lease || !loading) && (!lease || !lease.status_log || lease.status_log.length === 0)">
                 <div class="empty-state">
                     <p class="empty-state-title">No status history</p>
                     <p class="empty-state-text">Status changes will appear here.</p>
@@ -2086,6 +2089,8 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
                 $activityEntityId   = $leaseId;
                 $activityOriginAt   = $lease['created_at'];
                 $activityOriginBy   = $lease['created_by_name'] ?? null;
+                // S-PERF-3: fetch the timeline on first reveal, not on every view.
+                $activityLazyWhen   = "tab === 'activity'";
                 ?>
                 <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
             </div>
@@ -2338,7 +2343,13 @@ function FF_LeaseDetail() {
         },
 
         async init() {
-            await this.loadLease();
+            // S-PERF-3: start the lease fetch but DON'T await it before the
+            // hash-tab block — a deep-linked tab (#invoices, #documents, …) used
+            // to wait a full api/v1/leases/show round-trip before its own fetch
+            // even started. None of the tab loaders below read this.lease (they
+            // key off the server-rendered lease id); the Overview and Status Log
+            // templates gate on `loading` / `lease`, so they render the same.
+            const _leaseReady = this.loadLease();
 
             // ── Tab persistence (FF_TabHash) ─────────────────────────────────
             // Tab clicks use @click="tab='x'; loadX()" — those continue to
@@ -2358,7 +2369,11 @@ function FF_LeaseDetail() {
             if (_initTab === 'documents'     )                            this.loadDocuments();
 
             FF_TabHash.watchUnload(() => this.tab);
-            this.$nextTick(() => FF_TabHash.restoreScroll(_initTab));
+            // S-PERF-3: restore the saved scroll only once the lease has landed
+            // and Alpine has rendered it — the same moment as before the fetch
+            // stopped being awaited. Restoring over the Overview skeleton would
+            // clamp a reload-while-scrolled to the (shorter) skeleton height.
+            _leaseReady.then(() => this.$nextTick(() => FF_TabHash.restoreScroll(_initTab)));
 
             // $watch handles hash write + scroll only; lazy-loading is in @click.
             let _prevTab = _initTab;
@@ -2367,6 +2382,9 @@ function FF_LeaseDetail() {
                 FF_TabHash.onSwitchKeep(_prevTab, tab, this.$refs.tabBar);
                 _prevTab = tab;
             });
+
+            // Keep init()'s promise settling after the lease, as before.
+            await _leaseReady;
         },
 
         // ── Amendments (AMEND-1) ─────────────────────────────────

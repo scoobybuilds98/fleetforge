@@ -1730,7 +1730,12 @@ include FF_ROOT . '/includes/partials/ai-panel.php';
     <div x-show="activeTab === 'activity'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to" role="tabpanel">
         <div class="card">
             <div class="card-body">
-                <?php $activityEntityType = 'customer'; $activityEntityId = $customerId; ?>
+                <?php
+                $activityEntityType = 'customer';
+                $activityEntityId   = $customerId;
+                // S-PERF-3: fetch the timeline on first reveal, not on every view.
+                $activityLazyWhen   = "activeTab === 'activity'";
+                ?>
                 <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
             </div>
         </div>

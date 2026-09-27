@@ -2069,7 +2069,11 @@ $_expTone = $_expDays === null ? 'slate' : ($_expDays < 0 ? 'red' : ($_expDays <
         <!-- SAMSARA-2: dropdown lists vehicles AND trailers; the
              entity_type tag is rendered as a prefix so users can
              tell at a glance which API path the unit will sync via. -->
-        <template x-if="!unit?.samsara_vehicle_id">
+        <!-- S-PERF-3: `!loading` — a #tracking deep link now shows this tab
+             before the unit API answers; don't flash the picker for a unit
+             that is actually linked. (loadUnit() never resets loading, so the
+             link/unlink refreshes don't blank it.) -->
+        <template x-if="!loading && !unit?.samsara_vehicle_id">
             <div class="card spec-card">
                 <div class="card-header" style="padding:12px 16px;">
                     <div class="card-title">Link to Samsara</div>
@@ -2351,7 +2355,12 @@ $_expTone = $_expDays === null ? 'slate' : ($_expDays < 0 ? 'red' : ($_expDays <
     <div x-show="activeTab === 'activity'" x-transition:enter="ff-tab-enter" x-transition:enter-start="ff-tab-enter-from" x-transition:enter-end="ff-tab-enter-to">
         <div class="card">
             <div class="card-body">
-                <?php $activityEntityType = 'equipment_unit'; $activityEntityId = $unitId; ?>
+                <?php
+                $activityEntityType = 'equipment_unit';
+                $activityEntityId   = $unitId;
+                // S-PERF-3: fetch the timeline on first reveal, not on every view.
+                $activityLazyWhen   = "activeTab === 'activity'";
+                ?>
                 <?php require_once FF_ROOT . '/includes/partials/activity-log.php'; ?>
             </div>
         </div>
@@ -2574,6 +2583,13 @@ if (!empty($unit['samsara_vehicle_id'])) {
 
 <script>
 function FF_UnitDetail() {
+    // S-PERF-3: the initial api/v1/equipment/units/show promise, kept in the
+    // closure (not reactive state) so openSamsaraTab() can wait for the unit on
+    // a #tracking deep link now that init() no longer awaits it up front.
+    let _unitReady = Promise.resolve();
+    // Server-side link state, used to decide the Overview distance-log fetch
+    // before the unit API has answered (this.unit wins once it has).
+    const _serverHasSamsara = <?= json_encode(!empty($unit['samsara_vehicle_id'])) ?>;
     return {
         unit:                null,
         statusLog:           [],
@@ -2688,15 +2704,14 @@ function FF_UnitDetail() {
         linkedAssetId:        <?= (int) $linkedAssetId ?>,
 
         async init() {
-            await this.loadUnit();
-        },
-
-        async loadUnit() {
-            try {
-                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/show') ?>?id=<?= $unitId ?>');
-                if (r.success) this.unit = r.data;
-            } catch(e) { /* page already rendered server-side */ }
-            this.loading = false;
+            // S-PERF-3: tab wiring lives HERE, once. It used to sit at the end of
+            // loadUnit(), which the Samsara link / unlink / Sync Now handlers
+            // re-run — each re-run stacked another $watch (N clicks → N+1
+            // fetches per tab switch), another pagehide hook, re-fired the
+            // hash tab's loaders and re-restored the scroll. The unit fetch is
+            // also no longer awaited first, so a deep-linked tab's own fetch
+            // starts in parallel with it.
+            _unitReady = this.loadUnit();
 
             // ── Tab persistence (FF_TabHash) ─────────────────────────────────
             // Shared helper: trigger lazy-loads for a tab on first visit.
@@ -2712,7 +2727,11 @@ function FF_UnitDetail() {
                 if (tab === 'inspections'   && !this.inspectionsLoaded)      this.loadInspections();
                 if (tab === 'documents'     && !this.docsLoaded)             this.loadDocuments();
                 // Overview: load saved distance logs (card lives here now).
-                if (tab === 'overview' && this.unit?.samsara_vehicle_id && !this.distLogsLoaded) this.loadDistanceLogs();
+                // S-PERF-3: before the unit API answers, this.unit is null —
+                // fall back to the server-rendered link state; after a link /
+                // unlink the refreshed this.unit decides, exactly as before.
+                const _linked = this.unit ? !!this.unit.samsara_vehicle_id : _serverHasSamsara;
+                if (tab === 'overview' && _linked && !this.distLogsLoaded) this.loadDistanceLogs();
                 // SAMSARA-1: open Samsara tab — load picker if unmapped,
                 // mount the live map if mapped.
                 if (tab === 'tracking') this.openSamsaraTab();
@@ -2740,7 +2759,10 @@ function FF_UnitDetail() {
 
             // Save scroll on unload; restore position after Alpine renders.
             FF_TabHash.watchUnload(() => this.activeTab);
-            this.$nextTick(() => FF_TabHash.restoreScroll(_initTab));
+            // S-PERF-3: restore once the unit has landed and rendered (as when
+            // this block ran at the end of loadUnit) — the Overview is a
+            // skeleton until then and would clamp the saved scroll position.
+            _unitReady.then(() => this.$nextTick(() => FF_TabHash.restoreScroll(_initTab)));
 
             // Track previous tab so onSwitch can save its scroll.
             let _prevTab = _initTab;
@@ -2750,6 +2772,19 @@ function FF_UnitDetail() {
                 _prevTab = tab;
                 _onTabEnter(tab);
             });
+
+            // Keep init()'s promise settling after the unit, as before.
+            await _unitReady;
+        },
+
+        // Fetch (or re-fetch, after a Samsara link / unlink / sync) the unit
+        // row. Data only — S-PERF-3 moved the tab wiring into init().
+        async loadUnit() {
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/show') ?>?id=<?= $unitId ?>');
+                if (r.success) this.unit = r.data;
+            } catch(e) { /* page already rendered server-side */ }
+            this.loading = false;
         },
 
         async loadStatusLog() {
@@ -3094,7 +3129,11 @@ function FF_UnitDetail() {
 
         // Tab dispatcher — picks the right initializer based on
         // whether the unit is currently linked to a Samsara vehicle.
-        openSamsaraTab() {
+        async openSamsaraTab() {
+            // S-PERF-3: on a #tracking deep link this runs before the unit API
+            // has answered — wait for it so a linked unit gets its map instead
+            // of the "Link to Samsara" picker fetch. Resolves immediately after.
+            if (!this.unit) await _unitReady;
             if (this.unit?.samsara_vehicle_id) {
                 // Mapped state — render the live map (must defer one
                 // tick so Leaflet sees the now-visible #unit-tracking-map div).
@@ -3102,7 +3141,10 @@ function FF_UnitDetail() {
             } else {
                 // Unmapped — fetch the vehicle dropdown source if we
                 // haven't already, so the link form is ready to use.
-                if (!this.samsaraVehiclesLoaded) this.loadSamsaraVehicles();
+                // S-PERF-3: also skip while a fetch is in flight — two tab
+                // entries inside the initial unit wait (deep link + a quick
+                // click away and back) both resume here after the await.
+                if (!this.samsaraVehiclesLoaded && !this.samsaraVehiclesLoading) this.loadSamsaraVehicles();
             }
         },
 
