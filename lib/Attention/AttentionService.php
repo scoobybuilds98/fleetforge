@@ -44,7 +44,8 @@ declare(strict_types=1);
  *              app/admin/notifications/index.php, app/admin/dashboard/index.php
  * Defines:     FleetForge\Attention\AttentionService
  *
- * @session S-ATTENTION-INBOX
+ * @session S-ATTENTION-INBOX, S-PERF-3 (badge(): updates_unread is a 0/1 flag;
+ *          per-request memo + forgetBadge())
  */
 
 namespace FleetForge\Attention;
@@ -73,6 +74,15 @@ final class AttentionService
      * engine checks never queue real messages.
      */
     private static bool $channels = true;
+
+    /**
+     * Per-request badge() results keyed "userId|roleSlug" (S-PERF-3). Cleared
+     * by forgetBadge(), which every attention_items mutator below calls
+     * first. A static: lives for one PHP request (or one CLI run).
+     *
+     * @var array<string, array{total: int, urgent: int, mine: int, updates_unread: int}>
+     */
+    private static array $badgeMemo = [];
 
     // ────────────────────────────────────────────────────────────────────────
     // Listeners
@@ -161,6 +171,7 @@ final class AttentionService
      */
     public static function raise(Kind $kind, ?int $entityId, array $data, array $audience = []): array
     {
+        self::forgetBadge(); // S-PERF-3: counts may change below — drop the memo
         $key      = self::itemKey($kind, $entityId);
         $title    = mb_substr(trim((string) ($data['title'] ?? $kind->label())), 0, 300);
         $facts    = self::normalizeFacts($data['facts'] ?? []);
@@ -289,6 +300,7 @@ final class AttentionService
      */
     public static function clear(Kind $kind, ?int $entityId, string $why = 'Fixed'): bool
     {
+        self::forgetBadge(); // S-PERF-3: counts may change below — drop the memo
         $row = self::liveRow(self::itemKey($kind, $entityId));
         if ($row === null) {
             return false;
@@ -439,6 +451,7 @@ final class AttentionService
      */
     public static function wakeSnoozed(): int
     {
+        self::forgetBadge(); // S-PERF-3: counts may change below — drop the memo
         $rows = \db_select(
             "SELECT id FROM attention_items
               WHERE status = 'snoozed' AND snoozed_until IS NOT NULL AND snoozed_until <= UTC_TIMESTAMP()"
@@ -460,6 +473,7 @@ final class AttentionService
      */
     public static function escalate(): array
     {
+        self::forgetBadge(); // S-PERF-3: counts may change below — drop the memo
         $hours = max(1, (int) \settings_get('notifications.escalate_after_hours', '24'));
         $rows = \db_select(
             "SELECT * FROM attention_items
@@ -603,15 +617,36 @@ final class AttentionService
     }
 
     /**
-     * Everything the bell needs: Needs attention counts + unread updates.
-     * Never throws (the bell must never break a page).
+     * Everything the bell needs: Needs attention counts + an "unread updates"
+     * flag. Never throws (the bell must never break a page).
+     *
+     * updates_unread is a 0/1 FLAG, not a count (S-PERF-3). Every reader
+     * (topbar dot + aria label, the Updates tab new-dot, the Mark-all-read
+     * disabled state, FF_Notifications) only asks "any unread?", and the old
+     * COUNT(*) walked each manager's ~7k-row unread backlog on prod (~20 ms
+     * per page render and per 60 s bell poll). EXISTS stops at the first live
+     * unread row. If a UI ever needs the NUMBER, add a separate COUNT there —
+     * don't widen this hot path back to a count.
+     *
+     * Memoised per request (S-PERF-3): the dashboard and Notifications pages
+     * call badge() themselves AND the topbar calls it again in the same
+     * request. The memo is dropped by every mutator in this class (raise,
+     * clear, act, wakeSnoozed, escalate) and by forgetBadge(), so a read
+     * after an attention_items write in the same request is never stale.
+     * Writes to `notifications` (NotificationService, notifications/
+     * mark_read.php) do NOT drop it — nothing re-reads the badge after one
+     * today; if something ever does, call forgetBadge() first.
      *
      * @param  int    $userId
      * @param  string $roleSlug
-     * @return array{total: int, urgent: int, mine: int, updates_unread: int}
+     * @return array{total: int, urgent: int, mine: int, updates_unread: int}  updates_unread ∈ {0,1}
      */
     public static function badge(int $userId, string $roleSlug): array
     {
+        $memoKey = $userId . '|' . $roleSlug;
+        if (isset(self::$badgeMemo[$memoKey])) {
+            return self::$badgeMemo[$memoKey];
+        }
         $out = ['total' => 0, 'urgent' => 0, 'mine' => 0, 'updates_unread' => 0];
         try {
             $out = array_merge($out, self::counts($userId, $roleSlug));
@@ -619,14 +654,30 @@ final class AttentionService
             error_log('[Attention] badge counts failed: ' . $e->getMessage());
         }
         try {
+            // S-PERF-3: existence probe, not COUNT(*) — see the docblock.
+            // db_count() casts to int, so this is exactly 0 or 1 and the
+            // strict `=== 0` check on the Notifications page still works.
             $out['updates_unread'] = \db_count(
-                'SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL',
+                'SELECT EXISTS(SELECT 1 FROM notifications WHERE user_id = ? AND is_read = 0 AND deleted_at IS NULL)',
                 [$userId]
             );
         } catch (\Throwable) {
             // leave 0
         }
-        return $out;
+        return self::$badgeMemo[$memoKey] = $out;
+    }
+
+    /**
+     * Drop the per-request badge() memo (S-PERF-3). Call before re-reading
+     * the badge after changing attention items or notifications in the same
+     * request (api/v1/attention/act.php does). The mutators in this class
+     * already call it.
+     *
+     * @return void
+     */
+    public static function forgetBadge(): void
+    {
+        self::$badgeMemo = [];
     }
 
     /**
@@ -822,6 +873,7 @@ final class AttentionService
      */
     public static function act(int $itemId, int $userId, string $roleSlug, string $action, array $opts = []): array
     {
+        self::forgetBadge(); // S-PERF-3: counts may change below — drop the memo
         if (!in_array($action, self::ACTIONS, true)) {
             throw new \InvalidArgumentException('Unknown action.');
         }

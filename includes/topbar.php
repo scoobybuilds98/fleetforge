@@ -35,7 +35,9 @@ declare(strict_types=1);
 // First-paint numbers: Needs attention (the number on the bell) + unread
 // updates (a dot). FF_Notifications() then polls /api/v1/attention/count.php
 // every 60s. AttentionService::badge() never throws, so the topbar always
-// renders.
+// renders. S-PERF-3: updates_unread is a 0/1 flag (only ever tested > 0), and
+// badge() is memoised per request, so pages that already called it
+// (dashboard, notifications) don't pay for it twice.
 $_bellBadge = ['total' => 0, 'urgent' => 0, 'mine' => 0, 'updates_unread' => 0];
 $_uid = current_user_id();
 if ($_uid) {
@@ -410,22 +412,25 @@ $_topbarCompany = (string) settings_get('company.name', 'FleetForge');
         <div class="topbar-tray" role="group" aria-label="Preferences and assistants">
 
         <!-- ── Theme toggle ──────────────────────────────────────────── -->
-        <!-- Initialises from <html data-theme>; tracks state locally so  -->
-        <!-- the icon flips immediately without waiting for a DOM read.    -->
+<?php /* S-PERF-3: `dark` starts from FF_Theme.current() (<html data-theme>)
+                 and is re-read after every change — including one made by the
+                 SIDEBAR toggle, via the ff:theme-changed event — so the icon never
+                 goes stale. FF_Theme.set() (app.js) is the ONE place that persists
+                 the choice (save_preference.php, S017-B). This used to post a second
+                 save_preference per click, and after a sidebar toggle its stale
+                 `dark` flag saved the OPPOSITE theme. (PHP comment: not shipped.) */ ?>
         <!-- S-TOPBAR-FIT: `topbar-theme` class added so the responsive blocks
              can hide the WRAPPER. Hiding only the inner button left this div
              in the flex row as a zero-width item still consuming an 8px gap. -->
         <div class="topbar-theme"
              x-data="{
-                dark: document.documentElement.getAttribute('data-theme') === 'dark',
+                dark: FF_Theme.current() === 'dark',
                 toggle() {
                     FF_Theme.toggle();
-                    this.dark = !this.dark;
-                    // WHY: persist preference to DB so it survives logout/login (S017-B)
-                    const newTheme = this.dark ? 'dark' : 'light';
-                    FF_Api.post('<?= base_url('api/v1/users/save_preference.php') ?>', { theme: newTheme }).catch(() => {});
+                    this.dark = FF_Theme.current() === 'dark';
                 }
-             }">
+             }"
+             @ff:theme-changed.window="dark = $event.detail.theme === 'dark'">
             <button class="btn-icon topbar-theme-btn"
                     @click="toggle()"
                     :title="dark ? 'Switch to light mode' : 'Switch to dark mode'"

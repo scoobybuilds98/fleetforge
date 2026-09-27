@@ -20,8 +20,9 @@ declare(strict_types=1);
  *          q         title search (optional)
  *          limit     1-200 (default 50), offset
  * @returns 200 { items[], total, counts{total,urgent,mine,updates_unread}, kinds[{key,label}] }
+ *          counts.updates_unread is a 0/1 flag, not a count (S-PERF-3).
  *
- * @session S-ATTENTION-INBOX
+ * @session S-ATTENTION-INBOX, S-PERF-3
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';

@@ -525,8 +525,9 @@ const FF_Theme = {
 
     /**
      * Apply a theme: updates the <html> attribute, persists to
-     * localStorage, and POSTs to the server so the preference
-     * survives a hard refresh.
+     * localStorage, fires 'ff:theme-changed', and POSTs to
+     * save_preference.php so the preference survives a hard refresh
+     * and follows the user to other browsers/devices.
      * @param {'light'|'dark'} theme
      */
     set(theme) {
@@ -542,8 +543,16 @@ const FF_Theme = {
         try {
             window.dispatchEvent(new CustomEvent('ff:theme-changed', { detail: { theme } }));
         } catch (_e) { /* CustomEvent unsupported — ignore */ }
-        // Non-blocking server persist (best-effort)
-        FF_Api.post(FF_Api.url('/api/v1/account/theme'), { theme }).catch(() => {});
+        // Non-blocking server persist (best-effort) so the server-rendered
+        // <html data-theme> (header.php, from the session) matches next load.
+        // S-PERF-3: this used to POST /api/v1/account/theme, which never
+        // existed (404 on every toggle) — so the sidebar toggle, the ONLY
+        // toggle under 1024px, never saved. save_preference.php updates
+        // users.theme_preference AND the session. This is the ONE persist per
+        // toggle: callers (topbar, sidebar) must not post it again. quiet: a
+        // background save must never pop the guidance modal. init() must
+        // never call set() — that would POST on every page load.
+        FF_Api.post(FF_Api.url('/api/v1/users/save_preference.php'), { theme }, { quiet: true }).catch(() => {});
     },
 
     toggle() {

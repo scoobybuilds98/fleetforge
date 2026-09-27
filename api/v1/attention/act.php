@@ -16,10 +16,10 @@ declare(strict_types=1);
  *            note?: string ≤ 500                        (done — required while the
  *                                                        problem is still there — / note / reopen)
  *            user_id?: int                              (assign) }
- * @returns 200 { item, counts }
+ * @returns 200 { item, counts }   counts.updates_unread is a 0/1 flag (S-PERF-3)
  *          404 not found / not visible · 409 wrong state · 422 bad input
  *
- * @session S-ATTENTION-INBOX
+ * @session S-ATTENTION-INBOX, S-PERF-3
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -55,6 +55,11 @@ try {
     $gone = str_contains($e->getMessage(), 'no longer exists');
     json_error($gone ? 'NOT_FOUND' : 'CONFLICT', $e->getMessage(), $gone ? 404 : 409);
 }
+
+// S-PERF-3: badge() is memoised per request. act() already drops the memo
+// before it writes, but say it here too so the counts below can never be a
+// pre-mutation copy if anything above ever reads the badge first.
+AttentionService::forgetBadge();
 
 json_success([
     'item'   => AttentionService::present($row, $userId, can_view_financials()),
