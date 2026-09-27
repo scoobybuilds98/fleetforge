@@ -1648,7 +1648,7 @@ sudo nano /etc/php/8.2/apache2/php.ini
 # session.use_strict_mode = 1
 # session.use_only_cookies = 1
 # session.sid_length = 48
-# session.gc_maxlifetime = 28800
+# session.gc_maxlifetime = 86400   (S-PERF-3: >= SESSION_LIFETIME; Debian's phpsessionclean reads THIS ini, not the app's ini_set)
 # max_input_vars = 5000
 # expose_php = Off
 # opcache.enable = 1

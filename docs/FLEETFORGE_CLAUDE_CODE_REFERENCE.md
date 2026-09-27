@@ -136,7 +136,7 @@ ini_set('session.cookie_httponly', '1');
 ini_set('session.cookie_samesite', 'Lax');
 ini_set('session.use_strict_mode', '1');
 ini_set('session.use_only_cookies', '1');
-ini_set('session.gc_maxlifetime',  '28800');
+ini_set('session.gc_maxlifetime',  (string) max(SESSION_LIFETIME, 86400)); // S-PERF-3
 ```
 
 Do NOT set `session.cookie_secure` in php.ini. Control it from code via FF_ENV.
@@ -2195,6 +2195,12 @@ if (!empty($vars) && method_exists($frame, 'setVars')) {
 **Rule:** bind boolean attributes (`disabled`, `checked`, `readonly`, `hidden`…) to a real boolean: `:disabled="!!busy[it.id]"`, never a lookup that can be `undefined`.
 **Test:** read `el.disabled` / `getAttribute('disabled')` on the rendered button in the browser, not the evaluated expression. `_smoke_attention_inbox.php` G guards the bell markup.
 
+### Trap 78: a GET API endpoint must never write `$_SESSION` — the lock is released before the endpoint runs
+
+**Symptom (S-PERF-3, 2026-09-28):** a user's parallel XHRs queued one behind another on the PHP session file lock (a count request behind a PDF took 30 ms instead of 4). `require_auth_api()` now calls `_ff_release_session_lock_for_read()` for GET/HEAD, so any `$_SESSION[...] = …` in a GET endpoint (or in a helper it calls, including by-reference passes like `fn($_SESSION['x'])`) is **silently dropped**.
+**Rule:** state changes go in POST/PUT/PATCH/DELETE endpoints. If a GET truly needs to write the session, do it before `require_auth_api()` returns (inside an allowlisted auth function) and add it to the smoke's allowlist with a reason.
+**Test:** `tests/_smoke_session_get_close.php` fails on any new GET-reachable write; outside production a shutdown tripwire logs late writes to the PHP error log.
+
 ---
 
 ## 12. PERMISSION MATRIX (quick reference)
@@ -2877,6 +2883,7 @@ Drift detected by the smoke test:
 - D131 — S-ATTENTION-WHATSAPP 2026-09-25: NEW `tests/_smoke_attention_whatsapp.php` **44 checks** (Meta replaced by `WhatsAppClient::setTransportForTesting`; A helpers — phone normalisation, template-param cleaning, quiet hours across midnight; B alert targeting — who can see + chose urgent, to-do waits, send once; C dispatch — payload/bearer/URL/wamid, quiet deferral, 429 retry vs 132001 fail, skipped when fixed first; D escalation super admins only; E summary 5 params + once per day; F update opt-in, money scrubbed, PERM-TEST override honoured, grouped burst silent; G status never backwards + HMAC; H cron + webhook subprocesses fail closed; static settings-group isolation + encrypted secrets).
 - D131 — S-ATTENTION-INBOX 2026-09-25: NEW `tests/_smoke_attention_inbox.php` **96 checks** (A schema + live_key uniqueness; B all 16 kinds' evaluateAll() on the real schema, every configured kind exists, every literal notify() type in api/app/lib/cron routes sanely; C engine in BEGIN/ROLLBACK — open once, refresh in place, done-needs-note, reopen only when worse, escalate once, snooze/effective-open/wake, clear + recurrence, event-only done clears, take/release/give-to visibility; D role visibility + named audience + money facts; E notify() routing — compliance event → item with no per-person rows, burst grouping, fallback to update; F cron/attention_sweep.php + switch-over dry run + attention/count, attention/index, notifications/index GET endpoints as subprocesses incl. dispatcher money scrub; G static — seed() not init(), !!busy, assets, every fix site re-checks, SES notifyRole gone). `_smoke_portal_request_notifications.php` C14–C16/C34 rewritten for the item model (38/38); `_smoke_module_chrome.php` +notifications page (14/14). Trap 77 added.
 - D131 — S-CHAT-SEEN-TIME 2026-09-25: `tests/_smoke_chat_rebuild.php` extended 134 → **143 checks** (section K with the SQL clock pinned via `SET TIMESTAMP`: `last_read_at` only moves when the read mark advances — not on the poll's re-read or on Delete chat; NULL → plain "Seen"; group = latest reader's time + per-reader list; portal = team's first read, unnamed).
+- D131 — S-PERF-3 2026-09-28: 5 NEW smokes — `_smoke_session_get_close.php` (static token scan of api/lib/includes/config: every `$_SESSION` write / by-ref pass / session helper must sit in a POST-only api file or an allowlisted pre-close auth function; live php -S: GET+HEAD release the lock, POST keeps it, late write dropped + tripwire, CLI unchanged), `_smoke_health_strict.php` (healthy + DB-down servers, strict 503 vs default 200, no Set-Cookie for anonymous), `_smoke_dashboard_month_windows.php` (month labels consecutive + distinct across a 2022–2027 day sweep, payment_speed by paid_date), `_smoke_equipment_units_kpis.php` (25 checks: tile parity with the old per_page=1 totals for users 54–58, 403 without equipment.view, no money), `_smoke_samsara_sync_exec.php` (48 checks: executes the real cron + sync-all + cache_cleanup in rolled-back transactions against a mocked Samsara; `--emit=DIR` for before/after DB-effect diffs). `_smoke_module_chrome.php` accepts `asset_v()` as well as `asset_url()`. **Sweeps must hard-exclude `_smoke_golive_reset.php`** (it wipes transaction tables). Trap 78 added.
 - KNOWN ISSUE #100 — `lease_billing_periods` precharge cleanup (still open; next discipline target)
 - Original Phase 2 reconcile: commit `a54ad7f` for the full-regen procedure
 
