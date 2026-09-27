@@ -40,7 +40,12 @@ declare(strict_types=1);
  *                mixed       no uniform border (a photo, a full-bleed badge) —
  *                            not trimmed, only resized
  *
- * @session     S-SIDEBAR-LOGO
+ *              It also keeps a byte-for-byte local copy of the uploaded
+ *              favicon (faviconFile(), S-PERF-3), served same-origin by the
+ *              same endpoint as ?kind=favicon so the <link rel="icon"> URL is
+ *              stable and browser-cacheable instead of a per-render presign.
+ *
+ * @session     S-SIDEBAR-LOGO, S-PERF-3
  */
 
 namespace FleetForge\Ui;
@@ -133,6 +138,59 @@ final class BrandLogo
         }
         $path = self::cacheBase($key) . ($kind === 'mark' ? '.mark.png' : '.png');
         return is_file($path) ? $path : null;
+    }
+
+    /**
+     * Local-disk copy of the uploaded favicon (settings brand.favicon_path),
+     * filled from storage on first request — S-PERF-3.
+     *
+     * WHY: the favicon used to be linked as a StorageClient::url() presign
+     * minted on every render; on S3 the signature changes every second, so
+     * the browser could never cache it. api/v1/storage/logo.php?kind=favicon
+     * now serves these bytes same-origin under a stable ?v=, immutable. The
+     * bytes are passed through untouched (PNG or ICO, ≤512 KB at upload) —
+     * no image processing, unlike the logo derivatives. Keeping a local copy
+     * also means the icon survives a storage-side disappearance of the
+     * object (see the S3 lifecycle finding in the S-PERF-3 plan).
+     *
+     * Unlike build(), a failure caches NOTHING: the endpoint answers it
+     * with a no-store response, so the next request simply retries.
+     *
+     * @param  string $key Storage key of the uploaded favicon.
+     * @return string|null Absolute path of the cached copy, or null when the
+     *                     object does not exist in storage (→ 404).
+     * @throws \Throwable  On a storage error, an oversized object or an
+     *                     unwritable cache (the endpoint falls back to a
+     *                     no-store redirect to the original upload).
+     */
+    public static function faviconFile(string $key): ?string
+    {
+        $path = FF_ROOT . '/storage/generated/brand/' . sha1('favicon|' . self::VERSION . '|' . $key) . '.fav';
+        if (is_file($path)) {
+            return $path;
+        }
+        // @: a local-driver read failure also raises a PHP warning before it
+        // throws; with display_errors on that output would pre-empt the
+        // endpoint's no-store fallback headers. The exception still carries it.
+        $bytes = @StorageClient::read($key);
+        if ($bytes === null || $bytes === '') {
+            return null;
+        }
+        // 2× the upload cap — anything bigger is not something brand.php wrote.
+        if (strlen($bytes) > 1024 * 1024) {
+            throw new \RuntimeException('favicon larger than 1 MB');
+        }
+        $dir = dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new \RuntimeException('favicon cache dir not creatable');
+        }
+        // Atomic (temp + rename) — two first requests can race.
+        $tmp = $path . '.' . bin2hex(random_bytes(4)) . '.tmp';
+        if (@file_put_contents($tmp, $bytes) === false || !@rename($tmp, $path)) {
+            @unlink($tmp);
+            throw new \RuntimeException('favicon cache not writable');
+        }
+        return $path;
     }
 
     private static function cacheBase(string $key): string

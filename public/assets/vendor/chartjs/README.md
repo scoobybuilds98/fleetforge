@@ -26,8 +26,8 @@ independent; both are self-hosted in this `vendor/` directory tree.
 
 Re-fetch from cdn.jsdelivr or npm, replace `chart.umd.min.js` in this
 directory, update the version pin in the consumer comment + this README,
-and bump `FF_ASSET_VERSION` if any consumer page's CSS changes (the JS
-itself doesn't have a cache-bust query string today; URL change is
-sufficient).
+No version bump is needed: since S-PERF-3 asset URLs carry a per-file
+`?v=` token (`asset_v()` — the file's own mtime+size), so replacing the
+file changes its URL automatically.
 
 — S-PROD-3 (2026-05-14)

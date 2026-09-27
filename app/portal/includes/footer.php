@@ -335,9 +335,9 @@ $_ftMethods  = [
 
 <div id="ff-toast-container" role="region" aria-live="polite" aria-label="Notifications" aria-atomic="false"></div>
 
-<script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
-<script src="<?= asset_url('assets/js/portal.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
-<script defer src="<?= asset_url('assets/vendor/alpinejs/cdn.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+<script src="<?= e(asset_v('assets/js/app.js')) ?>"></script>
+<script src="<?= e(asset_v('assets/js/portal.js')) ?>"></script>
+<script defer src="<?= e(asset_v('assets/vendor/alpinejs/cdn.min.js')) ?>"></script>
 </body>
 </html>
 <?php unset($_ftCompany, $_ftSummary, $_ftOnline, $_ftPath, $_ftBase, $_ftIs, $_ftPay, $_ftMethods, $_k, $_v); ?>

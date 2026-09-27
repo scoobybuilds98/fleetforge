@@ -89,6 +89,10 @@ function ff_mc_check(string $id, string $label, array $errs): void
 }
 
 $src = static fn (string $rel): string => (string) @file_get_contents(FF_ROOT . '/' . $rel);
+// S-PERF-3: shells link stylesheets via asset_v() (per-file ?v=) — accept it
+// alongside the older asset_url('…')?v=FF_ASSET_VERSION form.
+$loadsCss = static fn (string $source, string $file): bool =>
+    (bool) preg_match('~asset_(?:url|v)\(\'assets/css/' . preg_quote($file, '~') . '\'\)~', $source);
 
 // The converted pages: route → [file, accent, has KPI grid]
 $PAGES = [
@@ -176,7 +180,7 @@ ff_mc_check('C2', 'illustrations well-formed, titled, token-coloured, defined cl
 // ══ C3 ══════════════════════════════════════════════════════════
 $e = [];
 foreach (['includes/header.php', 'includes/header_embed.php'] as $shell) {
-    if (!str_contains($src($shell), "asset_url('assets/css/module-chrome.css')")) { $e[] = "{$shell} does not load module-chrome.css"; }
+    if (!$loadsCss($src($shell), 'module-chrome.css')) { $e[] = "{$shell} does not load module-chrome.css"; }
 }
 $cssNoComments = (string) preg_replace('~/\*.*?\*/~s', '', $css);
 // mask-image stencils use #000 as pure alpha — not a colour anyone sees
@@ -379,7 +383,7 @@ ff_mc_check('C7', 'dashboard renders per role: money charts/cards only with fina
 
 // ══ C8 ══════════════════════════════════════════════════════════
 $e = [];
-if (!str_contains($src('includes/header.php'), "asset_url('assets/css/shell.css')")) { $e[] = 'header.php does not load shell.css'; }
+if (!$loadsCss($src('includes/header.php'), 'shell.css')) { $e[] = 'header.php does not load shell.css'; }
 $shell = (string) preg_replace('~/\*.*?\*/~s', '', $src('public/assets/css/shell.css'));
 if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $shell, $hm)) { $e[] = "shell.css hardcodes {$hm[0]}"; }
 if (preg_match('/(^|[;{\s])width\s*:\s*var\(--sidebar-width/m', $shell)) { $e[] = 'shell.css sets a sidebar width (widths belong to app.css)'; }
@@ -417,7 +421,7 @@ ff_mc_check('C8', 'shell: stylesheet token-only + visual-only, grouped menu with
 // ══ C9 ══════════════════════════════════════════════════════════
 $e = [];
 $ssrc = $src('app/admin/settings/index.php');
-if (!str_contains($ssrc, "asset_url('assets/css/settings.css')")) { $e[] = 'settings page does not load settings.css'; }
+if (!$loadsCss($ssrc, 'settings.css')) { $e[] = 'settings page does not load settings.css'; }
 if (str_contains($ssrc, 'class="tab-bar"')) { $e[] = 'settings still renders the old tab bar'; }
 preg_match('/\$tabPermMap = \[(.*?)\];/s', $ssrc, $tm);
 preg_match_all("/'([a-z_]+)'\s*=>\s*'settings_/", $tm[1] ?? '', $tk);
@@ -453,7 +457,7 @@ ff_mc_check('C9', 'settings: grouped nav ↔ permission map ↔ panels, lockout 
 // ══ C10 ═════════════════════════════════════════════════════════
 $e = [];
 foreach (['includes/header.php', 'includes/header_embed.php'] as $shell) {
-    if (!str_contains($src($shell), "asset_url('assets/css/tables.css')")) { $e[] = "{$shell} does not load tables.css"; }
+    if (!$loadsCss($src($shell), 'tables.css')) { $e[] = "{$shell} does not load tables.css"; }
 }
 $tcss = (string) preg_replace('~/\*.*?\*/~s', '', $src('public/assets/css/tables.css'));
 if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $tcss, $hm)) { $e[] = "tables.css hardcodes {$hm[0]}"; }
@@ -529,7 +533,7 @@ $bgShells = ['includes/header.php', 'includes/header_embed.php', 'app/portal/inc
              'app/auth/mfa_challenge.php', 'app/auth/accept_invite.php'];
 foreach ($bgShells as $shell) {
     $ssrc2 = $src($shell);
-    if (!str_contains($ssrc2, "asset_url('assets/css/backgrounds.css')")) { $e[] = "{$shell} does not load backgrounds.css"; }
+    if (!$loadsCss($ssrc2, 'backgrounds.css')) { $e[] = "{$shell} does not load backgrounds.css"; }
     if (!str_contains($ssrc2, 'data-bg="<?= e(ff_background()) ?>"')) { $e[] = "{$shell} does not write data-bg"; }
 }
 if (!in_array(ff_background(), array_keys($bgReg), true)) { $e[] = 'ff_background() returned a key outside the registry'; }
@@ -581,7 +585,7 @@ ff_mc_check('C12', 'lists: tabs + pager in the table toolbar, strip ↔ focus fi
 // ══ C13 ═════════════════════════════════════════════════════════
 $e = [];
 foreach (['includes/header.php', 'includes/header_embed.php'] as $shell) {
-    if (!str_contains($src($shell), "asset_url('assets/css/records.css')")) { $e[] = "{$shell} does not load records.css"; }
+    if (!$loadsCss($src($shell), 'records.css')) { $e[] = "{$shell} does not load records.css"; }
 }
 $rcss = (string) preg_replace('~/\*.*?\*/~s', '', $src('public/assets/css/records.css'));
 if (preg_match('/#[0-9a-fA-F]{3,8}\b/', $rcss, $hm)) { $e[] = "records.css hardcodes {$hm[0]}"; }

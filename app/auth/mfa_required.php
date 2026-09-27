@@ -40,9 +40,9 @@ if (empty($_SESSION['ff_mfa_must_setup'])) {
     <title>MFA Setup Required — FleetForge</title>
     <?= ff_favicon_tags() ?>
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
     <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/backgrounds.css')) ?>">
     <?php
     // S-LUX-4: mirror the login brand-colour override (white-label chain).
     $_ffBrand = (string) (settings_get('brand.primary_color') ?: '');

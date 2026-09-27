@@ -321,14 +321,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // own name, tagline, logo and primary color. Every read falls back
 // to a safe default so an un-seeded DB still renders a usable form.
 $loginLogo    = (string) (settings_get('brand.logo_path')    ?? '');
-$loginFavicon = (string) (settings_get('brand.favicon_path') ?? '');
 $loginName    = (string) (settings_get('company.name')       ?: 'FleetForge');
 $loginTagline = (string) (settings_get('company.tagline')    ?? '');
 $loginColor   = (string) (settings_get('brand.primary_color') ?: '#2596be');
 $loginHover   = (string) (settings_get('brand.primary_hover') ?: '#1e7ea0');
 $loginLight   = (string) (settings_get('brand.primary_light') ?: '#e0f4fb');
 
-// Signed storage URLs for logo/favicon — only when paths exist.
+// Signed storage URL for the logo — only when the path exists.
 // Resolve the login logo URL with a two-source fallback:
 //   1) brand.logo_path settings row → StorageClient signed URL
 //      (this is what Settings → Design writes when an admin uploads a logo).
@@ -355,7 +354,8 @@ if ($loginLogoUrl === '') {
         }
     }
 }
-$loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url($loginFavicon, 86400) : '';
+// (S-PERF-3: the old $loginFaviconUrl presign here was dead — never echoed —
+// and cost an S3 presign per render; the <head> favicon is ff_favicon_tags().)
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark" data-bg="<?= e(ff_background()) ?>">
@@ -371,12 +371,14 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
 
     <!-- S-LUX-1: Geist variable fonts — self-hosted (@font-face in app.css), preloaded to avoid FOUT.
          crossorigin required even same-origin (font fetches are CORS-mode; mismatched preloads are discarded). -->
+<?php // S-PERF-3: NO GeistMono preload here — nothing on the login page renders in mono, so the
+          // 71 KB (incompressible woff2) preload only competed with app.css + Geist. @font-face in
+          // app.css still loads it lazily wherever mono is actually used. ?>
     <link rel="preload" href="<?= asset_url('assets/fonts/Geist[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="<?= asset_url('assets/fonts/GeistMono[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
 
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
     <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/backgrounds.css')) ?>">
 
     <!-- Brand color injection — mirrors includes/header.php so the
          login card uses the customer's primary color for focus
@@ -1134,7 +1136,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? \FleetForge\Storage\StorageClient::url
 </html>
 <?php
 unset($_csrfToken, $_flash, $error, $email,
-      $loginLogo, $loginFavicon, $loginName, $loginTagline,
+      $loginLogo, $loginName, $loginTagline,
       $loginColor, $loginHover, $loginLight,
-      $loginLogoUrl, $loginFaviconUrl);
+      $loginLogoUrl);
 ?>

@@ -23,7 +23,8 @@ renders a chart. Consumers:
 If a future session needs to upgrade ApexCharts, fetch the new minified
 file from the CDN (or npm package), replace `apexcharts.min.js` in this
 directory, update the version pin in `includes/footer.php`'s comment + in
-this README, and bump `FF_ASSET_VERSION` so the cache-bust query string
-on `app.js` invalidates the browser-cached chart code.
+this README, No version bump is needed: `includes/footer.php` loads it via
+`asset_v()` (S-PERF-3), whose per-file `?v=` token (mtime+size) changes
+when the file is replaced.
 
 — S-PROD-3 (2026-05-14)

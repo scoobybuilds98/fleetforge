@@ -43,8 +43,11 @@ If a future session needs to upgrade DM Sans / DM Mono to a newer
 version, re-fetch the @font-face CSS from Google Fonts (with a modern
 browser User-Agent), download the new woff2 files, and replace the
 existing files. The relative paths in app.css will continue to work
-unchanged. Bump `FF_ASSET_VERSION` so browsers re-fetch app.css and
-pick up the new font references.
+unchanged. IMPORTANT (S-PERF-3): /assets/ is served `immutable` and app.css
+references the woff2 files WITHOUT a query string, so a replacement file
+with the SAME name is never re-fetched by browsers that cached the old
+one. Give new font files NEW filenames and update app.css; app.css itself
+re-versions automatically via `asset_v()`.
 
 ## License
 

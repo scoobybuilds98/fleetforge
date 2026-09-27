@@ -49,7 +49,7 @@ echo pt_page_head([
     'sub'     => 'Text ' . $company . ' — everyone on your account sees this conversation. Tap the paper clip to share an invoice, lease or payment.',
 ]);
 ?>
-<link rel="stylesheet" href="<?= asset_url('assets/css/chat.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+<link rel="stylesheet" href="<?= e(asset_v('assets/css/chat.css')) ?>">
 
 <div class="cx cx--portal" x-data="FF_ChatApp(<?= e(json_encode($chatConfig, JSON_UNESCAPED_SLASHES)) ?>)">
     <section class="cx-thread" aria-label="Conversation with <?= e($company) ?>">
@@ -65,6 +65,6 @@ echo pt_page_head([
     </section>
 </div>
 
-<script src="<?= asset_url('assets/js/chat.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+<script src="<?= e(asset_v('assets/js/chat.js')) ?>"></script>
 
 <?php require_once dirname(__DIR__) . '/includes/footer.php'; ?>

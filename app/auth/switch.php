@@ -62,7 +62,7 @@ $_email   = (string) ($_me['email'] ?? '');
     <title>Already signed in — <?= e($_company) ?></title>
 
     <?= ff_favicon_tags() ?>
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
     <?php
     // Brand override. ff_brand_override_css() is the shared helper, but it was
     // introduced with the Northland rebrand and is not present on every

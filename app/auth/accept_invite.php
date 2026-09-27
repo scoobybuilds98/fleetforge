@@ -195,9 +195,9 @@ $_roleLabel = $_roleLabels[$invite['role_slug'] ?? ''] ?? ucfirst($invite['role_
     <title>Accept Invitation — FleetForge</title>
     <?= ff_favicon_tags() ?>
     <!-- Fonts self-hosted via @font-face in public/assets/css/app.css (S-PROD-3 2026-05-14) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
     <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/backgrounds.css')) ?>">
     <script>
         try { var t=localStorage.getItem('ff-theme'); if(t==='light'||t==='dark') document.documentElement.setAttribute('data-theme',t); } catch(e){}
     </script>

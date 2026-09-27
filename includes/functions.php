@@ -59,6 +59,62 @@ function asset_url(string $path = ''): string
 }
 
 // ============================================================
+// asset_v() — asset_url() plus a PER-FILE cache-buster (S-PERF-3)
+//
+//   In a template: href="…e(asset_v('assets/css/app.css'))…" (echo tag)
+//   asset_v('assets/css/app.css')
+//   → https://yourdomain.com/assets/css/app.css?v=tn2k8x1vpq
+//
+// WHY: the old `?v=FF_ASSET_VERSION` is the git HEAD hash, so EVERY deploy
+// gave every CSS/JS file a new URL — ~72% of prod deploys change no asset
+// at all, yet each one made the browser re-download the whole ~185 KB gz
+// set (330 KB on the dashboard, apexcharts included) and throw away V8's
+// code cache. The token here is the file's own mtime + size (base36), so
+// only files a deploy actually rewrote change URL.
+//
+// Deploy semantics: bin/deploy.sh updates the checkout with
+// `git pull --ff-only`, and git only rewrites the files a pull changes —
+// unchanged assets keep their mtime (prod still shows 2026-05-15 on the
+// vendor files), so their token is stable across deploys. A rollback or
+// checkout writes a fresh mtime on whatever it changes → a new token, which
+// is still correct. A bundle deploy (Northland) that resets every mtime
+// just busts everything, exactly like the HEAD hash did — no regression.
+// Size is folded in so a same-second rewrite with different content still
+// changes the token. Side effect for dev: an UNCOMMITTED CSS/JS edit now
+// busts the browser cache immediately (the HEAD hash only moved on commit).
+//
+// Cost: one stat() per distinct asset per request (memoised in a static;
+// filemtime + filesize share PHP's stat cache). A missing file falls back
+// to FF_ASSET_VERSION so the URL still works and behaves as before.
+//
+// Leave app/errors/*.php, the Sentry release and window.FF_ASSET_VERSION
+// on FF_ASSET_VERSION — the error pages may run before this file loads.
+// ============================================================
+if (!function_exists('asset_v')) {
+/**
+ * Versioned URL for a static file under public/.
+ *
+ * @param  string $path Path relative to public/ (e.g. 'assets/js/app.js').
+ * @return string       asset_url($path) . '?v=' . <mtime36><size36>
+ *                      (or FF_ASSET_VERSION when the file cannot be stat'ed).
+ */
+function asset_v(string $path): string
+{
+    static $tokens = [];
+    $path = ltrim($path, '/');
+    if (!isset($tokens[$path])) {
+        $file  = (defined('FF_ROOT') ? FF_ROOT : dirname(__DIR__)) . '/public/' . $path;
+        $mtime = @filemtime($file);
+        $size  = $mtime !== false ? @filesize($file) : false;
+        $tokens[$path] = ($mtime !== false && $size !== false)
+            ? base_convert((string) $mtime, 10, 36) . base_convert((string) $size, 10, 36)
+            : (defined('FF_ASSET_VERSION') ? (string) FF_ASSET_VERSION : '1');
+    }
+    return asset_url($path) . '?v=' . $tokens[$path];
+}
+}
+
+// ============================================================
 // ff_favicon_tags() — the SINGLE <link rel="icon"> for every <head>
 //
 // Returns exactly ONE icon link, never two: the custom favicon uploaded
@@ -71,15 +127,31 @@ function asset_url(string $path = ''): string
 //
 // Defensive: any settings/storage failure falls back to the SVG default,
 // so this never breaks a <head> (safe to call on error pages too). The
-// default carries ?v=FF_ASSET_VERSION so a changed bundled icon isn't
+// default carries a per-file ?v= (asset_v) so a changed bundled icon isn't
 // served stale from cache; the custom URL is already unique per upload.
+//
+// S-PERF-3: the custom favicon is served SAME-ORIGIN through
+// api/v1/storage/logo?kind=favicon&v=<hash of the storage key> — a stable,
+// immutable-cached URL. It used to be a StorageClient::url() presign minted
+// on every render: on S3 the X-Amz-Date changes every second, so the URL
+// was never the same twice, the browser re-fetched 7.8 KB cross-origin
+// (often with a fresh TLS handshake) on every navigation, and every page
+// render built an S3Client (~3 ms). This function now does NO storage call
+// at all — only the URL; the endpoint reads + caches the bytes on local
+// disk (BrandLogo::faviconFile). A re-upload writes a new key
+// (favicon_<ts>.png) → a new ?v → the old URL is simply dropped.
 // ============================================================
 if (!function_exists('ff_favicon_tags')) {
+/**
+ * The one <link rel="icon"> tag for a page head.
+ *
+ * @return string HTML — the uploaded favicon via the same-origin endpoint,
+ *                or the bundled SVG default (never throws).
+ */
 function ff_favicon_tags(): string
 {
-    $ver = defined('FF_ASSET_VERSION') ? FF_ASSET_VERSION : '1';
     $svgDefault = '<link rel="icon" type="image/svg+xml" href="'
-        . e(asset_url('assets/icons/favicon.svg')) . '?v=' . e((string) $ver) . '">';
+        . e(asset_v('assets/icons/favicon.svg')) . '">';
 
     try {
         $key = (string) (settings_get('brand.favicon_path') ?? '');
@@ -87,11 +159,11 @@ function ff_favicon_tags(): string
             return $svgDefault;
         }
         // Upload only accepts PNG/ICO (api/v1/settings/brand.php); match the
-        // <link type> to the stored key's extension so browsers get the hint
-        // even when S3 serves the object as application/octet-stream.
+        // <link type> to the stored key's extension (the endpoint serves the
+        // same Content-Type from the same rule).
         $ext  = strtolower(pathinfo($key, PATHINFO_EXTENSION));
         $type = $ext === 'ico' ? 'image/x-icon' : 'image/png';
-        $href = \FleetForge\Storage\StorageClient::url($key, 86400);
+        $href = base_url('api/v1/storage/logo') . '?kind=favicon&v=' . substr(sha1($key), 0, 12);
         return '<link rel="icon" type="' . e($type) . '" href="' . e($href) . '">';
     } catch (\Throwable $e) {
         // Storage/driver/DB hiccup — never break the head; show the default.

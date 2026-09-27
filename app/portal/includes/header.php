@@ -102,11 +102,14 @@ foreach ($_quickLinks as $_q) {
         (function () { try { var t = localStorage.getItem('ff-theme'); if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t); } catch (e) {} })();
     </script>
     <!-- S-LUX-1: Geist variable fonts — self-hosted, preloaded to avoid FOUT. -->
+<?php // S-PERF-3: Geist only. GeistMono is NOT preloaded — portal home/lists never render mono
+          // (the header <kbd> overrides to the sans font); only VINs on lease/equipment detail and the
+          // hidden pay drawer use it, and @font-face in app.css loads it lazily there. Per-file ?v=
+          // via asset_v() so a deploy only busts the files it changed. ?>
     <link rel="preload" href="<?= asset_url('assets/fonts/Geist[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="<?= asset_url('assets/fonts/GeistMono[wght].woff2') ?>" as="font" type="font/woff2" crossorigin>
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
-    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
-    <link rel="stylesheet" href="<?= asset_url('assets/css/portal.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/backgrounds.css')) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/portal.css')) ?>">
     <?php
     // S-LUX-4: the white-label brand colour (Settings → Design), read-only → CSS vars.
     $_ffBrand = (string) (settings_get('brand.primary_color') ?: '');

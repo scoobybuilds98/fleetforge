@@ -26,12 +26,12 @@
               // read-only invoice preview and draws no charts, so this is normally
               // skipped entirely (saves 522 KB raw / 134 KB gzipped per iframe load). ?>
         <?php if (!empty($pageNeedsCharts)): ?>
-        <script src="<?= asset_url('assets/vendor/apexcharts/apexcharts.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
-        <script src="<?= asset_url('assets/js/ff-chart-theme.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+        <script src="<?= e(asset_v('assets/vendor/apexcharts/apexcharts.min.js')) ?>"></script>
+        <script src="<?= e(asset_v('assets/js/ff-chart-theme.js')) ?>"></script>
         <?php endif; ?>
-        <script src="<?= asset_url('assets/js/app.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
-        <script src="<?= asset_url('assets/js/ff-animations.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
-        <script defer src="<?= asset_url('assets/vendor/alpinejs/cdn.min.js') ?>?v=<?= e(FF_ASSET_VERSION) ?>"></script>
+        <script src="<?= e(asset_v('assets/js/app.js')) ?>"></script>
+        <script src="<?= e(asset_v('assets/js/ff-animations.js')) ?>"></script>
+        <script defer src="<?= e(asset_v('assets/vendor/alpinejs/cdn.min.js')) ?>"></script>
 
 </body>
 </html>

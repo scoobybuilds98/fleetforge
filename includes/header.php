@@ -110,21 +110,23 @@ if (!in_array($_displayDensity, ['compact', 'comfortable', 'spacious'], true)) {
 
     <!-- Application stylesheet -->
     <!-- D27: asset_url() has no /fleetforge prefix — assets served from public/ root under Herd -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+<?php // S-PERF-3: asset_v() = asset_url() + a PER-FILE ?v= (mtime+size), so a deploy only busts the
+          // files it changed (was ?v=FF_ASSET_VERSION = git HEAD → every file re-downloaded every deploy). ?>
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
     <!-- S-BACKGROUNDS: the background palette picked in Settings → Design (tokens for <html data-bg>) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/backgrounds.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/backgrounds.css')) ?>">
     <!-- S-ANIMATIONS-PACK: supplemental animation utilities (skeleton, status pulse, step indicator, confetti host, etc.) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/animations.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/animations.css')) ?>">
     <!-- S-MODULE-CHROME: module heroes, upgraded KPI tiles, dg-* illustration classes (opt-in classes only) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/module-chrome.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/module-chrome.css')) ?>">
     <!-- S-SHELL-REDESIGN: sidebar + topbar visuals (widths/collapse stay in app.css) -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/shell.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/shell.css')) ?>">
     <!-- S-TABLES-REDESIGN: every admin table (.table/.data-table/.spec-table), wrappers, pagination -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/tables.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/tables.css')) ?>">
     <!-- S-RECORD-REDESIGN: record pages — tabs, main + rail layout, rail cards, More menu -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/records.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/records.css')) ?>">
     <!-- S-ATTENTION-INBOX: the bell's Needs attention / Updates panel, the Notifications page, dashboard card, settings -->
-    <link rel="stylesheet" href="<?= asset_url('assets/css/attention.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/attention.css')) ?>">
 
     <?php
     // ============================================================

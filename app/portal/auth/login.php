@@ -124,7 +124,6 @@ $loginTagline = (string) (settings_get('company.tagline') ?? '');
 $loginColor   = (string) (settings_get('brand.primary_color') ?: '#2596be');
 $loginHover   = (string) (settings_get('brand.primary_hover') ?: '#1e7ea0');
 $loginLight   = (string) (settings_get('brand.primary_light') ?: '#e0f4fb');
-$loginFavicon = (string) (settings_get('brand.favicon_path') ?? '');
 
 $loginLogoUrl = '';
 if ($loginLogo !== '') {
@@ -140,7 +139,9 @@ if ($loginLogoUrl === '') {
         }
     }
 }
-$loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 86400) : '';
+// (S-PERF-3: the old $loginFaviconUrl presign here was dead — never echoed —
+// and, unguarded, could 500 the page on a storage error; the <head> favicon
+// is ff_favicon_tags().)
 ?>
 <!DOCTYPE html>
 <html lang="en" data-theme="dark">
@@ -154,7 +155,7 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
 
     <?= ff_favicon_tags() ?>
 
-    <link rel="stylesheet" href="<?= asset_url('assets/css/app.css') ?>?v=<?= e(FF_ASSET_VERSION) ?>">
+    <link rel="stylesheet" href="<?= e(asset_v('assets/css/app.css')) ?>">
 
     <!-- Brand color injection — same pattern as admin login. -->
     <style id="ff-portal-login-brand-override">
@@ -746,5 +747,5 @@ $loginFaviconUrl = $loginFavicon !== '' ? StorageClient::url($loginFavicon, 8640
 <?php
 unset($_csrfToken, $_flash, $error, $email, $_companyName,
       $loginLogo, $loginTagline, $loginColor, $loginHover, $loginLight,
-      $loginFavicon, $loginLogoUrl, $loginFaviconUrl);
+      $loginLogoUrl);
 ?>

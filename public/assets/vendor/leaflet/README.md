@@ -43,7 +43,8 @@ plain `<link href>` / `<script src>` without integrity attributes.
 ## Updating
 
 Re-fetch from unpkg or jsdelivr, replace files in this directory, bump
-the version pin in the two consumer comments + this README, and bump
-`FF_ASSET_VERSION` if the CSS changes.
+the version pin in the two consumer comments + this README, no version bump
+is needed — the consumer tags use `asset_v()` (S-PERF-3), whose per-file
+token changes when the file is replaced.
 
 — S-PROD-3 (2026-05-14)
