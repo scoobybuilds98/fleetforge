@@ -7,7 +7,9 @@ declare(strict_types=1);
  * @file        api/v1/dashboard/charts.php
  * @description Returns datasets for the ApexCharts / visual cards rendered on the
  *              admin dashboard. Each chart dataset is cached independently
- *              (15-min TTL per spec §8).
+ *              (15-min TTL per spec §8) — one report_cache row per chart, but
+ *              read with ONE lookup and written with ONE multi-row REPLACE per
+ *              request (S-PERF-3).
  *
  *              Available charts (pass ?chart=<key> for a single chart, or omit for all):
  *                revenue_trend        — 12-month area (current year vs prior year)
@@ -22,7 +24,7 @@ declare(strict_types=1);
  *                revenue_forecast     — area, projected revenue next 6 months from active leases
  *                lease_expiry_calendar— bar, count of active leases expiring each month (12mo)
  *                occupancy_by_type    — grouped bar, occupied % vs available % per equipment category
- *                payment_speed        — line, avg days from invoice_date to payment (last 12mo)
+ *                payment_speed        — line, avg days from invoice_date to paid_date (last 12mo)
  *
  *              S-DASHBOARD-VIZ (plain-shaped datasets, not ApexCharts series):
  *                cash_flow            — MONEY. Billed vs collected per month, rolling 12
@@ -51,7 +53,7 @@ declare(strict_types=1);
  *              lib/Reports/ReportBuilder.php (pct() — fleet_mix)
  * @spec        FLEETFORGE_SPEC_FINAL.md §9 Charts & Analytics Specification
  * @design      FLEETFORGE_DESIGN_DETAILS.md §4 Dashboard Grid Layout
- * @session     S004, S-DASH-CHART-REDACT, S-DASHBOARD-VIZ
+ * @session     S004, S-DASH-CHART-REDACT, S-DASHBOARD-VIZ, S-PERF-3
  */
 
 // dirname(__DIR__, 3): api/v1/dashboard/ → api/v1/ → api/ → project root
@@ -125,54 +127,76 @@ $now          = ff_now_utc();
 $cacheTtlMin  = 15;
 $results      = [];
 
+// Per-chart calc version: bumping it orphans a cached payload computed with
+// superseded maths (utilization merge fix, CAD-canonical AR aging) instead
+// of serving it for up to 15 more minutes.
+// S-DASHBOARD-VIZ: top_customers gained `ytd_total`; a pre-change cached
+// payload lacks it, so the new dashboard's share-of-total would read NaN.
+// S-PERF-3: the four month-bucketed charts now anchor their month windows on
+// the 1st (chart_months()); a payload cached on a 29th–31st by the old
+// strtotime("±N months") loops carries duplicated/missing months.
+$calcVersions = [
+    'utilization_trend'     => '|fleet-util-v2',
+    'ar_aging'              => '|ar-aging-cad-v2',
+    'top_customers'         => '|ytd-total-v1',
+    'revenue_forecast'      => '|month-anchor-v1',
+    'lease_expiry_calendar' => '|month-anchor-v1',
+    // S-PERF-3 (C2): payment_speed re-dated from updated_at to paid_date.
+    'payment_speed'         => '|month-anchor-v1|paid-date-v1',
+    'leases_trend'          => '|month-anchor-v1',
+];
+
+// report_type => parameters_hash for every chart this request serves.
+$cacheKeys = [];
 foreach ($chartsToFetch as $chartKey) {
-    // Per-chart calc version: bumping it orphans a cached payload computed with
-    // superseded maths (utilization merge fix, CAD-canonical AR aging) instead
-    // of serving it for up to 15 more minutes.
-    // S-DASHBOARD-VIZ: top_customers gained `ytd_total`; a pre-change cached
-    // payload lacks it, so the new dashboard's share-of-total would read NaN.
-    $calcVersion = [
-        'utilization_trend' => '|fleet-util-v2',
-        'ar_aging'          => '|ar-aging-cad-v2',
-        'top_customers'     => '|ytd-total-v1',
-    ][$chartKey] ?? '';
-    $cacheHash = hash('sha256', 'dashboard_chart_' . $chartKey . $calcVersion);
+    $cacheKeys['dashboard_chart_' . $chartKey] =
+        hash('sha256', 'dashboard_chart_' . $chartKey . ($calcVersions[$chartKey] ?? ''));
+}
 
-    // ── Cache hit? ─────────────────────────────────────────────
-    $cached = db_row(
-        "SELECT result_data FROM report_cache
-          WHERE report_type = ?
-            AND parameters_hash = ?
-            AND expires_at > ?",
-        ['dashboard_chart_' . $chartKey, $cacheHash, $now]
-    );
+// ── Cache hits: ONE lookup for every requested chart ──────────────────
+// S-PERF-3: was one SELECT per chart (11 on the dashboard's cold AND warm
+// path). The two IN lists can pair a type with another chart's hash in
+// theory, so hits are matched on the exact (type, hash) pair below — a
+// calc-version bump still orphans the old row exactly as before.
+$ph   = implode(',', array_fill(0, count($cacheKeys), '?'));
+$hits = [];
+foreach (db_select(
+    "SELECT report_type, parameters_hash, result_data FROM report_cache
+      WHERE report_type IN ({$ph})
+        AND parameters_hash IN ({$ph})
+        AND expires_at > ?",
+    [...array_keys($cacheKeys), ...array_values($cacheKeys), $now]
+) as $row) {
+    if (($cacheKeys[$row['report_type']] ?? null) === $row['parameters_hash']) {
+        $hits[$row['report_type']] = $row['result_data'];
+    }
+}
 
-    if ($cached) {
-        $results[$chartKey] = json_decode($cached['result_data'], true);
+// ── Build the misses; cache them with ONE write after the loop ────────
+// WHY builders run outside any transaction: holding the REPLACE's row locks
+// across ~50–100 ms of builds would block invalidate_analytics_cache()'s
+// DELETE in concurrent write requests.
+$fresh = [];
+foreach ($chartsToFetch as $chartKey) {
+    $type = 'dashboard_chart_' . $chartKey;
+    if (isset($hits[$type])) {
+        $results[$chartKey] = json_decode($hits[$type], true);
         continue;
     }
 
-    // ── Build fresh dataset ────────────────────────────────────
-    $dataset    = build_chart_dataset($chartKey);
-    $expiresAt  = ff_now_utc("+{$cacheTtlMin} minutes"); // UTC, lockstep with $now
-
-    db_execute(
-        "REPLACE INTO report_cache
-            (report_type, parameters_hash, parameters, result_data, generated_at, expires_at, generated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [
-            'dashboard_chart_' . $chartKey,
-            $cacheHash,
-            json_encode(['chart' => $chartKey]),
-            json_encode($dataset),
-            $now,
-            $expiresAt,
-            current_user_id(),
-        ]
-    );
-
+    $dataset = build_chart_dataset($chartKey);
+    $fresh[] = [
+        $type,
+        $cacheKeys[$type],
+        json_encode(['chart' => $chartKey]),
+        json_encode($dataset),
+        $now,
+        ff_now_utc("+{$cacheTtlMin} minutes"), // UTC, lockstep with $now
+        current_user_id(),
+    ];
     $results[$chartKey] = $dataset;
 }
+chart_cache_write($fresh);
 
 // Serve-time financial redaction. Revenue/AR charts expose dollar figures and
 // are gated on payments:view; operational charts (fleet_status, utilization)
@@ -242,6 +266,69 @@ function build_chart_dataset(string $key): array
         'lease_flow'             => chart_lease_flow(),
         default                  => [],
     };
+}
+
+/**
+ * Cache freshly built chart datasets with ONE multi-row REPLACE (S-PERF-3).
+ *
+ * WHY one statement: every autocommit write is an fsync'd commit on prod
+ * (sync_binlog=1, flush_log_at_trx_commit=1, ~6–7 ms each); a cold dashboard
+ * load used to issue 11 of them back to back.
+ *
+ * WHY sorted by (report_type, parameters_hash): a multi-row REPLACE locks up to
+ * 17 uq_report_hash entries in one statement. Taking them in index order means
+ * two concurrent cold chart requests always lock in the same order and cannot
+ * deadlock each other. It does NOT rule out a deadlock with
+ * invalidate_analytics_cache()'s DELETE (every successful write request): that
+ * DELETE's next-key/gap locks still cross the REPLACE's insert locks. Under a
+ * synthetic stress loop (S-PERF-3) the REPLACE side lost ~7–10 per 120 cold
+ * builds and is retried once here; the DELETE side lost ~10 per 7,000
+ * invalidations (HEAD: ~4), which is invalidate_analytics_cache()'s to retry.
+ *
+ * WHY failures are swallowed: the cache is an optimisation. A failed write
+ * only means the next request rebuilds — it must never turn a correctly built
+ * charts response into a 500. It is logged, not rethrown.
+ *
+ * @param list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:?int}> $fresh
+ *        rows of (report_type, parameters_hash, parameters, result_data,
+ *        generated_at, expires_at, generated_by)
+ * @return void
+ */
+function chart_cache_write(array $fresh): void
+{
+    if ($fresh === []) {
+        return;
+    }
+    // strcmp, not <=>: a hash made only of digits would compare numerically.
+    // Lowercase report types + lowercase hex order the same under strcmp as
+    // under the column's utf8mb4_unicode_ci collation.
+    usort($fresh, static fn(array $a, array $b): int => strcmp($a[0], $b[0]) ?: strcmp($a[1], $b[1]));
+
+    $sql = "REPLACE INTO report_cache
+                (report_type, parameters_hash, parameters, result_data, generated_at, expires_at, generated_by)
+            VALUES " . implode(', ', array_fill(0, count($fresh), '(?, ?, ?, ?, ?, ?, ?)'));
+    $params = array_merge(...$fresh);
+    // Read BEFORE the write: a deadlock rolls the server-side transaction
+    // back, after which inTransaction() may no longer report the caller's one.
+    $standalone = !db_pdo()->inTransaction();
+
+    for ($attempt = 1; $attempt <= 2; $attempt++) {
+        try {
+            db_execute($sql, $params);
+            return;
+        } catch (\PDOException $e) {
+            $isDeadlock = (int) ($e->errorInfo[1] ?? 0) === 1213;
+            // A deadlock inside a caller's transaction rolled that whole
+            // transaction back — re-running just this statement would not
+            // restore it, so only a standalone (autocommit) write is retried.
+            if ($attempt === 1 && $isDeadlock && $standalone) {
+                continue;
+            }
+            error_log('[dashboard/charts] report_cache write skipped (' . count($fresh)
+                . ' charts, attempt ' . $attempt . '): ' . $e->getMessage());
+            return;
+        }
+    }
 }
 
 /**
@@ -409,42 +496,59 @@ function chart_top_customers(): array
 
 /**
  * Leases trend — grouped bar: leases opened vs closed per month (last 12 months).
+ *
+ * Not in the redesigned dashboard's ?charts= list, but still served in the
+ * all-charts payload and by ?chart=leases_trend, so it is kept (deleting it
+ * would change both contracts).
+ * opened = created_at in the month; "closed" = completed or cancelled with
+ * updated_at in the month (a proxy, unchanged). Both are bucketed on the raw
+ * stored DATETIME, exactly as the old per-month YEAR(col) = ? AND MONTH(col) = ?
+ * COUNTs bucketed them.
+ *
+ * S-PERF-3: months come from chart_months() — anchored on the 1st; the old
+ * strtotime("-N months") loop repeated/skipped months on the 29th–31st — and
+ * two GROUP BY queries replace the 24 per-month COUNTs.
  */
 function chart_leases_trend(): array
 {
-    // Last 12 complete months + current month
-    $labels  = [];
-    $opened  = [];
-    $closed  = [];
+    $months = chart_months(-11, 0);
+    // Half-open DATETIME window [first month 00:00, the month after the last
+    // 00:00) — the same rows the per-month YEAR()/MONTH() = ? tests matched,
+    // and sargable.
+    $from = $months[0]['start'] . ' 00:00:00';
+    $to   = chart_months(1, 1)[0]['start'] . ' 00:00:00';
 
-    for ($i = 11; $i >= 0; $i--) {
-        $ts      = strtotime("-{$i} months");
-        $yr      = date('Y', $ts);
-        $mo      = date('n', $ts);
-        $label   = date('M Y', $ts);
-        $labels[] = $label;
+    $openedBy = array_column(db_select(
+        "SELECT DATE_FORMAT(created_at, '%Y-%m') AS ym, COUNT(*) AS cnt
+           FROM leases
+          WHERE deleted_at IS NULL
+            AND created_at >= ?
+            AND created_at <  ?
+          GROUP BY ym",
+        [$from, $to]
+    ), 'cnt', 'ym');
 
-        $openRow = db_row(
-            "SELECT COUNT(*) AS cnt FROM leases
-              WHERE YEAR(created_at) = ? AND MONTH(created_at) = ?
-                AND deleted_at IS NULL",
-            [$yr, $mo]
-        );
-        $opened[] = (int) $openRow['cnt'];
+    // "Closed" = completed or cancelled in this month
+    $closedBy = array_column(db_select(
+        "SELECT DATE_FORMAT(updated_at, '%Y-%m') AS ym, COUNT(*) AS cnt
+           FROM leases
+          WHERE status IN ('completed','cancelled')
+            AND deleted_at IS NULL
+            AND updated_at >= ?
+            AND updated_at <  ?
+          GROUP BY ym",
+        [$from, $to]
+    ), 'cnt', 'ym');
 
-        // "Closed" = completed or cancelled in this month
-        $closeRow = db_row(
-            "SELECT COUNT(*) AS cnt FROM leases
-              WHERE status IN ('completed','cancelled')
-                AND YEAR(updated_at) = ? AND MONTH(updated_at) = ?
-                AND deleted_at IS NULL",
-            [$yr, $mo]
-        );
-        $closed[] = (int) $closeRow['cnt'];
+    $opened = [];
+    $closed = [];
+    foreach ($months as $m) {
+        $opened[] = (int) ($openedBy[$m['ym']] ?? 0);
+        $closed[] = (int) ($closedBy[$m['ym']] ?? 0);
     }
 
     return [
-        'labels' => $labels,
+        'labels' => array_column($months, 'label'),
         'series' => [
             ['name' => 'Opened', 'data' => $opened],
             ['name' => 'Closed',  'data' => $closed],
@@ -598,34 +702,43 @@ function chart_weekly_heatmap(): array
  * overlaps that month's date range.  Rate priority: monthly_rate → weekly_rate × 4.33
  * → daily_rate × days_in_month.  All arithmetic uses bcmath (D16 rule).
  *
+ * S-PERF-3: ONE fetch of every active lease overlapping the 6-month window
+ * (was one query per month); each month then re-applies the exact per-month
+ * overlap test (start_date <= month end AND (end_date IS NULL OR end_date >=
+ * month start)) in PHP. Months come from chart_months(), anchored on the 1st —
+ * the old strtotime("+N months") loop double-counted/skipped months in the
+ * 6-month total on the 29th–31st.
+ *
  * @return array{ labels: string[], series: array<array{name: string, data: float[]}> }
  */
 function chart_revenue_forecast(): array
 {
-    $labels = [];
-    $data   = [];
+    $months = chart_months(0, 5);
 
-    for ($i = 0; $i <= 5; $i++) {
-        $ts         = strtotime("+{$i} months");
-        $monthStart = date('Y-m-01', $ts);
-        $monthEnd   = date('Y-m-t', $ts);
-        $daysInMonth = (int) date('t', $ts);
-        $labels[]   = date('M Y', $ts);
+    // Every active lease that overlaps ANY of the six months — a superset of
+    // each month's set; the per-month test below narrows it exactly.
+    $leases = db_select(
+        "SELECT start_date, end_date, monthly_rate, weekly_rate, daily_rate
+           FROM leases
+          WHERE status = 'active'
+            AND deleted_at IS NULL
+            AND start_date <= ?
+            AND (end_date IS NULL OR end_date >= ?)",
+        [$months[5]['end'], $months[0]['start']]
+    );
 
-        // Fetch all active leases that overlap this calendar month
-        $leases = db_select(
-            "SELECT monthly_rate, weekly_rate, daily_rate
-               FROM leases
-              WHERE status = 'active'
-                AND deleted_at IS NULL
-                AND start_date <= ?
-                AND (end_date IS NULL OR end_date >= ?)",
-            [$monthEnd, $monthStart]
-        );
-
+    $data = [];
+    foreach ($months as $m) {
         // Accumulate projected income for this month using bcmath (D16 rule)
         $monthTotal = '0.00';
         foreach ($leases as $lease) {
+            // Same overlap predicate the per-month SQL applied (DATE columns
+            // arrive as Y-m-d strings, which compare chronologically).
+            if ((string) $lease['start_date'] > $m['end']
+                || ($lease['end_date'] !== null && (string) $lease['end_date'] < $m['start'])) {
+                continue;
+            }
+
             $monthly = (string) $lease['monthly_rate'];
             $weekly  = (string) $lease['weekly_rate'];
             $daily   = (string) $lease['daily_rate'];
@@ -638,7 +751,7 @@ function chart_revenue_forecast(): array
                 $contribution = bcmul($weekly, '4.33', 2);
             } else {
                 // Daily rate × actual days in this month
-                $contribution = bcmul($daily, (string) $daysInMonth, 2);
+                $contribution = bcmul($daily, (string) $m['days'], 2);
             }
 
             $monthTotal = bcadd($monthTotal, $contribution, 2);
@@ -648,7 +761,7 @@ function chart_revenue_forecast(): array
     }
 
     return [
-        'labels' => $labels,
+        'labels' => array_column($months, 'label'),
         'series' => [['name' => 'Projected Revenue', 'data' => $data]],
     ];
 }
@@ -659,34 +772,35 @@ function chart_revenue_forecast(): array
  * Useful for forecasting renewal workload and identifying concentration risk
  * (many leases expiring in a single month).
  *
+ * S-PERF-3: one GROUP BY over the 12-month end_date window (was 12 per-month
+ * COUNTs); months from chart_months(), anchored on the 1st — the old
+ * strtotime("+N months") loop showed a month twice and skipped another on the
+ * 29th–31st.
+ *
  * @return array{ labels: string[], series: array<array{name: string, data: int[]}> }
  */
 function chart_lease_expiry_calendar(): array
 {
-    $labels = [];
-    $data   = [];
+    $months = chart_months(0, 11);
 
-    for ($i = 0; $i <= 11; $i++) {
-        $ts      = strtotime("+{$i} months");
-        $yr      = date('Y', $ts);
-        $mo      = date('n', $ts);
-        $labels[] = date('M Y', $ts);
+    $byYm = array_column(db_select(
+        "SELECT DATE_FORMAT(end_date, '%Y-%m') AS ym, COUNT(*) AS cnt
+           FROM leases
+          WHERE status = 'active'
+            AND deleted_at IS NULL
+            AND end_date >= ?
+            AND end_date <= ?
+          GROUP BY ym",
+        [$months[0]['start'], $months[11]['end']]
+    ), 'cnt', 'ym');
 
-        $row = db_row(
-            "SELECT COUNT(*) AS cnt
-               FROM leases
-              WHERE status = 'active'
-                AND deleted_at IS NULL
-                AND YEAR(end_date)  = ?
-                AND MONTH(end_date) = ?",
-            [$yr, $mo]
-        );
-
-        $data[] = (int) $row['cnt'];
+    $data = [];
+    foreach ($months as $m) {
+        $data[] = (int) ($byYm[$m['ym']] ?? 0);
     }
 
     return [
-        'labels' => $labels,
+        'labels' => array_column($months, 'label'),
         'series' => [['name' => 'Leases Expiring', 'data' => $data]],
     ];
 }
@@ -761,44 +875,60 @@ function chart_occupancy_by_type(): array
 }
 
 /**
- * Payment speed — average days between invoice_date and payment date (last 12 months).
+ * Payment speed — average days between invoice_date and paid_date (last 12 months),
+ * bucketed by the month of paid_date.
  *
- * Uses updated_at as a proxy for payment date: invoices move to status='paid' when
- * payment is recorded, so updated_at closely approximates actual payment timing.
+ * WHY paid_date (S-PERF-3, was updated_at): invoices.updated_at is ON UPDATE
+ * CURRENT_TIMESTAMP, so ANY later write to a paid invoice — a PDF (re)generation
+ * stamping pdf_path, a delivery-method change, a recalc, a repair script —
+ * re-dated the payment into the current month with inflated days-to-pay. Every
+ * status→paid writer (payments create/allocate/reallocate, credit-note and
+ * deposit apply, RoundingSettler, PaymentWebhookHandler) sets paid_date, and the
+ * reversal paths clear it. paid_date is the local business date the payment was
+ * RECORDED (not payments.payment_date), so a back-dated payment lands in the
+ * month it was entered. No COALESCE(paid_date, updated_at) fallback on purpose:
+ * it would bring the re-dating bug back for any row missing paid_date, which is
+ * then simply left out.
+ *
  * Months with no paid invoices yield null so the frontend can render a gap rather
  * than a misleading zero.
+ *
+ * S-PERF-3: one GROUP BY over the 12-month window (was 12 per-month AVGs);
+ * months from chart_months(), anchored on the 1st — the old
+ * strtotime("-N months") loop showed the current month twice (and skipped the
+ * previous one) on the 29th–31st.
  *
  * @return array{ labels: string[], series: array<array{name: string, data: (float|null)[]}> }
  */
 function chart_payment_speed(): array
 {
-    $labels = [];
-    $data   = [];
+    $months = chart_months(-11, 0);
 
-    for ($i = 11; $i >= 0; $i--) {
-        $ts      = strtotime("-{$i} months");
-        $yr      = date('Y', $ts);
-        $mo      = date('n', $ts);
-        $labels[] = date('M Y', $ts);
+    // AVG(DATEDIFF) across all invoices paid in each month. paid_date is a
+    // DATE holding the company-local business day, so BETWEEN the first
+    // month's 1st and the last month's last day is exact (and excludes NULLs).
+    $byYm = array_column(db_select(
+        "SELECT DATE_FORMAT(paid_date, '%Y-%m') AS ym,
+                AVG(DATEDIFF(paid_date, invoice_date)) AS avg_days
+           FROM invoices
+          WHERE status = 'paid'
+            AND deleted_at IS NULL
+            AND paid_date BETWEEN ? AND ?
+          GROUP BY ym",
+        [$months[0]['start'], $months[11]['end']]
+    ), 'avg_days', 'ym');
 
-        // AVG(DATEDIFF) across all invoices paid in this month
-        $row = db_row(
-            "SELECT AVG(DATEDIFF(DATE(updated_at), invoice_date)) AS avg_days
-               FROM invoices
-              WHERE status = 'paid'
-                AND deleted_at IS NULL
-                AND YEAR(updated_at)  = ?
-                AND MONTH(updated_at) = ?",
-            [$yr, $mo]
-        );
-
-        // WHY null guard: AVG on an empty set returns NULL; use null in data so
-        // ApexCharts renders a gap instead of a zero which would skew the trend line.
-        $data[] = $row['avg_days'] !== null ? round((float) $row['avg_days'], 1) : null;
+    $data = [];
+    foreach ($months as $m) {
+        $avg = $byYm[$m['ym']] ?? null;
+        // WHY null guard: a month with no paid invoices has no row; use null in
+        // data so ApexCharts renders a gap instead of a zero which would skew
+        // the trend line.
+        $data[] = $avg !== null ? round((float) $avg, 1) : null;
     }
 
     return [
-        'labels' => $labels,
+        'labels' => array_column($months, 'label'),
         'series' => [['name' => 'Avg Days to Pay', 'data' => $data]],
     ];
 }
@@ -820,29 +950,53 @@ function chart_payment_speed(): array
 // ============================================================
 
 /**
- * The rolling 12 calendar months ending with the current company-local month,
- * oldest first.
+ * Calendar months relative to the current company-local month, oldest first.
  *
- * @return list<array{ym:string, label:string, start:string, end:string}>
+ * $from / $to are month offsets from the current month, inclusive: (-11, 0) is
+ * the rolling 12 ending this month, (0, 5) this month and the next five,
+ * (1, 1) just next month.
+ *
+ * S-PERF-3: the ONE month-window builder for every month-bucketed chart.
+ * Anchored on the 1st so the arithmetic never repeats or skips a month
+ * ("Oct 31 + 1 month" = Dec 1 in PHP; "Mar 31 − 1 month" = Mar 3), and on
+ * ff_today() (the business timezone) so every chart shares one "current month".
+ *
+ * @param int $from first month offset (may be negative)
+ * @param int $to   last month offset, >= $from
+ * @return list<array{ym:string, label:string, start:string, end:string, days:int}>
  *         ym 'Y-m'; label 'M Y' (e.g. 'Oct 2025'); start/end = first/last
- *         calendar day of the month (Y-m-d)
+ *         calendar day of the month (Y-m-d); days = days in the month
  */
-function chart_rolling_months(): array
+function chart_months(int $from, int $to): array
 {
-    // Anchor on the 1st so the month arithmetic never skips a month
-    // ("Mar 31 − 1 month" = Mar 3 in PHP).
     $anchor = new DateTimeImmutable(substr(ff_today(), 0, 7) . '-01');
     $months = [];
-    for ($i = 11; $i >= 0; $i--) {
-        $m = $anchor->modify("-{$i} months");
+    for ($i = $from; $i <= $to; $i++) {
+        $m = $anchor->modify(($i >= 0 ? '+' : '') . $i . ' months');
         $months[] = [
             'ym'    => $m->format('Y-m'),
             'label' => $m->format('M Y'),
             'start' => $m->format('Y-m-01'),
             'end'   => $m->format('Y-m-t'),
+            'days'  => (int) $m->format('t'),
         ];
     }
     return $months;
+}
+
+/**
+ * The rolling 12 calendar months ending with the current company-local month,
+ * oldest first.
+ *
+ * S-PERF-3: a wrapper of chart_months(-11, 0) (which also carries `days`).
+ *
+ * @return list<array{ym:string, label:string, start:string, end:string, days:int}>
+ *         ym 'Y-m'; label 'M Y' (e.g. 'Oct 2025'); start/end = first/last
+ *         calendar day of the month (Y-m-d)
+ */
+function chart_rolling_months(): array
+{
+    return chart_months(-11, 0);
 }
 
 /**

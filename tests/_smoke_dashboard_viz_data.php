@@ -45,17 +45,25 @@
  *       dispatcher gets the requested keys minus the money ones (money-only
  *       list → data:{}); unknown key and empty list → 422 VALIDATION_ERROR;
  *       ?chart= wins over ?charts=; no-param mode still returns all 17 keys
+ *   MW  (S-PERF-3) the four month-bucketed charts: labels are the exact
+ *       distinct consecutive months anchored on ff_today()'s month
+ *       (revenue_forecast next 6, lease_expiry_calendar next 12,
+ *       payment_speed + leases_trend rolling 12), and EVERY month's value ==
+ *       an independent per-month SQL recompute (the pre-S-PERF-3 one-query-
+ *       per-month form): forecast via the bcmath rate ladder, expiries by
+ *       end_date, payment speed by paid_date (null for an empty month),
+ *       leases opened/closed by created_at/updated_at
  *
  * HERMETIC: every endpoint call runs in a CLI subprocess that opens an outer
  * transaction FIRST, deletes the report_cache rows for the five new chart keys
- * (so they build fresh), logs a real user in, runs the endpoint and ROLLS
+ * and the four month-bucketed ones (so they build fresh), logs a real user in, runs the endpoint and ROLLS
  * BACK in a shutdown function — the cache writes the endpoint makes do not
  * persist. The parent process only reads.
  *
  * USAGE: php tests/_smoke_dashboard_viz_data.php
  * EXIT:  0 = all pass, 1 = any failure, 2 = setup error.
  *
- * @session S-DASHBOARD-VIZ
+ * @session S-DASHBOARD-VIZ, S-PERF-3
  */
 
 declare(strict_types=1);
@@ -156,11 +164,14 @@ register_shutdown_function(static function () use ($pdo, &$state) {
     echo '@@STATE@@' . json_encode($state);
 });
 
-// Fresh builds for the S-DASHBOARD-VIZ keys only (inside the rolled-back txn).
+// Fresh builds for the S-DASHBOARD-VIZ keys and (S-PERF-3) the four
+// month-bucketed charts the MW checks recompute (inside the rolled-back txn).
 db_execute(
     "DELETE FROM report_cache WHERE report_type IN
         ('dashboard_chart_cash_flow','dashboard_chart_receivables','dashboard_chart_overdue_customers',
-         'dashboard_chart_fleet_mix','dashboard_chart_lease_flow')"
+         'dashboard_chart_fleet_mix','dashboard_chart_lease_flow',
+         'dashboard_chart_revenue_forecast','dashboard_chart_lease_expiry_calendar',
+         'dashboard_chart_payment_speed','dashboard_chart_leases_trend')"
 );
 
 $_SERVER['REQUEST_METHOD'] = 'GET';
@@ -592,6 +603,145 @@ try {
         }
         check("TC.2 ytd_total (" . m2($tc['ytd_total']) . ") ≥ Σ top-5 series ({$seriesSum}) and == independent all-customer total ({$indYtd})",
             bccomp(m2($tc['ytd_total']), $seriesSum, 2) >= 0 && m2($tc['ytd_total']) === $indYtd);
+    }
+
+    // ── MW: month-bucketed charts (S-PERF-3) ────────────────────────────────
+    // WHY: these four used strtotime("±N months") from today, which repeats /
+    // skips a month on the 29th–31st, and ran one query per month. They now
+    // share chart_months() (anchored on the 1st of ff_today()'s month) and one
+    // GROUP BY / one fetch each. The expected months here are built a third
+    // way ('first day of this month' ± i) and every value is recomputed with
+    // the old per-month query shape, so both the bucketing and the batching
+    // are pinned.
+    echo "\nMW month-bucketed charts (S-PERF-3)\n";
+    $fwdMonths = static function (int $n) use ($today): array {
+        $out = [];
+        for ($i = 0; $i < $n; $i++) {
+            $d = (new DateTimeImmutable($today))->modify('first day of this month')->modify("+{$i} months");
+            $out[] = ['label' => $d->format('M Y'), 'start' => $d->format('Y-m-d'), 'end' => $d->format('Y-m-t'),
+                      'y' => (int) $d->format('Y'), 'n' => (int) $d->format('n'), 'days' => (int) $d->format('t')];
+        }
+        return $out;
+    };
+    $pastMonths = array_map(static function (array $m): array {
+        $d = new DateTimeImmutable($m['start']);
+        return $m + ['y' => (int) $d->format('Y'), 'n' => (int) $d->format('n')];
+    }, $expMonths);
+    $curLabel = (new DateTimeImmutable($today))->format('M Y');
+
+    // revenue_forecast — next 6 months, bcmath ladder per month.
+    $rf     = $D['revenue_forecast'] ?? null;
+    $rfData = $rf['series'][0]['data'] ?? null;
+    $rfExp  = $fwdMonths(6);
+    $rfShape = is_array($rf) && ($rf['labels'] ?? null) === array_column($rfExp, 'label')
+        && ($rf['series'][0]['name'] ?? null) === 'Projected Revenue'
+        && is_array($rfData) && array_is_list($rfData) && count(array_filter($rfData, 'is_num')) === 6;
+    check("MW.1 revenue_forecast labels = 6 consecutive months from {$curLabel}, 6 numbers",
+        $rfShape, 'got=' . substr(json_encode($rf), 0, 300));
+    if ($rfShape) {
+        $bad = [];
+        foreach ($rfExp as $i => $m) {
+            $exp = '0.00';
+            foreach (db_select(
+                "SELECT monthly_rate, weekly_rate, daily_rate FROM leases
+                  WHERE status = 'active' AND deleted_at IS NULL
+                    AND start_date <= ? AND (end_date IS NULL OR end_date >= ?)",
+                [$m['end'], $m['start']]
+            ) as $l) {
+                $exp = bcadd($exp, match (true) {
+                    bccomp((string) $l['monthly_rate'], '0', 2) > 0 => (string) $l['monthly_rate'],
+                    bccomp((string) $l['weekly_rate'], '0', 2) > 0  => bcmul((string) $l['weekly_rate'], '4.33', 2),
+                    default                                          => bcmul((string) $l['daily_rate'], (string) $m['days'], 2),
+                }, 2);
+            }
+            if (m2($rfData[$i]) !== $exp) {
+                $bad[] = "{$m['label']}: api=" . m2($rfData[$i]) . " sql={$exp}";
+            }
+        }
+        check('MW.2 revenue_forecast == independent per-month overlap query + bcmath rate ladder, every month',
+            $bad === [], implode('; ', $bad));
+    }
+
+    // lease_expiry_calendar — next 12 months, count by end_date month.
+    $le     = $D['lease_expiry_calendar'] ?? null;
+    $leData = $le['series'][0]['data'] ?? null;
+    $leExp  = $fwdMonths(12);
+    $leShape = is_array($le) && ($le['labels'] ?? null) === array_column($leExp, 'label')
+        && is_array($leData) && array_is_list($leData) && count($leData) === 12
+        && count(array_filter($leData, static fn($v) => is_int($v) && $v >= 0)) === 12;
+    check("MW.3 lease_expiry_calendar labels = 12 consecutive months from {$curLabel}, 12 non-negative ints",
+        $leShape, 'got=' . substr(json_encode($le), 0, 300));
+    if ($leShape) {
+        $bad = [];
+        foreach ($leExp as $i => $m) {
+            $n = (int) db_row(
+                "SELECT COUNT(*) AS n FROM leases
+                  WHERE status = 'active' AND deleted_at IS NULL
+                    AND YEAR(end_date) = ? AND MONTH(end_date) = ?",
+                [$m['y'], $m['n']]
+            )['n'];
+            if ($leData[$i] !== $n) {
+                $bad[] = "{$m['label']}: api={$leData[$i]} sql={$n}";
+            }
+        }
+        check('MW.4 lease_expiry_calendar == independent per-month COUNT of active leases ending that month',
+            $bad === [], implode('; ', $bad));
+    }
+
+    // payment_speed — rolling 12, AVG(paid_date − invoice_date) by paid_date month.
+    $ps     = $D['payment_speed'] ?? null;
+    $psData = $ps['series'][0]['data'] ?? null;
+    $psShape = is_array($ps) && ($ps['labels'] ?? null) === $expLabels
+        && ($ps['series'][0]['name'] ?? null) === 'Avg Days to Pay'
+        && is_array($psData) && array_is_list($psData) && count($psData) === 12
+        && count(array_filter($psData, static fn($v) => $v === null || is_num($v))) === 12;
+    check("MW.5 payment_speed labels = the 12 rolling months ending {$curLabel}, 12 numbers-or-null",
+        $psShape, 'got=' . substr(json_encode($ps), 0, 300));
+    if ($psShape) {
+        $bad = [];
+        foreach ($pastMonths as $i => $m) {
+            $avg = db_row(
+                "SELECT AVG(DATEDIFF(paid_date, invoice_date)) AS a FROM invoices
+                  WHERE status = 'paid' AND deleted_at IS NULL
+                    AND YEAR(paid_date) = ? AND MONTH(paid_date) = ?",
+                [$m['y'], $m['n']]
+            )['a'];
+            $exp = $avg === null ? null : round((float) $avg, 1);
+            if ($psData[$i] !== $exp && !(is_num($psData[$i]) && $exp !== null && (float) $psData[$i] === $exp)) {
+                $bad[] = "{$m['label']}: api=" . json_encode($psData[$i]) . ' sql=' . json_encode($exp);
+            }
+        }
+        check('MW.6 payment_speed == independent per-month AVG by paid_date (null where no invoice was paid)',
+            $bad === [], implode('; ', $bad));
+    }
+
+    // leases_trend — rolling 12, opened by created_at / closed by updated_at.
+    $lt = $D['leases_trend'] ?? null;
+    $ltShape = is_array($lt) && ($lt['labels'] ?? null) === $expLabels
+        && ($lt['series'][0]['name'] ?? null) === 'Opened' && ($lt['series'][1]['name'] ?? null) === 'Closed'
+        && $intList($lt['series'][0]['data'] ?? null) && $intList($lt['series'][1]['data'] ?? null);
+    check("MW.7 leases_trend labels = the 12 rolling months ending {$curLabel}; Opened/Closed are 12 ints",
+        $ltShape, 'got=' . substr(json_encode($lt), 0, 300));
+    if ($ltShape) {
+        $bad = [];
+        foreach ($pastMonths as $i => $m) {
+            $o = (int) db_row(
+                "SELECT COUNT(*) AS n FROM leases
+                  WHERE deleted_at IS NULL AND YEAR(created_at) = ? AND MONTH(created_at) = ?",
+                [$m['y'], $m['n']]
+            )['n'];
+            $c = (int) db_row(
+                "SELECT COUNT(*) AS n FROM leases
+                  WHERE deleted_at IS NULL AND status IN ('completed','cancelled')
+                    AND YEAR(updated_at) = ? AND MONTH(updated_at) = ?",
+                [$m['y'], $m['n']]
+            )['n'];
+            if ($lt['series'][0]['data'][$i] !== $o || $lt['series'][1]['data'][$i] !== $c) {
+                $bad[] = "{$m['label']}: api=" . $lt['series'][0]['data'][$i] . '/' . $lt['series'][1]['data'][$i] . " sql={$o}/{$c}";
+            }
+        }
+        check('MW.8 leases_trend opened/closed == independent per-month COUNTs',
+            $bad === [], implode('; ', $bad));
     }
 
     // ── IU: idle_units (tables.php) ─────────────────────────────────────────
