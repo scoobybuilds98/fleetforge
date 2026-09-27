@@ -11,10 +11,14 @@ declare(strict_types=1);
  * Dispatchers and above can view; create permission gates the New Unit button.
  *
  * Alpine.js component FF_Equipment() — fetches api/v1/equipment/units/index.php
- * and api/v1/equipment/units/index.php?per_page=1 for KPI counts (status-bucketed).
+ * for the table, api/v1/equipment/units/kpis.php for the 4 tile counts (one
+ * GROUP BY status call, S-PERF-3) and api/v1/equipment/templates for the filter
+ * dropdown. init() fires all three without awaiting (table first), so neither
+ * the tiles nor the dropdown gate the table; bulk actions refresh the tiles.
  *
  * @depends config/app.php, includes/auth.php, includes/header.php,
  *          includes/footer.php, api/v1/equipment/units/index.php,
+ *          api/v1/equipment/units/kpis.php,
  *          api/v1/equipment/templates/index.php
  * @spec    FLEETFORGE_SPEC_FINAL.md §7.4, §4.1 Equipment list KPI drilldowns
  * @decisions D30, D32, D33
@@ -476,33 +480,49 @@ function FF_Equipment() {
         selectAll:   false,
         bulkWorking: false,
 
-        async init() {
-            // Load templates for the filter dropdown
+        init() {
+            // S-PERF-3: no awaits between these. The table does not depend on
+            // the template dropdown or the tiles (filters.template_id starts ''),
+            // so it no longer waits behind two serial network stages. load() is
+            // issued FIRST on purpose: same-session API requests queue on the
+            // PHP session lock, and the list should hold the front of that queue.
+            // Each loader catches its own failures, so one failed call can no
+            // longer leave the table (or the tiles) spinning forever.
+            // (Alpine auto-calls init() — never add an x-init that calls it again.)
+            this.$watch('currentPage', () => this.clearSelection());
+            this.load();
+            this.loadKpis();
+            this.loadTemplates();
+        },
+
+        // Template options for the filter dropdown — non-critical; the "All"
+        // option works before (or without) them.
+        async loadTemplates() {
             try {
                 const r = await FF_Api.get('<?= base_url('api/v1/equipment/templates') ?>?active=1&per_page=100');
                 if (r.success) this.templates = r.data.items;
             } catch(e) { /* non-critical */ }
-
-            await this.loadKpis();
-            await this.load();
-            this.$watch('currentPage', () => this.clearSelection());
         },
 
+        // Tile counts — one call (api/v1/equipment/units/kpis.php, S-PERF-3)
+        // instead of four units?status=…&per_page=1 calls. Same numbers: the
+        // endpoint uses the list's own base filter and Total sums every status.
+        // FF_Api.get resolves on 4xx/5xx (gate on .success; body nests under
+        // .data) and throws on a network error / non-JSON body — either way the
+        // tiles leave the skeleton state (zeros on first load, the previous
+        // counts on a refresh) instead of spinning forever.
         async loadKpis() {
-            // Fetch counts for each status bucket in parallel
-            const statuses = ['available', 'on_lease', 'maintenance'];
-            const [avail, onLease, maint, total] = await Promise.all([
-                FF_Api.get('<?= base_url('api/v1/equipment/units') ?>?status=available&per_page=1'),
-                FF_Api.get('<?= base_url('api/v1/equipment/units') ?>?status=on_lease&per_page=1'),
-                FF_Api.get('<?= base_url('api/v1/equipment/units') ?>?status=maintenance&per_page=1'),
-                FF_Api.get('<?= base_url('api/v1/equipment/units') ?>?per_page=1'),
-            ]);
-            this.kpis = {
-                available:   avail.success  ? avail.data.pagination.total  : 0,
-                on_lease:    onLease.success ? onLease.data.pagination.total : 0,
-                maintenance: maint.success  ? maint.data.pagination.total  : 0,
-                total:       total.success  ? total.data.pagination.total  : 0,
-            };
+            try {
+                const r = await FF_Api.get('<?= base_url('api/v1/equipment/units/kpis') ?>');
+                if (r.success) {
+                    this.kpis = {
+                        available:   r.data.available,
+                        on_lease:    r.data.on_lease,
+                        maintenance: r.data.maintenance,
+                        total:       r.data.total,
+                    };
+                }
+            } catch (e) { /* show zeros rather than a skeleton forever */ }
             this.kpisLoaded = true;
         },
 
@@ -621,7 +641,11 @@ function FF_Equipment() {
                     if (d.deleted > 0) FF_Toast.success(d.deleted + ' deleted' + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
                     if (d.errors?.length) FF_Toast.error(d.errors.length + ' could not be deleted: ' + d.errors.map(e => e.reason).join('; '));
                     this.clearSelection();
-                    await this.load();
+                    // S-PERF-3: refresh the tiles too — a bulk delete / status
+                    // change moves units between buckets, and the tiles used to
+                    // stay stale until a full reload. load() first (session-lock
+                    // queue order); loadKpis() never rejects.
+                    await Promise.all([this.load(), this.loadKpis()]);
                 } else {
                     FF_Toast.error(res.error?.message || 'Bulk delete failed.');
                 }
@@ -648,7 +672,11 @@ function FF_Equipment() {
                     if (d.actioned > 0) FF_Toast.success(d.actioned + ' unit' + (d.actioned === 1 ? '' : 's') + ' → ' + label + (d.skipped > 0 ? ', ' + d.skipped + ' skipped' : '') + '.');
                     if (d.errors?.length) FF_Toast.error(d.errors.length + ' failed: ' + d.errors.slice(0,3).map(e => e.reason).join('; ') + (d.errors.length > 3 ? '…' : ''));
                     this.clearSelection();
-                    await this.load();
+                    // S-PERF-3: refresh the tiles too — a bulk delete / status
+                    // change moves units between buckets, and the tiles used to
+                    // stay stale until a full reload. load() first (session-lock
+                    // queue order); loadKpis() never rejects.
+                    await Promise.all([this.load(), this.loadKpis()]);
                 } else {
                     FF_Toast.error(res.error?.message || 'Status update failed.');
                 }
