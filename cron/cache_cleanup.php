@@ -21,6 +21,7 @@ declare(strict_types=1);
  *     data to delete. Their lifecycle is managed by billing logic.
  *
  * Decisions: D21 (advisory lock)
+ * S-PERF-3: the success audit row is written only when rows were deleted.
  * Audit findings resolved: part of #3 (missing cache_cleanup cron)
  */
 
@@ -62,20 +63,23 @@ try {
 
     $notes = "Cache cleanup: report_cache={$reportDeleted}, ai_summaries={$aiDeleted}, rate_limit_attempts={$rateLimitDeleted} expired rows deleted ({$duration}s)";
 
-    db_insert('audit_log', [
-        'user_id'      => null,
-        'user_name'    => 'system',
-        'action'       => 'cron',
-        'module'       => 'cache',
-        'entity_type'  => 'cron',
-        'entity_id'    => null,
-        'entity_label' => 'cache_cleanup',
-        'notes'        => $notes,
-        'ip_address'   => '127.0.0.1',
-    ]);
-
-    // Only log to cron.log if we actually deleted something (hourly cron — keep logs quiet)
+    // Audit + cron.log only when something was actually deleted (hourly cron —
+    // keep both quiet). S-PERF-3: the audit row used to be written every hour
+    // regardless; ~88% of them said "0, 0, 0" and they crowded real user
+    // actions off the /audit page. Nothing reads cache_cleanup audit rows.
+    // The FAILED row below is unconditional.
     if ($total > 0) {
+        db_insert('audit_log', [
+            'user_id'      => null,
+            'user_name'    => 'system',
+            'action'       => 'cron',
+            'module'       => 'cache',
+            'entity_type'  => 'cron',
+            'entity_id'    => null,
+            'entity_label' => 'cache_cleanup',
+            'notes'        => $notes,
+            'ip_address'   => '127.0.0.1',
+        ]);
         error_log("[CRON cache_cleanup] {$notes}");
     }
 

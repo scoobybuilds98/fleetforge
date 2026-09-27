@@ -17,16 +17,27 @@ declare(strict_types=1);
 //   3. Stamp samsara_last_synced_at to NOW() so the UI staleness
 //      indicator stays accurate.
 //
-// SAMSARA-2: dispatches via SamsaraClient::getEntityStats($type, $id)
-// per unit so vehicles hit /fleet/vehicles/stats and trailers hit
-// /fleet/trailers/stats. The wrong path returns HTTP 400 from
-// Samsara. The samsara_entity_type column is read alongside the
+// SAMSARA-2: vehicles hit /fleet/vehicles/stats and trailers hit
+// /fleet/trailers/stats (the wrong path returns HTTP 400 from
+// Samsara). The samsara_entity_type column is read alongside the
 // other unit fields so no extra queries are needed.
 //
+// S-PERF-3: trailers (every linked unit on prod) are fetched with
+// ONE fleet-wide SamsaraClient::getAllTrailerStatsForSync() call per
+// tick instead of one HTTPS call per unit — 167 serial calls made a
+// tick take ~30 s (p90 45 s, worst 272 s); the bulk page takes ~2 s.
+// Each trailer's stats go through the same normalizer, so everything
+// downstream (the $update build, breadcrumbs, battery alerts) is
+// unchanged. A trailer missing from the map (not in Samsara's answer,
+// or on a page that failed) is skipped and NOT stamped — exactly what
+// the old per-unit [] meant. Vehicles keep the per-unit call.
+//
 // Failures are isolated per-unit — one bad trackable never
-// short-circuits the rest of the batch. The cron writes ONE
-// summary row to audit_log at the end and a per-unit line to
-// logs/gps.log so you can reconstruct exactly what happened.
+// short-circuits the rest of the batch. Every tick logs CRON_END to
+// logs/gps.log. S-PERF-3: the audit_log summary row is written only
+// when something needs a human (a unit failed, the trailer fetch was
+// incomplete, or the fatal path) plus one hourly heartbeat — the
+// every-5-min rows were 64% of audit_log and buried real user actions.
 //
 // Static identifier columns (vin, serial, gateway, vehicle_name,
 // entity_type) are NEVER touched here — they were snapshotted at
@@ -37,7 +48,7 @@ declare(strict_types=1);
 //   php /Users/avi/Documents/fleetforge/cron/samsara_sync.php
 //
 // @depends config/app.php, lib/GPS/SamsaraClient.php
-// @session SAMSARA-1, SAMSARA-2
+// @session SAMSARA-1, SAMSARA-2, S-PERF-3
 // ============================================================
 
 require_once dirname(__DIR__) . '/config/app.php';
@@ -139,6 +150,28 @@ try {
 
     ff_samsara_log('CRON_START', sprintf('Tick: %d linked units to sync', count($linked)));
 
+    // ── S-PERF-3: one fleet-wide trailer fetch per tick ─────
+    // Only when a linked trailer exists (a vehicles-only fleet makes no
+    // extra call). $trailerFetchComplete=false means a page still failed
+    // after its one retry: the map then holds only the pages that arrived.
+    $trailerStatsMap      = [];
+    $trailerFetchComplete = true;
+    $missingTrailers      = [];   // unit numbers with no stats this tick → one CRON_SKIP line
+    foreach ($linked as $linkedUnit) {
+        if ((string) ($linkedUnit['samsara_entity_type'] ?? 'vehicle') === 'trailer') {
+            $bulk                 = $client->getAllTrailerStatsForSync();
+            $trailerStatsMap      = $bulk['stats'];
+            $trailerFetchComplete = $bulk['complete'];
+            if (!$trailerFetchComplete) {
+                ff_samsara_log('CRON_BULK_INCOMPLETE', sprintf(
+                    'Trailer stats fetch incomplete (%d trailers received) — linked trailers missing from it are skipped, not stamped',
+                    count($trailerStatsMap)
+                ));
+            }
+            break;
+        }
+    }
+
     // (The offline-alert timezone resolution that used to live here was removed
     // with the device-offline notification — see [NOTIF-OFFLINE-REMOVED]. Offline
     // status is still computed for the dashboard in api/v1/samsara/fleet.php.)
@@ -153,13 +186,25 @@ try {
         $entityType = (string) ($unit['samsara_entity_type'] ?? 'vehicle');
 
         try {
-            $stats = $client->getEntityStats($entityType, $vehicleId);
+            // S-PERF-3: trailers read the tick's fleet-wide map ('trailer' is
+            // exactly getEntityStats()'s trailer branch; anything else was and
+            // is the per-unit vehicle call). A missing id yields [] — the same
+            // value the old per-unit call returned for "no data".
+            $stats = $entityType === 'trailer'
+                ? ($trailerStatsMap[$vehicleId] ?? [])
+                : $client->getEntityStats($entityType, $vehicleId);
 
-            // Empty stats = transient API failure (logged inside
-            // the client). Skip but never abort the batch — the
-            // next tick will retry automatically.
+            // Empty stats = no data / transient API failure. Skip — never
+            // stamp — and never abort the batch; the next tick retries.
             if (empty($stats)) {
-                ff_samsara_log('CRON_SKIP', "Unit $unitNum ($entityType): getEntityStats returned []");
+                if ($entityType === 'trailer') {
+                    // Collected into ONE CRON_SKIP line after the loop: the same
+                    // dead trailers used to log NO_MATCH + CRON_SKIP every tick
+                    // (65% of gps.log).
+                    $missingTrailers[] = $unitNum;
+                } else {
+                    ff_samsara_log('CRON_SKIP', "Unit $unitNum ($entityType): getEntityStats returned []");
+                }
                 $skipped++;
                 continue;
             }
@@ -276,6 +321,15 @@ try {
         }
     }
 
+    if ($missingTrailers !== []) {
+        ff_samsara_log('CRON_SKIP', sprintf(
+            '%d trailer(s) had no stats in the fleet-wide response%s: %s',
+            count($missingTrailers),
+            $trailerFetchComplete ? '' : ' (fetch incomplete)',
+            implode(', ', $missingTrailers)
+        ));
+    }
+
     // ── [NOTIF-1] Grouped alert dispatch ──────────────────────────
     // Fires at most one notification per alert type per cron tick.
     // Per-unit 6h dedup via notification_log prevents re-alerting the
@@ -384,17 +438,34 @@ try {
 
     ff_samsara_log('CRON_END', $summary);
 
-    db_insert('audit_log', [
-        'user_id'      => null,
-        'user_name'    => 'system',
-        'action'       => 'cron',
-        'module'       => 'equipment',
-        'entity_type'  => 'cron',
-        'entity_id'    => null,
-        'entity_label' => 'samsara_sync',
-        'notes'        => $summary,
-        'ip_address'   => '127.0.0.1',
-    ]);
+    // ── S-PERF-3: audit row only when it tells someone something ──
+    // Written when a unit failed, when the trailer fetch was incomplete (a
+    // Samsara outage now shows every tick, not just hourly), or once an hour
+    // as a heartbeat: the */5 tick whose START minute is 0-4 (minute-only, so
+    // it is timezone-safe; taken at start so a slow run can't skip it). The
+    // summary still goes to gps.log (CRON_END) and stdout on every tick. The
+    // fatal path below always writes. FF_SAMSARA_SYNC_TEST_MINUTE is a test
+    // seam defined only by tests/_smoke_samsara_sync_exec.php.
+    $auditMinute = defined('FF_SAMSARA_SYNC_TEST_MINUTE')
+        ? (int) constant('FF_SAMSARA_SYNC_TEST_MINUTE')
+        : (int) date('i', (int) $startedAt);
+    if ($failed > 0 || !$trailerFetchComplete || $auditMinute < 5) {
+        db_insert('audit_log', [
+            'user_id'      => null,
+            'user_name'    => 'system',
+            'action'       => 'cron',
+            'module'       => 'equipment',
+            'entity_type'  => 'cron',
+            'entity_id'    => null,
+            'entity_label' => 'samsara_sync',
+            // Say WHY an off-the-hour row exists when the fetch was the
+            // trigger — the counts alone ("0 failed") would not explain it.
+            'notes'        => $summary . ($trailerFetchComplete
+                ? ''
+                : ' — trailer stats fetch incomplete (see gps.log CRON_BULK_INCOMPLETE)'),
+            'ip_address'   => '127.0.0.1',
+        ]);
+    }
 
     echo "[SAMSARA_SYNC] $summary\n";
 

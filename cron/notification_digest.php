@@ -28,7 +28,7 @@ declare(strict_types=1);
  *   America/Vancouver) and exits silently when local hour != 7. Survives
  *   DST without manual crontab edits.
  *
- * @session S-CRON-3
+ * @session S-CRON-3, S-PERF-3 (audit row skipped on all-zero runs)
  * @audit   #3 (missing crons), #23 (orphan scheduled_reports), #26 (AR escalation)
  */
 
@@ -124,17 +124,28 @@ try {
     );
     error_log('[CRON] ' . $summary);
 
-    db_insert('audit_log', [
-        'user_id'      => null,
-        'user_name'    => 'system',
-        'action'       => 'cron',
-        'module'       => 'system',
-        'entity_type'  => 'cron',
-        'entity_id'    => null,
-        'entity_label' => 'notification_digest',
-        'notes'        => $summary,
-        'ip_address'   => '127.0.0.1',
-    ]);
+    // S-PERF-3: skip the audit row on an hour where nothing happened at all
+    // (~96% of runs) — those heartbeats swamped /audit and the Settings →
+    // Intelligence briefing feed (briefing_audit_log.php), which still shows
+    // every run that sent, skipped or errored. See digest_audit_row_due().
+    if (digest_audit_row_due($forced, [
+        $digestEmailsSent, $digestEmailsSkipped, $digestEmailsErrors,
+        $dunningCounts['reminder_30'], $dunningCounts['reminder_60'], $dunningCounts['warning_90'],
+        $dunningSkipped, $dunningErrors,
+        $reportsDispatched, $reportsSkipped,
+    ])) {
+        db_insert('audit_log', [
+            'user_id'      => null,
+            'user_name'    => 'system',
+            'action'       => 'cron',
+            'module'       => 'system',
+            'entity_type'  => 'cron',
+            'entity_id'    => null,
+            'entity_label' => 'notification_digest',
+            'notes'        => $summary,
+            'ip_address'   => '127.0.0.1',
+        ]);
+    }
 
 } catch (\Throwable $e) {
     \FleetForge\Observability\Sentry::captureException($e);
@@ -154,6 +165,34 @@ try {
     exit(1);
 } finally {
     db_execute("SELECT RELEASE_LOCK('ff_cron_notification_digest')", []);
+}
+
+/**
+ * digest_audit_row_due() — should this run leave a success row in audit_log?
+ *
+ * S-PERF-3: yes when ANY section did anything — a count of sent, skipped or
+ * errors, in the digest, dunning or scheduled-report section, is non-zero —
+ * or when the run was forced (FF_CRON_FORCE manual run: whoever ran it by hand
+ * expects a trace). An all-zero scheduled hour writes nothing; error_log still
+ * records its summary line. The fatal-path row is unconditional (not here).
+ * Pure function so tests/_smoke_samsara_sync_exec.php can check both
+ * directions via the FF_NOTIFICATION_DIGEST_INCLUDE seam.
+ *
+ * @param bool  $forced  FF_CRON_FORCE=1 run
+ * @param int[] $counts  every summary counter of the run
+ * @return bool
+ */
+function digest_audit_row_due(bool $forced, array $counts): bool
+{
+    if ($forced) {
+        return true;
+    }
+    foreach ($counts as $n) {
+        if ((int) $n !== 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // =======================================================================

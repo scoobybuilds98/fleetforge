@@ -36,6 +36,16 @@ class SamsaraClient
     /** HTTP timeout in seconds — spec §10 */
     private const TIMEOUT_SECONDS = 10;
 
+    /**
+     * Per-request timeout for the fleet-wide trailer stats fetch used by the
+     * 5-min sync (getAllTrailerStatsForSync). S-PERF-3: one bulk page carries
+     * ~170 trailers / ~67 KB and measured 1.9-2.5 s from dev, so the 10 s
+     * per-unit budget is too tight for a single call that now stands in for
+     * 167 of them; 20 s leaves headroom on a slow Samsara day while still
+     * finishing well inside the 300 s cron tick even with the one retry.
+     */
+    private const SYNC_BULK_TIMEOUT_SECONDS = 20;
+
     /** Path to GPS failure log (relative to project root) */
     private const LOG_FILE = 'logs/gps.log';
 
@@ -44,8 +54,9 @@ class SamsaraClient
     private string $projectRoot;
 
     /**
-     * Test-only HTTP transport override for the history-query path
-     * (httpRequest). Smokes install a closure that records the exact URL and
+     * Test-only HTTP transport override for every GET read (httpRequest —
+     * the history queries AND, since S-PERF-3, apiRequest(), i.e. the current
+     * stats / list calls). Smokes install a closure that records the exact URL and
      * returns canned Samsara JSON, so window/boundary assertions run through
      * the REAL request builder + bookend math with zero network I/O — even on
      * a dev box that has a live API key configured. Static so it also reaches
@@ -836,17 +847,59 @@ class SamsaraClient
     // getAllTrailerStats()
     //
     // Returns current stats for EVERY trailer in the org in a
-    // single call. Used by the cron sync to avoid N+1 round-trips
-    // when there are 100+ linked trailers — one call returns all
-    // 162 in our test account in well under a second.
+    // single call (cursor-paginated). Used by the Samsara bulk
+    // import (api/v1/samsara/import.php, scripts/samsara_bulk_import.php).
+    // The 5-min sync uses getAllTrailerStatsForSync() instead,
+    // which adds a retry and reports whether the map is complete.
     //
     // @return array<string, array>  Map of trailerId → normalized stats.
-    //                               Empty map on failure or empty fleet.
+    //                               Empty map on failure or empty fleet;
+    //                               PARTIAL map if a page after the first
+    //                               fails (callers must treat a missing id
+    //                               as "no data", never as "unchanged").
     // --------------------------------------------------------
     public function getAllTrailerStats(): array
     {
+        // Unchanged behaviour for the import callers: no retry, default timeout.
+        return $this->fetchAllTrailerStats(false, null)['stats'];
+    }
+
+    /**
+     * Fleet-wide trailer stats for the live sync paths (cron/samsara_sync.php
+     * and the "Refresh now" sync-all in api/v1/samsara/sync.php).
+     *
+     * S-PERF-3: those paths used to call getTrailerStats() once per linked
+     * unit — 167 serial HTTPS calls (a fresh TLS handshake each) that made a
+     * tick take ~30 s (p90 45 s, worst 272 s). The same /fleet/trailers/stats
+     * endpoint WITHOUT a trailerIds filter returns every trailer in one page,
+     * and each element goes through the same normalizeTrailerStats(), so the
+     * per-trailer payload is identical to the per-unit call by construction.
+     *
+     * Because one failed call now affects the whole tick instead of one unit,
+     * each page gets ONE retry on a transient failure (cURL error / 429 / 5xx,
+     * via httpRequestWithRetry) and a 20 s timeout. 'complete' is false when
+     * any page still failed (or no API key is configured); the map then holds
+     * only the pages that arrived, and callers must skip — never stamp — the
+     * units that are missing from it.
+     *
+     * @return array{stats: array<string, array>, complete: bool}
+     */
+    public function getAllTrailerStatsForSync(): array
+    {
+        return $this->fetchAllTrailerStats(true, self::SYNC_BULK_TIMEOUT_SECONDS);
+    }
+
+    /**
+     * Shared pager behind getAllTrailerStats() / getAllTrailerStatsForSync().
+     *
+     * @param  bool     $retry           one retry per page on transient errors
+     * @param  int|null $timeoutSeconds  per-request cURL timeout (null = default)
+     * @return array{stats: array<string, array>, complete: bool}
+     */
+    private function fetchAllTrailerStats(bool $retry, ?int $timeoutSeconds): array
+    {
         if ($this->apiKey === '') {
-            return [];
+            return ['stats' => [], 'complete' => false];
         }
 
         $out  = [];
@@ -860,10 +913,10 @@ class SamsaraClient
                 $url .= '&after=' . urlencode($cursor);
             }
 
-            $response = $this->apiRequest($url);
+            $response = $this->apiRequest($url, $retry, $timeoutSeconds);
             if ($response === null) {
                 $this->log('GPS_ALL_TRAILER_STATS_ERROR', 'apiRequest returned null on page ' . ($i + 1));
-                return $out;
+                return ['stats' => $out, 'complete' => false];
             }
 
             foreach ($response['data'] ?? [] as $t) {
@@ -876,15 +929,20 @@ class SamsaraClient
 
             $hasMore = $response['pagination']['hasNextPage'] ?? false;
             if (!$hasMore) {
-                break;
+                return ['stats' => $out, 'complete' => true];
             }
             $cursor = $response['pagination']['endCursor'] ?? null;
             if (!$cursor) {
-                break;
+                // hasNextPage without a cursor: nothing more we can ask for.
+                // Same stop as before S-PERF-3; the map is all Samsara offered.
+                return ['stats' => $out, 'complete' => true];
             }
         }
 
-        return $out;
+        // S-PERF-3: ran out of the $maxPages guard with pages still pending —
+        // the map is partial, so the sync must not treat it as the whole fleet.
+        $this->log('GPS_ALL_TRAILER_STATS_ERROR', "page guard ($maxPages) reached with more pages pending");
+        return ['stats' => $out, 'complete' => false];
     }
 
     // --------------------------------------------------------
@@ -1862,9 +1920,9 @@ class SamsaraClient
      * Never retries 4xx (other than 429) — those indicate a client
      * error that won't be fixed by waiting.
      */
-    private function httpRequestWithRetry(string $method, string $url): array
+    private function httpRequestWithRetry(string $method, string $url, ?int $timeoutSeconds = null): array
     {
-        $first = $this->httpRequest($method, $url);
+        $first = $this->httpRequest($method, $url, $timeoutSeconds);
 
         // No retry on success or definitive client error
         if ($first['code'] === 200) {
@@ -1887,15 +1945,19 @@ class SamsaraClient
         ));
         sleep($sleepSec);
 
-        return $this->httpRequest($method, $url);
+        return $this->httpRequest($method, $url, $timeoutSeconds);
     }
 
     /**
      * One-shot HTTP request returning code + body + error + parsed
      * Retry-After. Centralizes cURL setup so retry path doesn't
      * duplicate options.
+     *
+     * @param int|null $timeoutSeconds  cURL timeout override (S-PERF-3: the
+     *                                  bulk sync fetch uses 20 s); null keeps
+     *                                  TIMEOUT_SECONDS.
      */
-    private function httpRequest(string $method, string $url): array
+    private function httpRequest(string $method, string $url, ?int $timeoutSeconds = null): array
     {
         // Test seam (S-GPS-LOCAL-WINDOW): a smoke-installed transport replaces
         // cURL entirely so hermetic tests can never reach api.samsara.com.
@@ -1914,7 +1976,7 @@ class SamsaraClient
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST  => $method,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
+            CURLOPT_TIMEOUT        => $timeoutSeconds ?? self::TIMEOUT_SECONDS,
             CURLOPT_HTTPHEADER     => $this->buildHeaders(),
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_HEADERFUNCTION => function ($_ch, $line) use (&$headerAccumulator) {
@@ -2003,26 +2065,35 @@ class SamsaraClient
     }
 
     // --------------------------------------------------------
-    // apiRequest() — shared HTTP helper for all Samsara calls.
+    // apiRequest() — shared HTTP helper for all Samsara GET reads.
     // Returns parsed JSON array on success, null on any failure.
-    // Centralizes curl setup, error handling, and logging.
+    // Centralizes error handling and logging.
+    //
+    // S-PERF-3: now built on httpRequest() instead of its own cURL
+    // handle, so (a) the setHttpTransportForTesting() seam covers the
+    // current-stats / list calls too — the 5-min sync cron can finally
+    // be executed hermetically — and (b) a caller can opt into the
+    // shared single-retry policy + a longer timeout (the bulk sync
+    // fetch). Default arguments keep every existing caller on exactly
+    // the old behaviour: one attempt, TIMEOUT_SECONDS, same log lines.
+    //
+    // @param string   $url
+    // @param bool     $retry           one retry on cURL error / 429 / 5xx
+    // @param int|null $timeoutSeconds  null = TIMEOUT_SECONDS
     // --------------------------------------------------------
-    private function apiRequest(string $url): ?array
+    private function apiRequest(string $url, bool $retry = false, ?int $timeoutSeconds = null): ?array
     {
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-            CURLOPT_HTTPHEADER     => $this->buildHeaders(),
-            CURLOPT_SSL_VERIFYPEER => true,
-        ]);
+        $res = $retry
+            ? $this->httpRequestWithRetry('GET', $url, $timeoutSeconds)
+            : $this->httpRequest('GET', $url, $timeoutSeconds);
 
-        $raw  = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $err  = curl_error($ch);
-        curl_close($ch);
+        $raw  = $res['body'];
+        $code = $res['code'];
+        $err  = $res['error'];
 
-        if ($raw === false || $err !== '') {
+        // Same failure classification as the pre-S-PERF-3 inline cURL code:
+        // curl_exec() === false (body null here) or a cURL error string.
+        if ($raw === null || $err !== '') {
             $this->log('GPS_API_CURL_ERROR', "url={$url} error={$err}");
             return null;
         }

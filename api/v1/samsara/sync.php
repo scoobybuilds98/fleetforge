@@ -27,6 +27,9 @@ declare(strict_types=1);
  *   1. Call SamsaraClient::getEntityStats($type, $id) to refresh
  *      live fields. The dispatcher hits /fleet/vehicles/stats for
  *      vehicles and /fleet/trailers/stats for trailers.    [SAMSARA-2]
+ *      Sync-all (S-PERF-3) reads trailers from ONE fleet-wide
+ *      getAllTrailerStatsForSync() call instead — same normalized
+ *      stats per trailer, ~2 s instead of ~30 s of serial calls.
  *   2. Update samsara_* live columns on equipment_units
  *   3. If the lat/lng moved since the previous sync, write a new
  *      row to samsara_location_history with the entity_type stamped
@@ -38,7 +41,7 @@ declare(strict_types=1);
  * link/unlink/import (was equipment:view, under-privileged for a mutation).
  *
  * @depends api/bootstrap.php, lib/GPS/SamsaraClient.php
- * @session SAMSARA-1, SAMSARA-2
+ * @session SAMSARA-1, SAMSARA-2, S-PERF-3
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -67,9 +70,14 @@ $client = new SamsaraClient();
  *                     samsara_vehicle_id, samsara_entity_type,
  *                     samsara_last_location_lat, samsara_last_location_lng).
  * @param SamsaraClient $client
+ * @param array|null $trailerStatsMap  S-PERF-3: sync-all passes the tick's
+ *                     fleet-wide trailer map (id → normalized stats) so a
+ *                     trailer costs no HTTP call; a trailer missing from it
+ *                     is "no data" (never stamped). null = per-unit call
+ *                     (Sync Now, and every vehicle).
  * @return array  {ok, unit_id, unit_number, synced_at, stats}
  */
-function ff_samsara_sync_one(array $unit, SamsaraClient $client): array
+function ff_samsara_sync_one(array $unit, SamsaraClient $client, ?array $trailerStatsMap = null): array
 {
     $vehicleId  = (string) $unit['samsara_vehicle_id'];
     // Default to 'vehicle' for safety — pre-SAMSARA-2 rows will
@@ -77,7 +85,11 @@ function ff_samsara_sync_one(array $unit, SamsaraClient $client): array
     // also handle missing-key paranoia in case the SELECT was
     // updated upstream and we were called from an older path.
     $entityType = (string) ($unit['samsara_entity_type'] ?? 'vehicle');
-    $stats      = $client->getEntityStats($entityType, $vehicleId);
+    // 'trailer' is exactly getEntityStats()'s trailer branch, so the map
+    // stands in for the same call it would have made.
+    $stats      = ($trailerStatsMap !== null && $entityType === 'trailer')
+        ? ($trailerStatsMap[$vehicleId] ?? [])
+        : $client->getEntityStats($entityType, $vehicleId);
     // S-UTC-STAMPS: sync stamps are UTC DATETIMEs (db.php session +00:00);
     // Samsara's ISO-8601 'Z' times below go through gmdate(), not date().
     $now        = ff_now_utc();
@@ -207,10 +219,23 @@ $linked = db_select(
         AND deleted_at IS NULL"
 );
 
+// S-PERF-3: one fleet-wide trailer fetch (one retry per page, 20 s timeout)
+// instead of one HTTPS call per trailer — this request used to hold an FPM
+// worker for ~30 s. Only fetched when a linked trailer exists. A page that
+// still fails leaves its trailers out of the map; they are reported in
+// `failed` exactly like a per-unit "no data" answer and are not stamped.
+$trailerStatsMap = null;
+foreach ($linked as $linkedUnit) {
+    if ((string) ($linkedUnit['samsara_entity_type'] ?? 'vehicle') === 'trailer') {
+        $trailerStatsMap = $client->getAllTrailerStatsForSync()['stats'];
+        break;
+    }
+}
+
 $synced = [];
 $failed = [];
 foreach ($linked as $unit) {
-    $result = ff_samsara_sync_one($unit, $client);
+    $result = ff_samsara_sync_one($unit, $client, $trailerStatsMap);
     if ($result['ok']) {
         $synced[] = $result;
     } else {

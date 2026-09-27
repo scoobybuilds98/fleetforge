@@ -71,7 +71,7 @@ Once linked, the unit appears in **Map View** and **List View** and starts synci
 <summary>Under the hood — how it works technically</summary>
 
 - **Read-only dashboard** — this page calls only `GET /api/v1/samsara/fleet`, which reads cached `samsara_*` columns from FleetForge's database. It never calls Samsara live, so it loads instantly.
-- **5-minute sync cron** — `cron/samsara_sync.php` runs every 5 minutes (`*/5 * * * *`), pulls fresh stats per linked unit, and stamps `samsara_last_synced_at`. Vehicles hit Samsara's vehicle stats endpoint and trailers hit the trailer endpoint, dispatched by `samsara_entity_type`.
+- **5-minute sync cron** — `cron/samsara_sync.php` runs every 5 minutes (`*/5 * * * *`), pulls fresh stats for every linked unit, and stamps `samsara_last_synced_at`. Vehicles hit Samsara's vehicle stats endpoint per unit; trailers are fetched in ONE bulk trailer-stats call per run (paged) and matched by id, dispatched by `samsara_entity_type`. A trailer missing from that response is skipped and keeps its previous sync time.
 - **Linkage** — a unit is "linked" when its `samsara_vehicle_id` column is set (done by `api/v1/samsara/link.php`). That ID is opaque and works for both vehicles and trailers.
 - **Online vs offline** — "online" means the unit has a GPS fix *and* its `samsara_last_connected_at` is within the last 8 hours. Everything else counts as offline.
 - **Alert thresholds** — battery critical ≤10%, battery low ≤25%, offline ≥24h (critical) / ≥8h (warning), and no-GPS when latitude is null. These are evaluated in `fleet.php`; alert dismissals live in browser `localStorage` with a 24-hour TTL.
