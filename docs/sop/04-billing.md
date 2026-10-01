@@ -29,7 +29,7 @@ Each invoice re-prices the whole lease, from its start to the end of this period
 **Mileage and engine hours.** Each invoice bills the daily estimate. When an actual reading exists, a **Mileage true-up** line settles actual against everything billed so far:
 
 - Samsara leases get a reading every period.
-- Manual leases get one at close, or when you enter an odometer.
+- Manual leases get one at close, or when you enter an odometer reading or a distance driven.
 - Engine hours true up at close.
 
 ## Month-end billing
@@ -37,7 +37,7 @@ Each invoice re-prices the whole lease, from its start to the end of this period
 Each month is a **billing cycle**: {{Billing › Monthly Billing @/billing}}. The **Open billing cycles** scheduled job opens last month's cycle on the 1st and tells the billing owner; **Start the … cycle** does the same by hand. On the cycle page, work the steps left to right (click a step to open its tab):
 
 1. **Prepare**: the **Readiness** tab. Fix every blocker (no rate, no US-dollar rate). Fix or **Acknowledge** each warning — earlier months never billed, missing readings, Samsara units not reporting, leases past their end date, customers with no email or a bounced one, missing PO numbers, expired tax exemptions, a closed ledger month, older drafts.
-2. **Readings**: enter the month-end odometer (and engine hours) for every Manual-mileage and hourly lease, then **Save readings**. Generation passes them to the invoice.
+2. **Readings**: enter the month-end odometer (and engine hours) for every Manual-mileage and hourly lease, then **Save readings**. Generation passes them to the invoice. This tab takes odometer readings only; to bill a month by distance driven, use the lease's **Generate Invoice**.
 3. **Generate**: **Open workbench**. **Preview totals** (nothing is saved), **Hold for review** anything wrong, then **Looks right — Generate N**. Leases on a billing hold are never pre-selected. The **Leases** tab shows what is still **To bill**; a **Closed, unbilled** lease uses its own **Generate Invoice**.
 4. **Review**: the **Review** tab. Clear every red flag (double billing, double mileage), look at the amber ones (big change against last month, $0, no tax, no recipient), then **Mark reviewed**. **Query** anything that needs a second look.
 5. **Approve** (only when "Require approval before batch billing" is on in {{Billing › Settings @/billing/settings}}): **Submit for approval** from the workbench; a manager approves on {{Billing › Approvals @/billing#approvals}}, then **Generate**.
@@ -57,8 +57,8 @@ The workbench bills active monthly leases only. A completed lease with an unbill
 From the lease → **Generate Invoice**:
 
 1. Pick the month marked **Next to bill** (months must be billed in order).
-2. For a Manual-mileage lease, enter **Odometer at Period End**.
-3. Press **Generate &lt;Month&gt;** (or **Generate all due**).
+2. Under **Mileage**, type the **Distance driven** that month. On a Manual lease it counts from the reading shown under the box; on a Samsara lease it replaces the GPS distance (leave it blank to bill GPS). To enter readings instead, switch to **Odometer readings** and enter **Odometer at Period End**.
+3. Press **Generate &lt;Month&gt;** (or **Generate all due**, which is unavailable while a distance is typed — a distance covers one month).
 
 ## Review, send, void
 

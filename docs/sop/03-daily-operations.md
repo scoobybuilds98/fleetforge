@@ -91,7 +91,7 @@ Press **Activate Lease** when the unit leaves. This creates a draft invoice for 
 ### During the lease
 
 - Missing start reading: **Odometer & Distance** card → enter it → **Save** (or **Fetch from Samsara**).
-- Manual mileage is entered on each invoice's **Odometer at Period End**. Mileage Logs keep history only; they bill nothing.
+- Manual mileage is entered on each invoice: the **Distance driven** that month (the default), or **Odometer at Period End** under **Odometer readings**. Mileage Logs keep history only; they bill nothing.
 - Rate change: Rates card → **Amend Rates** → **Apply Amendment**. The next invoice re-prices the lease with a catch-up line.
 
 ### Close

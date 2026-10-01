@@ -197,11 +197,13 @@ export default {
       },
     },
     {
-      say: 'The period, billing type and odometer fields fill in from the selected month. For a manually tracked lease, enter the closing odometer reading for the month so mileage bills correctly.',
+      say: 'The period and billing type fill in from the selected month. For a manually tracked lease, type the distance driven that month. It counts on from the last reading, shown under the box. To enter readings instead, switch to odometer readings.',
       run: async (d) => {
         await d.scroll(500);
         await d.hover('[x-model="form.period_start"]', 700);
-        await d.hover('[x-model="form.odometer_at_period_end_km"]', 1400);
+        // S-INVOICE-DISTANCE-ENTRY: Distance driven is the default mode — the
+        // end-odometer input is hidden until "Odometer readings" is picked.
+        await d.hover('[x-model="form.period_distance"]', 1400);
       },
     },
     {

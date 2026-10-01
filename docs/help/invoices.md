@@ -30,7 +30,14 @@ Click any tile to filter the list to that aging bucket. Use the **Outstanding**,
    - *Partial End* — final partial month when a lease closes
    - *Single Period* — a custom one-off billing period
 5. Choose the **Invoice Type**: *Regular*, *Final*, *Mileage Only*, or *Adjustment*.
-6. If the unit is Samsara-linked, the **Odometer** section appears — enter or fetch the starting and ending odometer readings for the period. Distance is calculated automatically.
+6. In the **Mileage** section, type the **Distance driven** for the period — one number, in the lease's unit (**Enter in** switches km / miles). This is the default.
+   - On a **Manual** mileage lease the distance counts from the reading shown under the box (the last reading before this month, else the lease's starting odometer), and the invoice records the new reading for you. If no earlier invoice has a reading, include all driving since the lease started that hasn't been billed.
+   - A lease that bills **estimated mileage** and has no reading yet asks for the **Total distance since the lease started** instead — the estimates already billed are subtracted in the true-up. Typing only one month there would credit those estimates back.
+   - A lease with no starting odometer and no earlier reading can't take a distance until you enter a start reading under **Odometer readings** (or set the lease's starting odometer — 0 if its mileage counts from zero).
+   - On a **Samsara** lease the distance replaces the GPS distance for that period. Leave it blank to bill the GPS distance.
+   - To enter readings instead, switch to **Odometer readings** and enter the start and end odometer (or **Fetch from Samsara** — it reads today's odometer, so don't use it for a past month).
+   - A lease with mileage tracking **Off** shows a note instead and bills no mileage.
+   - A distance covers one month: **Generate all due** is unavailable while one is typed.
 7. Enter a **PO Number** if required, and any **Notes** (customer-facing) or **Internal Notes**.
 8. Click **Create Invoice**. The invoice is created in **Draft** status.
 
@@ -157,7 +164,7 @@ The first invoice carrying a mileage precharge line locks the precharge on the l
 Sending an invoice posts a double-entry journal: DR Accounts Receivable / CR Revenue / CR GST Payable / CR PST Payable. Voiding reverses this entry.
 
 **Odometer data on invoices**
-If odometer readings are captured, the invoice records `odometer_at_period_start_km` and `odometer_at_period_end_km`. Distance driven that period is calculated from these and used for mileage billing.
+If odometer readings are captured, the invoice records `odometer_at_period_start_km` and `odometer_at_period_end_km`. Distance driven that period is calculated from these and used for mileage billing. A **Distance driven** typed on a Manual lease is stored the same way — the previous reading plus the distance — so the next invoice counts on from it. One typed on a Samsara lease is stored as the period distance only (no readings). **Regenerate from Lease** keeps either. Voided invoices are never used as the previous reading.
 
 **Monthly invoicing is manual**
 The `invoice_generate_monthly` cron job exists but ships **off** (Settings → Intelligence → Scheduled Jobs). Invoices for leases with `billing_cycle = 'monthly'` are created on purpose in **Monthly Billing** (active monthly leases, from its workbench) or a lease's **Generate Invoice**. Either way they start as drafts and must be sent.
