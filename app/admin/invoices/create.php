@@ -611,6 +611,7 @@ function FF_InvoiceCreate() {
                                            // 'invoice' | 'lease' | 'none' (auto-fill) | 'edited' | 'gps'
         _odoReadings:          [],         // live period-end readings, oldest first (leases/show odometer_readings)
         _odoStartAutoInv:      '',         // invoice whose end reading the auto-fill used
+        _odoStartAutoDerived:  false,      // that position = last reading + distance-only months since
         _leaseEstimatePerDay:  0,          // lease.estimated_mileage_per_day (estimate model when > 0)
         _latestPeriodEnd:      '',         // latest live invoice's billing_period_end
         // The auto-filled period-start reading exactly as stored (km) and as
@@ -1051,6 +1052,7 @@ function FF_InvoiceCreate() {
             this._odoStartAutoKm         = null;
             this._odoStartAutoDisplay    = null;
             this._odoStartAutoInv        = '';
+            this._odoStartAutoDerived    = false;
             this._odoReadings            = [];
             this._leaseEstimatePerDay    = 0;
             this._latestPeriodEnd        = '';
@@ -1098,10 +1100,14 @@ function FF_InvoiceCreate() {
          *  reading before it, else the lease's starting odometer, else blank. */
         _applyStartAutoFill() {
             const r = this._readingBefore(this.form.period_start);
-            let km = null, from = 'none', inv = '', hint = 'No previous odometer on file. Enter manually or fetch from Samsara.';
+            let km = null, from = 'none', inv = '', derived = false, hint = 'No previous odometer on file. Enter manually or fetch from Samsara.';
             if (r) {
-                km = r.km; from = 'invoice'; inv = r.invoice_number || '';
-                hint = 'Auto-filled from the end reading of ' + (inv || 'the previous invoice') + '.';
+                km = r.km; from = 'invoice'; inv = r.invoice_number || ''; derived = !!r.derived;
+                // S-SAMSARA-CLOSE-DISTANCE-CHAIN: a derived position is the last
+                // reading plus the GPS/typed distance of the months billed since.
+                hint = derived
+                    ? 'Auto-filled from the last reading plus the distance billed since (through ' + (inv || 'the previous invoice') + ').'
+                    : 'Auto-filled from the end reading of ' + (inv || 'the previous invoice') + '.';
             } else if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
                 km = this._leaseStartOdo; from = 'lease';
                 hint = 'Auto-filled from lease starting odometer.';
@@ -1110,6 +1116,7 @@ function FF_InvoiceCreate() {
             this._odoStartAutoKm       = km === null ? null : String(km);
             this._odoStartAutoDisplay  = this.form.odometer_at_period_start_km;
             this._odoStartAutoInv      = inv;
+            this._odoStartAutoDerived  = derived;
             this.distanceAnchorFrom    = from;
             this.odoStartSource        = km === null ? null : 'manual';
             this.odoStartAutoSource    = hint;
@@ -1133,14 +1140,14 @@ function FF_InvoiceCreate() {
             const from  = this.distanceAnchorFrom;
             const r     = this._readingBefore(this.form.period_start);
             if (!isNaN(typed)) {
-                if (auto) return { value: typed, from: from, inv: this._odoStartAutoInv };
-                return { value: typed, from: from === 'gps' ? 'gps' : 'edited', inv: '' };
+                if (auto) return { value: typed, from: from, inv: this._odoStartAutoInv, derived: this._odoStartAutoDerived };
+                return { value: typed, from: from === 'gps' ? 'gps' : 'edited', inv: '', derived: false };
             }
-            if (r) return { value: this.fromKm(r.km), from: 'invoice', inv: r.invoice_number || '' };
+            if (r) return { value: this.fromKm(r.km), from: 'invoice', inv: r.invoice_number || '', derived: !!r.derived };
             if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
-                return { value: this.fromKm(this._leaseStartOdo), from: 'lease', inv: '' };
+                return { value: this.fromKm(this._leaseStartOdo), from: 'lease', inv: '', derived: false };
             }
-            return { value: null, from: 'none', inv: '' };
+            return { value: null, from: 'none', inv: '', derived: false };
         },
         _distanceStart() {
             const a = this._distanceAnchor();
@@ -1178,7 +1185,9 @@ function FF_InvoiceCreate() {
             const a     = this._distanceAnchor();
             const start = this.fmtDist(a.value === null ? 0 : a.value);
             if (a.from === 'invoice') {
-                return 'Counted from ' + start + ' — the end reading of ' + (a.inv || 'the previous invoice') + '.';
+                return a.derived
+                    ? 'Counted from ' + start + ' — the last reading plus the distance billed since, through ' + (a.inv || 'the previous invoice') + '.'
+                    : 'Counted from ' + start + ' — the end reading of ' + (a.inv || 'the previous invoice') + '.';
             }
             if (a.from === 'lease')  return 'Counted from ' + start + ' — the lease\'s starting odometer.';
             if (a.from === 'edited') return 'Counted from ' + start + ' — the start reading entered under Odometer readings.';

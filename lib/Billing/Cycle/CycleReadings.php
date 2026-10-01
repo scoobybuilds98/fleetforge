@@ -129,10 +129,11 @@ final class CycleReadings
             $unit       = $r['mileage_unit'] === 'miles' ? 'miles' : 'km';
             $toUnit     = $unit === 'miles' ? (string) $r['km_to_miles_conversion'] : '1';
 
-            $p = $prev[$lid] ?? ['odometer_km' => null, 'odometer_from' => null, 'hours' => null, 'hours_from' => null];
+            $p = $prev[$lid] ?? ['odometer_km' => null, 'odometer_from' => null, 'odometer_floor_km' => null, 'hours' => null, 'hours_from' => null];
             if ($p['odometer_km'] === null && $r['odometer_start_km'] !== null) {
                 $p['odometer_km'] = (string) $r['odometer_start_km'];
                 $p['odometer_from'] = 'lease start';
+                $p['odometer_floor_km'] = (string) $r['odometer_start_km'];
             }
             if ($p['hours'] === null && $r['engine_hours_at_start'] !== null) {
                 $p['hours'] = (string) $r['engine_hours_at_start'];
@@ -156,6 +157,10 @@ final class CycleReadings
                 'prev_odometer_km'  => $p['odometer_km'],
                 'prev_odometer_in_unit' => $p['odometer_km'] !== null ? bcmul($p['odometer_km'], $toUnit, 2) : null,
                 'prev_odometer_from'=> $p['odometer_from'],
+                // S-SAMSARA-CLOSE-DISTANCE-CHAIN: the last REAL reading under
+                // prev_odometer_km — save()'s hard floor (a derived, GPS-summed
+                // previous value may sit a little above the true odometer).
+                'prev_odometer_floor_km' => $p['odometer_floor_km'] ?? $p['odometer_km'],
                 'prev_hours'        => $p['hours'],
                 'prev_hours_from'   => $p['hours_from'],
                 'samsara_odometer_in_unit' => ($r['samsara_vehicle_id'] && $r['samsara_odometer_km'] !== null)
@@ -217,31 +222,43 @@ final class CycleReadings
      * Most recent period-end odometer / hours strictly before $beforeDate,
      * from live invoices (void invoices never billed their reading).
      *
+     * S-SAMSARA-CLOSE-DISTANCE-CHAIN: the odometer is the POSITION from
+     * \FleetForge\Billing\OdometerChain — the latest real end reading plus the
+     * distance of later distance-only invoices (Samsara GPS / typed distance),
+     * so a reading entered next can't re-bill those months. odometer_from then
+     * names the last contributing invoice, and odometer_floor_km is the last
+     * REAL reading under it — the hard floor for a new reading (a GPS-summed
+     * position can run a little above the true odometer).
+     *
      * @param int[] $leaseIds
-     * @return array<int, array{odometer_km: ?string, odometer_from: ?string, hours: ?string, hours_from: ?string}>
+     * @return array<int, array{odometer_km: ?string, odometer_from: ?string, odometer_floor_km: ?string, hours: ?string, hours_from: ?string}>
      */
     public static function previousReadings(array $leaseIds, string $beforeDate): array
     {
         if (!$leaseIds) return [];
         $ph = implode(',', array_fill(0, count($leaseIds), '?'));
         $out = [];
+        foreach (\FleetForge\Billing\OdometerChain::positionsBefore($leaseIds, $beforeDate) as $lid => $p) {
+            $out[$lid] = [
+                'odometer_km'   => $p['km'],
+                'odometer_from' => $p['derived'] ? $p['from'] . ' + distance billed since the last reading' : $p['from'],
+                'odometer_floor_km' => $p['floor_km'],
+                'hours'         => null,
+                'hours_from'    => null,
+            ];
+        }
         foreach (\db_select(
-            "SELECT i.lease_id, i.invoice_number, i.billing_period_end,
-                    i.odometer_at_period_end_km, i.engine_hours_at_period_end
+            "SELECT i.lease_id, i.invoice_number, i.billing_period_end, i.engine_hours_at_period_end
                FROM invoices i
               WHERE i.deleted_at IS NULL AND i.status <> 'void' AND i.lease_id IN ({$ph})
                 AND i.billing_period_end < ?
-                AND (i.odometer_at_period_end_km IS NOT NULL OR i.engine_hours_at_period_end IS NOT NULL)
+                AND i.engine_hours_at_period_end IS NOT NULL
               ORDER BY i.billing_period_end ASC, i.id ASC",
             array_merge($leaseIds, [$beforeDate])
         ) as $r) {
             $lid = (int) $r['lease_id'];
-            $out[$lid] ??= ['odometer_km' => null, 'odometer_from' => null, 'hours' => null, 'hours_from' => null];
+            $out[$lid] ??= ['odometer_km' => null, 'odometer_from' => null, 'odometer_floor_km' => null, 'hours' => null, 'hours_from' => null];
             // ASC order: later rows overwrite, so each ends as the latest.
-            if ($r['odometer_at_period_end_km'] !== null) {
-                $out[$lid]['odometer_km'] = (string) $r['odometer_at_period_end_km'];
-                $out[$lid]['odometer_from'] = $r['invoice_number'] . ' (' . $r['billing_period_end'] . ')';
-            }
             if ($r['engine_hours_at_period_end'] !== null) {
                 $out[$lid]['hours'] = (string) $r['engine_hours_at_period_end'];
                 $out[$lid]['hours_from'] = $r['invoice_number'] . ' (' . $r['billing_period_end'] . ')';
@@ -304,7 +321,8 @@ final class CycleReadings
                 $odoKm = $row['mileage_unit'] === 'miles'
                     ? bcmul((string) $odo, $leaseConv[$leaseId] ?? '1.609344', 2)
                     : bcadd((string) $odo, '0', 2);
-                if ($row['prev_odometer_km'] !== null && bccomp($odoKm, (string) $row['prev_odometer_km'], 2) < 0) {
+                $floorKm = $row['prev_odometer_floor_km'] ?? $row['prev_odometer_km'];
+                if ($floorKm !== null && bccomp($odoKm, (string) $floorKm, 2) < 0) {
                     $errors[] = ['lease_id' => $leaseId, 'field' => 'odometer',
                         'message' => 'Lower than the previous reading (' . $row['prev_odometer_in_unit'] . ' ' . $row['mileage_unit'] . ' from ' . $row['prev_odometer_from'] . ').'];
                     continue;

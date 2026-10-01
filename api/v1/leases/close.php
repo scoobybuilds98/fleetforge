@@ -452,6 +452,23 @@ function legacy_append_mileage_to_full_month_draft(
     // discount snapshot. InvoiceRecalc replays the frozen snapshots with the
     // per-line prorated convention (same as createFromLease post-#16) and
     // rewrites the per-line taxes inserted above consistently.
+    // S-SAMSARA-CLOSE-DISTANCE-CHAIN: the close's $odoPeriodStart is where the
+    // odometer stood at the END of the billed periods — which, for this draft
+    // (it ends ON the extent), already includes the draft's OWN distance when
+    // it was billed as a GPS/typed distance. Stamp its start from the position
+    // before its own period instead, so the pair agrees with its distance and
+    // a later Regenerate (which re-bills from the stamped pair) doesn't drop it.
+    if ($odoPeriodStart !== null && !empty($invoice['billing_period_start']) && !empty($invoice['lease_id'])) {
+        $ownLeaseId = (int) $invoice['lease_id'];
+        $ownStart   = \FleetForge\Billing\OdometerChain::positionsBefore(
+            [$ownLeaseId], (string) $invoice['billing_period_start']
+        )[$ownLeaseId] ?? null;
+        if ($ownStart !== null) {
+            $odoPeriodStart = $ownStart['km'];
+        } elseif (($lease['odometer_start_km'] ?? null) !== null) {
+            $odoPeriodStart = (string) $lease['odometer_start_km'];
+        }
+    }
     $invoiceUpdate = ['updated_by' => current_user_id()];
     if ($odoPeriodStart !== null) $invoiceUpdate['odometer_at_period_start_km'] = $odoPeriodStart;
     if ($odoAtClose     !== null) $invoiceUpdate['odometer_at_period_end_km']   = $odoAtClose;
@@ -1018,23 +1035,29 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     }
 
     // SAMSARA-3: derive the period-start odometer for the final invoice.
-    // Priority: latest prior invoice's period-end odometer → lease start.
+    // Priority: where the odometer stood after the last billed period → lease start.
     // S-INVOICE-DISTANCE-ENTRY: never a VOID invoice's reading — a voided
-    // month's end reading was never billed (same rule as leases/show and the
-    // Readings tab), so counting from it under-bills the final period.
+    // month's end reading was never billed, so counting from it under-bills.
+    // S-SAMSARA-CLOSE-DISTANCE-CHAIN (D-ODOMETER-CHAIN-1): count from the
+    // odometer POSITION (OdometerChain), not the last real reading. A Samsara
+    // lease's months are usually billed as a GPS (or typed) DISTANCE with no end
+    // reading; skipping them made the final invoice bill closing − an old
+    // reading, i.e. every distance-only month a second time (closing 133,500 vs
+    // a 120,000 start after three 4,000 km GPS months → 13,500 km instead of
+    // 1,500). Bounded to periods ending ON/BEFORE the billable extent: an
+    // invoice running past the return (the closing month's full_month draft the
+    // void/overshoot passes below replace) is not driving that happened before
+    // the final period. Same rule as the Readings tab and Generate Invoice.
     $odoPeriodStart = null;
     if ($odoAtClose !== null) {
-        $prev = db_row(
-            "SELECT odometer_at_period_end_km
-               FROM invoices
-              WHERE lease_id = ? AND deleted_at IS NULL
-                AND status <> 'void'
-                AND odometer_at_period_end_km IS NOT NULL
-              ORDER BY billing_period_end DESC, id DESC LIMIT 1",
-            [$id]
+        $odoChainExtent = lease_billable_extent(
+            $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date'],
+            $billingDaysRemoved
         );
-        if ($prev && $prev['odometer_at_period_end_km'] !== null) {
-            $odoPeriodStart = $prev['odometer_at_period_end_km'];
+        $odoChainBefore = (new DateTimeImmutable($odoChainExtent))->modify('+1 day')->format('Y-m-d');
+        $prevPos = \FleetForge\Billing\OdometerChain::positionsBefore([$id], $odoChainBefore)[$id] ?? null;
+        if ($prevPos !== null) {
+            $odoPeriodStart = $prevPos['km'];
         } elseif ($lease['odometer_start_km'] !== null) {
             $odoPeriodStart = $lease['odometer_start_km'];
         }
@@ -1380,7 +1403,7 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
                 // (~line 1183) still bills the extra_lines so nothing is dropped.
                 if (!empty($extraLines)) {
                     $clampedDraft = db_row(
-                        "SELECT id, invoice_number, lease_id, subtotal, total_amount,
+                        "SELECT id, invoice_number, lease_id, subtotal, total_amount, billing_period_start,
                                 gst_exempt_snapshot, pst_exempt_snapshot, tax_exempt_snapshot
                            FROM invoices
                           WHERE lease_id = ? AND status = 'draft' AND deleted_at IS NULL

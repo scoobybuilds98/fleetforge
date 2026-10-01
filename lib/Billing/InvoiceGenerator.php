@@ -2933,6 +2933,12 @@ class InvoiceGenerator
 
             $lastIdx  = count($segments) - 1;
             $created  = [];
+            // S-SAMSARA-CLOSE-DISTANCE-CHAIN: GPS distance the earlier segments
+            // of THIS fan-out were billed with no end reading (a Samsara lease's
+            // past months). The caller's start reading predates them, so the
+            // last segment counts from start + this — otherwise its end reading
+            // bills those months a second time (D-ODOMETER-CHAIN-1).
+            $fanDistanceKm = '0.00';
             foreach ($segments as $i => $seg) {
                 $this->assertNoOverlap($leaseId, $seg['period_start'], $seg['period_end'], $allowOverlap, $seg['billing_type']);
                 $isLast    = ($i === $lastIdx);
@@ -2943,9 +2949,27 @@ class InvoiceGenerator
                     'invoice_type' => ($isLast && $extentDefinitive) ? 'final' : 'regular',
                 ];
                 if ($isLast) {
-                    $segParams += $odo; // odometer on the most-recent period only
+                    $segOdo = $odo; // odometer on the most-recent period only
+                    if (isset($segOdo['odometer_at_period_start_km']) && $segOdo['odometer_at_period_start_km'] !== ''
+                        && bccomp($fanDistanceKm, '0', 2) > 0
+                    ) {
+                        $segOdo['odometer_at_period_start_km'] = bcadd(
+                            (string) $segOdo['odometer_at_period_start_km'], $fanDistanceKm, 2
+                        );
+                    }
+                    $segParams += $segOdo;
                 }
-                $created[] = $this->createFromLease($segParams);
+                $segInv    = $this->createFromLease($segParams);
+                $created[] = $segInv;
+                if (!$isLast) {
+                    $segRow = db_row(
+                        "SELECT period_distance_km, odometer_at_period_end_km FROM invoices WHERE id = ?",
+                        [(int) $segInv['invoice_id']]
+                    );
+                    if ($segRow && $segRow['odometer_at_period_end_km'] === null && $segRow['period_distance_km'] !== null) {
+                        $fanDistanceKm = bcadd($fanDistanceKm, (string) $segRow['period_distance_km'], 2);
+                    }
+                }
             }
 
             return [

@@ -303,18 +303,17 @@ function ff_run_monthly_billing(string $today): array
                     $odoSource    = 'gps';
                     $odoFetchedAt = $lease['unit_samsara_last_synced_at'] ?: null;
 
-                    // Period-start priority: previous invoice's end odometer,
-                    // else lease.odometer_start_km, else null (first invoice).
-                    $prev = db_row(
-                        "SELECT odometer_at_period_end_km
-                           FROM invoices
-                          WHERE lease_id = ? AND deleted_at IS NULL
-                            AND odometer_at_period_end_km IS NOT NULL
-                          ORDER BY billing_period_end DESC, id DESC LIMIT 1",
-                        [$leaseId]
-                    );
-                    if ($prev && $prev['odometer_at_period_end_km'] !== null) {
-                        $odoPeriodStart = (string) $prev['odometer_at_period_end_km'];
+                    // Period-start priority: where the odometer stood after the
+                    // last live period before this one, else
+                    // lease.odometer_start_km, else null (first invoice).
+                    // S-SAMSARA-CLOSE-DISTANCE-CHAIN: the POSITION (OdometerChain —
+                    // last real reading + later GPS/typed distance-only months, void
+                    // skipped), so the cached odometer doesn't re-bill those months.
+                    $prevPos = \FleetForge\Billing\OdometerChain::positionsBefore(
+                        [(int) $leaseId], (string) $periodStart
+                    )[(int) $leaseId] ?? null;
+                    if ($prevPos !== null) {
+                        $odoPeriodStart = $prevPos['km'];
                     } elseif ($lease['odometer_start_km'] !== null) {
                         $odoPeriodStart = (string) $lease['odometer_start_km'];
                     }

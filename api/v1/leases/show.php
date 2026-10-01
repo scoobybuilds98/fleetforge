@@ -224,23 +224,22 @@ $lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? nu
 $lease['latest_invoice_id_for_odo']      = $latestOdoInv && $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
 $lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
 
-// S-INVOICE-DISTANCE-ENTRY: every live period-end reading, oldest first, so
-// Generate Invoice counts the period it is billing from the last reading
-// BEFORE that period (the engine's and the Readings tab's rule,
-// CycleReadings::previousReadings) — not the lease's latest reading, which is
-// wrong when a voided middle month is re-billed while later months stand.
+// S-INVOICE-DISTANCE-ENTRY: the lease's odometer chain, oldest first, so
+// Generate Invoice counts the period it is billing from where the odometer
+// stood BEFORE that period (the engine's and the Readings tab's rule) — not the
+// lease's latest reading, which is wrong when a voided middle month is
+// re-billed while later months stand.
+// S-SAMSARA-CLOSE-DISTANCE-CHAIN: each entry is the odometer POSITION after a
+// live invoice (OdometerChain): a real end reading, or the previous position
+// plus a distance-only month's GPS/typed distance (`derived` = true). Counting
+// from real readings alone made a reading typed after GPS-billed months bill
+// those months again.
 $lease['odometer_readings'] = array_map(static fn ($r) => [
-    'period_end'     => $r['billing_period_end'],
-    'km'             => (float) $r['odometer_at_period_end_km'],
+    'period_end'     => $r['period_end'],
+    'km'             => (float) $r['km'],
     'invoice_number' => $r['invoice_number'],
-], db_select(
-    "SELECT billing_period_end, odometer_at_period_end_km, invoice_number
-       FROM invoices
-      WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
-        AND odometer_at_period_end_km IS NOT NULL
-      ORDER BY billing_period_end ASC, id ASC",
-    [$id]
-));
+    'derived'        => (bool) $r['derived'],
+], \FleetForge\Billing\OdometerChain::chain($id));
 
 // S-DROPDOWN-RETROFIT-1: latest non-void invoice's billing_period_end so the
 // invoice create picker can auto-fill period_start = latest_period_end + 1 day.
