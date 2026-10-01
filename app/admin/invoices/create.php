@@ -74,7 +74,10 @@ require_once FF_ROOT . '/includes/header.php';
      CREATE INVOICE FORM
      ============================================================ -->
 <!-- FIX #39: wrap in form tag so Enter-to-submit works -->
-<form x-data="FF_InvoiceCreate()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;">
+<!-- S-INVOICE-DISTANCE-ENTRY: novalidate — the two mileage modes hide their
+     inputs with x-show, and the browser refuses to submit (silently) when a
+     HIDDEN input fails min/step. validate() + the API do the checking. -->
+<form x-data="FF_InvoiceCreate()" @submit.prevent="submit()" class="card" style="padding:24px; max-width:800px;" novalidate>
 
     <!-- Lease Selection — D-DROPDOWN-RETROFIT-PATTERN: FF_RecordPicker.
          @record-picked fires onLeasePickerSelected(raw) which populates the lease
@@ -255,26 +258,34 @@ require_once FF_ROOT . '/includes/header.php';
         </select>
     </div>
 
-    <!-- ── SAMSARA-3: Odometer & Distance section ─────────────────
-         Period start auto-populates from the previous invoice's
-         period-end odometer (or the lease's starting odometer if
-         this is the first invoice). Period end is fetched live from
-         Samsara or entered manually. Period distance + cumulative
-         distance are computed live from the two values.
+    <!-- ── SAMSARA-3 / S-INVOICE-DISTANCE-ENTRY: Mileage section ──────
+         Two ways to enter this period's mileage (D-DISTANCE-ENTRY-1):
+           • Distance driven (DEFAULT) — one number, the distance driven this
+             period. Built for backfilling, where only the month's mileage is
+             known. On a Manual lease the server adds it to the reading shown
+             as "Counted from" (end = start + distance), so the odometer chain
+             the next invoice / Readings tab / close count from stays intact.
+             On a Samsara lease it replaces the GPS distance for this period.
+           • Odometer readings — the original start/end pair. Period start
+             auto-populates from the previous (non-void) invoice's end reading,
+             else the lease's starting odometer; period end is typed or
+             fetched live from Samsara.
+         Leases with mileage tracking Off bill no mileage at all (the engine
+         drops every reading), so they get a note instead of inputs.
          ──────────────────────────────────────────────────────── -->
     <template x-if="selectedLease">
         <div style="margin-bottom:20px;padding:16px;border:1px solid var(--border-color);border-radius:8px;background:var(--bg-surface-2);">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:0.75rem;">
-                <div style="font-weight:600;font-size:0.95rem;">Odometer &amp; Distance</div>
-                <!-- S-ODO-UNIT: entry/display unit ONLY. Readings are ALWAYS
-                     stored in km (the columns are odometer_at_period_*_km and
-                     the billing engine computes distance in km) — picking
-                     "miles" converts on the way in, it does NOT change which
-                     rate is billed. That is driven by the LEASE's own
-                     mileage_unit and is untouched here. Defaults to the
-                     lease's unit so the operator normally never touches it. -->
-                <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;" class="text-secondary">
-                    Enter readings in
+                <div style="font-weight:600;font-size:0.95rem;">Mileage</div>
+                <!-- S-ODO-UNIT: entry/display unit ONLY. Readings and distances
+                     are ALWAYS stored in km (the columns are *_km and the
+                     billing engine computes distance in km) — picking "miles"
+                     converts on the way in, it does NOT change which rate is
+                     billed. That is driven by the LEASE's own mileage_unit and
+                     is untouched here. Defaults to the lease's unit so the
+                     operator normally never touches it. -->
+                <label x-show="leaseMileageMode !== 'off'" style="display:flex;align-items:center;gap:6px;font-size:0.8rem;" class="text-secondary">
+                    Enter in
                     <select class="form-control form-control-sm" style="width:auto;padding-block:4px;"
                             x-model="odoUnit" @change="onOdoUnitChanged($event)">
                         <option value="km">Kilometres (km)</option>
@@ -283,84 +294,194 @@ require_once FF_ROOT . '/includes/header.php';
                 </label>
             </div>
 
-            <!-- Period Start Odometer -->
-            <div style="margin-bottom:1rem;">
-                <label class="form-label">Odometer at Period Start (<span x-text="odoUnitLabel"></span>)</label>
-                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+            <!-- Mileage tracking Off: nothing to enter (InvoiceGenerator drops
+                 every reading/distance on an 'off' lease). -->
+            <div x-show="leaseMileageMode === 'off'" class="form-hint">
+                Mileage tracking is Off for this lease, so this invoice bills no mileage.
+                To bill mileage, set the lease's mileage tracking to Manual or Samsara.
+            </div>
+
+            <div x-show="leaseMileageMode !== 'off'">
+                <!-- Entry mode: Distance driven (default) | Odometer readings -->
+                <div style="margin-bottom:1rem;max-width:100%;overflow-x:auto;">
+                    <div class="ff-segment-control" role="tablist" aria-label="How to enter mileage">
+                        <div class="ff-segment-control__pill"
+                             :class="{ 'ff-segment-control__pill--right': form.mileage_entry === 'odometer' }"></div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': form.mileage_entry === 'distance' }"
+                             @click="setMileageEntry('distance')"
+                             role="tab" :aria-selected="form.mileage_entry === 'distance'" tabindex="0"
+                             @keydown.enter.prevent="setMileageEntry('distance')"
+                             @keydown.space.prevent="setMileageEntry('distance')">
+                            Distance driven
+                        </div>
+                        <div class="ff-segment-control__option"
+                             :class="{ 'ff-segment-control__option--active': form.mileage_entry === 'odometer' }"
+                             @click="setMileageEntry('odometer')"
+                             role="tab" :aria-selected="form.mileage_entry === 'odometer'" tabindex="0"
+                             @keydown.enter.prevent="setMileageEntry('odometer')"
+                             @keydown.space.prevent="setMileageEntry('odometer')">
+                            Odometer readings
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Distance driven ─────────────────────────────────── -->
+                <div x-show="form.mileage_entry === 'distance'">
+                    <label class="form-label" for="ff-inv-distance">
+                        <span x-text="distanceLabel()"></span>
+                        (<span x-text="odoUnitLabel"></span>)
+                    </label>
                     <input type="number"
+                           id="ff-inv-distance"
+                           name="period_distance_km"
                            class="form-control font-mono"
-                           x-model="form.odometer_at_period_start_km"
-                           @input="onOdoStartEdited()"
+                           x-model="form.period_distance"
                            step="0.01"
                            min="0"
-                           placeholder="Auto-filled from last invoice"
-                           style="flex:1 1 200px;min-width:0;">
-                    <span x-show="odoStartSource === 'gps'" class="badge badge-info" title="Fetched live from Samsara">GPS</span>
-                    <span x-show="odoStartSource === 'manual' && form.odometer_at_period_start_km !== '' && form.odometer_at_period_start_km !== null"
-                          class="badge badge-neutral" title="Manually entered">Manual</span>
-                    <button type="button" class="btn btn-secondary btn-sm"
-                            x-show="odoCanFetch"
-                            @click="fetchOdometer('start')"
-                            :disabled="odoFetching">
-                        <span x-show="!(odoFetching && odoFetchTarget === 'start')">Fetch from Samsara</span>
-                        <span x-show="odoFetching && odoFetchTarget === 'start'">Fetching…</span>
-                    </button>
-                </div>
-                <div class="form-hint" style="margin-top:0.25rem;" x-show="odoStartAutoSource"
-                     x-text="odoStartAutoSource"></div>
-            </div>
+                           placeholder="Total distance driven"
+                           style="max-width:260px;">
 
-            <!-- Period End Odometer -->
-            <div style="margin-bottom:1rem;">
-                <label class="form-label">Odometer at Period End — current (<span x-text="odoUnitLabel"></span>)</label>
-                <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-                    <input type="number"
-                           class="form-control font-mono"
-                           x-model="form.odometer_at_period_end_km"
-                           @input="onOdoEndEdited()"
-                           step="0.01"
-                           min="0"
-                           placeholder="Live reading"
-                           style="flex:1 1 200px;min-width:0;">
-                    <span x-show="odoEndSource === 'gps'" class="badge badge-info" title="Fetched live from Samsara">GPS</span>
-                    <span x-show="odoEndSource === 'manual' && form.odometer_at_period_end_km !== '' && form.odometer_at_period_end_km !== null"
-                          class="badge badge-neutral" title="Manually entered">Manual</span>
-                    <button type="button" class="btn btn-secondary btn-sm"
-                            x-show="odoCanFetch"
-                            @click="fetchOdometer('end')"
-                            :disabled="odoFetching">
-                        <span x-show="!(odoFetching && odoFetchTarget === 'end')">Fetch from Samsara</span>
-                        <span x-show="odoFetching && odoFetchTarget === 'end'">Fetching…</span>
-                    </button>
-                </div>
-            </div>
+                    <!-- Manual lease: say exactly what the distance counts from,
+                         and what reading it produces. -->
+                    <template x-if="leaseMileageMode === 'manual'">
+                        <div>
+                            <div class="form-hint" style="margin-top:0.25rem;" x-show="distanceNotice() !== 'none'" x-text="distanceAnchorHint()"></div>
+                            <!-- Estimate lease, no reading yet, earlier invoices billed
+                                 ESTIMATES: the true-up treats the reading as lifetime
+                                 mileage, so a single month here would credit every
+                                 earlier estimate back. Ask for the lifetime figure. -->
+                            <div class="alert alert-warning" style="margin-top:0.5rem;padding:0.5rem 0.75rem;font-size:0.85rem;"
+                                 x-show="distanceNotice() === 'lifetime'">
+                                This lease bills estimated mileage, and no earlier invoice has a reading. Enter
+                                <strong>all</strong> the distance driven since the lease started on
+                                <span x-text="_leaseStartDate"></span> — the estimates already billed are subtracted in the
+                                true-up. Entering only this month's distance would credit those estimates back.
+                            </div>
+                            <div class="form-hint" style="margin-top:0.25rem;" x-show="distanceNotice() === 'first'">
+                                No earlier invoice on this lease has a reading, so this distance should cover all
+                                driving since the lease started that hasn't been billed yet.
+                            </div>
+                            <div class="alert alert-warning" style="margin-top:0.5rem;padding:0.5rem 0.75rem;font-size:0.85rem;"
+                                 x-show="distanceNotice() === 'none'">
+                                This lease has no starting odometer and no earlier reading, so a distance has nothing to
+                                count from. Enter the start reading under <strong>Odometer readings</strong>, or set the
+                                lease's starting odometer (0 if its mileage counts from zero).
+                            </div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:0.75rem;padding-top:0.75rem;border-top:1px solid var(--border-color);">
+                                <div>
+                                    <div class="text-xs text-secondary">New odometer reading</div>
+                                    <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
+                                         x-text="fmtDist(distanceNewReading())"></div>
+                                </div>
+                                <div>
+                                    <div class="text-xs text-secondary">Cumulative (since lease start)</div>
+                                    <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
+                                         x-text="fmtDist(distanceCumulative())"></div>
+                                    <div x-show="cumulativeContext" class="text-xs text-secondary" style="margin-top:2px;"
+                                         x-text="cumulativeContext"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
 
-            <!-- Distance results (live-calculated) -->
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:0.5rem;padding-top:0.75rem;border-top:1px solid var(--border-color);">
-                <div>
-                    <div class="text-xs text-secondary">Period Distance</div>
-                    <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
-                         x-text="fmtDist(periodDistance)"></div>
-                    <div x-show="periodDistanceWarning" class="text-xs" style="color:var(--color-danger);margin-top:2px;"
-                         x-text="periodDistanceWarning"></div>
+                    <!-- Samsara lease: the typed distance replaces GPS. -->
+                    <div class="form-hint" style="margin-top:0.25rem;" x-show="leaseMileageMode === 'samsara'">
+                        Replaces the Samsara GPS distance for this period. Leave it blank to bill the GPS distance.
+                    </div>
                 </div>
-                <div>
-                    <div class="text-xs text-secondary">Cumulative (since lease start)</div>
-                    <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
-                         x-text="fmtDist(cumulativeDistance)"></div>
-                    <div x-show="cumulativeContext" class="text-xs text-secondary" style="margin-top:2px;"
-                         x-text="cumulativeContext"></div>
+
+                <!-- ── Odometer readings (SAMSARA-3) ───────────────────── -->
+                <div x-show="form.mileage_entry === 'odometer'">
+                    <!-- Period Start Odometer -->
+                    <div style="margin-bottom:1rem;">
+                        <label class="form-label" for="ff-inv-odo-start">Odometer at Period Start (<span x-text="odoUnitLabel"></span>)</label>
+                        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                            <input type="number"
+                                   id="ff-inv-odo-start"
+                                   name="odometer_at_period_start_km"
+                                   class="form-control font-mono"
+                                   x-model="form.odometer_at_period_start_km"
+                                   @input="onOdoStartEdited()"
+                                   step="0.01"
+                                   min="0"
+                                   placeholder="Auto-filled from last invoice"
+                                   style="flex:1 1 200px;min-width:0;">
+                            <span x-show="odoStartSource === 'gps'" class="badge badge-info" title="Fetched live from Samsara">GPS</span>
+                            <span x-show="odoStartSource === 'manual' && form.odometer_at_period_start_km !== '' && form.odometer_at_period_start_km !== null"
+                                  class="badge badge-neutral" title="Manually entered">Manual</span>
+                            <button type="button" class="btn btn-secondary btn-sm"
+                                    x-show="odoCanFetch"
+                                    @click="fetchOdometer('start')"
+                                    :disabled="odoFetching">
+                                <span x-show="!(odoFetching && odoFetchTarget === 'start')">Fetch from Samsara</span>
+                                <span x-show="odoFetching && odoFetchTarget === 'start'">Fetching…</span>
+                            </button>
+                        </div>
+                        <div class="form-hint" style="margin-top:0.25rem;" x-show="odoStartAutoSource"
+                             x-text="odoStartAutoSource"></div>
+                    </div>
+
+                    <!-- Period End Odometer -->
+                    <div style="margin-bottom:1rem;">
+                        <label class="form-label" for="ff-inv-odo-end">Odometer at Period End — current (<span x-text="odoUnitLabel"></span>)</label>
+                        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+                            <input type="number"
+                                   id="ff-inv-odo-end"
+                                   name="odometer_at_period_end_km"
+                                   class="form-control font-mono"
+                                   x-model="form.odometer_at_period_end_km"
+                                   @input="onOdoEndEdited()"
+                                   step="0.01"
+                                   min="0"
+                                   placeholder="Live reading"
+                                   style="flex:1 1 200px;min-width:0;">
+                            <span x-show="odoEndSource === 'gps'" class="badge badge-info" title="Fetched live from Samsara">GPS</span>
+                            <span x-show="odoEndSource === 'manual' && form.odometer_at_period_end_km !== '' && form.odometer_at_period_end_km !== null"
+                                  class="badge badge-neutral" title="Manually entered">Manual</span>
+                            <button type="button" class="btn btn-secondary btn-sm"
+                                    x-show="odoCanFetch"
+                                    @click="fetchOdometer('end')"
+                                    :disabled="odoFetching">
+                                <span x-show="!(odoFetching && odoFetchTarget === 'end')">Fetch from Samsara</span>
+                                <span x-show="odoFetching && odoFetchTarget === 'end'">Fetching…</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Distance results (live-calculated) -->
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:0.5rem;padding-top:0.75rem;border-top:1px solid var(--border-color);">
+                        <div>
+                            <div class="text-xs text-secondary">Period Distance</div>
+                            <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
+                                 x-text="fmtDist(periodDistance)"></div>
+                            <div x-show="periodDistanceWarning" class="text-xs" style="color:var(--color-danger);margin-top:2px;"
+                                 x-text="periodDistanceWarning"></div>
+                        </div>
+                        <div>
+                            <div class="text-xs text-secondary">Cumulative (since lease start)</div>
+                            <div class="font-mono" style="font-size:1rem;font-weight:600;margin-top:2px;"
+                                 x-text="fmtDist(cumulativeDistance)"></div>
+                            <div x-show="cumulativeContext" class="text-xs text-secondary" style="margin-top:2px;"
+                                 x-text="cumulativeContext"></div>
+                        </div>
+                    </div>
+
+                    <!-- Fetch banner -->
+                    <div x-show="odoBanner" :class="odoBanner && odoBanner.type === 'success' ? 'alert alert-success' : 'alert alert-warning'"
+                         style="margin-top:0.75rem;padding:0.5rem 0.75rem;font-size:0.875rem;"
+                         x-text="odoBanner && odoBanner.message"></div>
+
+                    <!-- Hint when not Samsara-linked -->
+                    <div x-show="selectedLease && !odoCanFetch" class="form-hint" style="margin-top:0.5rem;">
+                        This lease's unit is not linked to Samsara. Enter odometer values manually.
+                    </div>
+                    <!-- The Samsara buttons read TODAY's live odometer — wrong for a
+                         past period, so say so while backfilling. -->
+                    <div x-show="odoCanFetch && form.period_end && form.period_end < _todayYmd()" class="form-hint" style="margin-top:0.5rem;">
+                        "Fetch from Samsara" reads today's odometer, not the reading at the end of this past period.
+                    </div>
                 </div>
-            </div>
-
-            <!-- Fetch banner -->
-            <div x-show="odoBanner" :class="odoBanner && odoBanner.type === 'success' ? 'alert alert-success' : 'alert alert-warning'"
-                 style="margin-top:0.75rem;padding:0.5rem 0.75rem;font-size:0.875rem;"
-                 x-text="odoBanner && odoBanner.message"></div>
-
-            <!-- Hint when not Samsara-linked -->
-            <div x-show="selectedLease && !odoCanFetch" class="form-hint" style="margin-top:0.5rem;">
-                This lease's unit is not linked to Samsara. Enter odometer values manually.
             </div>
         </div>
     </template>
@@ -399,8 +520,12 @@ require_once FF_ROOT . '/includes/header.php';
             <span x-show="!submitting" x-text="primaryGenerateLabel()"></span>
             <span x-show="submitting">Generating…</span>
         </button>
+        <!-- S-INVOICE-DISTANCE-ENTRY: a typed distance belongs to ONE month —
+             on a fan-out it would land whole on the last month (the server
+             refuses it too), so "all due" waits until the box is cleared. -->
         <template x-if="monthsLoaded && unbilledCount > 1">
-            <button type="button" class="btn btn-secondary" :disabled="submitting"
+            <button type="button" class="btn btn-secondary" :disabled="submitting || distanceEntered()"
+                    :title="distanceEntered() ? 'Distance driven is entered one month at a time — generate the selected month, or clear the distance.' : ''"
                     @click="submitAllDue()"
                     x-text="'Generate all due (' + unbilledCount + ' months)'"></button>
         </template>
@@ -439,6 +564,14 @@ function FF_InvoiceCreate() {
             odometer_at_period_end_km:   '',
             odometer_source:             null,   // 'gps' | 'manual' | null
             odometer_fetched_at:         null,   // ISO datetime when GPS fetched end value
+            // S-INVOICE-DISTANCE-ENTRY: distance driven this period, in the
+            // DISPLAY unit (odoUnit). Sent as period_distance_km (km) only in
+            // "Distance driven" mode — see submit().
+            period_distance:             '',
+            // 'distance' (default) | 'odometer'. In `form` (not component
+            // state) so a restored draft brings its mode back with its values —
+            // otherwise a restored end reading sits hidden and is dropped.
+            mileage_entry:               'distance',
             single_segment:              false,  // R2 §3.6: picker bills ONE calendar-month segment
         },
         selectedLease:      null,
@@ -471,6 +604,21 @@ function FF_InvoiceCreate() {
         odoBanner:          null,     // { type: 'success'|'warning', message: string }
         _leaseStartOdo:     null,     // raw lease.odometer_start_km as float, for cumulative calc
         _leaseStartDate:    '',
+
+        // S-INVOICE-DISTANCE-ENTRY (D-DISTANCE-ENTRY-1) mileage entry state
+        leaseMileageMode:      null,       // lease.mileage_tracking_mode: 'manual' | 'samsara' | 'off'
+        distanceAnchorFrom:    null,       // where the period-start reading came from:
+                                           // 'invoice' | 'lease' | 'none' (auto-fill) | 'edited' | 'gps'
+        _odoReadings:          [],         // live period-end readings, oldest first (leases/show odometer_readings)
+        _odoStartAutoInv:      '',         // invoice whose end reading the auto-fill used
+        _leaseEstimatePerDay:  0,          // lease.estimated_mileage_per_day (estimate model when > 0)
+        _latestPeriodEnd:      '',         // latest live invoice's billing_period_end
+        // The auto-filled period-start reading exactly as stored (km) and as
+        // first displayed. An untouched auto-fill is sent as the stored km,
+        // not re-converted from a 2dp miles display (that round-trip drifts
+        // by up to 0.01 km and would put a gap in the odometer chain).
+        _odoStartAutoKm:       null,
+        _odoStartAutoDisplay:  null,
 
         // S-INVOICE-CREATION-UX C2: period auto-fill state
         periodWarning:      '',       // banner text when auto-fill hits an edge case (catch-up, capped, etc.)
@@ -769,6 +917,9 @@ function FF_InvoiceCreate() {
         // in order, atomically (the server's single-db_transaction fan-out path).
         submitAllDue() {
             if (this.monthsNextDue === null) return;
+            // S-INVOICE-DISTANCE-ENTRY: the button is disabled while a distance
+            // is typed; this guards keyboard/programmatic triggers too.
+            if (this.distanceEntered()) return;
             const first = this.billableMonths[this.monthsNextDue];
             let lastEnd = first.period_end;
             this.billableMonths.forEach(m => { if (m.status === 'unbilled' || m.status === 'void') lastEnd = m.period_end; });
@@ -813,6 +964,17 @@ function FF_InvoiceCreate() {
                 const d = r.data || {};
 
                 this.odoCanFetch     = !!d.samsara_vehicle_id;
+                // S-INVOICE-DISTANCE-ENTRY: the lease's mileage source decides
+                // what a typed distance means (manual → a reading counted from
+                // the previous one; samsara → replaces GPS; off → nothing).
+                this.leaseMileageMode = d.mileage_tracking_mode || null;
+                // Period-start auto-fill inputs (applied once the period is
+                // known, below). Null the "auto display" first so the period
+                // auto-fill's updateDays() can't re-apply a previous lease's.
+                this._odoStartAutoDisplay = null;
+                this._odoReadings         = Array.isArray(d.odometer_readings) ? d.odometer_readings : [];
+                this._leaseEstimatePerDay = parseFloat(d.estimated_mileage_per_day) || 0;
+                this._latestPeriodEnd     = d.latest_invoice_period_end || '';
                 // S-ODO-UNIT: default to the lease's own convention so the
                 // operator normally never has to touch the selector. Set
                 // before any auto-fill below so those convert correctly.
@@ -856,23 +1018,14 @@ function FF_InvoiceCreate() {
                 this.form.odometer_fetched_at       = null;
                 this.odoEndSource                   = null;
                 this.odoBanner                      = null;
+                // S-INVOICE-DISTANCE-ENTRY: every lease opens in Distance
+                // driven mode with an empty box (same "enter fresh" rule).
+                this.form.period_distance           = '';
+                this.form.mileage_entry                   = 'distance';
 
-                // Auto-populate start side
-                const prevEndOdo = d.latest_invoice_odometer_km;
-                if (prevEndOdo !== null && prevEndOdo !== undefined && !isNaN(Number(prevEndOdo))) {
-                    // S-ODO-UNIT: stored value is KM — show it in the chosen unit.
-                    this.form.odometer_at_period_start_km = this.fromKm(prevEndOdo).toFixed(2);
-                    this.odoStartSource                    = 'manual';
-                    this.odoStartAutoSource                = 'Auto-filled from previous invoice end odometer.';
-                } else if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
-                    this.form.odometer_at_period_start_km = this.fromKm(this._leaseStartOdo).toFixed(2);
-                    this.odoStartSource                    = 'manual';
-                    this.odoStartAutoSource                = 'Auto-filled from lease starting odometer.';
-                } else {
-                    this.form.odometer_at_period_start_km = '';
-                    this.odoStartSource                    = null;
-                    this.odoStartAutoSource                = 'No previous odometer on file. Enter manually or fetch from Samsara.';
-                }
+                // Auto-populate the start side for the selected period: the last
+                // live reading BEFORE it, else the lease's starting odometer.
+                this._applyStartAutoFill();
             } catch (e) {
                 // Non-fatal: context fetch failed; basic selectedLease state still works.
                 // Period dates and odometer fields will be blank — user can fill manually.
@@ -890,6 +1043,17 @@ function FF_InvoiceCreate() {
             this.odoBanner          = null;
             this._leaseStartOdo     = null;
             this._leaseStartDate    = '';
+            // S-INVOICE-DISTANCE-ENTRY reset
+            this.form.period_distance    = '';
+            this.form.mileage_entry            = 'distance';
+            this.leaseMileageMode        = null;
+            this.distanceAnchorFrom      = null;
+            this._odoStartAutoKm         = null;
+            this._odoStartAutoDisplay    = null;
+            this._odoStartAutoInv        = '';
+            this._odoReadings            = [];
+            this._leaseEstimatePerDay    = 0;
+            this._latestPeriodEnd        = '';
             this.periodWarning      = '';
             this.fullyBilled        = false;
             // R2 §3.6 picker reset
@@ -900,6 +1064,140 @@ function FF_InvoiceCreate() {
             this.monthsExtentDefinitive = false;
             this.selectedMonthIndex = null;
             this.form.single_segment = false;
+        },
+
+        // ── S-INVOICE-DISTANCE-ENTRY (D-DISTANCE-ENTRY-1) ───────────
+        // Switch between typing the distance driven (default) and typing
+        // odometer readings. Both modes share the period-start reading, so a
+        // start corrected under "Odometer readings" is what a distance counts
+        // from when the operator switches back.
+        setMileageEntry(mode) {
+            if (mode !== 'distance' && mode !== 'odometer') return;
+            this.form.mileage_entry = mode;
+        },
+        /** True when a distance will actually be sent (drives the
+         *  "Generate all due" lock — a distance belongs to one month). */
+        distanceEntered() {
+            const v = this.form.period_distance;   // read first: Alpine dep tracking
+            return this.leaseMileageMode !== 'off'
+                && this.form.mileage_entry === 'distance'
+                && v !== '' && v !== null && !isNaN(parseFloat(v));
+        },
+        /** The last live period-end reading before `periodStart` — the rule
+         *  the engine and the Readings tab use (CycleReadings::previousReadings).
+         *  _odoReadings is oldest-first, so the last match is the latest. */
+        _readingBefore(periodStart) {
+            let hit = null;
+            if (!periodStart) return hit;
+            for (const r of this._odoReadings) {
+                if (r.period_end < periodStart) hit = r;
+            }
+            return hit;
+        },
+        /** Fill the period-start reading for the CURRENT period from the last
+         *  reading before it, else the lease's starting odometer, else blank. */
+        _applyStartAutoFill() {
+            const r = this._readingBefore(this.form.period_start);
+            let km = null, from = 'none', inv = '', hint = 'No previous odometer on file. Enter manually or fetch from Samsara.';
+            if (r) {
+                km = r.km; from = 'invoice'; inv = r.invoice_number || '';
+                hint = 'Auto-filled from the end reading of ' + (inv || 'the previous invoice') + '.';
+            } else if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
+                km = this._leaseStartOdo; from = 'lease';
+                hint = 'Auto-filled from lease starting odometer.';
+            }
+            this.form.odometer_at_period_start_km = km === null ? '' : this.fromKm(km).toFixed(2);
+            this._odoStartAutoKm       = km === null ? null : String(km);
+            this._odoStartAutoDisplay  = this.form.odometer_at_period_start_km;
+            this._odoStartAutoInv      = inv;
+            this.distanceAnchorFrom    = from;
+            this.odoStartSource        = km === null ? null : 'manual';
+            this.odoStartAutoSource    = hint;
+        },
+        /** After a period change, move an UNTOUCHED auto-filled start to the
+         *  new period's reading (an edited or fetched start is left alone). */
+        _refreshStartAutoFill() {
+            if (this._odoStartAutoDisplay === null) return;   // lease context not loaded yet
+            if (this.form.odometer_at_period_start_km !== this._odoStartAutoDisplay) return;
+            this._applyStartAutoFill();
+        },
+        /** What a manual-lease distance counts from — exactly what the server
+         *  will use: the start reading sent (an untouched auto-fill, an edit or
+         *  a fetch), or, when it is blank, the server's own fallback (last
+         *  reading before the period, else the lease's starting odometer).
+         *  { value (display unit) | null, from, inv }. */
+        _distanceAnchor() {
+            const raw   = this.form.odometer_at_period_start_km;
+            const typed = parseFloat(raw);
+            const auto  = raw === this._odoStartAutoDisplay;
+            const from  = this.distanceAnchorFrom;
+            const r     = this._readingBefore(this.form.period_start);
+            if (!isNaN(typed)) {
+                if (auto) return { value: typed, from: from, inv: this._odoStartAutoInv };
+                return { value: typed, from: from === 'gps' ? 'gps' : 'edited', inv: '' };
+            }
+            if (r) return { value: this.fromKm(r.km), from: 'invoice', inv: r.invoice_number || '' };
+            if (this._leaseStartOdo !== null && !isNaN(this._leaseStartOdo)) {
+                return { value: this.fromKm(this._leaseStartOdo), from: 'lease', inv: '' };
+            }
+            return { value: null, from: 'none', inv: '' };
+        },
+        _distanceStart() {
+            const a = this._distanceAnchor();
+            return a.value === null ? 0 : a.value;
+        },
+        /** A live invoice exists before the period being billed. */
+        _hasEarlierInvoice() {
+            const ps = this.form.period_start;
+            const months = this.billableMonths;
+            if (!ps) return false;
+            if (months.some(m => m.status === 'billed' && m.period_end < ps)) return true;
+            return !!(this._latestPeriodEnd && this._latestPeriodEnd < ps);
+        },
+        /** Which notice the manual distance box needs:
+         *   'lifetime' — estimate lease, no reading yet, earlier invoices billed
+         *                estimates: the box takes ALL distance since lease start
+         *   'first'    — no earlier reading: cover all unbilled driving
+         *   'none'     — nothing to count from at all (server refuses)
+         *   ''         — the normal "since last reading" case */
+        distanceNotice() {
+            const a        = this._distanceAnchor();
+            const earlier  = this._hasEarlierInvoice();
+            const estimate = this._leaseEstimatePerDay > 0;
+            if (a.from === 'none') return 'none';
+            if (a.from !== 'lease') return '';
+            return (estimate && earlier) ? 'lifetime' : 'first';
+        },
+        distanceLabel() {
+            const notice = this.distanceNotice();
+            if (this.leaseMileageMode === 'samsara') return 'Distance driven this period';
+            if (notice === 'lifetime') return 'Total distance since the lease started';
+            return 'Distance driven (since last reading)';
+        },
+        distanceAnchorHint() {
+            const a     = this._distanceAnchor();
+            const start = this.fmtDist(a.value === null ? 0 : a.value);
+            if (a.from === 'invoice') {
+                return 'Counted from ' + start + ' — the end reading of ' + (a.inv || 'the previous invoice') + '.';
+            }
+            if (a.from === 'lease')  return 'Counted from ' + start + ' — the lease\'s starting odometer.';
+            if (a.from === 'edited') return 'Counted from ' + start + ' — the start reading entered under Odometer readings.';
+            if (a.from === 'gps')    return 'Counted from ' + start + ' — the start reading fetched from Samsara.';
+            return '';
+        },
+        /** Reading this invoice will store as its period-end odometer
+         *  (start + distance) on a manual lease; null until a distance is typed. */
+        distanceNewReading() {
+            const start = this._distanceStart();
+            const dist  = parseFloat(this.form.period_distance);
+            if (isNaN(dist)) return null;
+            return start + dist;
+        },
+        distanceCumulative() {
+            const end = this.distanceNewReading();
+            if (end === null) return null;
+            if (this._leaseStartOdo === null || isNaN(this._leaseStartOdo)) return null;
+            return end - this.fromKm(this._leaseStartOdo);
         },
 
         // Live-calculated period distance (end - start)
@@ -960,13 +1258,25 @@ function FF_InvoiceCreate() {
             const prev = (ev && ev.target && ev.target._ffPrevUnit) || this._odoUnitPrev || 'km';
             const next = this.odoUnit;
             if (prev === next) return;
+            // An untouched auto-filled start is re-derived from the exact stored
+            // km below instead of re-converting its 2dp display (1,120.00 mi →
+            // 1,802.47 km when 1,802.46 is stored), so the hint and the payload
+            // stay on the real reading in either unit.
+            const startUntouched = this._odoStartAutoKm !== null
+                && this.form.odometer_at_period_start_km === this._odoStartAutoDisplay;
             const factor = (prev === 'miles' && next === 'km') ? this._MI_TO_KM
                          : (prev === 'km' && next === 'miles') ? (1 / this._MI_TO_KM)
                          : 1;
-            ['odometer_at_period_start_km', 'odometer_at_period_end_km'].forEach(k => {
+            // S-INVOICE-DISTANCE-ENTRY: a distance converts with the same
+            // factor as a reading (both are distances, never rates).
+            ['odometer_at_period_start_km', 'odometer_at_period_end_km', 'period_distance'].forEach(k => {
                 const n = parseFloat(this.form[k]);
                 if (!isNaN(n)) this.form[k] = (n * factor).toFixed(2);
             });
+            if (startUntouched) {
+                this.form.odometer_at_period_start_km = this.fromKm(this._odoStartAutoKm).toFixed(2);
+                this._odoStartAutoDisplay             = this.form.odometer_at_period_start_km;
+            }
             this._odoUnitPrev = next;
         },
         _odoUnitPrev: 'km',
@@ -1014,6 +1324,7 @@ function FF_InvoiceCreate() {
                     this.form.odometer_at_period_start_km = km;
                     this.odoStartSource                    = 'gps';
                     this.odoStartAutoSource                = '';
+                    this.distanceAnchorFrom                = 'gps';
                 } else {
                     this.form.odometer_at_period_end_km = km;
                     this.odoEndSource                   = 'gps';
@@ -1039,6 +1350,9 @@ function FF_InvoiceCreate() {
             } else {
                 this.odoStartSource = null;
             }
+            // Blank or not, the operator owns it now: period changes stop
+            // re-filling it, and a blank one falls back server-side.
+            this.distanceAnchorFrom = 'edited';
         },
         onOdoEndEdited() {
             // User edited the end odometer — mark as manual (overrides GPS badge)
@@ -1061,6 +1375,9 @@ function FF_InvoiceCreate() {
             } else {
                 this.days = 0;
             }
+            // S-INVOICE-DISTANCE-ENTRY: the period-start reading follows the
+            // period (last reading BEFORE it) unless the operator changed it.
+            this._refreshStartAutoFill();
         },
 
         validate() {
@@ -1085,6 +1402,30 @@ function FF_InvoiceCreate() {
                 FF_Validate.field(f, 'period_end', 'Due date cannot be before invoice date.');
                 ok = false;
             }
+            // S-INVOICE-DISTANCE-ENTRY: check the mileage inputs of the ACTIVE
+            // mode before posting (the inputs now carry name= so these — and
+            // the server's 422s on the same keys — render under the field).
+            if (this.leaseMileageMode !== 'off') {
+                if (this.form.mileage_entry === 'distance') {
+                    const v = this.form.period_distance;
+                    const typed = v !== '' && v !== null;
+                    const sv = this.form.odometer_at_period_start_km;
+                    if (typed && (isNaN(parseFloat(v)) || parseFloat(v) < 0)) {
+                        FF_Validate.field(f, 'period_distance_km', 'Distance driven must be zero or more.');
+                        ok = false;
+                    } else if (typed && this.leaseMileageMode === 'manual' && this.distanceNotice() === 'none') {
+                        FF_Validate.field(f, 'period_distance_km', 'Nothing to count this distance from — enter the start reading under Odometer readings, or set the lease\'s starting odometer.');
+                        ok = false;
+                    } else if (typed && sv !== '' && sv !== null && (isNaN(parseFloat(sv)) || parseFloat(sv) < 0)) {
+                        // The start input is hidden in this mode, so say where it is.
+                        FF_Validate.banner(f, 'The start reading this distance counts from is not valid — fix it under Odometer readings.');
+                        ok = false;
+                    }
+                } else if (this.periodDistance !== null && this.periodDistance < 0) {
+                    FF_Validate.field(f, 'odometer_at_period_end_km', 'Ending odometer cannot be less than starting odometer.');
+                    ok = false;
+                }
+            }
             if (!ok) FF_Validate.scrollToFirst(f);
             return ok;
         },
@@ -1098,12 +1439,37 @@ function FF_InvoiceCreate() {
             // SAMSARA-3: build payload with odometer fields coerced to floats
             // (omit empty strings so the API sees proper null)
             const payload = { ...this.form };
+            // S-INVOICE-DISTANCE-ENTRY: `period_distance` is the display-unit
+            // input; the API key is period_distance_km (km). In "Distance
+            // driven" mode the distance REPLACES the end reading (the API
+            // refuses both). The start reading still goes along: on a manual
+            // lease it is exactly what the hint says the distance counts from
+            // (blank → the server counts from 0). A blank distance leaves the
+            // payload as it always was with a blank end reading.
+            delete payload.period_distance;
+            delete payload.mileage_entry;
+            if (this.leaseMileageMode !== 'off' && this.form.mileage_entry === 'distance') {
+                delete payload.odometer_at_period_end_km;
+                delete payload.odometer_source;
+                delete payload.odometer_fetched_at;
+                const dist = parseFloat(this.form.period_distance);
+                if (!isNaN(dist)) {
+                    // 4dp string: never a float in exponent form, and the
+                    // server rounds to the stored 2dp.
+                    payload.period_distance_km = this.toKm(dist).toFixed(4);
+                }
+            }
             // S-ODO-UNIT: the *_km columns and the billing engine are km-only.
             // Whatever unit the operator typed in, convert to km HERE — this is
             // the single boundary between display units and storage.
             ['odometer_at_period_start_km', 'odometer_at_period_end_km'].forEach(k => {
                 if (payload[k] === '' || payload[k] === null || payload[k] === undefined) {
                     delete payload[k];
+                } else if (k === 'odometer_at_period_start_km'
+                           && this._odoStartAutoKm !== null
+                           && payload[k] === this._odoStartAutoDisplay) {
+                    // Untouched auto-fill: the stored km exactly (see _odoStartAutoKm).
+                    payload[k] = this._odoStartAutoKm;
                 } else {
                     payload[k] = this.toKm(payload[k]);
                 }

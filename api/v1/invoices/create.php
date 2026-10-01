@@ -11,13 +11,15 @@ declare(strict_types=1);
  * @body    lease_id (required), period_start (required), period_end (required),
  *          billing_type, invoice_type, po_number, notes, internal_notes,
  *          odometer_at_period_start_km, odometer_at_period_end_km (SAMSARA-3),
- *          odometer_source, odometer_fetched_at (SAMSARA-3)
+ *          odometer_source, odometer_fetched_at (SAMSARA-3),
+ *          period_distance_km (S-INVOICE-DISTANCE-ENTRY — distance driven this
+ *          period, in km, sent INSTEAD of an end reading)
  * @auth    Session required; require_permission('invoices','create')
  * @returns 201 { id, invoice_number, total_amount, balance_due }
  *
  * Decisions: D14 (inclusive days), D15 (sequential numbers), D16 (bcmath),
- *            D20 (FOR UPDATE on number gen)
- * Session: S008, SAMSARA-3 (odometer/distance tracking)
+ *            D20 (FOR UPDATE on number gen), D-DISTANCE-ENTRY-1
+ * Session: S008, SAMSARA-3 (odometer/distance tracking), S-INVOICE-DISTANCE-ENTRY
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -70,7 +72,8 @@ if ($fields) {
 
 // Verify lease exists and is active
 $lease = db_row(
-    "SELECT id, status, customer_id, contract_number, company_name_snapshot
+    "SELECT id, status, customer_id, contract_number, company_name_snapshot,
+            mileage_tracking_mode
        FROM leases WHERE id = ? AND deleted_at IS NULL",
     [$leaseId]
 );
@@ -141,6 +144,35 @@ if ($odoStart !== null && $odoEnd !== null && bccomp($odoEnd, $odoStart, 2) < 0)
     $fields['odometer_at_period_end_km'] = 'Ending odometer cannot be less than starting odometer.';
 }
 
+// ── S-INVOICE-DISTANCE-ENTRY: optional distance driven this period ──
+// Sent instead of an end reading (the form's default "Distance driven" mode).
+// The engine turns it into a reading on a manual lease (end = start + distance)
+// or uses it in place of the GPS distance on a Samsara lease — see
+// InvoiceGenerator::createFromLease, D-DISTANCE-ENTRY-1. Already in km (the
+// form converts miles with the distance factor, never the rate's inverse).
+$distanceKm = null;
+if (isset($body['period_distance_km']) && $body['period_distance_km'] !== '' && $body['period_distance_km'] !== null) {
+    $dec = clean_decimal($body['period_distance_km']);
+    if ($dec === null || bccomp($dec, '0', 2) < 0) {
+        $fields['period_distance_km'] = 'Distance driven must be zero or more.';
+    } elseif (bccomp($dec, '999999.99', 2) > 0) {
+        // Above what the line quantity / reading columns hold (a strict-mode
+        // 22003 → 500 otherwise) — and almost always an odometer READING
+        // typed into the distance box by habit.
+        $fields['period_distance_km'] = 'That distance is too large — enter the distance driven, not an odometer reading.';
+    } elseif ($odoEnd !== null) {
+        // Two answers to one question — refuse rather than guess which wins.
+        $fields['period_distance_km'] = 'Enter either the distance driven or the ending odometer, not both.';
+    } elseif (($lease['mileage_tracking_mode'] ?? 'off') === 'off') {
+        // The engine drops every mileage input on an 'off' lease; say so
+        // instead of silently billing no mileage.
+        $fields['period_distance_km'] = 'Mileage tracking is Off for this lease, so no mileage is billed. '
+            . 'Set the lease to Manual or Samsara mileage first.';
+    } else {
+        $distanceKm = $dec;
+    }
+}
+
 $odoSourceRaw = $body['odometer_source'] ?? null;
 $odoSource    = in_array($odoSourceRaw, ['gps', 'manual', 'estimated'], true) ? $odoSourceRaw : null;
 
@@ -205,7 +237,7 @@ try {
     db_transaction(function () use (
         $generator, $leaseId, $periodStart, $periodEnd, $billingType, $invoiceType, $body,
         $odoStart, $odoEnd, $odoSource, $odoFetchedAt, $hoursStart, $hoursEnd, $allowOverlap, $lease,
-        &$batch
+        $distanceKm, &$batch
     ) {
         $batch = $generator->generateForLease([
             'lease_id'          => $leaseId,
@@ -227,12 +259,21 @@ try {
             'odometer_at_period_end_km'   => $odoEnd,
             'odometer_source'             => $odoSource,
             'odometer_fetched_at'         => $odoFetchedAt,
+            // S-INVOICE-DISTANCE-ENTRY — typed distance (km); one period only,
+            // the generator refuses it on a multi-month fan-out.
+            'period_distance_km'          => $distanceKm,
             // S-LEASE-HOURLY-BILLING — manual engine hours (final segment only).
             'engine_hours_at_period_start' => $hoursStart,
             'engine_hours_at_period_end'   => $hoursEnd,
         ]);
 
         $companyName = $lease['company_name_snapshot'] ?? 'customer';
+        // S-INVOICE-DISTANCE-ENTRY: record that the mileage was typed as a
+        // distance — on a manual lease the stored end reading is derived
+        // (start + distance), and this note is how anyone tells it apart later.
+        $distanceNote = $distanceKm !== null
+            ? " (mileage entered as distance driven: {$distanceKm} km)"
+            : '';
         foreach ($batch['invoices'] as $inv) {
             // Audit log inside same transaction (FIX #19) — one row per invoice.
             db_insert('audit_log', [
@@ -243,7 +284,7 @@ try {
                 'entity_type'  => 'invoice',
                 'entity_id'    => $inv['invoice_id'],
                 'entity_label' => $inv['invoice_number'],
-                'notes'        => "Invoice {$inv['invoice_number']} created for lease #{$leaseId}",
+                'notes'        => "Invoice {$inv['invoice_number']} created for lease #{$leaseId}{$distanceNote}",
                 'ip_address'   => $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1',
             ]);
 

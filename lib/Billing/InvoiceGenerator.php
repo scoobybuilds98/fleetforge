@@ -96,6 +96,12 @@ class InvoiceGenerator
      *   odometer_at_period_end_km:   ?string|float,
      *   odometer_source:             ?string ('gps'|'manual'|'estimated'),
      *   odometer_fetched_at:         ?string (ISO 8601)
+     *   // S-INVOICE-DISTANCE-ENTRY: distance driven this period (km), typed
+     *   // instead of an end reading. Manual leases turn it into a reading
+     *   // (end = start + distance); Samsara leases use it in place of the GPS
+     *   // distance. Ignored when an end reading is given or mileage is off.
+     *   period_distance_km:          ?string|float
+     *   period_distance_exact:       ?bool  (regenerate: the km is already stored — skip the miles nudge)
      *   // S-CLOSE-MILEAGE-SEMANTICS: true when the caller (lease close) already
      *   // carries the close's mileage as an extra 'mileage' overage line — the
      *   // legacy per-period mileage_usage emit then stands down (no double bill)
@@ -778,6 +784,79 @@ class InvoiceGenerator
                 ]);
             }
 
+            // ════════════════════════════════════════════════════════════════
+            // S-INVOICE-DISTANCE-ENTRY (D-DISTANCE-ENTRY-1) — the operator may
+            // type the DISTANCE driven this period instead of an end odometer
+            // reading ("Distance driven" on Generate Invoice, its default entry
+            // mode — built for backfilling, where only the month's mileage is
+            // known). Where it lands depends on where the lease's readings come
+            // from:
+            //   • manual  — the lease runs an odometer chain (usually virtual,
+            //     starting at 0) that the next invoice's start, the billing-cycle
+            //     Readings tab, lease close and Regenerate all read from
+            //     odometer_at_period_end_km. So the distance becomes a reading:
+            //     end = start + distance, where start is the caller's start, else
+            //     the last live reading before this period, else the lease's
+            //     starting odometer (none at all → refused). Every one of those readers keeps
+            //     working unchanged, and a distance-only invoice can't leave a
+            //     hole in the chain that the next reading would bill twice.
+            //   • samsara — the readings are the truck's REAL odometer, so an
+            //     invented end reading would corrupt that chain. The typed
+            //     distance replaces the GPS distance instead, in exactly the
+            //     shape the Samsara fallback below already writes (distance set,
+            //     no end reading); setting $periodDistanceKm stands that fetch
+            //     down. Regenerate carries it forward (regenerate.php).
+            //   • off     — ignored, like every other mileage input (nulled above).
+            // A caller-supplied END reading wins; api/v1/invoices/create refuses
+            // both at once. bcmath throughout (D16) — this is billed distance.
+            $typedDistanceKm = null;
+            if (isset($params['period_distance_km'])
+                && $params['period_distance_km'] !== ''
+                && $mileageMode !== 'off'
+                && $odoEndKm === null
+            ) {
+                // Regenerate passes back an already-stored 2dp km: keep it
+                // exactly (re-running the miles nudge on it can move it 0.01).
+                $typedDistanceKm = !empty($params['period_distance_exact'])
+                    ? bcround((string) $params['period_distance_km'], 2)
+                    : self::typedDistanceKm((string) $params['period_distance_km'], $lease);
+                if (bccomp($typedDistanceKm, '0', 2) < 0) {
+                    $typedDistanceKm = '0.00';
+                }
+                if ($mileageMode === 'manual') {
+                    if ($odoStartKm === null) {
+                        // Same "previous reading" rule as the Readings tab: live
+                        // (non-void) invoices ending before this period.
+                        $prevOdo    = Cycle\CycleReadings::previousReadings([$leaseId], (string) $periodStart);
+                        $odoStartKm = $prevOdo[$leaseId]['odometer_km']
+                            ?? (($lease['odometer_start_km'] ?? null) !== null
+                                ? (string) $lease['odometer_start_km']
+                                : null);
+                    }
+                    if ($odoStartKm === null) {
+                        // Nothing to count from: no reading before this period
+                        // and no starting odometer on the lease. Inventing 0
+                        // would build a chain that a real start or closing
+                        // reading entered later bills against (a 120,000 km
+                        // truck closed at 125,000 against a made-up 4,000).
+                        $msg = 'This lease has no starting odometer and no earlier reading, so a distance has '
+                             . 'nothing to count from. Enter the start reading under Odometer readings, or set '
+                             . "the lease's starting odometer (0 if its mileage counts from zero).";
+                        if (!function_exists('json_error')) {
+                            throw new \RuntimeException($msg);
+                        }
+                        json_error('DISTANCE_NO_START', $msg, 422, ['fields' => ['period_distance_km' => $msg]]);
+                    }
+                    // Snap the start to the stored 2dp FIRST so end − start is
+                    // exactly the typed distance: a start that went through a
+                    // miles round-trip in the browser (804.672) would otherwise
+                    // truncate the billed distance 0.01 short (1609.33 for a
+                    // typed 1,000 mi = 1609.34 km).
+                    $odoStartKm = bcround((string) $odoStartKm, 2);
+                    $odoEndKm   = bcadd($odoStartKm, $typedDistanceKm, 2);
+                }
+            }
+
             $periodDistanceKm     = null;
             $cumulativeDistanceKm = null;
             if ($odoStartKm !== null && $odoEndKm !== null) {
@@ -832,6 +911,21 @@ class InvoiceGenerator
                 } catch (\Throwable) {
                     $odometerFetchedAt = null;
                 }
+            }
+
+            // S-INVOICE-DISTANCE-ENTRY: a typed distance on a Samsara lease is
+            // the period distance itself (a manual lease already turned its
+            // distance into a reading above, so $periodDistanceKm is set there).
+            // Setting it here makes the GPS fallback below stand down.
+            if ($typedDistanceKm !== null) {
+                if ($periodDistanceKm === null) {
+                    $periodDistanceKm = $typedDistanceKm;
+                }
+                // The operator typed it — never label it GPS or stamp a fetch
+                // time. Regenerate recognises a typed distance by source='manual'
+                // with no end reading, and carries it forward.
+                $odometerSource    = 'manual';
+                $odometerFetchedAt = null;
             }
 
             // D-C Samsara fallback fetch — only when caller didn't pre-populate
@@ -2555,6 +2649,50 @@ class InvoiceGenerator
     }
 
     /**
+     * S-INVOICE-DISTANCE-ENTRY — the km to store for an operator-typed
+     * period distance (period_distance_km arrives in km, up to 4dp).
+     *
+     * Distances are stored as km at 2dp, but a miles lease shows the customer
+     * MILES (ff_mileage_line_display: km × km_to_miles_conversion, rounded to
+     * 2dp). Plain rounding loses up to 0.005 km and 0.621371 is not exactly
+     * 1/1.609344, so from ~6,000 mi per period about one typed value in four
+     * read back 0.01 mi short (6,231.48 mi typed → 6,231.47 mi billed). For a
+     * miles lease we therefore pick the 2dp km — within ±0.03 km of the plain
+     * rounding (0.01 km moves the miles by 0.0062, so one always fits) — whose
+     * displayed miles equal the miles typed (km ÷ 1.609344, the same distance
+     * factor the form used). A km lease, or no fitting candidate, keeps the
+     * plain rounding. bcmath throughout (D16); negatives clamp to 0.
+     *
+     * @param  string $km     Typed distance converted to km by the caller.
+     * @param  array  $lease  Lease row (mileage_unit, km_to_miles_conversion).
+     * @return string         km at 2dp, >= 0.
+     */
+    public static function typedDistanceKm(string $km, array $lease): string
+    {
+        $plain = bcround($km, 2);
+        if (bccomp($plain, '0', 2) < 0) {
+            // A negative distance is a bad edit, not reality — same defensive
+            // clamp as the reading-based distance.
+            return '0.00';
+        }
+        if (($lease['mileage_unit'] ?? 'km') !== 'miles') {
+            return $plain;
+        }
+        $targetMiles = bcround(bcdiv($km, '1.609344', 8), 2);
+        foreach (['0', '0.01', '-0.01', '0.02', '-0.02', '0.03', '-0.03'] as $nudge) {
+            $candidate = bcadd($plain, $nudge, 2);
+            if (bccomp($candidate, '0', 2) < 0) {
+                continue;
+            }
+            $shown = ff_mileage_line_display($lease, $candidate, '0')['distance'];
+            if (bccomp($shown, $targetMiles, 2) === 0) {
+                return $candidate;
+            }
+        }
+        return $plain;
+    }
+
+    /**
      * Revision 2 §9 — calendar-month fan-out orchestrator for manual
      * generation. Given a lease and a requested start, emit the correct
      * SEQUENCE of invoices for the lease's known extent:
@@ -2647,6 +2785,8 @@ class InvoiceGenerator
                 'odometer_at_period_end_km'   => $params['odometer_at_period_end_km']   ?? null,
                 'odometer_source'             => $params['odometer_source']             ?? null,
                 'odometer_fetched_at'         => $params['odometer_fetched_at']         ?? null,
+                // S-INVOICE-DISTANCE-ENTRY: typed distance for this period.
+                'period_distance_km'          => $params['period_distance_km']          ?? null,
                 // S-LEASE-HOURLY-BILLING: manual engine-hours for this period.
                 'engine_hours_at_period_start' => $params['engine_hours_at_period_start'] ?? null,
                 'engine_hours_at_period_end'   => $params['engine_hours_at_period_end']   ?? null,
@@ -2772,6 +2912,23 @@ class InvoiceGenerator
             $segments = $this->holistic->segmentsFor($fanStart, $target);
             if (empty($segments)) {
                 json_error('INVERTED_PERIOD', "No billable calendar-month segments for {$fanStart}..{$target}.", 422);
+            }
+
+            // S-INVOICE-DISTANCE-ENTRY: a typed distance belongs to ONE period.
+            // On a fan-out it would land whole on the last month (the odometer
+            // rule below), billing several months' driving as one and none on
+            // the rest. Refuse before any segment is written; the operator
+            // generates one month at a time instead (the picker's primary button).
+            if (count($segments) > 1
+                && isset($params['period_distance_km']) && $params['period_distance_km'] !== ''
+            ) {
+                $msg = 'Distance driven is entered one month at a time. This period covers '
+                     . count($segments) . ' months — generate each month separately, or switch to '
+                     . 'odometer readings.';
+                if (!function_exists('json_error')) {
+                    throw new \RuntimeException($msg);
+                }
+                json_error('DISTANCE_SPANS_MONTHS', $msg, 422, ['fields' => ['period_distance_km' => $msg]]);
             }
 
             $lastIdx  = count($segments) - 1;

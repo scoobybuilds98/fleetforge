@@ -202,10 +202,16 @@ $lease['km_to_miles_conversion']      = $lease['km_to_miles_conversion']      !=
 
 // SAMSARA-3: pull the latest invoice's period-end odometer and invoice number
 // so the Overview tab can show "Latest recorded: 2,456.78 km (from INV-...)"
+// — and Generate Invoice counts the next period (reading or distance) FROM it.
+// S-INVOICE-DISTANCE-ENTRY: skip VOID invoices. After a void-and-redo (common
+// while backfilling) the voided invoice's reading is not the truth, and
+// counting from it would bill the redone month short (the Readings tab's
+// CycleReadings::previousReadings skips void the same way).
 $latestOdoInv = db_row(
     "SELECT i.odometer_at_period_end_km, i.cumulative_distance_km, i.invoice_number, i.id
        FROM invoices i
       WHERE i.lease_id = ? AND i.deleted_at IS NULL
+        AND i.status <> 'void'
         AND i.odometer_at_period_end_km IS NOT NULL
       ORDER BY i.billing_period_end DESC, i.id DESC LIMIT 1",
     [$id]
@@ -217,6 +223,24 @@ $lease['latest_invoice_cumulative_km']   = $latestOdoInv && $latestOdoInv['cumul
 $lease['latest_invoice_number_for_odo']  = $latestOdoInv['invoice_number'] ?? null;
 $lease['latest_invoice_id_for_odo']      = $latestOdoInv && $latestOdoInv['id'] ? (int) $latestOdoInv['id'] : null;
 $lease['samsara_odometer_km']         = $lease['samsara_odometer_km']         !== null ? (float) $lease['samsara_odometer_km']         : null;
+
+// S-INVOICE-DISTANCE-ENTRY: every live period-end reading, oldest first, so
+// Generate Invoice counts the period it is billing from the last reading
+// BEFORE that period (the engine's and the Readings tab's rule,
+// CycleReadings::previousReadings) — not the lease's latest reading, which is
+// wrong when a voided middle month is re-billed while later months stand.
+$lease['odometer_readings'] = array_map(static fn ($r) => [
+    'period_end'     => $r['billing_period_end'],
+    'km'             => (float) $r['odometer_at_period_end_km'],
+    'invoice_number' => $r['invoice_number'],
+], db_select(
+    "SELECT billing_period_end, odometer_at_period_end_km, invoice_number
+       FROM invoices
+      WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'
+        AND odometer_at_period_end_km IS NOT NULL
+      ORDER BY billing_period_end ASC, id ASC",
+    [$id]
+));
 
 // S-DROPDOWN-RETROFIT-1: latest non-void invoice's billing_period_end so the
 // invoice create picker can auto-fill period_start = latest_period_end + 1 day.

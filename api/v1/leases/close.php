@@ -1019,12 +1019,16 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
 
     // SAMSARA-3: derive the period-start odometer for the final invoice.
     // Priority: latest prior invoice's period-end odometer → lease start.
+    // S-INVOICE-DISTANCE-ENTRY: never a VOID invoice's reading — a voided
+    // month's end reading was never billed (same rule as leases/show and the
+    // Readings tab), so counting from it under-bills the final period.
     $odoPeriodStart = null;
     if ($odoAtClose !== null) {
         $prev = db_row(
             "SELECT odometer_at_period_end_km
                FROM invoices
               WHERE lease_id = ? AND deleted_at IS NULL
+                AND status <> 'void'
                 AND odometer_at_period_end_km IS NOT NULL
               ORDER BY billing_period_end DESC, id DESC LIMIT 1",
             [$id]

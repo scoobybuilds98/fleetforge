@@ -36,7 +36,7 @@ declare(strict_types=1);
  *                PRECHARGE_REGENERATE_UNSUPPORTED
  *
  * @decisions D14 (draft-only), D15/D20 (gap-free numbering), D45 (counters), D19
- * @session   S-INVOICE-DRAFT-EDIT
+ * @session   S-INVOICE-DRAFT-EDIT, S-INVOICE-DISTANCE-ENTRY (typed-distance carry-forward)
  */
 
 require_once dirname(__DIR__, 3) . '/api/bootstrap.php';
@@ -61,7 +61,7 @@ $invoice = db_row(
             po_number, notes, internal_notes, total_amount,
             engine_hours_at_period_start, engine_hours_at_period_end,
             odometer_at_period_start_km, odometer_at_period_end_km,
-            odometer_source, odometer_fetched_at
+            odometer_source, odometer_fetched_at, period_distance_km
        FROM invoices WHERE id = ? AND deleted_at IS NULL",
     [$id]
 );
@@ -205,10 +205,25 @@ if ($oldEstHours && bccomp((string) $oldEstHours['quantity'], '0', 2) > 0) {
     $estHoursOverride = (string) $oldEstHours['quantity'];
 }
 
+// S-INVOICE-DISTANCE-ENTRY: a distance the operator TYPED on a Samsara lease is
+// stored as period_distance_km with no end reading (D-DISTANCE-ENTRY-1) — the
+// odometer carry-forward below can't rebuild it, and without this the engine
+// would re-fetch the GPS distance and silently replace what was typed. A typed
+// distance is the only shape with source 'manual' AND no end reading AND a
+// distance (the GPS fallback always writes 'gps'). A manual lease's typed
+// distance became an end reading and is carried by the odometer pair instead.
+$typedDistanceKm = null;
+if ($invoice['odometer_at_period_end_km'] === null
+    && $invoice['period_distance_km'] !== null
+    && ($invoice['odometer_source'] ?? null) === 'manual'
+) {
+    $typedDistanceKm = (string) $invoice['period_distance_km'];
+}
+
 $voidedCns = [];
 
 try {
-$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, $estKmOverride, $estHoursOverride, &$voidedCns) {
+$result = db_transaction(function () use ($id, $invoice, $generator, $number, $periodStart, $periodEnd, $estKmOverride, $estHoursOverride, $typedDistanceKm, &$voidedCns) {
     // S-AUDIT-LIFECYCLE-1 #21: re-check draft status UNDER LOCK — the gate
     // ran on an unlocked pre-txn read; a racing send could have flipped the
     // row to 'sent' before the hard DELETEs below destroy an issued record.
@@ -270,6 +285,9 @@ $result = db_transaction(function () use ($id, $invoice, $generator, $number, $p
         'odometer_at_period_end_km'    => $invoice['odometer_at_period_end_km'],
         'odometer_source'              => $invoice['odometer_source'],
         'odometer_fetched_at'          => $invoice['odometer_fetched_at'],
+        // S-INVOICE-DISTANCE-ENTRY: the typed Samsara-lease distance (see above).
+        'period_distance_km'           => $typedDistanceKm,
+        'period_distance_exact'        => $typedDistanceKm !== null,   // already-stored km: keep it to the cent
         // S-REGEN-PRESERVE-ESTIMATE: keep the billed estimate distance (km);
         // null when the old draft had no estimate line (engine derives normally).
         'estimate_distance_km_override' => $estKmOverride,
