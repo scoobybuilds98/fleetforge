@@ -125,7 +125,7 @@ All amendments are logged in the **Amendments** tab.
 1. Open the lease and click **Close Lease** (shown only for Active leases).
 2. In the close modal, enter the **Actual Return Date**.
 3. Capture the **Closing Odometer** reading — enter manually or fetch from Samsara.
-4. The actual mileage is auto-calculated from the odometer readings. Adjust if needed.
+4. The actual mileage is auto-calculated from the odometer readings. Adjust if needed. The final invoice bills only the distance not billed yet: it counts from where the odometer stood after the last billed month — the last reading plus any months billed by distance alone (Samsara GPS or a typed distance).
 5. If the lease has a mileage precharge balance remaining, choose how to return it under **Precharge Refund**: **Apply as Credit** (a credit note on the customer's account, usable against any future invoice) or **Cash Refund**. For a cash refund, come back to the closed lease and click **Mark Refund Settled** once the cheque or EFT has actually gone out.
 6. Confirm. The lease moves to **Completed**, the unit returns to *Available*, and a final invoice is queued if any balance is outstanding.
 
