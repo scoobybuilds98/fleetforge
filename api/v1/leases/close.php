@@ -1172,15 +1172,30 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
     // S-LEASE-HOURLY-BILLING: derive the period-start engine hours for the final
     // invoice. Same priority as odometer: latest prior invoice's period-end
     // hours → lease start hours.
+    // S-CLOSE-VOID-OVERFLOW-CN: never a VOIDED invoice's reading (e.g. the
+    // previous close's final after a reopen + void), and never a DRAFT billed past
+    // the extent — close voids and reissues those drafts (overshoot clamp /
+    // legacy full_month), so their later reading would start the final period
+    // late and under-bill the hours. A SENT/paid/written-off invoice that only
+    // STARTS inside the extent stays: close merely credits it, its hours line
+    // stands, and dropping its reading would bill those hours again. That is the
+    // coverage anchor's row set below (non-void, start <= extent) minus the
+    // drafts this close is about to void.
     $hoursPeriodStart = null;
     if ($hoursAtClose !== null) {
+        $hoursExtent = lease_billable_extent(
+            $actualReturnDate, $actualReturnTime, $lease['start_time'] ?? null, (string) $lease['start_date'],
+            $billingDaysRemoved
+        );
         $prevH = db_row(
             "SELECT engine_hours_at_period_end
                FROM invoices
               WHERE lease_id = ? AND deleted_at IS NULL
+                AND status <> 'void'
+                AND (billing_period_end <= ? OR (status <> 'draft' AND billing_period_start <= ?))
                 AND engine_hours_at_period_end IS NOT NULL
               ORDER BY billing_period_end DESC, id DESC LIMIT 1",
-            [$id]
+            [$id, $hoursExtent, $hoursExtent]
         );
         if ($prevH && $prevH['engine_hours_at_period_end'] !== null) {
             $hoursPeriodStart = $prevH['engine_hours_at_period_end'];
@@ -1914,6 +1929,18 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         error_log('[NOTIF lease.closed] ' . $e->getMessage());
     }
 });
+} catch (\FleetForge\Billing\OverflowCreditNoteBlockedException $e) {
+    // S-CLOSE-VOID-OVERFLOW-CN: the close had to void an invoice whose overflow
+    // credit the customer already spent. The transaction rolled back — nothing
+    // changed — so say so and name the credit note to unapply (same 422 code as
+    // invoices/void.php).
+    // L43 parity: dispatchers (leases:edit without financials) see the credit
+    // note numbers, not the dollar amounts.
+    json_error('CREDIT_NOTE_APPLIED',
+        can_view_financials() ? $e->getMessage() : ff_scrub_money_text($e->getMessage()), 422, [
+        'invoice_number' => $e->invoiceNumber,
+        'credit_notes'   => array_column($e->blockers, 'credit_note_number'),
+    ]);
 } catch (\FleetForge\Billing\BillingRateException $e) {
     error_log("[leases/close] Lease #{$id} rate hole: " . $e->getMessage());
     json_error(
@@ -1931,6 +1958,11 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
         )
     );
 }
+
+// S-CLOSE-VOID-OVERFLOW-CN: the close committed — now queue the QBO CreditMemo
+// void for every overflow credit note adv_void_invoice() voided inside it
+// (post-commit best-effort, D-ENQUEUER-CONTRACT).
+adv_cn_void_queue_flush();
 
 // ── S-ACCT-LESSOR-3: lease termination JE ────────────────────────────
 // Post-commit hook — fires only for capital classifications (sales_type

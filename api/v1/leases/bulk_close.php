@@ -177,6 +177,9 @@ foreach ($cleanIds as $id) {
 
     // ── Per-lease transaction ──────────────────────────────────
     // WHY isolated: one DB failure must never abort the rest of the batch.
+    // S-CLOSE-VOID-OVERFLOW-CN: each lease gets its own overflow-CN void queue
+    // (filled by adv_void_invoice() inside the transaction, flushed after commit).
+    adv_cn_void_queue_discard();
     try {
         db_transaction(function () use (
             $id, $lease, $userId, $userName, $ipAddress,
@@ -300,9 +303,19 @@ foreach ($cleanIds as $id) {
             ]);
         });
 
+        // Committed: queue the QBO CreditMemo voids (post-commit, D-ENQUEUER-CONTRACT).
+        adv_cn_void_queue_flush();
         $actioned++;
+    } catch (\FleetForge\Billing\OverflowCreditNoteBlockedException $e) {
+        // S-CLOSE-VOID-OVERFLOW-CN: an invoice this close must void has an
+        // overflow credit the customer already spent — leave the lease open.
+        adv_cn_void_queue_discard();
+        $skipped++;
+        $errors[] = ['id' => $id, 'reason' => can_view_financials() ? $e->getMessage() : ff_scrub_money_text($e->getMessage())];
     } catch (\Throwable $e) {
-        // Transaction rolled back — record failure and continue with remaining IDs
+        // Transaction rolled back — record failure and continue with remaining IDs.
+        // Discard the queue: those CN voids rolled back with the lease.
+        adv_cn_void_queue_discard();
         $skipped++;
         $errors[] = [
             'id'     => $id,

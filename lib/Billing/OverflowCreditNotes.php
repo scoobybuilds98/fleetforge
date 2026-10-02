@@ -79,11 +79,17 @@ class OverflowCreditNotes
      * consumed status). Fully-unapplied CNs are not blockers — they are
      * auto-voided by voidForInvoice().
      *
+     * $forUpdate (S-CLOSE-VOID-OVERFLOW-CN): lease close checks late inside its
+     * long transaction, where a plain read returns the transaction's old
+     * snapshot — an apply committed meanwhile would slip past and surface as
+     * voidForInvoice()'s generic error. A locking read sees it (and serializes
+     * against credit_notes/apply.php) so the caller can refuse cleanly.
+     *
      * @return array<int, array<string,mixed>>
      */
-    public static function findBlockers(int $invoiceId): array
+    public static function findBlockers(int $invoiceId, bool $forUpdate = false): array
     {
-        return array_values(array_filter(self::findLive($invoiceId), function (array $cn): bool {
+        return array_values(array_filter(self::findLive($invoiceId, $forUpdate), function (array $cn): bool {
             return \bccomp((string) $cn['amount_remaining'], (string) $cn['amount'], 2) !== 0
                 || in_array($cn['status'], ['partially_used', 'fully_used'], true);
         }));

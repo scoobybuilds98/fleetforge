@@ -12,7 +12,8 @@
  * Functions:
  *   lease_billable_extent()        canonical "last day this lease may be billed"
  *   adv_void_or_credit_full()      draft -> void | sent/paid -> full credit_note
- *   adv_void_invoice()             status-aware Path-B void + JE reversal + last_billed anchor walk-back
+ *   adv_void_invoice()             draft Path-B void + JE reversal + last_billed anchor walk-back + overflow-CN void
+ *   adv_cn_void_queue_*()          post-commit QBO void queue for the overflow CNs adv_void_invoice() voided
  *   adv_partial_refund_containing() containing period: draft -> void+regenerate-shortened | sent -> prorated credit
  *   adv_create_credit_note()       gap-free credit_note + auto-JE
  *   reconcile_overshoot_invoices() clamp every non-advance rental invoice billed past the extent
@@ -112,22 +113,58 @@ function adv_void_or_credit_full(array $inv, array $lease, string $reason): arra
  * back to the latest still-live invoice (same query as void.php / delete / regenerate).
  * Callers that reissue afterwards rely on createFromLease's GREATEST update to
  * advance the anchor to the reissue; when nothing is reissued the walk-back is final.
+ *
+ * S-CLOSE-VOID-OVERFLOW-CN: the invoice's auto-created overflow credit notes live
+ * and die with it, exactly as in void.php / delete / bulk_void / regenerate
+ * (OverflowCreditNotes contract). An already-APPLIED one blocks the void
+ * (OverflowCreditNoteBlockedException → close refuses, bulk_close skips the lease);
+ * unapplied ones are voided in this transaction and queued for a post-commit
+ * QBO CreditMemo void via adv_cn_void_queue_add() — the endpoint drains it with
+ * adv_cn_void_queue_flush() after commit (D-ENQUEUER-CONTRACT). Drafts only: every
+ * live caller already branches sent/paid invoices to a credit note instead.
+ *
+ * @throws \LogicException                                    non-draft input
+ * @throws \FleetForge\Billing\OverflowCreditNoteBlockedException  applied overflow CN
+ * @throws \RuntimeException                                  invoice changed concurrently
  */
 function adv_void_invoice(array $inv, array $lease, string $reason): void
 {
+    // Drafts only. The sent/paid branches of the decrements below stay as
+    // defense in depth, but a non-draft void here would also need the revenue
+    // decrement and QBO invoice void that void.php does — so refuse it loudly.
+    if (($inv['status'] ?? '') !== 'draft') {
+        throw new \LogicException(
+            "adv_void_invoice() voids drafts only; {$inv['invoice_number']} is '{$inv['status']}' — use a credit note."
+        );
+    }
+
+    // S-CLOSE-VOID-OVERFLOW-CN: refuse BEFORE any write when the customer has
+    // already spent this invoice's overflow credit (same gate as void.php).
+    // Locking read: close is deep in a long transaction whose plain reads see
+    // an old snapshot, so an apply committed meanwhile would otherwise slip past.
+    $cnBlockers = \FleetForge\Billing\OverflowCreditNotes::findBlockers((int) $inv['id'], true);
+    if ($cnBlockers) {
+        throw new \FleetForge\Billing\OverflowCreditNoteBlockedException((string) $inv['invoice_number'], $cnBlockers);
+    }
+
     $preVoidStatus = $inv['status'];
     $totalAmount   = (string) $inv['total_amount'];
     $balanceDue    = (string) $inv['balance_due'];
     $decOb         = ($preVoidStatus === 'draft') ? '0.00' : $balanceDue;
 
-    db_update('invoices', [
+    // I05: gate the flip on the status the caller read, so an invoice sent (or
+    // voided) by another request since then is never double-reversed below.
+    $affected = db_update('invoices', [
         'status'      => 'void',
         'balance_due' => '0.00',
         'voided_date' => date('Y-m-d'),
         'void_reason' => $reason,
         'voided_by'   => current_user_id(),
         'updated_by'  => current_user_id(),
-    ], 'id = ?', [$inv['id']]);
+    ], 'id = ? AND status = ?', [$inv['id'], $preVoidStatus]);
+    if ($affected === 0) {
+        throw new \RuntimeException("Invoice {$inv['invoice_number']} changed while the lease was closing (no longer '{$preVoidStatus}'). Refresh and close again.");
+    }
 
     // Trap 6: reverse denormalized counters bumped at invoice insert time.
     db_execute(
@@ -196,6 +233,62 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
     ff_reverse_precharge_on_invoice_removal(
         (int) $inv['id'], current_user_id(), current_user()['name'] ?? 'system', 'voided (close reconciliation)'
     );
+
+    // S-CLOSE-VOID-OVERFLOW-CN: void the invoice's unapplied overflow CNs in the
+    // SAME transaction (also reverses each CN's issue JE), BEFORE any reissue. The
+    // reissue recomputes the credit itself: a stranded overflow CN would be netted
+    // against it (mileage/hours true-ups subtract LIVE overflow CNs) or credited
+    // twice (HolisticLeaseEngine's base-rental sum doesn't) — S-ORPHAN-OVERFLOW-CN.
+    $voidedCns = \FleetForge\Billing\OverflowCreditNotes::voidForInvoice(
+        (int) $inv['id'], current_user_id(), current_user()['name'] ?? 'system',
+        "source invoice {$inv['invoice_number']} voided on lease close"
+    );
+    adv_cn_void_queue_add($voidedCns);
+}
+
+/**
+ * S-CLOSE-VOID-OVERFLOW-CN: per-request queue of overflow credit notes voided by
+ * adv_void_invoice() inside a close transaction, awaiting their QBO CreditMemo
+ * void. Enqueuers are post-commit best-effort (D-ENQUEUER-CONTRACT), so the
+ * endpoint drains the queue only after its transaction commits:
+ *   close.php       — adv_cn_void_queue_flush() once the close commits;
+ *   bulk_close.php  — flush after each lease's commit, discard after a rollback.
+ * Discard is defense in depth: CreditMemoEnqueuer's gate 0 already refuses a
+ * 'void' for a CN whose void rolled back (status no longer 'void').
+ * Any OTHER caller of adv_void_invoice() / reconcile_overshoot_invoices() (e.g. a
+ * remediation script) must call adv_cn_void_queue_flush() after its own commit,
+ * or the CN voids never reach QuickBooks.
+ */
+function &adv_cn_void_queue_ref(): array
+{
+    static $queue = [];
+    return $queue;
+}
+
+/** @param array<int, array<string,mixed>> $cns  Rows returned by OverflowCreditNotes::voidForInvoice(). */
+function adv_cn_void_queue_add(array $cns): void
+{
+    $queue = &adv_cn_void_queue_ref();
+    foreach ($cns as $cn) {
+        $queue[] = (int) $cn['id'];
+    }
+}
+
+/** Enqueue the QBO CreditMemo void for every queued CN, then empty the queue. Call AFTER commit. */
+function adv_cn_void_queue_flush(): void
+{
+    $queue = &adv_cn_void_queue_ref();
+    foreach (array_unique($queue) as $cnId) {
+        \FleetForge\QboPushers\CreditMemoEnqueuer::enqueue($cnId, 'void');
+    }
+    $queue = [];
+}
+
+/** Drop the queue after a rollback — those CN voids never happened. */
+function adv_cn_void_queue_discard(): void
+{
+    $queue = &adv_cn_void_queue_ref();
+    $queue = [];
 }
 
 /**
