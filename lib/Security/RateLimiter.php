@@ -17,8 +17,9 @@ namespace FleetForge\Security;
  *   'mfa:ip:{ip}'                      — IP-level MFA attempts (cross-user)
  *   'ai:user:{user_id}'                — AI endpoint requests per user
  *
- * D-F: IP detection reads CF-Connecting-IP (Cloudflare header) first,
- *      then falls back to REMOTE_ADDR. In dev REMOTE_ADDR is used.
+ * D-F (revised S-SEC-CLIENT-IP): IP detection uses REMOTE_ADDR. CF-Connecting-IP
+ *      is honoured only when TRUST_CLOUDFLARE_IP=1 (the site served through
+ *      Cloudflare); otherwise it is client-supplied and ignored. See getClientIp().
  *
  * @session S-PROD-1A
  */
@@ -169,20 +170,28 @@ class RateLimiter
     /**
      * Returns the client's real IP address.
      *
-     * D-F: The app sits behind Cloudflare in production. Cloudflare sets
-     * HTTP_CF_CONNECTING_IP to the visitor's real IP. Only trust this header
-     * when it is present — it is not user-settable through Cloudflare's layer.
-     * In dev (direct connection), REMOTE_ADDR is the correct value.
+     * D-F (revised S-SEC-CLIENT-IP, 2026-10-02): CF-Connecting-IP is only
+     * trustworthy when Cloudflare is actually the hop in front of nginx — then
+     * Cloudflare overwrites whatever the client sent. Mainland's production box
+     * is NOT behind Cloudflare (verified 2026-10-02: mainlandrentals.com →
+     * 44.226.100.133, Lightsail, `server: nginx/1.18.0 (Ubuntu)`, no cf-ray;
+     * Northland's box was found the same way on 2026-10-01), so the header arrives
+     * straight from the client and trusting it let any caller choose their own
+     * rate-limit bucket (login throttling, credit-application submits) and
+     * write any IP into signature evidence. It is now honoured only when
+     * TRUST_CLOUDFLARE_IP=1 is set in .env — set that only if the site is moved
+     * behind Cloudflare (and then firewall the origin to Cloudflare's ranges).
      *
      * X-Forwarded-For is intentionally ignored here: without a known trusted
      * proxy chain, XFF is trivially spoofable and cannot be trusted.
      */
     public static function getClientIp(): string
     {
-        // Cloudflare sets this in production — safe to trust
-        $cfIp = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '';
-        if ($cfIp !== '' && filter_var($cfIp, FILTER_VALIDATE_IP)) {
-            return $cfIp;
+        if (filter_var(env('TRUST_CLOUDFLARE_IP', false), FILTER_VALIDATE_BOOLEAN)) {
+            $cfIp = $_SERVER['HTTP_CF_CONNECTING_IP'] ?? '';
+            if ($cfIp !== '' && filter_var($cfIp, FILTER_VALIDATE_IP)) {
+                return $cfIp;
+            }
         }
 
         return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';

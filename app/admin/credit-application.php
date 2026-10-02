@@ -331,7 +331,9 @@ if ($pageState === 'form' && $_SERVER['REQUEST_METHOD'] === 'POST' && !$isAdminP
         // S-UTC-STAMPS: submitted_at is a UTC DATETIME (read by format_datetime /
         // FF_formatUtc, and cca_render_html converts it to local for the PDF).
         $now           = ff_now_utc();
-        $submittedIp   = (string)($_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '');
+        // Signature evidence: same trust rule as rate limiting (RateLimiter::getClientIp —
+        // the raw CF-Connecting-IP header is client-supplied unless TRUST_CLOUDFLARE_IP=1).
+        $submittedIp   = RateLimiter::getClientIp();
         $submittedUa   = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500);
         $uploadedDocIds = [];
 

@@ -74,9 +74,7 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
-**S-SEC-CLIENT-IP** — IN-FLIGHT
-  Started: 2026-10-02T08:45 UTC by claude-code-desktop (mainlandWeb session)
-  Touching: lib/Security/RateLimiter.php, app/admin/credit-application.php, .env.example, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_OPERATOR_FOLLOWUPS.md
+**S-SEC-CLIENT-IP** — SHIPPED 2026-10-02 (see PROGRESS.md SESSION LOG row + D-SEC-CLIENT-IP-1). **FleetForge no longer trusts a visitor-supplied `CF-Connecting-IP` header. mainlandrentals.com is not behind Cloudflare, so the header came straight from the visitor: anyone could dodge login lockout and rate limits, or plant a fake IP in credit-application signature evidence. The header is now honoured only with `TRUST_CLOUDFLARE_IP=1` (off by default; documented in `.env.example`); otherwise the real connection IP is used, and credit applications record the IP through the same helper. Port of Northland's c48cdbf0.** No migration. Operator: F106 (deploy).
 
 **S-SAMSARA-CLOSE-DISTANCE-CHAIN** — SHIPPED 2026-10-01 (see PROGRESS.md SESSION LOG row + D-ODOMETER-CHAIN-1). **Closing a Samsara lease no longer charges again for months that were billed by GPS (or typed) distance — the final invoice counts from where the odometer actually stood after the last billed month. The same rule now drives the Readings tab, Generate Invoice's starting reading, "Generate all due" and the monthly job. A manual lease closed mid-month also stops billing 0 km.** No schema change. Operator: F105 (deploy).
 
