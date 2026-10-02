@@ -1339,10 +1339,11 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // MAX(billing_period_end) over the lease's non-void, non-deleted
             // invoices — rather than the denormalized leases.last_billed_date.
             // The denormalized anchor is monotonic (GREATEST in InvoiceGenerator)
-            // and is NOT walked back everywhere on void/delete, so it can point
-            // PAST real coverage after the most-recent invoice is voided; trusting
-            // it here would skip this final period and lose revenue. The live MAX
-            // is authoritative. written_off counts as covered (the period was
+            // and historically was NOT walked back on every void (close's own
+            // adv_void_invoice() skipped it until S-CLOSE-ANCHOR-WALKBACK), so it can
+            // point PAST real coverage — older rows, or a credited sent invoice that
+            // stays live past the extent; trusting it here would skip this final
+            // period and lose revenue. The live MAX is authoritative. written_off counts as covered (the period was
             // billed; non-payment is a collections matter, not a re-bill), so we
             // exclude only 'void' — matching HolisticLeaseEngine::sumAlreadyBilled.
             // S-CLOSE-OVERSHOOT: restrict the coverage anchor to invoices STARTING
@@ -1364,8 +1365,9 @@ db_transaction(function () use ($id, $actualReturnDate, $actualReturnTime, $mile
             // S-CLOSE-ZEROBILL-FIX: trust ONLY the live invoice coverage (the MAX
             // above, restricted to non-void invoices starting on/before the
             // extent). Do NOT fall back to the denormalized leases.last_billed_date:
-            // it is a monotonic GREATEST() that is NOT walked back when an invoice
-            // is voided, so after legacy_handle_existing_full_month_draft() voids the
+            // it is a monotonic GREATEST() that (before S-CLOSE-ANCHOR-WALKBACK) was
+            // NOT walked back when close voided an invoice, so after
+            // legacy_handle_existing_full_month_draft() voided the
             // closing-month full_month draft (mid-month close — or a removed-days
             // close — of a lease that started on the 1st), last_billed_date still
             // points at month-end. Using it as the anchor pushed periodStart past the

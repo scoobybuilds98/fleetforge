@@ -12,7 +12,7 @@
  * Functions:
  *   lease_billable_extent()        canonical "last day this lease may be billed"
  *   adv_void_or_credit_full()      draft -> void | sent/paid -> full credit_note
- *   adv_void_invoice()             status-aware Path-B void + JE reversal
+ *   adv_void_invoice()             status-aware Path-B void + JE reversal + last_billed anchor walk-back
  *   adv_partial_refund_containing() containing period: draft -> void+regenerate-shortened | sent -> prorated credit
  *   adv_create_credit_note()       gap-free credit_note + auto-JE
  *   reconcile_overshoot_invoices() clamp every non-advance rental invoice billed past the extent
@@ -107,6 +107,11 @@ function adv_void_or_credit_full(array $inv, array $lease, string $reason): arra
  * now restores leases.precharge_balance consumed by the voided invoice's
  * mileage_drawdown_credit line(s) — the clamped reissue's createFromLease
  * re-draws from the restored balance, so the close-time refund stays exact.
+ *
+ * S-CLOSE-ANCHOR-WALKBACK: walks leases.last_billed_date / last_billed_invoice_id
+ * back to the latest still-live invoice (same query as void.php / delete / regenerate).
+ * Callers that reissue afterwards rely on createFromLease's GREATEST update to
+ * advance the anchor to the reissue; when nothing is reissued the walk-back is final.
  */
 function adv_void_invoice(array $inv, array $lease, string $reason): void
 {
@@ -133,6 +138,32 @@ function adv_void_invoice(array $inv, array $lease, string $reason): void
           WHERE id = ?",
         [$totalAmount, $decOb, (int) $lease['id']]
     );
+
+    // S-CLOSE-ANCHOR-WALKBACK: walk the billing-coverage anchor back to the latest
+    // STILL-LIVE invoice, exactly as invoices/void.php (FinancialActions), bulk_void,
+    // delete, bulk_delete and regenerate already do. Without it the anchor kept
+    // pointing at the invoice voided here: the shorter final/clamped reissue that
+    // close creates next cannot pull it back because InvoiceGenerator's anchor
+    // UPDATE is GREATEST-monotonic, so every mid-month close left
+    // last_billed_date = the voided month-end (prod: 151 completed leases,
+    // repaired 2026-10-02). With the walk-back, that reissue's GREATEST correctly
+    // advances the anchor from real coverage to its own period_end.
+    $cov = db_row(
+        "SELECT i2.billing_period_end AS max_end, i2.id AS inv_id
+           FROM invoices i2
+          WHERE i2.lease_id = ?
+            AND i2.deleted_at IS NULL
+            AND i2.status <> 'void'
+            AND i2.billing_period_end IS NOT NULL
+          ORDER BY i2.billing_period_end DESC, i2.id DESC
+          LIMIT 1",
+        [(int) $lease['id']]
+    );
+    db_execute(
+        "UPDATE leases SET last_billed_date = ?, last_billed_invoice_id = ?, updated_at = NOW() WHERE id = ?",
+        [$cov['max_end'] ?? null, $cov['inv_id'] ?? null, (int) $lease['id']]
+    );
+
     if (!empty($lease['customer_id'])) {
         db_execute(
             "UPDATE customers

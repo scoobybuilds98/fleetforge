@@ -20,6 +20,12 @@
  * sent/paid → prorated credit_note. The legacy partial_end block now compares
  * against / bills to the same time-of-day-adjusted $extentEnd.
  *
+ * S-CLOSE-ANCHOR-WALKBACK (2026-10-02): every case that voids an invoice also
+ * runs anchor_check() — the lease's last_billed_date / last_billed_invoice_id must
+ * equal the walk-back over LIVE invoices, never a voided one — and CASE I adds the
+ * Sept-2026 batch shape (live prior month + full_month draft, mid-month close).
+ * adv_void_invoice() used to skip the walk-back (151 completed prod leases).
+ *
  * This drives the REAL close endpoint over HTTP (like _smoke_session4_regression)
  * and creates the activation invoice the SAME way activate.php's legacy path does
  * (InvoiceGenerator::createFromLease, partial_start → end of start month).
@@ -104,6 +110,28 @@ function live_invoices(int $leaseId): array {
            FROM invoices WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void' ORDER BY id",
         [$leaseId]
     );
+}
+
+/**
+ * S-CLOSE-ANCHOR-WALKBACK: after any close that voids an invoice, the lease's
+ * last_billed_date / last_billed_invoice_id must equal the walk-back over LIVE
+ * invoices (latest non-void, non-deleted billing_period_end) and must never
+ * point at a voided invoice. Before the fix adv_void_invoice() skipped the
+ * walk-back and the GREATEST-monotonic generator update kept the voided
+ * month-end as the anchor (prod: 151 completed leases).
+ */
+function anchor_check(string $label, int $leaseId): void {
+    $l = db_row("SELECT last_billed_date, last_billed_invoice_id FROM leases WHERE id = ?", [$leaseId]);
+    $w = db_row(
+        "SELECT billing_period_end AS max_end, id AS inv_id FROM invoices
+          WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void' AND billing_period_end IS NOT NULL
+          ORDER BY billing_period_end DESC, id DESC LIMIT 1",
+        [$leaseId]
+    );
+    ok("{$label} anchor last_billed_date = latest live coverage", (string) ($w['max_end'] ?? ''), (string) ($l['last_billed_date'] ?? ''));
+    ok("{$label} anchor last_billed_invoice_id = latest live invoice", (string) ($w['inv_id'] ?? ''), (string) ($l['last_billed_invoice_id'] ?? ''));
+    $ptr = $l['last_billed_invoice_id'] ? db_row("SELECT status FROM invoices WHERE id = ?", [(int) $l['last_billed_invoice_id']]) : null;
+    okTrue("{$label} anchor does not point at a void invoice", ($ptr['status'] ?? '') !== 'void');
 }
 
 // ── Shared fixtures ────────────────────────────────────────────────────────
@@ -239,6 +267,9 @@ okTrue('A.13 replacement amount < original over-billed amount',
     bccomp((string) $repl['total_amount'], $origTotalA, 2) < 0);
 ok('A.14 no spurious partial_end final invoice (final invoice_id null)', '', (string) ($dataA['invoice_id'] ?? ''));
 ok('A.15 customer OB still 0 (all drafts, Path B)', '0.00', customer_ob($customerId));
+anchor_check('A.16', $leaseA);
+ok('A.17 anchor = the clamped replacement (literal)', (string) $repl['id'] . '|' . $returnA,
+    implode('|', db_row("SELECT last_billed_invoice_id, last_billed_date FROM leases WHERE id = ?", [$leaseA])));
 echo "\n";
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -330,6 +361,7 @@ $replD = $invsD[0] ?? [];
 $expectedExtentD = $day(14); // return 15th, returned before pickup time → extent = 14th
 ok('D.3 replacement period_end = return date - 1 (time-of-day rule)', $expectedExtentD, (string) ($replD['billing_period_end'] ?? ''));
 ok('D.4 replacement billed days = 10 (day 5..14 inclusive)', '10', (string) ($replD['billing_period_days'] ?? ''));
+anchor_check('D.5', $leaseD);
 echo "\n";
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -350,6 +382,7 @@ ok('E.2 reclose returned 200', 200, $recloseResp['http_code']);
 $dataE = $recloseResp['json']['data'] ?? $recloseResp['json'];
 ok('E.3 reclose finds nothing to reconcile (already clamped to extent)', 0, count($dataE['overshoot_actions'] ?? []));
 ok('E.4 still exactly one live invoice (no duplicate clamp/credit)', 1, count(live_invoices($leaseA)));
+anchor_check('E.5', $leaseA);
 echo "\n";
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -382,6 +415,7 @@ if ($dom < 4 || $dom >= $dim) {
     $liveF = live_invoices($leaseF);
     ok('F.5 exactly one live invoice (clamped replacement)', 1, count($liveF));
     ok('F.6 replacement period_end = today (clamped to bulk extent)', $todayStr, (string) ($liveF[0]['billing_period_end'] ?? ''));
+    anchor_check('F.7', $leaseF);
     echo "\n";
 }
 
@@ -420,6 +454,9 @@ ok('G.5 partial_end final invoice generated for the real tail', true, !empty($da
 $tailG = db_row("SELECT billing_period_start, billing_period_end, billing_type FROM invoices WHERE id = ?", [$dataG['invoice_id']]);
 ok('G.6 tail period_start = day 11 (day after real coverage)', $day(11), (string) ($tailG['billing_period_start'] ?? ''));
 ok('G.7 tail period_end = day 20 (the return/extent)', $returnG, (string) ($tailG['billing_period_end'] ?? ''));
+anchor_check('G.8', $leaseG);
+ok('G.9 anchor = the tail final (literal)', (string) $dataG['invoice_id'] . '|' . $returnG,
+    implode('|', db_row("SELECT last_billed_invoice_id, last_billed_date FROM leases WHERE id = ?", [$leaseG])));
 echo "\n";
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -441,8 +478,94 @@ if ($dom < 4 || $dom >= $dim) {
     $liveH = live_invoices($leaseH);
     ok('H.3 exactly one live invoice (clamped replacement)', 1, count($liveH));
     ok('H.4 replacement period_end = today (full_month straddle clamped)', $todayStr, (string) ($liveH[0]['billing_period_end'] ?? ''));
+    anchor_check('H.5', $leaseH);
     echo "\n";
 }
+
+// ══════════════════════════════════════════════════════════════════════════
+// CASE I — S-CLOSE-ANCHOR-WALKBACK: the Sept-2026 batch shape. A running lease
+// with a LIVE prior-month invoice gets a batch/cron-style full_month DRAFT
+// (generation_source=manual, NOT the advance-close path) for the
+// closing month, then is returned mid-month. Close voids the full_month draft
+// (close.php legacy_handle_existing_full_month_draft → adv_void_invoice) and
+// bills a final to the return date. The anchor must follow the final — NOT
+// stay on the voided month-end draft (the 151-lease prod bug).
+// ══════════════════════════════════════════════════════════════════════════
+echo "CASE I — full_month draft voided at mid-month close → anchor follows the final\n";
+$prevStart = (new DateTimeImmutable($refMonthStart))->modify('first day of last month')->format('Y-m-d');
+$prevEnd   = date('Y-m-t', strtotime($prevStart));
+$leaseI = make_active_lease($customerId, $unitId, $unitNumber, $prefix, 'I', $prevStart, null);
+$genI = new InvoiceGenerator();
+$genI->createFromLease(['lease_id'=>$leaseI,'period_start'=>$prevStart,'period_end'=>$prevEnd,
+    'billing_type'=>'full_month','invoice_type'=>'regular','created_by'=>1,'auto_generated'=>1,'generation_source'=>'manual']);
+$invFmI = $genI->createFromLease(['lease_id'=>$leaseI,'period_start'=>$refMonthStart,'period_end'=>$monthEnd,
+    'billing_type'=>'full_month','invoice_type'=>'regular','created_by'=>1,'auto_generated'=>1,'generation_source'=>'manual']);
+$preI = db_row("SELECT last_billed_date, last_billed_invoice_id FROM leases WHERE id = ?", [$leaseI]);
+ok('I.0 pre-close anchor = the closing-month full_month draft', $monthEnd, (string) $preI['last_billed_date']);
+
+$returnI = $day(15);
+$respI = http_post("$baseUrl/api/v1/leases/close", ['id'=>$leaseI,'actual_return_date'=>$returnI,'close_notes'=>'anchor smoke I'], $sessId, $csrf);
+ok('I.1 close returned 200', 200, $respI['http_code']);
+if ($respI['http_code'] !== 200) { echo "    body: {$respI['body']}\n"; throw new RuntimeException('close I failed'); }
+ok('I.2 closing-month full_month draft voided', 'void', (string) db_row("SELECT status FROM invoices WHERE id = ?", [$invFmI['invoice_id']])['status']);
+$dataI = $respI['json']['data'] ?? $respI['json'];
+ok('I.2b voided by legacy_handle_existing_full_month_draft (not the overshoot pass)', 'voided_for_replacement', (string) ($dataI['advance_actions'][0]['action'] ?? ''));
+ok('I.2c overshoot pass took no action (straddle deferred to legacy handling)', 0, count($dataI['overshoot_actions'] ?? []));
+$maxLiveI = (string) (db_row("SELECT MAX(billing_period_end) m FROM invoices WHERE lease_id = ? AND deleted_at IS NULL AND status <> 'void'", [$leaseI])['m'] ?? '');
+ok('I.3 live coverage now ends on the return date', $returnI, $maxLiveI);
+$postI = db_row("SELECT last_billed_date FROM leases WHERE id = ?", [$leaseI]);
+ok('I.4 anchor moved OFF the voided month-end (the prod bug)', $returnI, (string) $postI['last_billed_date']);
+anchor_check('I.5', $leaseI);
+echo "\n";
+
+// ══════════════════════════════════════════════════════════════════════════
+// CASE J — the walk-back IS the final anchor (no reissue follows). A stray
+// next-month full_month draft is voided wholly_past; the closing-month partial
+// already covers to the return date, so close creates nothing afterwards and
+// the anchor must be exactly what adv_void_invoice() walked back to. (In A/D/G/I
+// a reissue's GREATEST overwrites the walk-back, so they can't tell a correct
+// walk-back from one that lands on NULL.)
+// ══════════════════════════════════════════════════════════════════════════
+echo "CASE J — wholly-past draft voided, no reissue → anchor = walk-back result\n";
+[$leaseJ, $invJ1, $meJ] = make_active_lease_with_invoice1($customerId, $unitId, $unitNumber, $prefix, 'J', $day(5), null);
+$nmStartJ = (new DateTimeImmutable($refMonthStart))->modify('first day of next month')->format('Y-m-d');
+$nmEndJ   = date('Y-m-t', strtotime($nmStartJ));
+$invJ2 = (new InvoiceGenerator())->createFromLease(['lease_id'=>$leaseJ,'period_start'=>$nmStartJ,'period_end'=>$nmEndJ,
+    'billing_type'=>'full_month','invoice_type'=>'regular','created_by'=>1,'auto_generated'=>1,'generation_source'=>'manual']);
+ok('J.0 pre-close anchor = the next-month draft', $nmEndJ, (string) db_row("SELECT last_billed_date FROM leases WHERE id = ?", [$leaseJ])['last_billed_date']);
+$respJ = http_post("$baseUrl/api/v1/leases/close", ['id'=>$leaseJ,'actual_return_date'=>$meJ,'close_notes'=>'anchor smoke J'], $sessId, $csrf);
+ok('J.1 close returned 200', 200, $respJ['http_code']);
+if ($respJ['http_code'] !== 200) { echo "    body: {$respJ['body']}\n"; throw new RuntimeException('close J failed'); }
+ok('J.2 next-month draft voided', 'void', (string) db_row("SELECT status FROM invoices WHERE id = ?", [$invJ2['invoice_id']])['status']);
+ok('J.3 exactly one live invoice (no reissue, no partial_end)', 1, count(live_invoices($leaseJ)));
+ok('J.4 anchor = the surviving closing-month invoice (literal)', (string) $invJ1 . '|' . $meJ,
+    implode('|', db_row("SELECT last_billed_invoice_id, last_billed_date FROM leases WHERE id = ?", [$leaseJ])));
+anchor_check('J.5', $leaseJ);
+echo "\n";
+
+// ══════════════════════════════════════════════════════════════════════════
+// CASE K — same, through bulk_close (date-independent, unlike F/H): a live
+// invoice to today + a next-month full_month draft. bulk_close voids the draft
+// via reconcile_overshoot_invoices(..., true) → adv_void_invoice(); nothing is
+// reissued, so the anchor must land on the [1st..today] invoice.
+// ══════════════════════════════════════════════════════════════════════════
+echo "CASE K — bulk_close voids a wholly-past draft → anchor = walk-back result\n";
+$todayK  = date('Y-m-d');
+$leaseK  = make_active_lease($customerId, $unitId, $unitNumber, $prefix, 'K', date('Y-m-01'), null);
+$genK    = new InvoiceGenerator();
+$invK1   = $genK->createFromLease(['lease_id'=>$leaseK,'period_start'=>date('Y-m-01'),'period_end'=>$todayK,
+    'billing_type'=>'partial_start','invoice_type'=>'regular','created_by'=>1,'auto_generated'=>1,'generation_source'=>'manual']);
+$nmStartK = (new DateTimeImmutable('first day of next month'))->format('Y-m-d');
+$invK2   = $genK->createFromLease(['lease_id'=>$leaseK,'period_start'=>$nmStartK,'period_end'=>date('Y-m-t', strtotime($nmStartK)),
+    'billing_type'=>'full_month','invoice_type'=>'regular','created_by'=>1,'auto_generated'=>1,'generation_source'=>'manual']);
+$brespK = http_post("$baseUrl/api/v1/leases/bulk_close", ['ids'=>[$leaseK]], $sessId, $csrf);
+ok('K.1 bulk_close returned 200', 200, $brespK['http_code']);
+if ($brespK['http_code'] !== 200) { echo "    body: {$brespK['body']}\n"; throw new RuntimeException('bulk_close K failed'); }
+ok('K.2 next-month draft voided by bulk_close', 'void', (string) db_row("SELECT status FROM invoices WHERE id = ?", [$invK2['invoice_id']])['status']);
+ok('K.3 anchor = the [1st..today] invoice (literal)', (string) $invK1['invoice_id'] . '|' . $todayK,
+    implode('|', db_row("SELECT last_billed_invoice_id, last_billed_date FROM leases WHERE id = ?", [$leaseK])));
+anchor_check('K.4', $leaseK);
+echo "\n";
 
 } catch (\Throwable $e) {
     echo "\nEXCEPTION: {$e->getMessage()}\n{$e->getTraceAsString()}\n";

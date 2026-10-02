@@ -150,7 +150,8 @@ foreach ($cleanIds as $id) {
     // the lease is wrongly NOT skipped, leaving the real gap unbilled.
     // S-AUDIT-LIFECYCLE-1 #19a: NO last_billed_date fallback — close.php
     // explicitly forbids trusting that anchor for coverage (S-CLOSE-ZEROBILL:
-    // it is GREATEST-monotonic and survives voids, so after a reopen/void
+    // it is GREATEST-monotonic and, before S-CLOSE-ANCHOR-WALKBACK, survived
+    // close-time voids, so after a reopen/void
     // cycle a stale month-end value masked a REAL unbilled tail and the lease
     // bulk-closed with revenue silently unbilled). Live invoices are the only
     // coverage truth; no live coverage ⇒ tail starts at start_date ⇒ skip.
