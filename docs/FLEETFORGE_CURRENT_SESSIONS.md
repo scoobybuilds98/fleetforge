@@ -74,6 +74,10 @@ When the session ships, update the entry to status SHIPPED with commit refs (per
 
 ### IN-FLIGHT
 
+**S-SEC-CLIENT-IP** — IN-FLIGHT
+  Started: 2026-10-02T08:45 UTC by claude-code-desktop (mainlandWeb session)
+  Touching: lib/Security/RateLimiter.php, app/admin/credit-application.php, .env.example, docs/FLEETFORGE_PROGRESS.md, docs/FLEETFORGE_CURRENT_SESSIONS.md, docs/FLEETFORGE_OPERATOR_FOLLOWUPS.md
+
 **S-SAMSARA-CLOSE-DISTANCE-CHAIN** — SHIPPED 2026-10-01 (see PROGRESS.md SESSION LOG row + D-ODOMETER-CHAIN-1). **Closing a Samsara lease no longer charges again for months that were billed by GPS (or typed) distance — the final invoice counts from where the odometer actually stood after the last billed month. The same rule now drives the Readings tab, Generate Invoice's starting reading, "Generate all due" and the monthly job. A manual lease closed mid-month also stops billing 0 km.** No schema change. Operator: F105 (deploy).
 
 **S-INVOICE-DISTANCE-ENTRY** — SHIPPED 2026-10-01 (see PROGRESS.md SESSION LOG row + D-DISTANCE-ENTRY-1). **Generate Invoice now asks for the distance driven in the period — one box instead of two odometer readings — for backfilling last year's invoices and for billing going forward. On a Manual lease it counts on from the last reading; on a Samsara lease it replaces the GPS distance for that month. Odometer readings are one click away. Also fixed: voided invoices are no longer used as the previous reading (form auto-fill + lease close).** No schema change. Operator: F105 (deploy).
